@@ -1,0 +1,18 @@
+# Environment — never commit real credentials
+.env
+.env.local
+
+# Dependencies
+node_modules/
+sdk/node/node_modules/
+
+# Build output
+dist/
+sdk/node/dist/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*

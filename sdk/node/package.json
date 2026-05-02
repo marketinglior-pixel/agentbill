@@ -1,0 +1,26 @@
+{
+  "name": "agentbill",
+  "version": "0.1.0",
+  "description": "Usage-based billing for AI agents — 3-line integration with pre-flight budget guardrails",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["ai", "agents", "billing", "metering", "usage-based"],
+  "license": "MIT",
+  "dependencies": {
+    "undici": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
