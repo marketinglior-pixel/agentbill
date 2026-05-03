@@ -37,7 +37,7 @@ That's it. AgentBill now:
 ## Install
 
 ```bash
-pip install agentbill
+pip install agentbill-sdk
 ```
 
 ```bash

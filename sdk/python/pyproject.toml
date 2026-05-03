@@ -3,11 +3,36 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentbill"
+name = "agentbill-sdk"
 version = "0.1.0"
-description = "Usage-based billing for AI agent developers"
+description = "Usage-based billing for AI agent developers. 3-line integration."
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.9"
 dependencies = ["httpx>=0.27"]
+authors = [
+  { name = "AgentBill", email = "marketinglior@gmail.com" }
+]
+keywords = ["ai", "agents", "billing", "metering", "llm", "usage-based"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/marketinglior-pixel/agentbill"
+Repository = "https://github.com/marketinglior-pixel/agentbill"
+Documentation = "https://github.com/marketinglior-pixel/agentbill#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentbill"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "respx"]
