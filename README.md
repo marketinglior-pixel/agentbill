@@ -28,8 +28,8 @@ async def run_agent(customer_id: str, topic: str) -> str:
 ```
 
 That's it. AgentBill now:
-- Checks the customer's budget **before** the LLM call (`preflight=True`)
-- Records the event **after** the function succeeds
+- Checks the customer's credit balance **before** the LLM call (`preflight=True`)
+- Records the credit usage **after** the function succeeds
 - Blocks the call with `BudgetExhaustedError` the moment the customer runs out — no surprise overages
 
 ---
@@ -59,17 +59,17 @@ AGENTBILL_API_KEY=your_key_here
 ```python
 from agentbill import meter, BudgetExhaustedError
 
-# Bill 1 unit per call
+# Charge 1 credit per run
 @meter(event="research_run", customer_id_from="customer_id")
 async def run_agent(customer_id: str, topic: str) -> str:
     ...
 
-# Block BEFORE the LLM call if the customer is out of budget
+# Pre-flight: block BEFORE the LLM call if the customer is out of credits
 @meter(event="research_run", customer_id_from="customer_id", preflight=True)
 async def run_agent_safe(customer_id: str, topic: str) -> str:
     ...
 
-# Outcome-based: only charge if the task succeeded
+# Outcome-based: charge credits only if the task succeeded
 @meter(
     event="ticket_resolved",
     customer_id_from="customer_id",
@@ -79,7 +79,7 @@ async def resolve_ticket(customer_id: str, ticket_id: str) -> dict:
     ...
 ```
 
-### 3. Handle budget exhaustion
+### 3. Handle credit exhaustion
 
 ```python
 try:
@@ -91,10 +91,10 @@ except BudgetExhaustedError as e:
 
 ### 4. Watch your dashboard
 
-Open `https://your-instance/dashboard` to see every customer's usage in real time:
+Open `https://your-instance/dashboard` to see every customer's credit usage in real time:
 
-- Usage bar (turns red at 80%)
-- Remaining units
+- Credit usage bar (turns red at 80%)
+- Remaining credits
 - BLOCKED badge when limit is hit
 
 ---
@@ -127,84 +127,14 @@ try {
 
 ---
 
-## How it works
-
-```
-Your agent code
-     │
-     ▼
-@meter decorator
-     │
-     ├─ [preflight=true] GET /budget → is_blocked? → raise BudgetExhaustedError
-     │
-     ├─ Run your function (LLM call happens here)
-     │
-     ├─ [function succeeded] POST /events → record units
-     │
-     └─ Return result
-```
-
-Events are recorded **after success only**. If your agent throws, the customer is not billed.
-
----
-
-## API reference
-
-### `@meter(event, options)`
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `event` | `str` | required | Event label, shown in dashboard |
-| `customer_id` | `str` | — | Fixed customer identifier |
-| `customer_id_from` | `str` | — | Name of a function parameter to read customer_id from |
-| `units` | `int \| callable` | `1` | Units per call, or a function `(result) -> int` |
-| `preflight` | `bool` | `False` | Check budget before running. Blocks immediately if exhausted. |
-| `metadata` | `dict` | — | Static key-value pairs attached to every event |
-
-### Exceptions
-
-| Exception | When |
-|---|---|
-| `BudgetExhaustedError` | Customer has 0 remaining units (HTTP 402) |
-| `AgentBillError` | Network error or unexpected server response |
-
----
-
-## Self-hosting
-
-```bash
-git clone https://github.com/your-org/agentbill
-cd agentbill
-cp .env.example .env   # add your DATABASE_URL
-npm install
-npm run dev
-```
-
-Requires: Node 20+, PostgreSQL 14+
-
----
-
-## Roadmap
-
-- [x] Core metering (`POST /events`)
-- [x] Budget enforcement (HTTP 402)
-- [x] Pre-flight guardrails (`preflight=True`)
-- [x] Outcome-based billing (`units=lambda`)
-- [x] Dashboard
-- [ ] Stripe Connect — bill your customers directly
-- [ ] Webhooks — get notified when a customer hits 80% or 100%
-- [ ] Team accounts
-
----
-
 ## Pricing for outcomes, not tokens
 
-Stripe, Metronome, and most billing tools count *events*. They have no concept of "did the task actually succeed?"
+Most billing tools count *events*. They have no concept of "did the task actually succeed?"
 
-AgentBill does. The unit count is a function of the result — you decide what success means:
+AgentBill does. The credit count is a function of the result — you decide what success means:
 
 ```python
-# Support agent — charge only when the ticket is resolved
+# Support agent — charge credits only when the ticket is resolved
 @meter(
     event="ticket_resolved",
     customer_id_from="customer_id",
@@ -216,7 +146,7 @@ async def resolve_ticket(customer_id: str, ticket_id: str) -> dict:
 ```
 
 ```python
-# Coding agent — charge only when tests pass
+# Coding agent — charge credits only when tests pass
 @meter(
     event="code_generated",
     customer_id_from="customer_id",
@@ -229,7 +159,7 @@ async def generate_code(customer_id: str, spec: str) -> dict:
 ```
 
 ```python
-# Research agent — charge by pages processed
+# Research agent — charge by volume processed
 @meter(
     event="research_completed",
     customer_id_from="customer_id",
@@ -240,9 +170,126 @@ async def research(customer_id: str, topic: str) -> dict:
     # returns {"summary": "...", "pages_processed": 14}
 ```
 
-If `units` resolves to `0` — no event is recorded. The customer is not charged. Your margins stay intact.
+If credits resolve to `0` — no event is recorded. The customer is not charged. Your margins stay intact.
 
-This is what Sequoia and YC mean when they say "charge for the work, not the software." AgentBill is the layer that makes it possible in 3 lines.
+---
+
+## Why AgentBill? (vs. Metronome / Orb / Stripe)
+
+**Metronome and Orb** are excellent for SaaS products. They're built around usage records, pricing tiers, and invoicing. If you're building a database or an API with predictable units — use them.
+
+AgentBill is different in two ways:
+
+### 1. Pre-flight enforcement
+
+Metronome and Orb record usage *after the fact*. They have no way to stop an expensive operation before it starts.
+
+AgentBill checks the customer's credit balance **before** the LLM call runs. If they're out — the function never executes. No API call is made. No money is spent.
+
+```
+Metronome/Orb:   run → bill → (oops, over budget)
+AgentBill:       check → [blocked if over budget] → run → bill
+```
+
+This matters when a single agent run costs $0.80 on a good day and $43 on a bad one.
+
+### 2. Lives inside your function
+
+Metronome requires you to emit events from your infrastructure. AgentBill is a decorator — it wraps your function directly and handles everything: pre-flight check, credit deduction, idempotency, error handling.
+
+No event pipelines. No webhooks to configure. One line.
+
+---
+
+## Current scope — what AgentBill solves today
+
+AgentBill is designed for **atomic, short-running agent tasks** — functions that complete in a single execution and return a deterministic result.
+
+**Works well for:**
+- Research runs, report generation, document processing
+- Support ticket resolution (single attempt)
+- Code generation with test validation
+- Any agent function that runs once and returns a clear result
+
+**Not yet supported:**
+- **Multi-signal outcomes** — tasks where success is determined by multiple events over time (e.g., a ticket that gets reopened 3 days later)
+- **Long-running workflows** — agents that run for hours or days across multiple steps
+- **Outcome invalidation** — billing reversal when a previously "successful" result is later undone
+
+These are real problems. They require a different architecture — event sourcing, state machines, reversal logic. If you're building at that level of complexity, AgentBill's current version isn't the right tool yet.
+
+For atomic tasks — it's 3 lines.
+
+---
+
+## How it works
+
+```
+Your agent code
+     │
+     ▼
+@meter decorator
+     │
+     ├─ [preflight=true] GET /budget → is_blocked? → raise BudgetExhaustedError
+     │
+     ├─ Run your function (LLM call happens here)
+     │
+     ├─ [function succeeded] POST /events → record credits used
+     │
+     └─ Return result
+```
+
+Credits are recorded **after success only**. If your agent throws, the customer is not charged.
+
+---
+
+## API reference
+
+### `@meter(event, options)`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `event` | `str` | required | Event label, shown in dashboard |
+| `customer_id` | `str` | — | Fixed customer identifier |
+| `customer_id_from` | `str` | — | Name of a function parameter to read customer_id from |
+| `units` | `int \| callable` | `1` | Credits per call, or a function `(result) -> int` returning 0 to skip billing |
+| `preflight` | `bool` | `False` | Check credit balance before running. Blocks immediately if exhausted. |
+| `metadata` | `dict` | — | Static key-value pairs attached to every event |
+
+### Exceptions
+
+| Exception | When |
+|---|---|
+| `BudgetExhaustedError` | Customer has 0 remaining credits (HTTP 402) |
+| `AgentBillError` | Network error or unexpected server response |
+
+---
+
+## Self-hosting
+
+```bash
+git clone https://github.com/marketinglior-pixel/agentbill
+cd agentbill
+cp .env.example .env   # add your DATABASE_URL and AGENTBILL_API_KEY
+npm install
+npm run dev
+```
+
+Requires: Node 20+, PostgreSQL 14+
+
+---
+
+## Roadmap
+
+- [x] Core metering (`POST /events`)
+- [x] Credit balance enforcement (HTTP 402)
+- [x] Pre-flight guardrails (`preflight=True`)
+- [x] Outcome-based billing (`units=lambda`)
+- [x] Live dashboard
+- [ ] Stripe Connect — bill your customers directly
+- [ ] Webhooks — alerts at 80% and 100% credit usage
+- [ ] Multi-signal outcome support
+- [ ] Team accounts
 
 ---
 
@@ -250,9 +297,9 @@ This is what Sequoia and YC mean when they say "charge for the work, not the sof
 
 Stripe's metered billing requires: a product, a price, a customer, a subscription, a subscription item, and then a usage record per event. That's 6 API calls and 47 pages of documentation to charge someone $2.
 
-Stripe also has no concept of "did the task succeed?" — you'd need to build that logic yourself.
+Stripe also has no concept of "did the task succeed?" or "stop before it starts."
 
-AgentBill does all of that behind a single decorator.
+AgentBill handles all of that behind a single decorator.
 
 ---
 
