@@ -197,9 +197,60 @@ Requires: Node 20+, PostgreSQL 14+
 
 ---
 
+## Pricing for outcomes, not tokens
+
+Stripe, Metronome, and most billing tools count *events*. They have no concept of "did the task actually succeed?"
+
+AgentBill does. The unit count is a function of the result — you decide what success means:
+
+```python
+# Support agent — charge only when the ticket is resolved
+@meter(
+    event="ticket_resolved",
+    customer_id_from="customer_id",
+    units=lambda result: 5 if result["resolved"] else 0,
+)
+async def resolve_ticket(customer_id: str, ticket_id: str) -> dict:
+    resolution = await run_support_agent(ticket_id)
+    return resolution  # {"resolved": True, "summary": "..."}
+```
+
+```python
+# Coding agent — charge only when tests pass
+@meter(
+    event="code_generated",
+    customer_id_from="customer_id",
+    units=lambda result: 10 if result["tests_passed"] else 0,
+)
+async def generate_code(customer_id: str, spec: str) -> dict:
+    code = await run_coding_agent(spec)
+    passed = run_tests(code)
+    return {"code": code, "tests_passed": passed}
+```
+
+```python
+# Research agent — charge by pages processed
+@meter(
+    event="research_completed",
+    customer_id_from="customer_id",
+    units=lambda result: result["pages_processed"],
+)
+async def research(customer_id: str, topic: str) -> dict:
+    return await run_research_agent(topic)
+    # returns {"summary": "...", "pages_processed": 14}
+```
+
+If `units` resolves to `0` — no event is recorded. The customer is not charged. Your margins stay intact.
+
+This is what Sequoia and YC mean when they say "charge for the work, not the software." AgentBill is the layer that makes it possible in 3 lines.
+
+---
+
 ## Why not Stripe directly?
 
 Stripe's metered billing requires: a product, a price, a customer, a subscription, a subscription item, and then a usage record per event. That's 6 API calls and 47 pages of documentation to charge someone $2.
+
+Stripe also has no concept of "did the task succeed?" — you'd need to build that logic yourself.
 
 AgentBill does all of that behind a single decorator.
 
