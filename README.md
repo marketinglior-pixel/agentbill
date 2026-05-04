@@ -290,6 +290,7 @@ Requires: Node 20+, PostgreSQL 14+
 - [x] Live dashboard
 - [ ] Stripe Connect — bill your customers directly
 - [ ] Webhooks — alerts at 80% and 100% credit usage
+- [ ] Credit adjustments / refunds — comp a customer for a bad run
 - [ ] Multi-signal outcome support
 - [ ] Team accounts
 
