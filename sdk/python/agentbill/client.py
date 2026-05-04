@@ -10,12 +10,18 @@ class PreflightResult:
     reason: Optional[str]
     estimated_units: Optional[int]
     remaining_units: Optional[int]
+    upgrade_url: Optional[str] = None
 
 class CeilingExceededError(Exception):
     pass
 
 class BudgetExhaustedError(Exception):
     pass
+
+class FreeTierExceededError(Exception):
+    def __init__(self, upgrade_url: Optional[str] = None):
+        self.upgrade_url = upgrade_url
+        super().__init__("Free tier limit reached. Upgrade to continue.")
 
 class AgentBillClient:
     def __init__(self, api_key: str, ceiling: Optional[int] = None, base_url: str = BASE_URL):
@@ -46,6 +52,7 @@ class AgentBillClient:
             reason=data.get("reason"),
             estimated_units=data.get("estimated_units"),
             remaining_units=data.get("remaining_units"),
+            upgrade_url=data.get("upgrade_url"),
         )
 
         if not result.approved:
@@ -55,6 +62,8 @@ class AgentBillClient:
                 )
             if result.reason == "budget_exhausted":
                 raise BudgetExhaustedError("Run blocked: customer budget exhausted")
+            if result.reason == "free_tier_exceeded":
+                raise FreeTierExceededError(upgrade_url=data.get("upgrade_url"))
 
         return result
 

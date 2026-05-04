@@ -1,6 +1,9 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { reportUsage, getCheckoutUrl } from '../integrations/polar.js'
+
+const FREE_TIER_LIMIT = 1_000
 
 const PreflightBody = z.object({
   agent_id: z.string().min(1),
@@ -30,7 +33,46 @@ export async function preflightRoute(app: FastifyInstance) {
       })
     }
 
-    // Budget check
+    // Load account: plan, monthly usage, billing period
+    const [account] = await sql`
+      SELECT id, plan, polar_customer_id, monthly_calls, billing_period_start, default_budget_units
+      FROM accounts
+      WHERE id = ${accountId}
+    `
+
+    if (!account) {
+      return reply.status(401).send({ error: 'account_not_found' })
+    }
+
+    // Reset monthly counter if we've crossed into a new billing period
+    const now = new Date()
+    const periodStart = new Date(account.billingPeriodStart)
+    const isNewMonth =
+      now.getFullYear() > periodStart.getFullYear() ||
+      now.getMonth() > periodStart.getMonth()
+
+    if (isNewMonth) {
+      await sql`
+        UPDATE accounts
+        SET monthly_calls = 0,
+            billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
+        WHERE id = ${accountId}
+      `
+      account.monthlyCalls = 0
+    }
+
+    // Free tier enforcement
+    if (account.plan === 'free' && account.monthlyCalls >= FREE_TIER_LIMIT) {
+      return reply.send({
+        approved: false,
+        reason: 'free_tier_exceeded',
+        monthly_calls: account.monthlyCalls,
+        free_tier_limit: FREE_TIER_LIMIT,
+        upgrade_url: getCheckoutUrl(accountId),
+      })
+    }
+
+    // Per-customer budget check
     const customerRef = customer_id || 'default'
 
     let rows = await sql`
@@ -40,12 +82,9 @@ export async function preflightRoute(app: FastifyInstance) {
     `
 
     if (rows.length === 0) {
-      const [account] = await sql`
-        SELECT default_budget_units FROM accounts WHERE id = ${accountId}
-      `
       await sql`
         INSERT INTO customers (account_id, customer_ref, limit_units)
-        VALUES (${accountId}, ${customerRef}, ${account?.default_budget_units ?? null})
+        VALUES (${accountId}, ${customerRef}, ${account.defaultBudgetUnits ?? null})
         ON CONFLICT DO NOTHING
       `
       rows = await sql`
@@ -56,8 +95,8 @@ export async function preflightRoute(app: FastifyInstance) {
     }
 
     const customer = rows[0]
-    const remaining = customer.limit_units != null
-      ? customer.limit_units - customer.used_units
+    const remaining = customer.limitUnits != null
+      ? customer.limitUnits - customer.usedUnits
       : null
 
     if (remaining != null && remaining <= 0) {
@@ -67,6 +106,18 @@ export async function preflightRoute(app: FastifyInstance) {
         estimated_units: estimated_units ?? null,
         remaining_units: remaining,
       })
+    }
+
+    // Approved — increment monthly counter
+    await sql`
+      UPDATE accounts
+      SET monthly_calls = monthly_calls + 1
+      WHERE id = ${accountId}
+    `
+
+    // For paid accounts: report usage to Polar for billing
+    if (account.plan === 'paid' && account.polarCustomerId) {
+      void reportUsage(account.polarCustomerId, 1)
     }
 
     return reply.send({

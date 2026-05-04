@@ -8,7 +8,7 @@ declare module 'fastify' {
   }
 }
 
-const PUBLIC_PATHS = new Set(['/', '/docs', '/health', '/dashboard', '/register'])
+const PUBLIC_PATHS = new Set(['/', '/docs', '/health', '/dashboard', '/register', '/webhooks/polar'])
 
 export function registerAuth(app: FastifyInstance) {
   app.addHook('onRequest', async (request, reply) => {

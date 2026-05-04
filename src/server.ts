@@ -9,13 +9,15 @@ import { homeRoute } from './routes/home.js'
 import { docsRoute } from './routes/docs.js'
 import { preflightRoute } from './routes/preflight.js'
 import { registerAuth } from './middleware/auth.js'
+import { webhooksRoute } from './routes/webhooks.js'
 
 const app = Fastify({ logger: true })
 
 app.register(sensible)
 app.register(homeRoute)
-  app.register(docsRoute)
-  app.register(preflightRoute)
+app.register(docsRoute)
+app.register(preflightRoute)
+app.register(webhooksRoute)
 registerAuth(app)
 
 // Health check - useful for deploy verification
