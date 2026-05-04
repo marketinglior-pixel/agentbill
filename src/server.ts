@@ -7,6 +7,7 @@ import { dashboardRoute } from './routes/dashboard.js'
 import { registerRoute } from './routes/register.js'
 import { homeRoute } from './routes/home.js'
 import { docsRoute } from './routes/docs.js'
+import { preflightRoute } from './routes/preflight.js'
 import { registerAuth } from './middleware/auth.js'
 
 const app = Fastify({ logger: true })
@@ -14,6 +15,7 @@ const app = Fastify({ logger: true })
 app.register(sensible)
 app.register(homeRoute)
   app.register(docsRoute)
+  app.register(preflightRoute)
 registerAuth(app)
 
 // Health check - useful for deploy verification
