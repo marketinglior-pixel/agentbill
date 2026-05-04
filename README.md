@@ -72,6 +72,39 @@ Built for agents: No | Yes
 
 ---
 
+## MCP Server
+
+AgentBill ships an MCP server for native integration with Claude Code, Cursor, Windsurf, and any MCP-compatible agent host.
+
+Install via [agentbill-mcp on PyPI](https://pypi.org/project/agentbill-mcp/):
+
+```bash
+uvx agentbill-mcp
+```
+
+The MCP server exposes two tools:
+
+- `preflight(agent_id, customer_id, estimated_units, ceiling)` — check budget before running. Blocks if exhausted.
+- `record_event(agent_id, units, customer_id, metadata)` — bill after work completes.
+
+Configure in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agentbill": {
+      "command": "uvx",
+      "args": ["agentbill-mcp"],
+      "env": { "AGENTBILL_API_KEY": "sk_live_..." }
+    }
+  }
+}
+```
+
+Source: [mcp/](./mcp/) | PyPI: [agentbill-mcp](https://pypi.org/project/agentbill-mcp/) | MCP Registry: [io.github.marketinglior-pixel/agentbill-mcp](https://registry.modelcontextprotocol.io)
+
+---
+
 ## Star this repo
 
 If per-request ceilings are what you needed, star this. It helps other developers find it.
