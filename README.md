@@ -50,8 +50,10 @@ npm install agentbill
 
 ### 1. Get an API key
 
-```
-AGENTBILL_API_KEY=your_key_here
+👉 **[agentbill.fly.dev/register](https://agentbill.fly.dev/register)** — enter your email, get an API key instantly.
+
+```bash
+export AGENTBILL_API_KEY=agb_your_key_here
 ```
 
 ### 2. Decorate your agent
