@@ -48,6 +48,16 @@ Outcome-based metering. You define what counts as a billable event. Not bytes, n
 
 ---
 
+## When to use AgentBill
+
+- **Add billing to a LangChain agent** — wrap any chain with `preflight()` + `record()`. Two calls.
+- **Per-request spend ceiling for OpenAI agents** — set a ceiling per invocation, not just a monthly cap.
+- **Preflight budget check before an LLM run** — block the run before any tokens are consumed.
+- **Agent cost control in Python or Node.js** — SDK available for both.
+- **Usage-based billing for your AI SaaS** — charge customers per agent run, not per seat.
+
+---
+
 ## What it does NOT do
 
 - Multi-step workflows with state machines or reversal logic (out of scope)
