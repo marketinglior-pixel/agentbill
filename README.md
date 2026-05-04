@@ -1,11 +1,13 @@
 # AgentBill
 
-Usage-based billing for AI agents. Preflight. Per-request ceiling. No Stripe.
+A preflight gate for AI agent runs. Stop runaway loops before they start.
 
 ---
 
-Stripe tells you how much you spent. Too late.
-AgentBill blocks the run before it starts if the budget says so.
+Budget exceeded? GPU quota hit? Free tier exhausted?
+AgentBill blocks the run before the first token — not after the damage is done.
+
+Works whether you're paying OpenAI per token or running your own GPU.
 
 > "The moment you're using Stripe as your safety net, you've already lost the run."
 > — scarlett1908, r/LangChain

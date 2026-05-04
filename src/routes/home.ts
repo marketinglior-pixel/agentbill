@@ -8,7 +8,7 @@ export async function homeRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill — Billing for AI agents</title>
+  <title>AgentBill — Stop runaway AI agents before they start</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
@@ -32,10 +32,11 @@ export async function homeRoute(app: FastifyInstance) {
 </head>
 <body>
   <div class="container">
-    <h1>Billing for AI agents.<br>Preflight. Per-request ceiling. No Stripe.</h1>
+    <h1>Stop runaway AI agents<br>before they start.</h1>
     <p class="sub">
-      Stripe tells you how much you spent. Too late.<br>
-      AgentBill blocks the run before it starts if the budget says so.
+      A preflight gate for every agent run.<br>
+      Budget exceeded? GPU quota hit? Free tier exhausted?<br>
+      Block it before the first token — not after the bill arrives.
     </p>
     <div class="code-block">
       <pre>
@@ -56,6 +57,10 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
     <div class="quote-block">
       <p class="quote">"The moment you're using Stripe as your safety net, you've already lost the run."</p>
       <p class="quote-author">— scarlett1908, r/LangChain</p>
+    </div>
+    <div class="quote-block">
+      <p class="quote">"Works whether you're paying OpenAI $0.01/token or burning your own GPU at 3am."</p>
+      <p class="quote-author">— the point</p>
     </div>
     <a href="/register" class="cta">Get your API key</a>
     <div class="not-for">
