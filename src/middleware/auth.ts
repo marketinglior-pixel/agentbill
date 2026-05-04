@@ -1,25 +1,43 @@
 import type { FastifyInstance } from 'fastify'
+import { sql } from '../db/index.js'
 
-const PUBLIC_PATHS = new Set(['/health', '/dashboard', '/customers'])
+// Extend FastifyRequest so routes can read request.accountId
+declare module 'fastify' {
+  interface FastifyRequest {
+    accountId: string
+  }
+}
+
+const PUBLIC_PATHS = new Set(['/health', '/dashboard', '/register'])
 
 export function registerAuth(app: FastifyInstance) {
-  const apiKey = process.env.AGENTBILL_API_KEY
-
-  if (!apiKey) {
-    app.log.warn('AGENTBILL_API_KEY is not set — all API requests will be rejected.')
-  }
-
   app.addHook('onRequest', async (request, reply) => {
     if (PUBLIC_PATHS.has(request.url.split('?')[0])) return
 
     const auth = request.headers.authorization ?? ''
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
 
-    if (!apiKey || token !== apiKey) {
+    if (!token) {
       return reply.code(401).send({
         error: 'unauthorized',
-        message: 'Missing or invalid API key. Pass Authorization: Bearer <your_key>.',
+        message: 'Missing API key. Pass Authorization: Bearer <your_key>.',
       })
     }
+
+    // Look up key in DB → get account_id
+    const rows = await sql`
+      SELECT account_id FROM developer_api_keys
+      WHERE api_key = ${token}
+      LIMIT 1
+    `
+
+    if (rows.length === 0) {
+      return reply.code(401).send({
+        error: 'unauthorized',
+        message: 'Invalid API key.',
+      })
+    }
+
+    request.accountId = rows[0].accountId as string
   })
 }

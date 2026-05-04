@@ -22,10 +22,8 @@ export async function eventsRoute(app: FastifyInstance) {
 
     const { customer_id: customerRef, event_type, idempotency_key, units, metadata } = parsed.data
     const metadataJson = metadata !== undefined ? JSON.stringify(metadata) : null
-    const accountId = process.env.HARDCODED_ACCOUNT_ID!
-    const defaultBudget = process.env.HARDCODED_DEFAULT_BUDGET
-      ? parseInt(process.env.HARDCODED_DEFAULT_BUDGET, 10)
-      : null
+    const accountId = request.accountId
+    const defaultBudget: number | null = null
 
     try {
       const result = await sql.begin(async (tx) => {

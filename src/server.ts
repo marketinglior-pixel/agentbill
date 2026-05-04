@@ -4,6 +4,7 @@ import sensible from '@fastify/sensible'
 import { eventsRoute } from './routes/events.js'
 import { budgetRoute } from './routes/budget.js'
 import { dashboardRoute } from './routes/dashboard.js'
+import { registerRoute } from './routes/register.js'
 import { registerAuth } from './middleware/auth.js'
 
 const app = Fastify({ logger: true })
@@ -17,6 +18,7 @@ app.get('/health', async () => ({ status: 'ok' }))
 app.register(eventsRoute)
 app.register(budgetRoute)
 app.register(dashboardRoute)
+app.register(registerRoute)
 
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000
 

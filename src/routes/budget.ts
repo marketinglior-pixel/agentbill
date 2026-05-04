@@ -17,10 +17,8 @@ export async function budgetRoute(app: FastifyInstance) {
     }
 
     const { customer_id: customerRef } = parsed.data
-    const accountId = process.env.HARDCODED_ACCOUNT_ID!
-    const defaultBudget = process.env.HARDCODED_DEFAULT_BUDGET
-      ? parseInt(process.env.HARDCODED_DEFAULT_BUDGET, 10)
-      : null
+    const accountId = request.accountId
+    const defaultBudget: number | null = null
 
     try {
       // Lazy-create: if customer doesn't exist, create with default budget.
