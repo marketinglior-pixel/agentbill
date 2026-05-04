@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentbill-mcp"
+version = "0.1.0"
+description = "AgentBill MCP server. Add spend controls and billing to any AI agent in 3 lines."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "httpx>=0.27",
+]
+authors = [
+    { name = "AgentBill", email = "marketinglior@gmail.com" }
+]
+keywords = [
+    "mcp",
+    "ai-agents",
+    "billing",
+    "llm",
+    "agent-billing",
+    "spend-ceiling",
+    "preflight",
+    "usage-based",
+    "langchain",
+    "claude",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://agentbill.dev"
+Repository = "https://github.com/marketinglior-pixel/agentbill"
+Documentation = "https://github.com/marketinglior-pixel/agentbill#readme"
+
+[project.scripts]
+agentbill-mcp = "agentbill_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentbill_mcp"]

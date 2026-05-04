@@ -1,0 +1,18 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: "AgentBill API key. Get yours at agentbill.dev/dashboard"
+    required:
+      - apiKey
+  commandFunction: |-
+    (config) => ({
+      command: "uvx",
+      args: ["agentbill-mcp"],
+      env: {
+        AGENTBILL_API_KEY: config.apiKey
+      }
+    })
