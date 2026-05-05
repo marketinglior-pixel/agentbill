@@ -72,41 +72,63 @@ export async function preflightRoute(app: FastifyInstance) {
       })
     }
 
-    // Per-customer budget check
+    // Per-customer budget check — atomic reserve to prevent TOCTOU race condition.
+    // Under concurrent load, a plain read-check-approve lets multiple requests all
+    // see the same remaining balance and all get approved. Instead we atomically
+    // increment reserved_units inside a transaction; if the budget is exhausted the
+    // UPDATE matches 0 rows and we block without a race.
     const customerRef = customer_id || 'default'
+    const reserveUnits = estimated_units ?? 1
 
-    let rows = await sql`
-      SELECT limit_units, used_units
-      FROM customers
-      WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
-    `
-
-    if (rows.length === 0) {
-      await sql`
+    const result = await sql.begin(async (tx) => {
+      // Lazy-create the customer row if it doesn't exist yet.
+      await tx`
         INSERT INTO customers (account_id, customer_ref, limit_units)
         VALUES (${accountId}, ${customerRef}, ${account.defaultBudgetUnits ?? null})
         ON CONFLICT DO NOTHING
       `
-      rows = await sql`
-        SELECT limit_units, used_units
-        FROM customers
-        WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
+
+      // Atomic reserve: only succeeds when budget allows it.
+      // Returns the updated row so we can report remaining_units.
+      const reserved = await tx`
+        UPDATE customers
+        SET reserved_units = reserved_units + ${reserveUnits}
+        WHERE account_id = ${accountId}
+          AND customer_ref = ${customerRef}
+          AND (
+            limit_units IS NULL
+            OR used_units + reserved_units + ${reserveUnits} <= limit_units
+          )
+        RETURNING limit_units, used_units, reserved_units
       `
-    }
 
-    const customer = rows[0]
-    const remaining = customer.limitUnits != null
-      ? customer.limitUnits - customer.usedUnits
-      : null
+      if (reserved.length === 0) {
+        // Budget exhausted — read current state for the response
+        const [current] = await tx`
+          SELECT limit_units, used_units, reserved_units
+          FROM customers
+          WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
+        `
+        return { approved: false as const, current }
+      }
 
-    if (remaining != null && remaining <= 0) {
+      return { approved: true as const, row: reserved[0] }
+    })
+
+    if (!result.approved) {
+      const c = result.current
       return reply.send({
         approved: false,
         reason: 'budget_exhausted',
         estimated_units: estimated_units ?? null,
-        remaining_units: remaining,
+        remaining_units: c ? c.limitUnits - c.usedUnits - c.reservedUnits : 0,
       })
     }
+
+    const row = result.row
+    const remaining = row.limitUnits != null
+      ? row.limitUnits - row.usedUnits - row.reservedUnits
+      : null
 
     // Approved — increment monthly counter
     await sql`

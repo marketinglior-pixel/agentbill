@@ -85,23 +85,27 @@ export async function eventsRoute(app: FastifyInstance) {
             type: 'duplicate' as const,
             customerCreated,
             remainingUnits: locked.limitUnits !== null
-              ? locked.limitUnits - locked.usedUnits
+              ? locked.limitUnits - locked.usedUnits - locked.reservedUnits
               : null,
           }
         }
 
         // ----------------------------------------------------------------
-        // 5. Increment used_units atomically, still inside the transaction.
+        // 5. Reconcile: increment used_units and release the reservation
+        //    that preflight placed. GREATEST(0, ...) guards against record
+        //    calls that arrive without a prior preflight (no reservation held).
         // ----------------------------------------------------------------
         const [updated] = await tx`
           UPDATE customers
-          SET used_units = used_units + ${units}, updated_at = now()
+          SET used_units     = used_units + ${units},
+              reserved_units = GREATEST(0, reserved_units - ${units}),
+              updated_at     = now()
           WHERE id = ${customer.id}
-          RETURNING used_units, limit_units
+          RETURNING used_units, limit_units, reserved_units
         `
 
         const remainingUnits = updated.limitUnits !== null
-          ? updated.limitUnits - updated.usedUnits
+          ? updated.limitUnits - updated.usedUnits - updated.reservedUnits
           : null
 
         return {
