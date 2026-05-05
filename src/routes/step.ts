@@ -61,6 +61,26 @@ export async function stepRoute(app: FastifyInstance) {
     const deviationPct = Math.round(((units - baselineAvg) / baselineAvg) * 100)
     const anomaly = units > baselineAvg * ANOMALY_MULTIPLIER
 
+    if (anomaly) {
+      const [acct] = await sql`SELECT webhook_url FROM accounts WHERE id = ${accountId}`
+      if (acct?.webhookUrl) {
+        const payload = JSON.stringify({
+          event: 'anomaly.detected',
+          agent_id,
+          step_name,
+          units,
+          baseline_units: Math.round(baselineAvg),
+          deviation_pct: deviationPct,
+          timestamp: new Date().toISOString(),
+        })
+        void fetch(acct.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-AgentBill-Account-Id': accountId },
+          body: payload,
+        }).catch(() => {})
+      }
+    }
+
     return reply.send({
       recorded: true,
       anomaly,

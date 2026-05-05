@@ -14,6 +14,7 @@ import { guidesRoute } from './routes/guides.js'
 import { blogRoute } from './routes/blog.js'
 import { checkpointRoute } from './routes/checkpoint.js'
 import { stepRoute } from './routes/step.js'
+import { webhookConfigRoute } from './routes/webhook-config.js'
 
 const app = Fastify({ logger: true })
 
@@ -24,6 +25,7 @@ app.register(guidesRoute)
 app.register(blogRoute)
 app.register(checkpointRoute)
 app.register(stepRoute)
+app.register(webhookConfigRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
