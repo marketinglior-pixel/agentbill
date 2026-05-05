@@ -40,6 +40,11 @@ class FreeTierExceededError(Exception):
 
 class AgentBillClient:
     def __init__(self, api_key: str, ceiling: Optional[int] = None, base_url: str = BASE_URL):
+        if not api_key or not api_key.strip():
+            raise ValueError(
+                "AgentBill API key is missing.\n"
+                "Get your free key (1,000 calls/month) at: https://agentbill.fly.dev/register"
+            )
         self.api_key = api_key
         self.ceiling = ceiling
         self.base_url = base_url
