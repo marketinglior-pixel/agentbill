@@ -6,8 +6,9 @@ const EventBody = z.object({
   customer_id:      z.string().min(1),
   event_type:       z.string().min(1),
   idempotency_key:  z.string().min(1).max(128),
-  units:            z.number().int().min(1).default(1),
+  units:            z.number().int().min(0).default(1),
   metadata:         z.record(z.unknown()).optional(),
+  success:          z.boolean().default(true),
 })
 
 export async function eventsRoute(app: FastifyInstance) {
@@ -20,7 +21,7 @@ export async function eventsRoute(app: FastifyInstance) {
       })
     }
 
-    const { customer_id: customerRef, event_type, idempotency_key, units, metadata } = parsed.data
+    const { customer_id: customerRef, event_type, idempotency_key, units, metadata, success } = parsed.data
     const metadataJson = metadata !== undefined ? JSON.stringify(metadata) : null
     const accountId = request.accountId
     const defaultBudget: number | null = null
@@ -52,14 +53,28 @@ export async function eventsRoute(app: FastifyInstance) {
         //    used_units < limit and both proceed past the budget check.
         // ----------------------------------------------------------------
         const [locked] = await tx`
-          SELECT id, limit_units, used_units
+          SELECT id, limit_units, used_units, reserved_units
           FROM customers
           WHERE id = ${customer.id}
           FOR UPDATE
         `
 
         // ----------------------------------------------------------------
-        // 3. Budget check — happens under the row lock.
+        // 3a. If success=false: release the preflight reservation only.
+        //     No event recorded, no used_units incremented.
+        // ----------------------------------------------------------------
+        if (!success) {
+          await tx`
+            UPDATE customers
+            SET reserved_units = GREATEST(0, reserved_units - ${units}),
+                updated_at     = now()
+            WHERE id = ${locked.id}
+          `
+          return { type: 'released' as const, customerCreated }
+        }
+
+        // ----------------------------------------------------------------
+        // 3b. Budget check — happens under the row lock.
         // ----------------------------------------------------------------
         if (
           locked.limitUnits !== null &&
@@ -115,6 +130,13 @@ export async function eventsRoute(app: FastifyInstance) {
           remainingUnits,
         }
       })
+
+      if (result.type === 'released') {
+        return reply.code(200).send({
+          status: 'released',
+          customer_created: result.customerCreated,
+        })
+      }
 
       if (result.type === 'budget_exhausted') {
         return reply.code(402).send({

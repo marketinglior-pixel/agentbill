@@ -12,6 +12,7 @@ import { registerAuth } from './middleware/auth.js'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
 import { blogRoute } from './routes/blog.js'
+import { checkpointRoute } from './routes/checkpoint.js'
 
 const app = Fastify({ logger: true })
 
@@ -20,6 +21,7 @@ app.register(homeRoute)
 app.register(docsRoute)
 app.register(guidesRoute)
 app.register(blogRoute)
+app.register(checkpointRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
