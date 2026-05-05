@@ -14,6 +14,13 @@ class PreflightResult:
     upgrade_url: Optional[str] = None
 
 @dataclass
+class StepResult:
+    recorded: bool
+    anomaly: bool
+    baseline_units: Optional[int]
+    deviation_pct: Optional[int]
+
+@dataclass
 class CheckpointResult:
     approved: bool
     reason: Optional[str]
@@ -119,6 +126,33 @@ class AgentBillClient:
             reason=data.get("reason"),
             units_so_far=data["units_so_far"],
             remaining_units=data.get("remaining_units"),
+        )
+
+    def record_step(
+        self,
+        agent_id: str,
+        step_name: str,
+        units: int,
+        customer_id: Optional[str] = None,
+    ) -> StepResult:
+        payload: dict = {"agent_id": agent_id, "step_name": step_name, "units": units}
+        if customer_id is not None:
+            payload["customer_id"] = customer_id
+
+        resp = requests.post(
+            f"{self.base_url}/step",
+            json=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        return StepResult(
+            recorded=data["recorded"],
+            anomaly=data["anomaly"],
+            baseline_units=data.get("baseline_units"),
+            deviation_pct=data.get("deviation_pct"),
         )
 
     def gate(
