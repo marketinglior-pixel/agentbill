@@ -24,11 +24,13 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-check = client.preflight(agent_id="researcher", budget=5.00)
+check = client.preflight(agent_id="researcher", estimated_units=10)
 if not check.approved:
-    raise Exception("Budget exceeded")
+    raise Exception(f"Blocked: {check.reason}")
 
-client.record(agent_id="researcher", cost=check.estimated_cost)
+# run your agent here
+
+client.record(agent_id="researcher", units=10)
 
 Get your API key: https://agentbill.fly.dev/register
 
