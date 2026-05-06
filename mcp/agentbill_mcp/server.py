@@ -142,7 +142,14 @@ def _blocked_message(reason: str, data: dict) -> str:
 
 
 def main():
-    mcp.run()
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = 8080
+        mcp.settings.transport_security.enable_dns_rebinding_protection = False
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

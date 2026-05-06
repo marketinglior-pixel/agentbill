@@ -1,18 +1,13 @@
 startCommand:
-  type: stdio
+  type: http
+  url: https://agentbill-mcp.fly.dev/mcp
   configSchema:
     type: object
     properties:
       apiKey:
         type: string
-        description: "AgentBill API key. Get yours at agentbill.dev/dashboard"
+        description: "AgentBill API key. Get yours free at agentbill.fly.dev/register"
     required:
       - apiKey
-  commandFunction: |-
-    (config) => ({
-      command: "uvx",
-      args: ["agentbill-mcp"],
-      env: {
-        AGENTBILL_API_KEY: config.apiKey
-      }
-    })
+  exampleConfig:
+    apiKey: agb_your_key_here
