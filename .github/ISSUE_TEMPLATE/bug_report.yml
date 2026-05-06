@@ -1,0 +1,66 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much detail as possible.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AgentBill is affected?
+      options:
+        - Python SDK (agentbill-sdk)
+        - Node.js SDK (agentbill)
+        - MCP Server (agentbill-mcp)
+        - Backend API (agentbill.fly.dev)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly.
+      placeholder: "When I call preflight(), it returns..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "I expected the call to be blocked with reason..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code or commands to reproduce the issue.
+      render: python
+      placeholder: |
+        from agentbill import AgentBillClient
+        client = AgentBillClient(api_key="agb_...")
+        check = client.preflight(agent_id="test", estimated_units=10)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SDK / server version
+      placeholder: "agentbill-sdk 0.1.3"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Logs, error messages, environment info.
