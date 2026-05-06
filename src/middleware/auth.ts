@@ -8,7 +8,12 @@ declare module 'fastify' {
   }
 }
 
-const PUBLIC_PATHS = new Set(['/', '/docs', '/health', '/dashboard', '/register', '/webhooks/polar'])
+const PUBLIC_PATHS = new Set([
+  '/', '/docs', '/health', '/dashboard', '/register', '/webhooks/polar', '/llms.txt',
+  '/docs/limit-cost-per-agent-run', '/docs/langchain-billing', '/docs/openai-agent-spend-ceiling',
+  '/blog/monthly-caps-wont-save-you',
+  '/blog/how-preflight-avoids-double-billing',
+])
 
 export function registerAuth(app: FastifyInstance) {
   app.addHook('onRequest', async (request, reply) => {
