@@ -12,7 +12,13 @@ A preflight gate for AI agent runs. Stop runaway loops before they start.
 Budget exceeded? GPU quota hit? Free tier exhausted?
 AgentBill blocks the run before the first token — not after the damage is done.
 
-Works whether you're paying OpenAI per token or running your own GPU.
+Works whether you're paying OpenAI per token or running your own GPU.  
+
+<div align="center">
+
+![AgentBill preflight demo](docs/demo.png)
+
+</div>
 
 > "The moment you're using Stripe as your safety net, you've already lost the run."
 > — scarlett1908, r/LangChain
