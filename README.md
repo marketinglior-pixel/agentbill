@@ -20,6 +20,25 @@ Works whether you're paying OpenAI per token or running your own GPU.
 
 </div>
 
+```
+$ python run_agent.py
+
+[AgentBill] preflight check... BLOCKED
+  reason: free_tier_exceeded (1000/1000 calls used)
+  upgrade: https://agentbill.fly.dev/upgrade
+
+Agent did not run. $0 spent.
+```
+
+vs. without AgentBill:
+```
+$ python run_agent.py
+
+[OpenAI] Running research loop...
+... 3 hours later ...
+[OpenAI] $47.82 charged
+```
+
 > "The moment you're using Stripe as your safety net, you've already lost the run."
 > — scarlett1908, r/LangChain
 

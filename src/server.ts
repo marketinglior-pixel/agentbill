@@ -15,6 +15,7 @@ import { blogRoute } from './routes/blog.js'
 import { checkpointRoute } from './routes/checkpoint.js'
 import { stepRoute } from './routes/step.js'
 import { webhookConfigRoute } from './routes/webhook-config.js'
+import { upgradeRoute } from './routes/upgrade.js'
 
 const app = Fastify({ logger: true })
 
@@ -26,6 +27,7 @@ app.register(blogRoute)
 app.register(checkpointRoute)
 app.register(stepRoute)
 app.register(webhookConfigRoute)
+app.register(upgradeRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
@@ -55,10 +57,10 @@ npm install agentbill
 
 from agentbill import AgentBillClient
 client = AgentBillClient(api_key="agb_your_key")
-check = client.preflight(agent_id="researcher", budget=5.00)
+check = client.preflight(agent_id="researcher", estimated_units=10)
 if not check.approved:
-    raise Exception("Budget exceeded")
-client.record(agent_id="researcher", cost=check.estimated_cost)
+    raise Exception(f"Blocked: {check.reason}")
+client.record(agent_id="researcher", units=10)
 
 ## MCP Server (Claude Code, Cursor, Windsurf)
 
