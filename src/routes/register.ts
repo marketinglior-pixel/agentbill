@@ -4,8 +4,10 @@ import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 
 const RegisterBody = z.object({
-  email: z.string().email(),
-  name:  z.string().min(1).max(128).optional(),
+  email:    z.string().email(),
+  name:     z.string().min(1).max(128).optional(),
+  use_case: z.string().max(64).optional(),
+  stack:    z.string().max(32).optional(),
 })
 
 function generateApiKey(): string {
@@ -20,112 +22,245 @@ export async function registerRoute(app: FastifyInstance) {
     return reply.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill — Get your API key</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get your API key — AgentBill</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d0d0d; color: #e2e8f0;
-           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 40px; width: 100%; max-width: 460px; }
-    .logo { color: #a78bfa; font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-    .tagline { color: #4b5563; font-size: 12px; margin-bottom: 32px; }
-    label { display: block; font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
-    input { width: 100%; background: #0d0d0d; border: 1px solid #1f2937; border-radius: 6px;
-            color: #e2e8f0; font-family: inherit; font-size: 14px; padding: 10px 14px; margin-bottom: 20px; outline: none; }
-    input:focus { border-color: #7c3aed; }
-    button { width: 100%; background: #7c3aed; border: none; border-radius: 6px; color: #fff;
-             font-family: inherit; font-size: 14px; font-weight: 600; padding: 12px; cursor: pointer; }
-    button:hover { background: #6d28d9; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .result { display: none; margin-top: 28px; }
-    .result h3 { font-size: 13px; color: #4ade80; margin-bottom: 12px; }
-    .key-box { background: #0d0d0d; border: 1px solid #7c3aed; border-radius: 6px; padding: 14px;
-               font-size: 13px; color: #c4b5fd; word-break: break-all; position: relative; }
-    .copy-btn { margin-top: 10px; background: #1f2937; border: 1px solid #374151; border-radius: 6px;
-                color: #e2e8f0; font-family: inherit; font-size: 12px; padding: 6px 14px;
-                cursor: pointer; width: auto; }
-    .copy-btn:hover { background: #374151; }
-    .warning { margin-top: 12px; font-size: 11px; color: #f59e0b; }
-    .error { color: #f87171; font-size: 13px; margin-top: 16px; display: none; }
-    .docs { margin-top: 24px; font-size: 12px; color: #4b5563; text-align: center; }
-    .docs a { color: #7c3aed; text-decoration: none; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --surface: #111118; --surface2: #1a1a24;
+      --border: #ffffff10; --border2: #ffffff1a;
+      --text: #e8e8f0; --muted: #8888a0;
+      --accent: #6c63ff; --green: #22d3a0; --red: #ff5757;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
+           font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+           min-height: 100vh; display: flex; flex-direction: column; }
+    nav { background: rgba(10,10,15,0.9); backdrop-filter: blur(16px);
+          border-bottom: 1px solid var(--border); padding: 0 24px; height: 60px;
+          display: flex; align-items: center; justify-content: space-between; }
+    .nav-logo { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none;
+                display: flex; align-items: center; gap: 8px; }
+    .dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; }
+    .page { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: calc(100vh - 60px); }
+    .left { background: var(--surface); border-right: 1px solid var(--border);
+            padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
+    .left-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                  letter-spacing: 2px; color: var(--accent); margin-bottom: 24px; }
+    .left h1 { font-size: 30px; font-weight: 800; color: #fff; line-height: 1.2;
+               letter-spacing: -1px; margin-bottom: 16px; }
+    .left p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 40px; max-width: 380px; }
+    .feature-list { list-style: none; display: flex; flex-direction: column; gap: 18px; }
+    .fi { display: flex; align-items: flex-start; gap: 12px; }
+    .fi-check { width: 22px; height: 22px; background: rgba(34,211,160,0.1);
+                border: 1px solid rgba(34,211,160,0.2); border-radius: 6px;
+                display: flex; align-items: center; justify-content: center;
+                flex-shrink: 0; font-size: 11px; color: var(--green); font-weight: 700; margin-top: 1px; }
+    .fi-text h4 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .fi-text p { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
+    .quote { margin-top: 40px; padding: 18px 20px; background: rgba(108,99,255,0.06);
+             border: 1px solid rgba(108,99,255,0.12); border-radius: 10px; }
+    .quote p { font-size: 13px; font-style: italic; color: var(--muted); margin-bottom: 6px; line-height: 1.6; }
+    .quote span { font-size: 11px; color: #555570; font-family: 'JetBrains Mono', monospace; }
+    .right { padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
+    .form-header { margin-bottom: 36px; }
+    .form-header h2 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 6px; letter-spacing: -0.5px; }
+    .form-header p { font-size: 14px; color: var(--muted); }
+    .form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
+    .field { display: flex; flex-direction: column; gap: 7px; }
+    label { font-size: 13px; font-weight: 600; color: var(--text); }
+    label .opt { color: var(--muted); font-weight: 400; margin-left: 4px; }
+    input, select { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px;
+                    padding: 11px 14px; font-size: 14px; color: var(--text);
+                    font-family: 'Inter', sans-serif; outline: none; width: 100%;
+                    transition: border-color 0.15s, box-shadow 0.15s; }
+    input::placeholder { color: #444460; }
+    input:focus, select:focus { border-color: rgba(108,99,255,0.5); box-shadow: 0 0 0 3px rgba(108,99,255,0.1); }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888a0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+             background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+    select option { background: #1a1a24; }
+    .btn-submit { background: var(--accent); color: white; border: none; padding: 13px 24px;
+                  border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
+                  font-family: 'Inter', sans-serif; transition: all 0.2s; margin-top: 4px; }
+    .btn-submit:hover { background: #8b5cf6; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(108,99,255,0.3); }
+    .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+    .form-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .err { color: var(--red); font-size: 13px; display: none; }
+
+    /* Success state */
+    .success { display: none; flex-direction: column; gap: 22px; max-width: 420px; }
+    .success-icon { width: 52px; height: 52px; background: rgba(34,211,160,0.1);
+                    border: 1px solid rgba(34,211,160,0.2); border-radius: 13px;
+                    display: flex; align-items: center; justify-content: center; font-size: 22px; }
+    .success h2 { font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .success > p { font-size: 14px; color: var(--muted); line-height: 1.7; }
+    .key-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; overflow: hidden; }
+    .key-label { padding: 9px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 1.5px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
+    .key-value { padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--green);
+                 display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .btn-copy { background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.2); color: var(--accent);
+                padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+                font-family: 'Inter', sans-serif; transition: all 0.15s; white-space: nowrap; }
+    .btn-copy:hover { background: rgba(108,99,255,0.18); }
+    .next-steps { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .next-steps h4 { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 12px;
+                     text-transform: uppercase; letter-spacing: 1px; }
+    .ns { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+    .ns:last-child { border-bottom: none; }
+    .ns-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent);
+              background: rgba(108,99,255,0.1); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
+    .ns p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .ns code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
+               background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
+    @media (max-width: 768px) { .page { grid-template-columns: 1fr; } .left { display: none; }
+      .right { padding: 32px 20px; } }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">AgentBill</div>
-    <div class="tagline">Usage-based billing for AI agents — 3 lines of code</div>
-
-    <form id="form">
-      <label>Email</label>
-      <input type="email" id="email" placeholder="you@company.com" required />
-
-      <label>Name (optional)</label>
-      <input type="text" id="name" placeholder="Your name or company" />
-
-      <button type="submit" id="btn">Get my API key →</button>
-    </form>
-
-    <div class="error" id="error"></div>
-
-    <div class="result" id="result">
-      <h3>✓ Your API key is ready</h3>
-      <div class="key-box" id="key-value"></div>
-      <button class="copy-btn" onclick="copyKey()">Copy key</button>
-      <div class="warning">⚠ Save this key now — it will not be shown again.</div>
-    </div>
-
-    <div class="docs">
-      <a href="https://github.com/marketinglior-pixel/agentbill" target="_blank">View docs on GitHub →</a>
+<nav>
+  <a href="/" class="nav-logo"><div class="dot"></div> AgentBill</a>
+</nav>
+<div class="page">
+  <div class="left">
+    <div class="left-label">Free forever &middot; No credit card</div>
+    <h1>Your agents deserve<br/>proper governance.</h1>
+    <p>Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>
+    <ul class="feature-list">
+      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>1,000 free preflight calls/month</h4><p>No expiry. Full API access on the free tier.</p></div></li>
+      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Per-request ceiling enforcement</h4><p>Block before compute starts. Not after the invoice.</p></div></li>
+      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Multi-tenant out of the box</h4><p>Independent credit balances per customer_id. Zero config.</p></div></li>
+      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Production in 5 minutes</h4><p>One decorator. One env var. That's the integration.</p></div></li>
+    </ul>
+    <div class="quote">
+      <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
+      <span>scarlett1908 &mdash; r/LangChain</span>
     </div>
   </div>
 
-  <script>
-    let apiKey = ''
-    document.getElementById('form').addEventListener('submit', async (e) => {
-      e.preventDefault()
-      const btn = document.getElementById('btn')
-      const errEl = document.getElementById('error')
-      btn.disabled = true
-      btn.textContent = 'Creating account...'
-      errEl.style.display = 'none'
+  <div class="right">
+    <div id="form-state">
+      <div class="form-header">
+        <h2>Get your API key</h2>
+        <p>Takes 30 seconds. No setup call. No credit card.</p>
+      </div>
+      <form class="form" id="reg-form">
+        <div class="field">
+          <label for="email">Work email</label>
+          <input type="email" id="email" placeholder="you@company.com" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="name">Your name <span class="opt">(optional)</span></label>
+          <input type="text" id="name" placeholder="Ada Lovelace" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="use_case">What are you building?</label>
+          <select id="use_case">
+            <option value="">Select one&hellip;</option>
+            <option value="ai_saas">AI SaaS product</option>
+            <option value="internal_agents">Internal agent workflows</option>
+            <option value="agent_platform">Agent platform / marketplace</option>
+            <option value="research">Research / experiments</option>
+            <option value="other">Something else</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="stack">Primary language</label>
+          <select id="stack">
+            <option value="">Select one&hellip;</option>
+            <option value="python">Python</option>
+            <option value="nodejs">Node.js</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <p class="err" id="err"></p>
+        <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
+        <p class="form-note">By registering you agree to our Terms of Service. No marketing email. Just a key.</p>
+      </form>
+    </div>
 
+    <div class="success" id="success-state">
+      <div class="success-icon">&#128273;</div>
+      <h2>Your API key is ready.</h2>
+      <p>Copy it now. We won't show it again. Store it in your environment variables, not your code.</p>
+      <div class="key-box">
+        <div class="key-label">API Key</div>
+        <div class="key-value">
+          <span id="key-display"></span>
+          <button class="btn-copy" onclick="copyKey()">Copy</button>
+        </div>
+      </div>
+      <div class="next-steps">
+        <h4>Next steps</h4>
+        <div class="ns"><span class="ns-num">1</span><p>Install: <code>pip install agentbill-sdk</code></p></div>
+        <div class="ns"><span class="ns-num">2</span><p>Set key: <code>export AGENTBILL_API_KEY=your_key</code></p></div>
+        <div class="ns"><span class="ns-num">3</span><p>Add <code>@meter(preflight=True)</code> to your agent function.</p></div>
+        <div class="ns"><span class="ns-num">4</span><p>Read the <a href="/docs" style="color:var(--accent)">docs</a> for ceilings &amp; outcome billing.</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let apiKey = ''
+
+  document.getElementById('reg-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const btn = document.getElementById('submit-btn')
+    const errEl = document.getElementById('err')
+    errEl.style.display = 'none'
+    btn.disabled = true
+    btn.textContent = 'Generating…'
+
+    try {
       const res = await fetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: document.getElementById('email').value,
-          name: document.getElementById('name').value || undefined,
-        })
+          email:    document.getElementById('email').value,
+          name:     document.getElementById('name').value || undefined,
+          use_case: document.getElementById('use_case').value || undefined,
+          stack:    document.getElementById('stack').value || undefined,
+        }),
       })
       const data = await res.json()
 
       if (!res.ok) {
-        errEl.textContent = data.message ?? 'Something went wrong'
+        errEl.textContent = data.message ?? 'Something went wrong. Try again.'
         errEl.style.display = 'block'
         btn.disabled = false
-        btn.textContent = 'Get my API key →'
+        btn.textContent = 'Generate my API key →'
         return
       }
 
       apiKey = data.api_key
-      document.getElementById('key-value').textContent = apiKey
-      document.getElementById('result').style.display = 'block'
-      document.getElementById('form').style.display = 'none'
-    })
-
-    function copyKey() {
-      navigator.clipboard.writeText(apiKey)
-      document.querySelector('.copy-btn').textContent = '✓ Copied'
-      setTimeout(() => document.querySelector('.copy-btn').textContent = 'Copy key', 2000)
+      document.getElementById('key-display').textContent = apiKey
+      document.getElementById('form-state').style.display = 'none'
+      const s = document.getElementById('success-state')
+      s.style.display = 'flex'
+    } catch {
+      errEl.textContent = 'Network error. Check your connection and try again.'
+      errEl.style.display = 'block'
+      btn.disabled = false
+      btn.textContent = 'Generate my API key →'
     }
-  </script>
+  })
+
+  function copyKey() {
+    navigator.clipboard.writeText(apiKey)
+    const btn = document.querySelector('.btn-copy')
+    btn.textContent = 'Copied!'
+    btn.style.color = 'var(--green)'
+    setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
+  }
+</script>
 </body>
 </html>`)
   })
 
-  // Register API — POST
+  // Register API — POST (idempotent: same email always returns a key)
   app.post('/register', async (request, reply) => {
     const parsed = RegisterBody.safeParse(request.body)
     if (!parsed.success) {
@@ -135,41 +270,64 @@ export async function registerRoute(app: FastifyInstance) {
       })
     }
 
-    const { email, name } = parsed.data
+    const { email, name, use_case, stack } = parsed.data
 
     try {
+      // Check if account already exists — return existing key instead of 409
+      const [existing] = await sql`
+        SELECT k.api_key
+        FROM accounts a
+        JOIN developer_api_keys k ON k.account_id = a.id
+        WHERE a.email = ${email}
+        ORDER BY k.created_at ASC
+        LIMIT 1
+      `
+
+      if (existing) {
+        return reply.code(200).send({
+          api_key: existing.apiKey,
+          message: 'Account already exists. Here is your existing API key.',
+        })
+      }
+
+      // New account
       const result = await sql.begin(async (tx) => {
-        // Create account (or return existing if email already registered)
         const [account] = await tx`
-          INSERT INTO accounts (email, name, plan)
-          VALUES (${email}, ${name ?? null}, 'free')
+          INSERT INTO accounts (email, name, plan, use_case, stack, default_budget_units)
+          VALUES (${email}, ${name ?? null}, 'free', ${use_case ?? null}, ${stack ?? null}, 1000)
           ON CONFLICT (email) DO NOTHING
           RETURNING id
         `
 
         if (!account) {
-          return { type: 'already_exists' as const }
+          // Race condition: another request created the account between our check and insert.
+          // Fetch the key created by the other request.
+          const [raceKey] = await tx`
+            SELECT k.api_key FROM accounts a
+            JOIN developer_api_keys k ON k.account_id = a.id
+            WHERE a.email = ${email}
+            ORDER BY k.created_at ASC LIMIT 1
+          `
+          return { type: 'existing' as const, apiKey: raceKey?.apiKey ?? null }
         }
 
-        // Generate and store API key
         const apiKey = generateApiKey()
         await tx`
           INSERT INTO developer_api_keys (account_id, api_key, label)
           VALUES (${account.id}, ${apiKey}, 'default')
         `
 
-        return { type: 'created' as const, accountId: account.id as string, apiKey }
+        return { type: 'created' as const, apiKey }
       })
 
-      if (result.type === 'already_exists') {
-        return reply.code(409).send({
-          error: 'already_exists',
-          message: 'An account with this email already exists.',
+      if (result.type === 'existing') {
+        return reply.code(200).send({
+          api_key: result.apiKey,
+          message: 'Account already exists. Here is your existing API key.',
         })
       }
 
       return reply.code(201).send({
-        account_id: result.accountId,
         api_key: result.apiKey,
         message: 'Account created. Store your API key — it will not be shown again.',
       })

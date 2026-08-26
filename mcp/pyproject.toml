@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbill-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "AgentBill MCP server. Add spend controls and billing to any AI agent in 3 lines."
 readme = "README.md"
 license = { text = "MIT" }

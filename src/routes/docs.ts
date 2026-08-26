@@ -8,7 +8,17 @@ export async function docsRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill Docs</title>
+  <title>AgentBill Docs — Preflight Billing for AI Agents</title>
+  <meta name="description" content="AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer." />
+  <link rel="canonical" href="https://agentbill.fly.dev/docs" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://agentbill.fly.dev/docs" />
+  <meta property="og:title" content="AgentBill Docs — Preflight Billing for AI Agents" />
+  <meta property="og:description" content="Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK." />
+  <meta property="og:site_name" content="AgentBill" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="AgentBill Docs — Preflight Billing for AI Agents" />
+  <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
@@ -47,45 +57,55 @@ export async function docsRoute(app: FastifyInstance) {
 
   <hr>
 
-  <h2>Quick Start</h2>
-  <p>5 minutes. No credit card.</p>
+  <h2>Quick Start — 2 minutes</h2>
 
-  <h3>1. Install</h3>
+  <h3>Step 1 — Install</h3>
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
-  <h3>2. Get your API key</h3>
-  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.fly.dev/register</a>. Your key starts with <span class="inline">agb_</span>.</p>
+  <h3>Step 2 — Get your API key</h3>
+  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.fly.dev/register</a> — free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
-  <h3>3. Add to your agent</h3>
+  <h3>Step 3 — Add 3 lines to your agent</h3>
   <div class="code"><pre>
 from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># Before the run: check budget</span>
-check = client.preflight(agent_id="researcher", budget=5.00)
+<span class="comment"># Before the run: check if the customer has budget</span>
+check = client.preflight(agent_id="researcher", customer_id="user_123", estimated_units=10)
 if not check.approved:
-    raise Exception(f"Blocked: {check.reason}")
+    raise Exception(f"Blocked: {check.reason}")  <span class="comment"># budget_exhausted or ceiling_exceeded</span>
 
-<span class="comment"># Run your agent here</span>
+<span class="comment"># ... run your agent here ...</span>
 result = run_my_agent()
 
-<span class="comment"># After the run: record cost</span>
-client.record(agent_id="researcher", cost=check.estimated_cost)
+<span class="comment"># After the run: record what was actually used</span>
+client.record(agent_id="researcher", customer_id="user_123", units=10)
   </pre></div>
+
+  <p style="color:#4ade80; margin-top: 8px;">That's it. The first 1,000 units per customer are free.</p>
 
   <hr>
 
   <h2>Core Concepts</h2>
 
   <h3>Preflight</h3>
-  <p>Checks budget before compute is consumed. If the customer is out of credits, the run is blocked immediately. Nothing runs. Nothing is charged.</p>
+  <p>Checks budget before compute is consumed. If the customer is out of units, the run is blocked immediately — before any tokens are spent.</p>
 
   <h3>Record</h3>
-  <p>Logs the actual cost after a successful run. This is how AgentBill tracks usage per agent and per customer.</p>
+  <p>Logs actual usage after a successful run. Idempotent — safe to call from retried or parallel workflows.</p>
 
   <h3>Per-request ceiling</h3>
-  <p>Coming in v0.2.0. Set a max cost per invocation. If a single run is projected to exceed the ceiling, it is blocked at the call level before any compute starts.</p>
+  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> in preflight — if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts.</p>
+
+  <div class="code"><pre>
+check = client.preflight(
+    agent_id="researcher",
+    customer_id="user_123",
+    estimated_units=50,
+    ceiling=20  <span class="comment"># block if this run would cost more than 20 units</span>
+)
+  </pre></div>
 
   <hr>
 
@@ -94,49 +114,68 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
   <h3>preflight()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td>agent_id</td><td>string</td><td>Identifier for this agent. Used for usage tracking.</td></tr>
-    <tr><td>budget</td><td>float</td><td>Maximum cost allowed for this run (in USD).</td></tr>
-    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your customer's ID. For multi-tenant setups.</td></tr>
+    <tr><td>agent_id</td><td>string</td><td>Identifier for this agent. Appears in the dashboard.</td></tr>
+    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
+    <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
+    <tr><td>ceiling</td><td>int <span class="tag">optional</span></td><td>Block if estimated_units exceeds this value.</td></tr>
   </table>
 
   <p>Returns:</p>
   <div class="code"><pre>
 {
   "approved": true,
-  "reason": null,
-  "estimated_cost": 0.42,
-  "remaining_budget": 4.58
+  "remaining_units": 990,
+  "estimated_units": 10
+}
+  </pre></div>
+
+  <p>When blocked:</p>
+  <div class="code"><pre>
+{
+  "approved": false,
+  "reason": "budget_exhausted",  <span class="comment"># or "ceiling_exceeded"</span>
+  "remaining_units": 0,
+  "upgrade_url": "https://agentbill.fly.dev/upgrade"
 }
   </pre></div>
 
   <h3>record()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td>agent_id</td><td>string</td><td>Must match the agent_id used in preflight().</td></tr>
-    <tr><td>cost</td><td>float</td><td>Actual cost of the run (in USD).</td></tr>
-    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your customer's ID.</td></tr>
+    <tr><td>agent_id</td><td>string</td><td>Identifier for this agent or task type.</td></tr>
+    <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1.</td></tr>
+    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
+    <tr><td>metadata</td><td>dict <span class="tag">optional</span></td><td>Key-value pairs stored with the event (e.g. model name, latency).</td></tr>
   </table>
-
-  <hr>
-
-  <h2>What it does NOT do</h2>
-  <p>Multi-step workflows with state machines or reversal logic are out of scope. AgentBill works on atomic single-call functions. If your agent runs a single task and returns a result, you are in scope.</p>
-  <p>AgentBill does not replace your payment processor. It sits in front of it.</p>
 
   <hr>
 
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
-import { AgentBillClient } from 'agentbill'
+import { AgentBill } from 'agentbill'
 
-const client = new AgentBillClient({ apiKey: 'agb_your_key' })
+const bill = new AgentBill({ apiKey: 'agb_your_key' })
 
-const check = await client.preflight({ agentId: 'researcher', budget: 5.00 })
-if (!check.approved) throw new Error(check.reason)
+<span class="comment">// Before the run</span>
+const check = await bill.preflight({ agentId: 'researcher', customerId: 'user_123', estimatedUnits: 10 })
+if (!check.approved) throw new Error('Blocked: ' + check.reason)
 
-await client.record({ agentId: 'researcher', cost: check.estimatedCost })
+<span class="comment">// After the run</span>
+await bill.record({ agentId: 'researcher', customerId: 'user_123', units: 10 })
   </pre></div>
+
+  <hr>
+
+  <h2>What it does NOT do</h2>
+  <p>AgentBill does not replace your payment processor — it sits in front of it. Multi-step workflows with state machines or reversal logic are out of scope.</p>
+
+  <hr>
+
+  <h2>Guides</h2>
+  <p><a href="/docs/limit-cost-per-agent-run" style="color:#a8ff78">How to limit cost per agent run</a></p>
+  <p><a href="/docs/langchain-billing" style="color:#a8ff78">How to add billing to a LangChain agent</a></p>
+  <p><a href="/docs/openai-agent-spend-ceiling" style="color:#a8ff78">How to add a spend ceiling to an OpenAI agent</a></p>
 
   <hr>
 

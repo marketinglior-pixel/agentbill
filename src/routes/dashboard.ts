@@ -16,7 +16,7 @@ export async function dashboardRoute(app: FastifyInstance) {
              THEN true ELSE false END AS is_blocked,
         c.created_at
       FROM customers c
-      WHERE c.account_id = ${process.env.HARDCODED_ACCOUNT_ID!}
+      WHERE c.account_id = ${(request as any).accountId}
       ORDER BY c.created_at DESC
     `
     return reply.send(rows)

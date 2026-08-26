@@ -18,9 +18,13 @@ export async function budgetRoute(app: FastifyInstance) {
 
     const { customer_id: customerRef } = parsed.data
     const accountId = request.accountId
-    const defaultBudget: number | null = null
 
     try {
+      const [account] = await sql`
+        SELECT default_budget_units FROM accounts WHERE id = ${accountId}
+      `
+      const defaultBudget: number | null = account?.defaultBudgetUnits ?? null
+
       // Lazy-create: if customer doesn't exist, create with default budget.
       // This endpoint never returns 404.
       const inserted = await sql`

@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.marketinglior-pixel/agentbill-mcp -->
+
 # agentbill-mcp
 
 AgentBill MCP server. Add spend controls and usage billing to any AI agent in 3 lines.

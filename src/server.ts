@@ -16,6 +16,8 @@ import { checkpointRoute } from './routes/checkpoint.js'
 import { stepRoute } from './routes/step.js'
 import { webhookConfigRoute } from './routes/webhook-config.js'
 import { upgradeRoute } from './routes/upgrade.js'
+import { adminRoute } from './routes/admin.js'
+import { keysRoute } from './routes/keys.js'
 
 const app = Fastify({ logger: true })
 
@@ -28,12 +30,50 @@ app.register(checkpointRoute)
 app.register(stepRoute)
 app.register(webhookConfigRoute)
 app.register(upgradeRoute)
+app.register(adminRoute)
+app.register(keysRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
 
 // Health check - useful for deploy verification
 app.get('/health', async () => ({ status: 'ok' }))
+
+// Google Search Console verification
+app.get('/google816aee44e74d69c3.html', async (_, reply) => {
+  reply.type('text/html')
+  return 'google-site-verification: google816aee44e74d69c3.html'
+})
+
+// robots.txt
+app.get('/robots.txt', async (_, reply) => {
+  reply.type('text/plain')
+  return `User-agent: *
+Allow: /
+Allow: /docs
+Allow: /register
+Disallow: /dashboard
+Disallow: /webhooks/
+
+Sitemap: https://agentbill.fly.dev/sitemap.xml
+`
+})
+
+// sitemap.xml
+app.get('/sitemap.xml', async (_, reply) => {
+  const base = 'https://agentbill.fly.dev'
+  const now = new Date().toISOString().split('T')[0]
+  reply.type('application/xml')
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${base}/</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>${base}/docs</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>${base}/register</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>${base}/docs/limit-cost-per-agent-run</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${base}/docs/langchain-billing</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${base}/docs/openai-agent-spend-ceiling</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+</urlset>`
+})
 
 app.get('/llms.txt', async (_, reply) => {
   reply.type('text/plain')

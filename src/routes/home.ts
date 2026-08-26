@@ -8,7 +8,22 @@ export async function homeRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill — Stop runaway AI agents before they start</title>
+  <title>AgentBill — Billing Governance for AI Agents</title>
+  <meta name="description" content="Preflight billing for AI agents. Block runaway agent spend before compute starts. Per-request ceilings, multi-tenant metering, outcome-based billing. Python SDK. Free tier." />
+  <meta name="keywords" content="billing for AI agents, preflight billing, stripe for AI agents, LLM cost control, agent billing python, per request ceiling AI, usage based billing AI, agentbill, langchain billing, AI agent spend" />
+  <link rel="canonical" href="https://agentbill.fly.dev/" />
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://agentbill.fly.dev/" />
+  <meta property="og:title" content="AgentBill — Billing Governance for AI Agents" />
+  <meta property="og:description" content="Block runaway agent spend before compute starts. Preflight enforcement, per-request ceilings, multi-tenant billing. Not a tracker. A guardrail." />
+  <meta property="og:site_name" content="AgentBill" />
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="AgentBill — Billing Governance for AI Agents" />
+  <meta name="twitter:description" content="Block runaway agent spend before compute starts. Per-request ceilings, preflight enforcement, outcome-based billing." />
+  <!-- Structured data -->
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Preflight billing governance for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.fly.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }

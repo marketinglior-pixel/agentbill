@@ -1,6 +1,25 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { Resend } from 'resend'
+
+const ALERT_THRESHOLD = 800
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
+
+async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, prevUsedUnits: number) {
+  if (!resend) return
+  if (prevUsedUnits >= ALERT_THRESHOLD || usedUnits < ALERT_THRESHOLD) return
+  await resend.emails.send({
+    from: 'AgentBill <onboarding@resend.dev>',
+    to: 'marketinglior@gmail.com',
+    subject: `AgentBill: customer "${customerRef}" approaching 1000 units (${usedUnits} used)`,
+    html: `
+      <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong> and is approaching the 1000 free-tier limit.</p>
+      <p>This is a good time to reach out and convert them to a paying customer.</p>
+      <p><a href="https://agentbill.fly.dev/dashboard">View dashboard</a></p>
+    `,
+  })
+}
 
 const EventBody = z.object({
   customer_id:      z.string().min(1),
@@ -128,6 +147,9 @@ export async function eventsRoute(app: FastifyInstance) {
           eventId: event.id as string,
           customerCreated,
           remainingUnits,
+          prevUsedUnits: updated.usedUnits - units,
+          usedUnits: updated.usedUnits,
+          customerRef,
         }
       })
 
@@ -154,6 +176,8 @@ export async function eventsRoute(app: FastifyInstance) {
           customer_remaining_units: result.remainingUnits,
         })
       }
+
+      maybeSendThresholdAlert(result.customerRef, result.usedUnits, result.prevUsedUnits).catch(() => {})
 
       return reply.code(200).send({
         event_id: result.eventId,
