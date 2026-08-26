@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify'
+import { createHmac, timingSafeEqual } from 'crypto'
 import { sql } from '../db/index.js'
 
 const FREE_TIER_LIMIT = 1_000
 const WARN_AT = 800
+const SESSION_COOKIE = 'agentbill_admin'
+const SESSION_MAX_AGE = 7 * 24 * 3_600 // seconds
 
 export async function adminRoute(app: FastifyInstance) {
 
@@ -15,7 +18,7 @@ export async function adminRoute(app: FastifyInstance) {
     return reply.send(rows)
   })
 
-  // Visual dashboard — /admin?s=<ADMIN_SECRET>
+  // Visual dashboard — session cookie set by POST /admin/login
   app.get('/admin', async (request, reply) => {
     if (!checkAuth(request)) {
       reply.type('text/html')
@@ -26,28 +29,58 @@ export async function adminRoute(app: FastifyInstance) {
     return reply.send(adminPage(accounts))
   })
 
-  // POST /admin/login — form submits secret, redirects to /admin?s=secret
+  // POST /admin/login — form submits secret, sets HttpOnly session cookie.
+  // The secret never appears in a URL (query params leak into logs and browser history).
   app.post('/admin/login', async (request, reply) => {
-    const body = request.body as Record<string, string>
-    const secret = body?.secret ?? ''
-    if (secret !== (process.env.ADMIN_SECRET ?? '')) {
+    const body = request.body as Record<string, unknown>
+    const secret = typeof body?.secret === 'string' ? body.secret : ''
+    const expected = process.env.ADMIN_SECRET ?? ''
+    if (!expected || !safeEqual(secret, expected)) {
       reply.type('text/html')
       return reply.send(loginPage('Wrong secret.'))
     }
-    return reply.redirect(`/admin?s=${encodeURIComponent(secret)}`)
+    reply.header(
+      'Set-Cookie',
+      `${SESSION_COOKIE}=${sessionToken(expected)}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${SESSION_MAX_AGE}`
+    )
+    return reply.redirect('/admin')
   })
 }
 
 // ---------------------------------------------------------------------------
-// Auth helper — accepts Bearer header OR ?s= query param
+// Auth — accepts Bearer header (curl) OR the session cookie (browser).
+// The cookie holds an HMAC derived from ADMIN_SECRET, not the secret itself,
+// so rotating the secret invalidates all sessions.
 // ---------------------------------------------------------------------------
 
-function checkAuth(request: { headers: { authorization?: string }, query: unknown }): boolean {
+function sessionToken(secret: string): string {
+  return createHmac('sha256', secret).update('agentbill-admin-session').digest('hex')
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB)
+}
+
+function readCookie(header: string, name: string): string {
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq === -1) continue
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim()
+  }
+  return ''
+}
+
+function checkAuth(request: { headers: { authorization?: string; cookie?: string } }): boolean {
   const expected = process.env.ADMIN_SECRET ?? ''
   if (!expected) return false
-  const header = (request.headers.authorization ?? '').replace(/^Bearer /, '')
-  const param = (request.query as Record<string, string>)?.s ?? ''
-  return header === expected || param === expected
+
+  const bearer = (request.headers.authorization ?? '').replace(/^Bearer /, '')
+  if (bearer && safeEqual(bearer, expected)) return true
+
+  const cookie = readCookie(request.headers.cookie ?? '', SESSION_COOKIE)
+  return cookie !== '' && safeEqual(cookie, sessionToken(expected))
 }
 
 // ---------------------------------------------------------------------------

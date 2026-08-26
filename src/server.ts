@@ -21,6 +21,15 @@ import { keysRoute } from './routes/keys.js'
 
 const app = Fastify({ logger: true })
 
+// HTML form submissions (e.g. /admin/login). Fastify only parses JSON out of the box.
+app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
+  try {
+    done(null, Object.fromEntries(new URLSearchParams(body as string)))
+  } catch (err) {
+    done(err as Error)
+  }
+})
+
 app.register(sensible)
 app.register(homeRoute)
 app.register(docsRoute)
