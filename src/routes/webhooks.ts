@@ -1,9 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
-import { verifyWebhookSignature } from '../integrations/polar.js'
+import { verifyWebhookSignature, planFromProductId } from '../integrations/polar.js'
 
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
-const FREE_TIER_LIMIT = 1_000
 
 export async function webhooksRoute(app: FastifyInstance) {
   app.post('/webhooks/polar', {
@@ -35,17 +34,26 @@ export async function webhooksRoute(app: FastifyInstance) {
         return reply.send({ received: true })
       }
 
+      // Which tier was bought? Product id appears in different shapes across
+      // Polar event types; unknown/legacy products map to 'paid'.
+      const productId: string =
+        event?.data?.product_id ??
+        event?.data?.productId ??
+        event?.data?.product?.id ??
+        ''
+      const plan = planFromProductId(productId)
+
       await sql`
         UPDATE accounts
         SET
-          plan                = 'paid',
+          plan                = ${plan},
           polar_customer_id   = ${polarCustomerId},
           monthly_calls       = 0,
           billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
         WHERE id = ${accountId}
       `
 
-      request.log.info({ accountId, polarCustomerId }, 'Account upgraded to paid')
+      request.log.info({ accountId, polarCustomerId, plan, productId }, 'Account upgraded')
     }
 
     // Subscription canceled — downgrade to free

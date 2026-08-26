@@ -1,9 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
-import { reportUsage, getCheckoutUrl } from '../integrations/polar.js'
-
-const FREE_TIER_LIMIT = 1_000
+import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 
 const PreflightBody = z.object({
   agent_id: z.string().min(1),
@@ -74,14 +72,18 @@ export async function preflightRoute(app: FastifyInstance) {
       account.monthlyCalls = 0
     }
 
-    // Free tier enforcement
-    if (account.plan === 'free' && account.monthlyCalls >= FREE_TIER_LIMIT) {
+    // Monthly plan quota. Legacy 'paid' is unlimited (metered per call);
+    // unknown plans get the free quota rather than a free pass.
+    const planLimit =
+      account.plan === 'paid' ? null : PLAN_LIMITS[account.plan] ?? PLAN_LIMITS.free
+    if (planLimit !== null && account.monthlyCalls >= planLimit) {
       return reply.send({
         approved: false,
-        reason: 'free_tier_exceeded',
+        reason: account.plan === 'free' ? 'free_tier_exceeded' : 'plan_limit_exceeded',
+        plan: account.plan,
         monthly_calls: account.monthlyCalls,
-        free_tier_limit: FREE_TIER_LIMIT,
-        upgrade_url: getCheckoutUrl(accountId),
+        plan_limit: planLimit,
+        upgrade_url: `https://agentbill.fly.dev/upgrade?account_id=${accountId}`,
       })
     }
 

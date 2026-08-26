@@ -27,6 +27,46 @@ export function getCheckoutUrl(accountId: string): string {
   return `${POLAR_CHECKOUT_URL}?metadata[agentbill_account_id]=${encodeURIComponent(accountId)}`
 }
 
+// ---------------------------------------------------------------------------
+// Pricing tiers (2026-08-26): Free / Builder $29 / Team $99 / Scale $299.
+// Monthly included preflight calls are enforced app-side; the legacy 'paid'
+// plan (pay-as-you-go) stays metered per call and unlimited.
+// ---------------------------------------------------------------------------
+
+export const PLAN_LIMITS: Record<string, number> = {
+  free: 1_000,
+  builder: 50_000,
+  team: 500_000,
+  scale: 2_000_000,
+}
+
+const TIER_PRODUCTS: Record<string, string> = {
+  [process.env.POLAR_PRODUCT_ID_BUILDER ?? '__builder_unset']: 'builder',
+  [process.env.POLAR_PRODUCT_ID_TEAM ?? '__team_unset']: 'team',
+  [process.env.POLAR_PRODUCT_ID_SCALE ?? '__scale_unset']: 'scale',
+}
+
+// Map a Polar product to a plan name. Unknown products fall back to the
+// legacy 'paid' plan so old checkouts keep working.
+export function planFromProductId(productId: string | null | undefined): string {
+  if (!productId) return 'paid'
+  return TIER_PRODUCTS[productId] ?? 'paid'
+}
+
+const TIER_CHECKOUTS: Record<string, string> = {
+  builder: process.env.POLAR_CHECKOUT_URL_BUILDER ?? '',
+  team: process.env.POLAR_CHECKOUT_URL_TEAM ?? '',
+  scale: process.env.POLAR_CHECKOUT_URL_SCALE ?? '',
+}
+
+export function getTierCheckoutUrl(tier: string, accountId: string): string {
+  const url = TIER_CHECKOUTS[tier]
+  if (!url) return getCheckoutUrl(accountId)
+  return accountId
+    ? `${url}?metadata[agentbill_account_id]=${encodeURIComponent(accountId)}`
+    : url
+}
+
 // Verify Polar webhook signature (HMAC SHA-256).
 // Polar sends the signature in the "webhook-signature" header as "v1,<hex>".
 export async function verifyWebhookSignature(
