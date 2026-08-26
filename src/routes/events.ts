@@ -29,6 +29,7 @@ const EventBody = z.object({
   units:            z.number().int().min(0).default(1),
   metadata:         z.record(z.unknown()).optional(),
   success:          z.boolean().default(true),
+  task_ref:         z.string().min(1).max(128).optional(),
 })
 
 export async function eventsRoute(app: FastifyInstance) {
@@ -41,7 +42,7 @@ export async function eventsRoute(app: FastifyInstance) {
       })
     }
 
-    const { customer_id: customerRef, event_type, idempotency_key, units, metadata, success } = parsed.data
+    const { customer_id: customerRef, event_type, idempotency_key, units, metadata, success, task_ref } = parsed.data
     const metadataJson = metadata !== undefined ? JSON.stringify(metadata) : null
     const accountId = request.accountId
     const defaultBudget: number | null = null
@@ -90,6 +91,15 @@ export async function eventsRoute(app: FastifyInstance) {
                 updated_at     = now()
             WHERE id = ${locked.id}
           `
+          if (task_ref) {
+            // Failed run: release the task reservation, spend nothing.
+            await tx`
+              UPDATE task_budgets
+              SET reserved_units = GREATEST(0, reserved_units - ${units}),
+                  updated_at     = now()
+              WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+            `
+          }
           return { type: 'released' as const, customerCreated }
         }
 
@@ -143,6 +153,24 @@ export async function eventsRoute(app: FastifyInstance) {
           ? updated.limitUnits - updated.usedUnits - updated.reservedUnits
           : null
 
+        // ----------------------------------------------------------------
+        // 6. Task reconcile: usage is recorded even past the ceiling —
+        //    records report reality (the spend already happened); only
+        //    preflight prevents. Overage surfaces as task_exceeded.
+        // ----------------------------------------------------------------
+        let taskRow = null
+        if (task_ref) {
+          const [t] = await tx`
+            UPDATE task_budgets
+            SET used_units     = used_units + ${units},
+                reserved_units = GREATEST(0, reserved_units - ${units}),
+                updated_at     = now()
+            WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+            RETURNING ceiling_units, used_units, reserved_units
+          `
+          taskRow = t ?? null
+        }
+
         return {
           type: 'recorded' as const,
           eventId: event.id as string,
@@ -151,6 +179,7 @@ export async function eventsRoute(app: FastifyInstance) {
           prevUsedUnits: updated.usedUnits - units,
           usedUnits: updated.usedUnits,
           customerRef,
+          taskRow,
         }
       })
 
@@ -180,11 +209,19 @@ export async function eventsRoute(app: FastifyInstance) {
 
       maybeSendThresholdAlert(result.customerRef, result.usedUnits, result.prevUsedUnits).catch(() => {})
 
+      const t = result.taskRow
       return reply.code(200).send({
         event_id: result.eventId,
         status: 'recorded',
         customer_created: result.customerCreated,
         customer_remaining_units: result.remainingUnits,
+        ...(t
+          ? {
+              task_used_units: t.usedUnits,
+              task_remaining_units: Math.max(0, t.ceilingUnits - t.usedUnits - t.reservedUnits),
+              task_exceeded: t.usedUnits > t.ceilingUnits,
+            }
+          : {}),
       })
 
     } catch (err) {

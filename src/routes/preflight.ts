@@ -10,7 +10,20 @@ const PreflightBody = z.object({
   customer_id: z.string().optional(),
   estimated_units: z.number().int().positive().optional(),
   ceiling: z.number().int().positive().optional(),
+  task_ref: z.string().min(1).max(128).optional(),
+  task_ceiling: z.number().int().positive().optional(),
 })
+
+// Thrown inside the reserve transaction so a task-level rejection rolls back
+// the customer-level reservation too — the two reserves are all-or-nothing.
+class TaskRejection extends Error {
+  constructor(
+    public reason: 'task_ceiling_exceeded' | 'task_ceiling_required',
+    public current?: { ceilingUnits: number; usedUnits: number; reservedUnits: number }
+  ) {
+    super(reason)
+  }
+}
 
 export async function preflightRoute(app: FastifyInstance) {
   app.post('/preflight', async (request, reply) => {
@@ -19,7 +32,7 @@ export async function preflightRoute(app: FastifyInstance) {
       return reply.status(422).send({ error: 'Validation error', details: parse.error.issues })
     }
 
-    const { agent_id, customer_id, estimated_units, ceiling } = parse.data
+    const { agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling } = parse.data
     const accountId = (request as any).accountId
 
     // Ceiling check — no DB needed
@@ -80,40 +93,104 @@ export async function preflightRoute(app: FastifyInstance) {
     const customerRef = customer_id || 'default'
     const reserveUnits = estimated_units ?? 1
 
-    const result = await sql.begin(async (tx) => {
-      // Lazy-create the customer row if it doesn't exist yet.
-      await tx`
-        INSERT INTO customers (account_id, customer_ref, limit_units)
-        VALUES (${accountId}, ${customerRef}, ${account.defaultBudgetUnits ?? null})
-        ON CONFLICT DO NOTHING
-      `
-
-      // Atomic reserve: only succeeds when budget allows it.
-      // Returns the updated row so we can report remaining_units.
-      const reserved = await tx`
-        UPDATE customers
-        SET reserved_units = reserved_units + ${reserveUnits}
-        WHERE account_id = ${accountId}
-          AND customer_ref = ${customerRef}
-          AND (
-            limit_units IS NULL
-            OR used_units + reserved_units + ${reserveUnits} <= limit_units
-          )
-        RETURNING limit_units, used_units, reserved_units
-      `
-
-      if (reserved.length === 0) {
-        // Budget exhausted — read current state for the response
-        const [current] = await tx`
-          SELECT limit_units, used_units, reserved_units
-          FROM customers
-          WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
+    let result
+    try {
+      result = await sql.begin(async (tx) => {
+        // Lazy-create the customer row if it doesn't exist yet.
+        await tx`
+          INSERT INTO customers (account_id, customer_ref, limit_units)
+          VALUES (${accountId}, ${customerRef}, ${account.defaultBudgetUnits ?? null})
+          ON CONFLICT DO NOTHING
         `
-        return { approved: false as const, current }
-      }
 
-      return { approved: true as const, row: reserved[0] }
-    })
+        // Atomic reserve: only succeeds when budget allows it.
+        // Returns the updated row so we can report remaining_units.
+        const reserved = await tx`
+          UPDATE customers
+          SET reserved_units = reserved_units + ${reserveUnits}
+          WHERE account_id = ${accountId}
+            AND customer_ref = ${customerRef}
+            AND (
+              limit_units IS NULL
+              OR used_units + reserved_units + ${reserveUnits} <= limit_units
+            )
+          RETURNING limit_units, used_units, reserved_units
+        `
+
+        if (reserved.length === 0) {
+          // Budget exhausted — read current state for the response
+          const [current] = await tx`
+            SELECT limit_units, used_units, reserved_units
+            FROM customers
+            WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
+          `
+          return { approved: false as const, current }
+        }
+
+        // Task-level ceiling: a cross-call budget for one job/run. Same atomic
+        // reserve pattern as customers, scoped to (account_id, task_ref).
+        let task = null
+        if (task_ref) {
+          if (task_ceiling != null) {
+            // First call for this task creates it; the ceiling is fixed at
+            // creation and later task_ceiling values are ignored.
+            await tx`
+              INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units)
+              VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling})
+              ON CONFLICT (account_id, task_ref) DO NOTHING
+            `
+          }
+
+          const taskReserved = await tx`
+            UPDATE task_budgets
+            SET reserved_units = reserved_units + ${reserveUnits},
+                updated_at     = now()
+            WHERE account_id = ${accountId}
+              AND task_ref = ${task_ref}
+              AND used_units + reserved_units + ${reserveUnits} <= ceiling_units
+            RETURNING ceiling_units, used_units, reserved_units
+          `
+
+          if (taskReserved.length === 0) {
+            const [current] = await tx`
+              SELECT ceiling_units, used_units, reserved_units
+              FROM task_budgets
+              WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+            `
+            // Rolls back the customer reservation above as well.
+            throw current
+              ? new TaskRejection(
+                  'task_ceiling_exceeded',
+                  current as unknown as { ceilingUnits: number; usedUnits: number; reservedUnits: number }
+                )
+              : new TaskRejection('task_ceiling_required')
+          }
+          task = taskReserved[0]
+        }
+
+        return { approved: true as const, row: reserved[0], task }
+      })
+    } catch (err) {
+      if (err instanceof TaskRejection && err.reason === 'task_ceiling_required') {
+        return reply.status(422).send({
+          error: 'task_ceiling_required',
+          message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task.`,
+        })
+      }
+      if (err instanceof TaskRejection && err.current) {
+        const t = err.current
+        return reply.send({
+          approved: false,
+          reason: 'task_ceiling_exceeded',
+          estimated_units: estimated_units ?? null,
+          task_ref,
+          task_ceiling: t.ceilingUnits,
+          task_used_units: t.usedUnits,
+          task_remaining_units: Math.max(0, t.ceilingUnits - t.usedUnits - t.reservedUnits),
+        })
+      }
+      throw err
+    }
 
     if (!result.approved) {
       const c = result.current
@@ -142,11 +219,19 @@ export async function preflightRoute(app: FastifyInstance) {
       void reportUsage(account.polarCustomerId, 1)
     }
 
+    const task = result.task
     return reply.send({
       approved: true,
       reason: null,
       estimated_units: estimated_units ?? null,
       remaining_units: remaining,
+      ...(task
+        ? {
+            task_ref,
+            task_remaining_units:
+              task.ceilingUnits - task.usedUnits - task.reservedUnits,
+          }
+        : {}),
     })
   })
 }

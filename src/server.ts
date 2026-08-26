@@ -18,6 +18,7 @@ import { webhookConfigRoute } from './routes/webhook-config.js'
 import { upgradeRoute } from './routes/upgrade.js'
 import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
+import { tasksRoute } from './routes/tasks.js'
 
 const app = Fastify({ logger: true })
 
@@ -41,6 +42,7 @@ app.register(webhookConfigRoute)
 app.register(upgradeRoute)
 app.register(adminRoute)
 app.register(keysRoute)
+app.register(tasksRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
