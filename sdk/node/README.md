@@ -91,3 +91,32 @@ async function runAgent(customerId: string, input: string) {
 - [Full docs](https://agentbill.fly.dev/docs)
 - [GitHub](https://github.com/marketinglior-pixel/agentbill)
 - [Python SDK (PyPI)](https://pypi.org/project/agentbill/)
+
+## Task budgets — "this job dies at $5"
+
+A task groups many calls — across providers and tools — under one hard
+cross-call ceiling, blocked before the money is spent.
+
+```ts
+import { preflight, record, getTask, TaskCeilingExceededError } from 'agentbill'
+
+// First call creates the task with its ceiling
+await preflight({ agentId: 'researcher', estimatedUnits: 2,
+                  taskRef: 'job-42', taskCeiling: 50 })
+
+// ... run your LLM / tool call, then record what actually happened
+await record({ agentId: 'researcher', units: 2, taskRef: 'job-42' })
+
+// Every later call just names the task
+try {
+  await preflight({ agentId: 'researcher', estimatedUnits: 10, taskRef: 'job-42' })
+} catch (e) {
+  if (e instanceof TaskCeilingExceededError) {
+    console.log(`job-42 is done: ${e.taskUsedUnits}/${e.taskCeiling} units spent`)
+  }
+}
+
+// Live burn-down
+const status = await getTask('job-42')
+console.log(status.usedUnits, '/', status.ceilingUnits)
+```

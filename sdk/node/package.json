@@ -1,7 +1,7 @@
 {
   "name": "agentbill",
-  "version": "0.1.1",
-  "description": "Usage-based billing for AI agents — 3-line integration with pre-flight budget guardrails",
+  "version": "0.2.0",
+  "description": "Usage-based billing for AI agents \u2014 3-line integration with pre-flight budget guardrails",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -25,5 +25,6 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"
-  }
+  },
+  "type": "module"
 }

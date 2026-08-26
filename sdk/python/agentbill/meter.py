@@ -11,7 +11,7 @@ A decorator that records billable agent events.
 
 Environment variables
 ---------------------
-AGENTBILL_API_KEY     Required. Your API key from agentbill.dev/dashboard.
+AGENTBILL_API_KEY     Required. Your API key from agentbill.fly.dev/register.
 AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.fly.dev
 AGENTBILL_CUSTOMER_ID Optional. Fallback customer_id when not passed per-call.
 """
@@ -69,7 +69,7 @@ def _api_key() -> str:
     if not key:
         raise AgentBillError(
             "AGENTBILL_API_KEY is not set. "
-            "Get your key at agentbill.dev/dashboard."
+            "Get your key at agentbill.fly.dev/register."
         )
     return key
 
@@ -110,7 +110,7 @@ def _resolve_customer_id(
     )
 
 
-def _build_payload(customer_id: str, event: str, units: int, metadata: dict | None) -> dict:
+def _build_payload(customer_id: str, event: str, units: int, metadata: dict | None, task_ref: str | None = None) -> dict:
     payload: dict = {
         "customer_id": customer_id,
         "event_type": event,
@@ -120,6 +120,8 @@ def _build_payload(customer_id: str, event: str, units: int, metadata: dict | No
     }
     if metadata:
         payload["metadata"] = metadata
+    if task_ref:
+        payload["task_ref"] = task_ref
     return payload
 
 
@@ -177,22 +179,22 @@ async def _preflight_async(customer_id: str) -> None:
         raise BudgetExhaustedError(customer_id)
 
 
-def _submit_sync(customer_id: str, event: str, units: int, metadata: dict | None) -> None:
+def _submit_sync(customer_id: str, event: str, units: int, metadata: dict | None, task_ref: str | None = None) -> None:
     with httpx.Client() as client:
         resp = client.post(
             f"{_BASE_URL}/events",
-            json=_build_payload(customer_id, event, units, metadata),
+            json=_build_payload(customer_id, event, units, metadata, task_ref),
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
         )
     _handle_response(resp, customer_id)
 
 
-async def _submit_async(customer_id: str, event: str, units: int, metadata: dict | None) -> None:
+async def _submit_async(customer_id: str, event: str, units: int, metadata: dict | None, task_ref: str | None = None) -> None:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{_BASE_URL}/events",
-            json=_build_payload(customer_id, event, units, metadata),
+            json=_build_payload(customer_id, event, units, metadata, task_ref),
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
         )
@@ -211,6 +213,7 @@ def meter(
     customer_id_from: str | None = None,
     metadata: dict | None = None,
     preflight: bool = False,
+    task_ref: str | None = None,
 ) -> Callable[[F], F]:
     """Decorator that records a billable event after the wrapped function returns.
 
@@ -226,6 +229,8 @@ def meter(
         preflight:        If True, check budget BEFORE running the function. Raises
                           BudgetExhaustedError immediately if the customer is blocked,
                           preventing any expensive LLM calls from being made.
+        task_ref:         Attribute this event to a cross-call task budget created
+                          via AgentBillClient.preflight(task_ref=..., task_ceiling=...).
 
     Raises:
         BudgetExhaustedError: Customer has 0 remaining units (HTTP 402).
@@ -258,7 +263,7 @@ def meter(
                 result = await func(*args, **kwargs)
                 actual_units = _resolve_units(units, result)
                 if actual_units > 0:
-                    await _submit_async(cid, event, actual_units, metadata)
+                    await _submit_async(cid, event, actual_units, metadata, task_ref)
                 return result
             return async_wrapper  # type: ignore[return-value]
         else:
@@ -270,7 +275,7 @@ def meter(
                 result = func(*args, **kwargs)
                 actual_units = _resolve_units(units, result)
                 if actual_units > 0:
-                    _submit_sync(cid, event, actual_units, metadata)
+                    _submit_sync(cid, event, actual_units, metadata, task_ref)
                 return result
             return sync_wrapper  # type: ignore[return-value]
 

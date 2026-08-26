@@ -11,12 +11,12 @@
  *   )
  *
  * Environment variables:
- *   AGENTBILL_API_KEY     Required. Your key from agentbill.dev/dashboard.
- *   AGENTBILL_BASE_URL    Optional. Defaults to https://api.agentbill.dev/v1
+ *   AGENTBILL_API_KEY     Required. Your key from agentbill.fly.dev/register.
+ *   AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.fly.dev
  *   AGENTBILL_CUSTOMER_ID Optional. Fallback customer_id when not passed per-call.
  */
 
-const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://api.agentbill.dev/v1'
+const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://agentbill.fly.dev'
 
 // ---------------------------------------------------------------------------
 // Public exceptions
@@ -35,6 +35,25 @@ export class AgentBillError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AgentBillError'
+  }
+}
+
+/** The cross-call budget for this task is spent — the job dies here. */
+export class TaskCeilingExceededError extends Error {
+  readonly taskRef: string
+  readonly taskCeiling?: number
+  readonly taskUsedUnits?: number
+  readonly taskRemainingUnits?: number
+  constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number) {
+    super(
+      `Task '${taskRef}' blocked: ${taskUsedUnits}/${taskCeiling} units used, ` +
+      `${taskRemainingUnits} remaining is not enough for this call.`
+    )
+    this.name = 'TaskCeilingExceededError'
+    this.taskRef = taskRef
+    this.taskCeiling = taskCeiling
+    this.taskUsedUnits = taskUsedUnits
+    this.taskRemainingUnits = taskRemainingUnits
   }
 }
 
@@ -57,6 +76,8 @@ export interface MeterOptions<TArgs extends Record<string, unknown>, TResult> {
   preflight?: boolean
   /** Static metadata attached to every event (not billed). */
   metadata?: Record<string, unknown>
+  /** Attribute events to a cross-call task budget (created via preflight()). */
+  taskRef?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +88,7 @@ function apiKey(): string {
   const key = process.env.AGENTBILL_API_KEY ?? ''
   if (!key) {
     throw new AgentBillError(
-      'AGENTBILL_API_KEY is not set. Get your key at agentbill.dev/dashboard.'
+      'AGENTBILL_API_KEY is not set. Get your key at agentbill.fly.dev/register.'
     )
   }
   return key
@@ -125,7 +146,7 @@ async function apiFetch(path: string, init: RequestInit): Promise<Response> {
   return res as unknown as Response
 }
 
-async function preflight(customerId: string): Promise<void> {
+async function budgetCheck(customerId: string): Promise<void> {
   const res = await apiFetch(`/budget?customer_id=${encodeURIComponent(customerId)}`, {
     method: 'GET',
   })
@@ -142,7 +163,8 @@ async function submitEvent(
   customerId: string,
   event: string,
   units: number,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  taskRef?: string
 ): Promise<void> {
   const body: Record<string, unknown> = {
     customer_id: customerId,
@@ -151,6 +173,7 @@ async function submitEvent(
     idempotency_key: `${event}_${randomHex()}`,
   }
   if (metadata) body.metadata = metadata
+  if (taskRef) body.task_ref = taskRef
 
   const res = await apiFetch('/events', {
     method: 'POST',
@@ -170,6 +193,140 @@ async function submitEvent(
 
 function randomHex(): string {
   return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2)
+}
+
+// ---------------------------------------------------------------------------
+// Public low-level API — preflight / record / getTask
+// ---------------------------------------------------------------------------
+
+export interface PreflightOptions {
+  /** Agent identifier — used for attribution. */
+  agentId: string
+  customerId?: string
+  estimatedUnits?: number
+  /** Per-request ceiling: block when estimatedUnits exceeds it. */
+  ceiling?: number
+  /** Cross-call job budget: many calls, one hard ceiling. */
+  taskRef?: string
+  /** Required on the first preflight of a new taskRef. */
+  taskCeiling?: number
+}
+
+export interface PreflightResult {
+  approved: boolean
+  reason: string | null
+  estimatedUnits: number | null
+  remainingUnits: number | null
+  taskRef?: string
+  taskRemainingUnits?: number
+  upgradeUrl?: string
+}
+
+/**
+ * Check every budget BEFORE the call runs. Throws TaskCeilingExceededError /
+ * BudgetExhaustedError on a blocked run so the expensive call never happens.
+ */
+export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
+  const body: Record<string, unknown> = { agent_id: options.agentId }
+  if (options.customerId) body.customer_id = options.customerId
+  if (options.estimatedUnits != null) body.estimated_units = options.estimatedUnits
+  if (options.ceiling != null) body.ceiling = options.ceiling
+  if (options.taskRef) body.task_ref = options.taskRef
+  if (options.taskCeiling != null) body.task_ceiling = options.taskCeiling
+
+  const res = await apiFetch('/preflight', { method: 'POST', body: JSON.stringify(body) })
+  const data = await res.json() as Record<string, any>
+
+  if (res.status === 422 && data.error === 'task_ceiling_required') {
+    throw new AgentBillError(String(data.message ?? 'task_ceiling required for a new task_ref'))
+  }
+  if (!res.ok) {
+    throw new AgentBillError(`AgentBill /preflight returned ${res.status}`)
+  }
+
+  if (!data.approved) {
+    if (data.reason === 'task_ceiling_exceeded') {
+      throw new TaskCeilingExceededError(
+        data.task_ref ?? options.taskRef ?? '',
+        data.task_ceiling,
+        data.task_used_units,
+        data.task_remaining_units
+      )
+    }
+    if (data.reason === 'budget_exhausted') {
+      throw new BudgetExhaustedError(options.customerId ?? 'default')
+    }
+    // free_tier_exceeded / plan_limit_exceeded / ceiling_exceeded fall through
+    // as a non-approved result so callers can route to data.upgrade_url.
+  }
+
+  return {
+    approved: Boolean(data.approved),
+    reason: data.reason ?? null,
+    estimatedUnits: data.estimated_units ?? null,
+    remainingUnits: data.remaining_units ?? null,
+    taskRef: data.task_ref,
+    taskRemainingUnits: data.task_remaining_units,
+    upgradeUrl: data.upgrade_url,
+  }
+}
+
+export interface RecordOptions {
+  agentId: string
+  units?: number
+  customerId?: string
+  /** false releases the preflight reservation without billing. */
+  success?: boolean
+  taskRef?: string
+  metadata?: Record<string, unknown>
+}
+
+/** Record what actually happened. Idempotency key is generated per call. */
+export async function record(options: RecordOptions): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {
+    customer_id: options.customerId ?? 'default',
+    event_type: options.agentId,
+    units: options.units ?? 1,
+    success: options.success ?? true,
+    idempotency_key: `${options.agentId}_${randomHex()}`,
+  }
+  if (options.taskRef) body.task_ref = options.taskRef
+  if (options.metadata) body.metadata = options.metadata
+
+  const res = await apiFetch('/events', { method: 'POST', body: JSON.stringify(body) })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new AgentBillError(`AgentBill /events returned ${res.status}: ${text.slice(0, 200)}`)
+  }
+  return await res.json() as Record<string, unknown>
+}
+
+export interface TaskStatus {
+  taskRef: string
+  agentId: string
+  ceilingUnits: number
+  usedUnits: number
+  reservedUnits: number
+  remainingUnits: number
+  exceeded: boolean
+}
+
+/** Live burn-down of one job's budget. */
+export async function getTask(taskRef: string): Promise<TaskStatus> {
+  const res = await apiFetch(`/tasks/${encodeURIComponent(taskRef)}`, { method: 'GET' })
+  if (!res.ok) {
+    throw new AgentBillError(`AgentBill /tasks returned ${res.status}`)
+  }
+  const data = await res.json() as Record<string, any>
+  return {
+    taskRef: data.task_ref,
+    agentId: data.agent_id,
+    ceilingUnits: data.ceiling_units,
+    usedUnits: data.used_units,
+    reservedUnits: data.reserved_units,
+    remainingUnits: data.remaining_units,
+    exceeded: Boolean(data.exceeded),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,13 +374,14 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
     units = 1,
     preflight: doPreFlight = false,
     metadata,
+    taskRef,
   } = options
 
   return async function metered(args: TArgs): Promise<TResult> {
     const customerId = resolveCustomerId(options, args)
 
     if (doPreFlight) {
-      await preflight(customerId)
+      await budgetCheck(customerId)
     }
 
     const result = await fn(args)
@@ -232,7 +390,7 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
 
     // Skip recording if outcome-based billing resolved to 0
     if (actualUnits > 0) {
-      await submitEvent(customerId, event, actualUnits, metadata)
+      await submitEvent(customerId, event, actualUnits, metadata, taskRef)
     }
 
     return result

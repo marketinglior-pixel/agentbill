@@ -304,3 +304,43 @@ AgentBill handles all of that behind a single decorator.
 ---
 
 Built for developers who ship agents and want to get paid fairly for what they actually deliver.
+
+## Task budgets — "this job dies at $5"
+
+A task groups many calls — across providers and tools — under one hard
+cross-call ceiling. The ceiling is fixed on the first preflight; every later
+call reserves against the same budget, and the run that would cross it is
+blocked before the money is spent.
+
+```python
+from agentbill import AgentBillClient, TaskCeilingExceededError
+
+client = AgentBillClient(api_key="agb_...")
+
+# First call creates the task with its ceiling
+client.preflight("researcher", estimated_units=2,
+                 task_ref="job-42", task_ceiling=50)
+
+# ... run your LLM / tool call, then record what actually happened
+client.record("researcher", units=2, task_ref="job-42")
+
+# Every later call just names the task
+try:
+    client.preflight("researcher", estimated_units=10, task_ref="job-42")
+except TaskCeilingExceededError as e:
+    print(f"job-42 is done: {e.task_used_units}/{e.task_ceiling} units spent")
+
+# Live burn-down
+status = client.get_task("job-42")
+print(status.used_units, "/", status.ceiling_units)
+```
+
+Or wrap the whole thing with the gate decorator — preflight before, record
+after, reservation released automatically when the function raises:
+
+```python
+@client.gate("researcher", estimated_units=2,
+             task_ref="job-42", task_ceiling=50)
+def run_step(query: str) -> str:
+    return call_llm(query)
+```

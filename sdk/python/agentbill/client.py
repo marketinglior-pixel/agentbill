@@ -12,6 +12,19 @@ class PreflightResult:
     estimated_units: Optional[int]
     remaining_units: Optional[int]
     upgrade_url: Optional[str] = None
+    task_ref: Optional[str] = None
+    task_remaining_units: Optional[int] = None
+
+
+@dataclass
+class TaskStatus:
+    task_ref: str
+    agent_id: str
+    ceiling_units: int
+    used_units: int
+    reserved_units: int
+    remaining_units: int
+    exceeded: bool
 
 @dataclass
 class StepResult:
@@ -38,6 +51,40 @@ class FreeTierExceededError(Exception):
         self.upgrade_url = upgrade_url
         super().__init__("Free tier limit reached. Upgrade to continue.")
 
+class PlanLimitExceededError(Exception):
+    """The account hit its plan's monthly call quota."""
+    def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None):
+        self.plan = plan
+        self.upgrade_url = upgrade_url
+        super().__init__(f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
+
+class TaskCeilingExceededError(Exception):
+    """The cross-call budget for this task is spent — the job dies here.
+
+    Catch this to stop the run cleanly:
+
+        try:
+            client.preflight("researcher", estimated_units=2,
+                             task_ref="job-42", task_ceiling=50)
+        except TaskCeilingExceededError as e:
+            log.info(f"task {e.task_ref} hit its ceiling "
+                     f"({e.task_used_units}/{e.task_ceiling})")
+            return partial_result
+    """
+    def __init__(self, task_ref: str, task_ceiling: Optional[int],
+                 task_used_units: Optional[int], task_remaining_units: Optional[int]):
+        self.task_ref = task_ref
+        self.task_ceiling = task_ceiling
+        self.task_used_units = task_used_units
+        self.task_remaining_units = task_remaining_units
+        super().__init__(
+            f"Task {task_ref!r} blocked: {task_used_units}/{task_ceiling} units used, "
+            f"{task_remaining_units} remaining is not enough for this call."
+        )
+
+class TaskCeilingRequiredError(Exception):
+    """A new task_ref needs task_ceiling on its first preflight."""
+
 class AgentBillClient:
     def __init__(self, api_key: str, ceiling: Optional[int] = None, base_url: str = BASE_URL):
         if not api_key or not api_key.strip():
@@ -49,7 +96,20 @@ class AgentBillClient:
         self.ceiling = ceiling
         self.base_url = base_url
 
-    def preflight(self, agent_id: str, estimated_units: Optional[int] = None, customer_id: Optional[str] = None) -> PreflightResult:
+    def preflight(
+        self,
+        agent_id: str,
+        estimated_units: Optional[int] = None,
+        customer_id: Optional[str] = None,
+        task_ref: Optional[str] = None,
+        task_ceiling: Optional[int] = None,
+    ) -> PreflightResult:
+        """Check every budget BEFORE the call runs.
+
+        task_ref groups many calls (across providers and tools) under one hard
+        cross-call ceiling — "this job dies at 50 units". Pass task_ceiling on
+        the first call for a new task_ref; later calls only need task_ref.
+        """
         payload = {"agent_id": agent_id}
         if estimated_units is not None:
             payload["estimated_units"] = estimated_units
@@ -57,6 +117,10 @@ class AgentBillClient:
             payload["ceiling"] = self.ceiling
         if customer_id is not None:
             payload["customer_id"] = customer_id
+        if task_ref is not None:
+            payload["task_ref"] = task_ref
+        if task_ceiling is not None:
+            payload["task_ceiling"] = task_ceiling
 
         resp = requests.post(
             f"{self.base_url}/preflight",
@@ -64,6 +128,10 @@ class AgentBillClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=5,
         )
+        if resp.status_code == 422:
+            data = resp.json()
+            if data.get("error") == "task_ceiling_required":
+                raise TaskCeilingRequiredError(data.get("message", "task_ceiling required for a new task_ref"))
         resp.raise_for_status()
         data = resp.json()
 
@@ -73,6 +141,8 @@ class AgentBillClient:
             estimated_units=data.get("estimated_units"),
             remaining_units=data.get("remaining_units"),
             upgrade_url=data.get("upgrade_url"),
+            task_ref=data.get("task_ref"),
+            task_remaining_units=data.get("task_remaining_units"),
         )
 
         if not result.approved:
@@ -84,10 +154,26 @@ class AgentBillClient:
                 raise BudgetExhaustedError("Run blocked: customer budget exhausted")
             if result.reason == "free_tier_exceeded":
                 raise FreeTierExceededError(upgrade_url=data.get("upgrade_url"))
+            if result.reason == "plan_limit_exceeded":
+                raise PlanLimitExceededError(plan=data.get("plan"), upgrade_url=data.get("upgrade_url"))
+            if result.reason == "task_ceiling_exceeded":
+                raise TaskCeilingExceededError(
+                    task_ref=data.get("task_ref") or task_ref or "",
+                    task_ceiling=data.get("task_ceiling"),
+                    task_used_units=data.get("task_used_units"),
+                    task_remaining_units=data.get("task_remaining_units"),
+                )
 
         return result
 
-    def record(self, agent_id: str, units: int = 1, customer_id: Optional[str] = None, success: bool = True) -> dict:
+    def record(
+        self,
+        agent_id: str,
+        units: int = 1,
+        customer_id: Optional[str] = None,
+        success: bool = True,
+        task_ref: Optional[str] = None,
+    ) -> dict:
         payload = {
             "customer_id": customer_id or "default",
             "event_type": agent_id,
@@ -95,6 +181,8 @@ class AgentBillClient:
             "units": units,
             "success": success,
         }
+        if task_ref is not None:
+            payload["task_ref"] = task_ref
         resp = requests.post(
             f"{self.base_url}/events",
             json=payload,
@@ -103,6 +191,25 @@ class AgentBillClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def get_task(self, task_ref: str) -> TaskStatus:
+        """Live burn-down of one job's budget."""
+        resp = requests.get(
+            f"{self.base_url}/tasks/{task_ref}",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return TaskStatus(
+            task_ref=data["task_ref"],
+            agent_id=data["agent_id"],
+            ceiling_units=data["ceiling_units"],
+            used_units=data["used_units"],
+            reserved_units=data["reserved_units"],
+            remaining_units=data["remaining_units"],
+            exceeded=data["exceeded"],
+        )
 
     def checkpoint(
         self,
@@ -165,6 +272,8 @@ class AgentBillClient:
         agent_id: str,
         estimated_units: Optional[int] = None,
         customer_id: Optional[str] = None,
+        task_ref: Optional[str] = None,
+        task_ceiling: Optional[int] = None,
     ):
         def decorator(func):
             @functools.wraps(func)
@@ -173,24 +282,32 @@ class AgentBillClient:
                     agent_id=agent_id,
                     estimated_units=estimated_units,
                     customer_id=customer_id,
+                    task_ref=task_ref,
+                    task_ceiling=task_ceiling,
                 )
                 if not check.approved:
                     raise Exception(f"Agent blocked: {check.reason}")
+                reserved = check.estimated_units or 1
                 try:
                     result = func(*args, **kwargs)
                     self.record(
                         agent_id=agent_id,
-                        units=check.estimated_units or 1,
+                        units=reserved,
                         customer_id=customer_id,
                         success=True,
+                        task_ref=task_ref,
                     )
                     return result
                 except Exception:
+                    # success=False releases the preflight reservation without
+                    # billing — units must equal what preflight reserved, or the
+                    # reservation leaks and eats the budget forever.
                     self.record(
                         agent_id=agent_id,
-                        units=0,
+                        units=reserved,
                         customer_id=customer_id,
                         success=False,
+                        task_ref=task_ref,
                     )
                     raise
             return wrapper
