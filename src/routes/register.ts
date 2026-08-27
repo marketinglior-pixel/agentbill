@@ -260,6 +260,10 @@ export async function registerRoute(app: FastifyInstance) {
       if (res.status === 201 && typeof window.fbq === 'function') {
         window.fbq('track', 'CompleteRegistration')
       }
+      // Reddit Pixel conversion — new accounts only (201)
+      if (res.status === 201 && typeof window.rdt === 'function') {
+        window.rdt('track', 'SignUp')
+      }
     } catch {
       errEl.textContent = 'Network error. Check your connection and try again.'
       errEl.style.display = 'block'
