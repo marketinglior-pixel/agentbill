@@ -58,6 +58,7 @@ export async function homeRoute(app: FastifyInstance) {
     .nav-links { display: flex; align-items: center; gap: 22px; }
     .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; }
     .nav-links a:hover { color: var(--text); }
+    .nav-links a.btn, .nav-links a.btn:hover, .nav-links a.btn:visited { color: #05130e; }
     .btn { display: inline-block; background: var(--green); color: #05130e; padding: 10px 18px;
            border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
            transition: transform .15s, box-shadow .15s; }
