@@ -57,6 +57,16 @@ export async function upgradeRoute(app: FastifyInstance) {
     .cta.ghost:hover { border-color: #6b7280; }
     .note { margin-top: 28px; font-size: 12px; color: #4b5563; line-height: 1.6; }
     .note a { color: #a78bfa; text-decoration: none; }
+    .havekey { margin-top: 32px; background: #111827; border: 1px solid #1f2937; border-radius: 10px;
+               padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .havekey label { font-size: 13px; color: #9ca3af; }
+    .havekey input { background: #0d0d0d; border: 1px solid #374151; border-radius: 6px; color: #e2e8f0;
+                     font-family: inherit; font-size: 13px; padding: 9px 12px; flex: 1; min-width: 220px; }
+    .havekey input:focus { outline: none; border-color: #7c3aed; }
+    .havekey button { background: transparent; border: 1px solid #7c3aed; border-radius: 6px; color: #a78bfa;
+                      font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; cursor: pointer; }
+    .havekey button:hover { background: #7c3aed; color: #fff; }
+    .havekey .msg { font-size: 12px; color: #22d3a0; width: 100%; display: none; }
   </style>
 </head>
 <body>
@@ -91,7 +101,7 @@ export async function upgradeRoute(app: FastifyInstance) {
           <li>Key security: revoke, rotate, rate-limit</li>
           <li>Email alerts on anomalies</li>
         </ul>
-        <a class="cta" href="${cta('builder')}">Get Builder</a>
+        <a class="cta" data-tier="builder" href="${cta('builder')}">Get Builder</a>
       </div>
 
       <div class="card hot">
@@ -104,7 +114,7 @@ export async function upgradeRoute(app: FastifyInstance) {
           <li>Per-agent cost attribution</li>
           <li>Priority support</li>
         </ul>
-        <a class="cta" href="${cta('team')}">Get Team</a>
+        <a class="cta" data-tier="team" href="${cta('team')}">Get Team</a>
       </div>
 
       <div class="card">
@@ -115,13 +125,41 @@ export async function upgradeRoute(app: FastifyInstance) {
           <li>Everything in Team</li>
           <li>Direct line to the founder</li>
         </ul>
-        <a class="cta" href="${cta('scale')}">Get Scale</a>
+        <a class="cta" data-tier="scale" href="${cta('scale')}">Get Scale</a>
       </div>
     </div>
 
+    ${accountId ? '' : `
+    <div class="havekey">
+      <label for="keyin">Already have an API key?</label>
+      <input id="keyin" type="password" placeholder="agb_..." autocomplete="off" spellcheck="false" />
+      <button id="keybtn" type="button">Unlock checkout</button>
+      <span class="msg" id="keymsg"></span>
+    </div>
+    <script>
+    document.getElementById('keybtn').addEventListener('click', async function () {
+      var k = document.getElementById('keyin').value.trim()
+      var msg = document.getElementById('keymsg')
+      msg.style.display = 'block'
+      if (!k) { msg.style.color = '#ff5757'; msg.textContent = 'Paste your API key first.'; return }
+      try {
+        var r = await fetch('/account/upgrade-url', { headers: { Authorization: 'Bearer ' + k } })
+        if (!r.ok) { msg.style.color = '#ff5757'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
+        var d = await r.json()
+        document.querySelectorAll('[data-tier]').forEach(function (a) {
+          var t = a.getAttribute('data-tier')
+          if (d.checkout && d.checkout[t]) a.setAttribute('href', d.checkout[t])
+        })
+        msg.style.color = '#22d3a0'
+        msg.textContent = 'Checkout unlocked for your account. Pick a plan above.'
+      } catch (e) {
+        msg.style.color = '#ff5757'
+        msg.textContent = 'Network error. Try again.'
+      }
+    })
+    </script>`}
     <p class="note">One runaway retry loop costs more than a year of Builder.
-    ${accountId ? '' : 'Have an account? Open this page from your dashboard so checkout links to your account, or '}
-    <a href="/register">create a free API key</a> in 30 seconds.</p>
+    No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
   </div>
 </body>
 </html>`)
@@ -129,4 +167,19 @@ export async function upgradeRoute(app: FastifyInstance) {
 
   app.get('/upgrade', pricingPage)
   app.get('/pricing', pricingPage)
+
+  // Authenticated helper for the pricing page's "already have a key?" box:
+  // turns a bearer key into checkout links carrying the account metadata, so
+  // existing users can upgrade before they hit a limit. (Auth middleware
+  // resolves the key — this path is deliberately NOT in PUBLIC_PATHS.)
+  app.get('/account/upgrade-url', async (request, reply) => {
+    const accountId = (request as any).accountId
+    return reply.send({
+      checkout: {
+        builder: getTierCheckoutUrl('builder', accountId),
+        team: getTierCheckoutUrl('team', accountId),
+        scale: getTierCheckoutUrl('scale', accountId),
+      },
+    })
+  })
 }

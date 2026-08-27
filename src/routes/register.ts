@@ -3,6 +3,63 @@ import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
+import { Resend } from 'resend'
+import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
+const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
+const SUPPORT_EMAIL = 'marketinglior@gmail.com'
+
+// Best-effort: mail the existing key to the account owner. Returns true only
+// when Resend accepted the send. (With the sandbox sender this fails for
+// arbitrary recipients until the agentbill.dev domain is verified in Resend —
+// the caller falls back to a support message, never to exposing the key.)
+async function emailExistingKey(email: string, apiKey: string): Promise<boolean> {
+  if (!resend) return false
+  try {
+    const res = await resend.emails.send({
+      from: RESEND_FROM,
+      to: email,
+      subject: 'Your AgentBill API key',
+      html: `
+        <p>Someone (hopefully you) asked for the API key of this AgentBill account.</p>
+        <p>Your key: <code>${apiKey}</code></p>
+        <p>Store it in your environment variables, not your code.</p>
+        <p>Wasn't you? Rotate it immediately:</p>
+        <pre>curl -X POST https://agentbill.dev/keys/rotate -H "Authorization: Bearer ${apiKey}"</pre>
+      `,
+    })
+    return !res.error
+  } catch {
+    return false
+  }
+}
+
+// Existing account: never hand the key to an unauthenticated caller — that
+// would let anyone holding an email address steal the account's live key.
+// (Deliberate change 2026-08-27; replaces the old "idempotent register"
+// behavior.) New-account creation still shows the key instantly, so the
+// 30-second signup promise is untouched.
+async function existingAccountReply(reply: any, email: string, apiKey: string) {
+  if (recoveryInCooldown(email)) {
+    return reply.code(200).send({
+      status: 'existing_account_emailed',
+      message: `This email already has an account. We recently sent your API key to ${email} — check your inbox.`,
+    })
+  }
+  const emailed = await emailExistingKey(email, apiKey)
+  if (emailed) {
+    markRecoverySent(email)
+    return reply.code(200).send({
+      status: 'existing_account_emailed',
+      message: `This email already has an account. We sent your API key to ${email}.`,
+    })
+  }
+  return reply.code(409).send({
+    error: 'account_exists',
+    message: `This email already has an account. Lost your key? Email ${SUPPORT_EMAIL} from that address and we'll rotate it for you.`,
+  })
+}
 
 const RegisterBody = z.object({
   email:    z.string().email(),
@@ -245,6 +302,17 @@ export async function registerRoute(app: FastifyInstance) {
 
       if (!res.ok) {
         errEl.textContent = data.message ?? 'Something went wrong. Try again.'
+        errEl.style.color = 'var(--red)'
+        errEl.style.display = 'block'
+        btn.disabled = false
+        btn.textContent = 'Generate my API key →'
+        return
+      }
+
+      // Existing account: the key went to their inbox, not to this response.
+      if (!data.api_key) {
+        errEl.textContent = data.message ?? 'This email already has an account. Check your inbox.'
+        errEl.style.color = 'var(--green)'
         errEl.style.display = 'block'
         btn.disabled = false
         btn.textContent = 'Generate my API key →'
@@ -284,8 +352,16 @@ export async function registerRoute(app: FastifyInstance) {
 </html>`)
   })
 
-  // Register API — POST (idempotent: same email always returns a key)
+  // Register API — POST. New accounts get their key instantly (shown once);
+  // existing emails get the key by email, never in the response.
   app.post('/register', async (request, reply) => {
+    if (!allowRegisterAttempt(request.ip)) {
+      return reply.code(429).send({
+        error: 'rate_limited',
+        message: 'Too many attempts from this address. Try again in an hour.',
+      })
+    }
+
     const parsed = RegisterBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(422).send({
@@ -308,10 +384,7 @@ export async function registerRoute(app: FastifyInstance) {
       `
 
       if (existing) {
-        return reply.code(200).send({
-          api_key: existing.apiKey,
-          message: 'Account already exists. Here is your existing API key.',
-        })
+        return existingAccountReply(reply, email, existing.apiKey)
       }
 
       // New account
@@ -345,10 +418,13 @@ export async function registerRoute(app: FastifyInstance) {
       })
 
       if (result.type === 'existing') {
-        return reply.code(200).send({
-          api_key: result.apiKey,
-          message: 'Account already exists. Here is your existing API key.',
-        })
+        if (!result.apiKey) {
+          return reply.code(409).send({
+            error: 'account_exists',
+            message: `This email already has an account. Email ${SUPPORT_EMAIL} to recover your key.`,
+          })
+        }
+        return existingAccountReply(reply, email, result.apiKey)
       }
 
       return reply.code(201).send({
