@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
-import { sql } from '../db/index.js'
+import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from '../lib/conversion.js'
+import type { AccountSignals } from '../lib/conversion.js'
 
-const FREE_TIER_LIMIT = 1_000
 const WARN_AT = 800
 const SESSION_COOKIE = 'agentbill_admin'
 const SESSION_MAX_AGE = 7 * 24 * 3_600 // seconds
@@ -14,8 +14,8 @@ export async function adminRoute(app: FastifyInstance) {
     if (!checkAuth(request)) {
       return reply.code(401).send({ error: 'unauthorized' })
     }
-    const rows = await getAccounts()
-    return reply.send(rows)
+    const rows = await getAccountsWithSignals()
+    return reply.send(rows.map(a => ({ ...a, conversionScore: conversionScore(a), hot: isHot(a) })))
   })
 
   // Visual dashboard, session cookie set by POST /admin/login
@@ -24,7 +24,7 @@ export async function adminRoute(app: FastifyInstance) {
       reply.type('text/html')
       return reply.send(loginPage())
     }
-    const accounts = await getAccounts() as unknown as AccountRow[]
+    const accounts = await getAccountsWithSignals()
     reply.type('text/html')
     return reply.send(adminPage(accounts))
   })
@@ -81,30 +81,6 @@ function checkAuth(request: { headers: { authorization?: string; cookie?: string
 
   const cookie = readCookie(request.headers.cookie ?? '', SESSION_COOKIE)
   return cookie !== '' && safeEqual(cookie, sessionToken(expected))
-}
-
-// ---------------------------------------------------------------------------
-// DB query
-// ---------------------------------------------------------------------------
-
-async function getAccounts() {
-  return sql`
-    SELECT
-      a.id,
-      a.email,
-      a.name,
-      a.plan,
-      a.use_case,
-      a.stack,
-      a.monthly_calls,
-      a.billing_period_start,
-      a.created_at,
-      COUNT(c.id)::int AS customer_count
-    FROM accounts a
-    LEFT JOIN customers c ON c.account_id = a.id
-    GROUP BY a.id
-    ORDER BY a.monthly_calls DESC, a.created_at DESC
-  `
 }
 
 // ---------------------------------------------------------------------------
@@ -186,47 +162,53 @@ function loginPage(error = '') {
 </html>`
 }
 
-type AccountRow = {
-  id: string
-  email: string | null
-  name: string | null
-  plan: string
-  useCase: string | null
-  stack: string | null
-  monthlyCalls: number
-  billingPeriodStart: string
-  createdAt: string
-  customerCount: number
-}
-
-function adminPage(accounts: AccountRow[]) {
+function adminPage(accounts: AccountSignals[]) {
   const total = accounts.length
-  const paid = accounts.filter(a => a.plan === 'paid').length
-  const warned = accounts.filter(a => a.monthlyCalls >= WARN_AT && a.plan === 'free').length
+  const paid = accounts.filter(a => a.plan !== 'free').length
+  const hot = accounts.filter(isHot).length
+  const weekAgo = Date.now() - 7 * 24 * 3_600_000
+  const new7d = accounts.filter(a => new Date(a.createdAt).getTime() > weekAgo).length
   const totalCalls = accounts.reduce((s, a) => s + (a.monthlyCalls ?? 0), 0)
 
-  const rows = accounts.map(a => {
+  // Hot accounts first, then by score, then newest. The table IS the call list.
+  const sorted = [...accounts].sort((a, b) =>
+    (Number(isHot(b)) - Number(isHot(a))) ||
+    (conversionScore(b) - conversionScore(a)) ||
+    (new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
+
+  const rel = (iso: string | null) => {
+    if (!iso) return '<span class="none">never</span>'
+    const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)
+    if (mins < 60) return `${mins}m ago`
+    if (mins < 2880) return `${Math.round(mins / 60)}h ago`
+    return `${Math.round(mins / 1440)}d ago`
+  }
+
+  const rows = sorted.map(a => {
     const calls = a.monthlyCalls ?? 0
+    const score = conversionScore(a)
+    const hotRow = isHot(a)
     const pct = Math.min(100, Math.round(calls / FREE_TIER_LIMIT * 100))
     const isWarn = calls >= WARN_AT && a.plan === 'free'
     const isFull = calls >= FREE_TIER_LIMIT && a.plan === 'free'
     const barClass = isFull ? 'full' : isWarn ? 'warn' : ''
-    const rowClass = isWarn ? 'warn-row' : ''
     const callBadge = isWarn
       ? `<span class="badge warn">${calls} / ${FREE_TIER_LIMIT}</span>`
       : `${calls}`
 
-    return `<tr class="${rowClass}">
+    return `<tr class="${hotRow ? 'warn-row' : ''}" title="${a.name ?? ''}">
+      <td>${hotRow ? `<span class="badge warn">&#128293; ${score}</span>` : `<span class="muted">${score}</span>`}</td>
       <td class="mono">${a.email ?? '<span class="none">no email</span>'}</td>
-      <td>${a.name ?? '<span class="none">-</span>'}</td>
-      <td><span class="badge ${a.plan}">${a.plan}</span></td>
-      <td>${a.stack ?? '<span class="muted">-</span>'}</td>
-      <td>${a.useCase ?? '<span class="muted">-</span>'}</td>
+      <td><span class="badge ${a.plan === 'free' ? 'free' : 'paid'}">${a.plan}</span></td>
       <td>
         <span class="bar-wrap"><span class="bar ${barClass}" style="width:${pct}%"></span></span>
         ${callBadge}
       </td>
+      <td class="muted">${a.taskCount}</td>
+      <td class="muted">${rel(a.lastActivityAt)}</td>
       <td class="muted">${a.customerCount}</td>
+      <td>${a.stack ?? '<span class="muted">-</span>'}</td>
+      <td>${a.useCase ?? '<span class="muted">-</span>'}</td>
       <td class="muted">${new Date(a.createdAt).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'})}</td>
     </tr>`
   }).join('')
@@ -240,7 +222,7 @@ function adminPage(accounts: AccountRow[]) {
 </head>
 <body>
   <h1>AgentBill Admin</h1>
-  <p class="sub">All registered accounts, sorted by usage. Refresh to update.</p>
+  <p class="sub">Conversion radar: hot accounts first, sorted by likelihood to pay. Refresh to update.</p>
 
   <div class="stats">
     <div class="stat">
@@ -252,8 +234,12 @@ function adminPage(accounts: AccountRow[]) {
       <div class="stat-value green">${paid}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Free (approaching limit)</div>
-      <div class="stat-value yellow">${warned}</div>
+      <div class="stat-label">&#128293; Hot (likely to pay)</div>
+      <div class="stat-value yellow">${hot}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">New (7 days)</div>
+      <div class="stat-value purple">${new7d}</div>
     </div>
     <div class="stat">
       <div class="stat-label">Total calls this month</div>
@@ -264,18 +250,20 @@ function adminPage(accounts: AccountRow[]) {
   <table>
     <thead>
       <tr>
+        <th>Score</th>
         <th>Email</th>
-        <th>Name</th>
         <th>Plan</th>
+        <th>Monthly calls</th>
+        <th>Tasks</th>
+        <th>Last active</th>
+        <th>Customers</th>
         <th>Stack</th>
         <th>Use case</th>
-        <th>Monthly calls</th>
-        <th>Customers</th>
         <th>Registered</th>
       </tr>
     </thead>
     <tbody>
-      ${rows || '<tr><td colspan="8" class="none" style="padding:24px">No accounts yet.</td></tr>'}
+      ${rows || '<tr><td colspan="10" class="none" style="padding:24px">No accounts yet.</td></tr>'}
     </tbody>
   </table>
 </body>

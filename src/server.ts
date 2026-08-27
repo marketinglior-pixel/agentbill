@@ -21,6 +21,7 @@ import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
 import { legalRoute } from './routes/legal.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
+import { startConversionDigest } from './lib/conversion-digest.js'
 import { OG_PNG } from './lib/og-image.js'
 
 const app = Fastify({ logger: true })
@@ -197,4 +198,5 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
     process.exit(1)
   }
   startDbWatchdog()
+  startConversionDigest()
 })
