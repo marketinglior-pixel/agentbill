@@ -83,7 +83,7 @@ export async function preflightRoute(app: FastifyInstance) {
         plan: account.plan,
         monthly_calls: account.monthlyCalls,
         plan_limit: planLimit,
-        upgrade_url: `https://agentbill.fly.dev/upgrade?account_id=${accountId}`,
+        upgrade_url: `https://agentbill.dev/upgrade?account_id=${accountId}`,
       })
     }
 

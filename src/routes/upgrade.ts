@@ -1,8 +1,11 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getTierCheckoutUrl } from '../integrations/polar.js'
+import { pixelSnippet } from '../lib/pixel.js'
 
 export async function upgradeRoute(app: FastifyInstance) {
-  app.get('/upgrade', async (request, reply) => {
+  // Served at both /upgrade (in-product links) and /pricing (what ad clickers
+  // type; used to 401 because the auth allowlist knew no such path).
+  const pricingPage = async (request: FastifyRequest, reply: FastifyReply) => {
     const accountId = ((request.query as any).account_id as string) ?? ''
 
     const cta = (tier: string) =>
@@ -15,6 +18,16 @@ export async function upgradeRoute(app: FastifyInstance) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentBill — Pricing</title>
+  <meta name="description" content="Hard budget ceilings for AI agents. Free tier with 1,000 preflight calls/month, paid plans from $29/month. No credit card to start." />
+  <link rel="canonical" href="https://agentbill.dev/pricing" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://agentbill.dev/pricing" />
+  <meta property="og:title" content="AgentBill — Pricing" />
+  <meta property="og:description" content="Free: 1,000 preflight calls/month. Builder $29. Team $99. Scale $299. Hard per-task ceilings, cross-provider, no proxy." />
+  <meta property="og:image" content="https://agentbill.dev/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
+  ${pixelSnippet()}
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d0d0d; color: #e2e8f0;
@@ -112,5 +125,8 @@ export async function upgradeRoute(app: FastifyInstance) {
   </div>
 </body>
 </html>`)
-  })
+  }
+
+  app.get('/upgrade', pricingPage)
+  app.get('/pricing', pricingPage)
 }

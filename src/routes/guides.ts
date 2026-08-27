@@ -78,14 +78,14 @@ export async function guidesRoute(app: FastifyInstance) {
 
   <h2>Quick start — curl</h2>
   <div class="code"><pre><span class="comment"># First call creates the task: this job dies at 50 units</span>
-curl -X POST https://agentbill.fly.dev/preflight \\
+curl -X POST https://agentbill.dev/preflight \\
   -H "Authorization: Bearer agb_your_key" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"researcher","estimated_units":2,
        "task_ref":"job-42","task_ceiling":50}'
 
 <span class="comment"># ... run the LLM / tool call, then record what actually happened</span>
-curl -X POST https://agentbill.fly.dev/events \\
+curl -X POST https://agentbill.dev/events \\
   -H "Authorization: Bearer agb_your_key" \\
   -H "Content-Type: application/json" \\
   -d '{"customer_id":"default","event_type":"llm_call",

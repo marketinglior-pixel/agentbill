@@ -23,7 +23,7 @@ export async function reportUsage(polarCustomerId: string, units = 1): Promise<v
 // Returns the Polar checkout URL with the account ID embedded as metadata.
 // Polar will forward this metadata in the webhook so we know who upgraded.
 export function getCheckoutUrl(accountId: string): string {
-  if (!POLAR_CHECKOUT_URL) return 'https://agentbill.fly.dev/upgrade'
+  if (!POLAR_CHECKOUT_URL) return 'https://agentbill.dev/upgrade'
   return `${POLAR_CHECKOUT_URL}?metadata[agentbill_account_id]=${encodeURIComponent(accountId)}`
 }
 

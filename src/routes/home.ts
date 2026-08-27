@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { pixelSnippet } from '../lib/pixel.js'
 
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', async (request, reply) => {
@@ -11,19 +12,23 @@ export async function homeRoute(app: FastifyInstance) {
   <title>AgentBill — Billing Governance for AI Agents</title>
   <meta name="description" content="Preflight billing for AI agents. Block runaway agent spend before compute starts. Per-request ceilings, multi-tenant metering, outcome-based billing. Python SDK. Free tier." />
   <meta name="keywords" content="billing for AI agents, preflight billing, stripe for AI agents, LLM cost control, agent billing python, per request ceiling AI, usage based billing AI, agentbill, langchain billing, AI agent spend" />
-  <link rel="canonical" href="https://agentbill.fly.dev/" />
+  <link rel="canonical" href="https://agentbill.dev/" />
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.fly.dev/" />
+  <meta property="og:url" content="https://agentbill.dev/" />
   <meta property="og:title" content="AgentBill — Billing Governance for AI Agents" />
   <meta property="og:description" content="Block runaway agent spend before compute starts. Preflight enforcement, per-request ceilings, multi-tenant billing. Not a tracker. A guardrail." />
   <meta property="og:site_name" content="AgentBill" />
+  <meta property="og:image" content="https://agentbill.dev/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="AgentBill — Billing Governance for AI Agents" />
   <meta name="twitter:description" content="Block runaway agent spend before compute starts. Per-request ceilings, preflight enforcement, outcome-based billing." />
+  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   <!-- Structured data -->
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Preflight billing governance for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.fly.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Preflight billing governance for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
@@ -43,7 +48,12 @@ export async function homeRoute(app: FastifyInstance) {
     .not-for ul { list-style: none; }
     .not-for li { color: #555; font-size: 14px; margin-bottom: 8px; padding-left: 16px; }
     .not-for li::before { content: "x  "; color: #333; }
+    .footer-links { margin-top: 48px; padding-top: 24px; border-top: 1px solid #1a1a1a; font-size: 13px; color: #444; }
+    .footer-links a { color: #666; text-decoration: none; margin-left: 18px; }
+    .footer-links a:first-child { margin-left: 0; }
+    .footer-links a:hover { color: #fff; }
   </style>
+  ${pixelSnippet()}
 </head>
 <body>
   <div class="container">
@@ -74,8 +84,7 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
       <p class="quote-author">— scarlett1908, r/LangChain</p>
     </div>
     <div class="quote-block">
-      <p class="quote">"Works whether you're paying OpenAI $0.01/token or burning your own GPU at 3am."</p>
-      <p class="quote-author">— the point</p>
+      <p class="quote" style="font-style: normal;">Works whether you're paying a provider per token or burning your own GPU at 3am. Cloud API or self-hosted. Same gate.</p>
     </div>
     <a href="/register" class="cta">Get your API key</a>
     <div class="not-for">
@@ -85,6 +94,9 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
         <li>Replace your payment processor (we sit in front of it)</li>
         <li>No-code dashboard for non-developers</li>
       </ul>
+    </div>
+    <div class="footer-links">
+      <a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
     </div>
   </div>
 </body>

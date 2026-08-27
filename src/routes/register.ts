@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { pixelSnippet } from '../lib/pixel.js'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 
@@ -115,9 +116,23 @@ export async function registerRoute(app: FastifyInstance) {
     .ns p { font-size: 13px; color: var(--muted); line-height: 1.5; }
     .ns code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
                background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
+    .mobile-promises { display: none; }
     @media (max-width: 768px) { .page { grid-template-columns: 1fr; } .left { display: none; }
-      .right { padding: 32px 20px; } }
+      .right { padding: 32px 20px; }
+      .mobile-promises { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px;
+        font-size: 12.5px; color: var(--green); font-weight: 600; }
+    }
   </style>
+  <meta name="description" content="Free API key in 30 seconds. 1,000 preflight calls/month, hard per-task budget ceilings for AI agents. No credit card." />
+  <link rel="canonical" href="https://agentbill.dev/register" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://agentbill.dev/register" />
+  <meta property="og:title" content="Get your API key — AgentBill" />
+  <meta property="og:description" content="Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card." />
+  <meta property="og:image" content="https://agentbill.dev/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
+  ${pixelSnippet()}
 </head>
 <body>
 <nav>
@@ -141,6 +156,7 @@ export async function registerRoute(app: FastifyInstance) {
   </div>
 
   <div class="right">
+    <div class="mobile-promises"><span>&#10003; Free forever</span><span>&#10003; No credit card</span><span>&#10003; 1,000 preflight calls/mo</span></div>
     <div id="form-state">
       <div class="form-header">
         <h2>Get your API key</h2>
@@ -177,7 +193,7 @@ export async function registerRoute(app: FastifyInstance) {
         </div>
         <p class="err" id="err"></p>
         <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
-        <p class="form-note">By registering you agree to our Terms of Service. No marketing email. Just a key.</p>
+        <p class="form-note">By registering you agree to our <a href="/terms" style="color:var(--accent)">Terms of Service</a> and <a href="/privacy" style="color:var(--accent)">Privacy Policy</a>. No marketing email. Just a key.</p>
       </form>
     </div>
 
@@ -240,6 +256,10 @@ export async function registerRoute(app: FastifyInstance) {
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
+      // Meta Pixel conversion — new accounts only (201), not returning-key lookups
+      if (res.status === 201 && typeof window.fbq === 'function') {
+        window.fbq('track', 'CompleteRegistration')
+      }
     } catch {
       errEl.textContent = 'Network error. Check your connection and try again.'
       errEl.style.display = 'block'

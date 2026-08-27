@@ -10,9 +10,9 @@ export async function docsRoute(app: FastifyInstance) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentBill Docs — Preflight Billing for AI Agents</title>
   <meta name="description" content="AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer." />
-  <link rel="canonical" href="https://agentbill.fly.dev/docs" />
+  <link rel="canonical" href="https://agentbill.dev/docs" />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.fly.dev/docs" />
+  <meta property="og:url" content="https://agentbill.dev/docs" />
   <meta property="og:title" content="AgentBill Docs — Preflight Billing for AI Agents" />
   <meta property="og:description" content="Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK." />
   <meta property="og:site_name" content="AgentBill" />
@@ -63,7 +63,7 @@ export async function docsRoute(app: FastifyInstance) {
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
   <h3>Step 2 — Get your API key</h3>
-  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.fly.dev/register</a> — free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
+  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.dev/register</a> — free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
   <h3>Step 3 — Add 3 lines to your agent</h3>
   <div class="code"><pre>
@@ -135,7 +135,7 @@ check = client.preflight(
   "approved": false,
   "reason": "budget_exhausted",  <span class="comment"># or "ceiling_exceeded"</span>
   "remaining_units": 0,
-  "upgrade_url": "https://agentbill.fly.dev/upgrade"
+  "upgrade_url": "https://agentbill.dev/upgrade"
 }
   </pre></div>
 

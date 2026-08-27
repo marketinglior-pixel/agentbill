@@ -11,6 +11,7 @@ declare module 'fastify' {
 
 const PUBLIC_PATHS = new Set([
   '/', '/docs', '/health', '/health/db', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
+  '/pricing', '/terms', '/privacy', '/og.png',
   '/admin', '/admin/accounts', '/admin/login',
   '/robots.txt', '/sitemap.xml', '/google816aee44e74d69c3.html',
   '/docs/limit-cost-per-agent-run', '/docs/langchain-billing', '/docs/openai-agent-spend-ceiling',
@@ -33,9 +34,9 @@ async function sendIpAlert(email: string, apiKey: string, oldIp: string, newIp: 
       <p><strong>Previous IP:</strong> ${oldIp}<br/>
          <strong>New IP:</strong> ${newIp}</p>
       <p>If this was you, ignore this message. If not, revoke the key immediately:</p>
-      <pre>curl -X POST https://agentbill.fly.dev/keys/revoke \\
+      <pre>curl -X POST https://agentbill.dev/keys/revoke \\
   -H "Authorization: Bearer ${masked}"</pre>
-      <p><a href="https://agentbill.fly.dev/dashboard">View dashboard</a></p>
+      <p><a href="https://agentbill.dev/dashboard">View dashboard</a></p>
     `,
   })
 }

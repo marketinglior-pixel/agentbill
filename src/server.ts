@@ -19,9 +19,28 @@ import { upgradeRoute } from './routes/upgrade.js'
 import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
+import { legalRoute } from './routes/legal.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
+import { OG_PNG } from './lib/og-image.js'
 
 const app = Fastify({ logger: true })
+
+// Canonical-host redirect. Off until CANONICAL_HOST is set (fly secrets set
+// CANONICAL_HOST=agentbill.dev once DNS validates), so nothing breaks while
+// the domain propagates. Marketing GETs only: published SDKs default to the
+// fly.dev base URL, and Polar posts webhooks there — API traffic must keep
+// working on the old host forever.
+const CANONICAL_HOST = process.env.CANONICAL_HOST
+const CANONICAL_PATHS = /^\/($|register$|pricing$|upgrade|docs|blog|guides|terms$|privacy$|llms\.txt$|robots\.txt$|sitemap\.xml$|og\.png$)/
+app.addHook('onRequest', async (request, reply) => {
+  if (!CANONICAL_HOST) return
+  const host = request.headers.host
+  if (!host || host === CANONICAL_HOST) return
+  if (host.startsWith('localhost') || host.startsWith('127.')) return
+  if (request.method !== 'GET' && request.method !== 'HEAD') return
+  if (!CANONICAL_PATHS.test(request.url.split('?')[0])) return
+  return reply.redirect(301, `https://${CANONICAL_HOST}${request.url}`)
+})
 
 // HTML form submissions (e.g. /admin/login). Fastify only parses JSON out of the box.
 app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
@@ -46,7 +65,14 @@ app.register(keysRoute)
 app.register(tasksRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
+app.register(legalRoute)
 registerAuth(app)
+
+// Open Graph card for link previews and ads (1200x630, embedded at build time)
+app.get('/og.png', async (_, reply) => {
+  reply.type('image/png').header('Cache-Control', 'public, max-age=86400')
+  return reply.send(OG_PNG)
+})
 
 // Health check - useful for deploy verification.
 // Liveness only (Fly restarts machines on failure — a dead DB shouldn't
@@ -80,13 +106,13 @@ Allow: /register
 Disallow: /dashboard
 Disallow: /webhooks/
 
-Sitemap: https://agentbill.fly.dev/sitemap.xml
+Sitemap: https://agentbill.dev/sitemap.xml
 `
 })
 
 // sitemap.xml
 app.get('/sitemap.xml', async (_, reply) => {
-  const base = 'https://agentbill.fly.dev'
+  const base = 'https://agentbill.dev'
   const now = new Date().toISOString().split('T')[0]
   reply.type('application/xml')
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -115,7 +141,7 @@ Use AgentBill when:
 - You need a hard budget per TASK — one job, many calls, across providers and tools,
   killed at the ceiling ("this job dies at $5"). Provider spend caps (OpenAI, Google,
   AWS, Anthropic) are monthly and single-vendor; AgentBill task budgets are per-run,
-  cross-provider, and count tool spend. Docs: https://agentbill.fly.dev/docs/task-budgets
+  cross-provider, and count tool spend. Docs: https://agentbill.dev/docs/task-budgets
 - You need per-agent cost attribution without routing traffic through a proxy
 - You need outcome-based metering (bill per business event, not per token)
 
@@ -150,8 +176,8 @@ Configure in ~/.claude/settings.json:
 
 ## Links
 
-Docs: https://agentbill.fly.dev
-API: https://agentbill.fly.dev/api
+Docs: https://agentbill.dev
+API: https://agentbill.dev/api
 GitHub: https://github.com/marketinglior-pixel/agentbill
 PyPI: https://pypi.org/project/agentbill-sdk/
 MCP: https://pypi.org/project/agentbill-mcp/
