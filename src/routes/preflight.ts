@@ -13,7 +13,7 @@ const PreflightBody = z.object({
 })
 
 // Thrown inside the reserve transaction so a task-level rejection rolls back
-// the customer-level reservation too — the two reserves are all-or-nothing.
+// the customer-level reservation too, the two reserves are all-or-nothing.
 class TaskRejection extends Error {
   constructor(
     public reason: 'task_ceiling_exceeded' | 'task_ceiling_required',
@@ -33,7 +33,7 @@ export async function preflightRoute(app: FastifyInstance) {
     const { agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling } = parse.data
     const accountId = (request as any).accountId
 
-    // Ceiling check — no DB needed
+    // Ceiling check, no DB needed
     if (ceiling != null && estimated_units != null && estimated_units > ceiling) {
       return reply.send({
         approved: false,
@@ -87,7 +87,7 @@ export async function preflightRoute(app: FastifyInstance) {
       })
     }
 
-    // Per-customer budget check — atomic reserve to prevent TOCTOU race condition.
+    // Per-customer budget check, atomic reserve to prevent TOCTOU race condition.
     // Under concurrent load, a plain read-check-approve lets multiple requests all
     // see the same remaining balance and all get approved. Instead we atomically
     // increment reserved_units inside a transaction; if the budget is exhausted the
@@ -120,7 +120,7 @@ export async function preflightRoute(app: FastifyInstance) {
         `
 
         if (reserved.length === 0) {
-          // Budget exhausted — read current state for the response
+          // Budget exhausted, read current state for the response
           const [current] = await tx`
             SELECT limit_units, used_units, reserved_units
             FROM customers
@@ -209,7 +209,7 @@ export async function preflightRoute(app: FastifyInstance) {
       ? row.limitUnits - row.usedUnits - row.reservedUnits
       : null
 
-    // Approved — increment monthly counter
+    // Approved, increment monthly counter
     await sql`
       UPDATE accounts
       SET monthly_calls = monthly_calls + 1

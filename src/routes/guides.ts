@@ -29,7 +29,7 @@ function page(title: string, description: string, body: string) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} — AgentBill</title>
+  <title>${title} · AgentBill</title>
   <meta name="description" content="${description}">
   <style>${CSS}</style>
 </head>
@@ -43,7 +43,7 @@ function page(title: string, description: string, body: string) {
   ${body}
   <div class="also">
     <p>Related guides</p>
-    <a href="/docs/task-budgets">Task budgets — a hard cost ceiling per agent job</a>
+    <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
     <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
@@ -57,26 +57,26 @@ export async function guidesRoute(app: FastifyInstance) {
 
   app.get('/docs/task-budgets', async (_, reply) => {
     return reply.type('text/html').send(page(
-      'Task budgets — a hard cost ceiling per agent job',
-      'Cap what one AI agent job can spend across every provider and tool it touches. Cross-call budget ceilings with per-agent attribution — the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
+      'Task budgets, a hard cost ceiling per agent job',
+      'Cap what one AI agent job can spend across every provider and tool it touches. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
       `
-  <h1>Task budgets — the job dies at $5</h1>
+  <h1>Task budgets, the job dies at $5</h1>
   <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no
   cross-provider budget, and tool spend isn't counted. A <b>task budget</b> is the number that
-  actually matters — what <i>this job</i> is allowed to cost, across every model and tool it
+  actually matters, what <i>this job</i> is allowed to cost, across every model and tool it
   touches, enforced <i>before</i> the money is spent.</p>
 
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>
-  <p>1 — The first preflight that names a <span class="inline">task_ref</span> creates the task
+  <p>1, The first preflight that names a <span class="inline">task_ref</span> creates the task
   and fixes its <span class="inline">task_ceiling</span>.<br>
-  2 — Every later preflight atomically reserves against the same budget; the call that would
+  2, Every later preflight atomically reserves against the same budget; the call that would
   cross the ceiling is <b>blocked before it runs</b>.<br>
-  3 — Records report reality: a failed run releases its reservation, and spend that lands past
-  the ceiling is still recorded and flagged <span class="inline">task_exceeded</span> — never
+  3, Records report reality: a failed run releases its reservation, and spend that lands past
+  the ceiling is still recorded and flagged <span class="inline">task_exceeded</span>, never
   silently dropped.</p>
 
-  <h2>Quick start — curl</h2>
+  <h2>Quick start, curl</h2>
   <div class="code"><pre><span class="comment"># First call creates the task: this job dies at 50 units</span>
 curl -X POST https://agentbill.dev/preflight \\
   -H "Authorization: Bearer agb_your_key" \\
@@ -101,7 +101,7 @@ curl -X POST https://agentbill.dev/events \\
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># preflight before, record after — or wrap it all with the gate decorator:</span>
+<span class="comment"># preflight before, record after, or wrap it all with the gate decorator:</span>
 @client.gate("researcher", estimated_units=2,
              task_ref="job-42", task_ceiling=50)
 def run_step(query: str) -> str:
@@ -123,15 +123,15 @@ const t = await getTask('job-42')  <span class="comment">// live burn-down</span
 console.log(t.usedUnits, '/', t.ceilingUnits)</pre></div>
 
   <h2>API reference</h2>
-  <h3>POST /preflight — extra fields</h3>
-  <p><span class="inline">task_ref</span> — job identifier (1-128 chars). Same ref = same budget.<br>
-  <span class="inline">task_ceiling</span> — required on the first preflight of a new task_ref;
+  <h3>POST /preflight, extra fields</h3>
+  <p><span class="inline">task_ref</span>, job identifier (1-128 chars). Same ref = same budget.<br>
+  <span class="inline">task_ceiling</span>, required on the first preflight of a new task_ref;
   fixed at creation, ignored afterwards.<br>
   Approved responses include <span class="inline">task_remaining_units</span>. A blocked run returns
   <span class="inline">reason: "task_ceiling_exceeded"</span>; a new task_ref without a ceiling
   returns <span class="inline">422 task_ceiling_required</span>.</p>
-  <h3>POST /events — extra field</h3>
-  <p><span class="inline">task_ref</span> — attributes the spend to the task.
+  <h3>POST /events, extra field</h3>
+  <p><span class="inline">task_ref</span>, attributes the spend to the task.
   <span class="inline">success: false</span> releases the reservation without billing.
   Responses include <span class="inline">task_used_units</span>,
   <span class="inline">task_remaining_units</span> and <span class="inline">task_exceeded</span>.</p>
@@ -151,10 +151,10 @@ console.log(t.usedUnits, '/', t.ceilingUnits)</pre></div>
       `
       <h1>How to limit cost per agent run</h1>
       <span class="badge">Python</span><span class="badge">Node.js</span>
-      <p>Monthly caps don't protect you from a single bad run. One 3-hour research loop can exhaust your budget before the cap triggers. AgentBill enforces a ceiling at the invocation level — before any tokens are consumed.</p>
+      <p>Monthly caps don't protect you from a single bad run. One 3-hour research loop can exhaust your budget before the cap triggers. AgentBill enforces a ceiling at the invocation level, before any tokens are consumed.</p>
 
       <h2>The problem with monthly caps</h2>
-      <p>A monthly cap fires after the damage is done. By the time you get the alert, the run already happened. AgentBill checks the budget <em>before</em> the run starts. If the estimated units exceed your ceiling, the call is blocked immediately — no compute, no cost.</p>
+      <p>A monthly cap fires after the damage is done. By the time you get the alert, the run already happened. AgentBill checks the budget <em>before</em> the run starts. If the estimated units exceed your ceiling, the call is blocked immediately, no compute, no cost.</p>
 
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk</pre></div>
@@ -179,7 +179,7 @@ check = client.preflight(
 if not check.approved:
     raise Exception(f"Run blocked: {check.reason}")
 
-<span class="comment"># Your agent runs here — budget is confirmed</span>
+<span class="comment"># Your agent runs here, budget is confirmed</span>
 result = run_agent()
 
 <span class="comment"># Record actual units used</span>
@@ -223,7 +223,7 @@ await client.record({ agentId: 'my_agent', units: 10 })
       </pre></div>
 
       <hr>
-      <a href="/register" class="cta">Get your API key — free tier, no credit card</a>
+      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
       `
     ))
   })
@@ -235,12 +235,12 @@ await client.record({ agentId: 'my_agent', units: 10 })
       `
       <h1>How to add billing to a LangChain agent</h1>
       <span class="badge">Python</span><span class="badge">LangChain</span><span class="badge">LCEL</span>
-      <p>Adding billing to a LangChain agent takes two calls: one before the chain runs, one after. No middleware, no monkey-patching. Works with any LangChain component — LCEL chains, AgentExecutor, RetrievalQA, or custom runnables.</p>
+      <p>Adding billing to a LangChain agent takes two calls: one before the chain runs, one after. No middleware, no monkey-patching. Works with any LangChain component, LCEL chains, AgentExecutor, RetrievalQA, or custom runnables.</p>
 
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk langchain-openai langchain-core</pre></div>
 
-      <h2>Pattern 1 — Manual preflight + record</h2>
+      <h2>Pattern 1, Manual preflight + record</h2>
       <p>The explicit pattern. Check budget before the chain runs, record units after it completes.</p>
       <div class="code"><pre>
 from langchain_openai import ChatOpenAI
@@ -251,7 +251,7 @@ from agentbill import AgentBillClient
 client = AgentBillClient(api_key="agb_your_key", ceiling=50)
 
 def run_research_agent(customer_id: str, topic: str) -> str:
-    <span class="comment"># 1. Preflight — block before any tokens are consumed</span>
+    <span class="comment"># 1. Preflight, block before any tokens are consumed</span>
     check = client.preflight(
         agent_id="research_chain",
         estimated_units=10,
@@ -271,7 +271,7 @@ def run_research_agent(customer_id: str, topic: str) -> str:
     return result.content
       </pre></div>
 
-      <h2>Pattern 2 — @gate decorator (cleanest)</h2>
+      <h2>Pattern 2, @gate decorator (cleanest)</h2>
       <p>The <span class="inline">@client.gate()</span> decorator handles preflight and record automatically. Zero boilerplate inside the function.</p>
       <div class="code"><pre>
 from langchain_openai import ChatOpenAI
@@ -287,11 +287,11 @@ def run_research_agent(topic: str) -> str:
     chain = prompt | llm
     return chain.invoke({"topic": topic}).content
 
-<span class="comment"># preflight runs before, record runs after — automatically</span>
+<span class="comment"># preflight runs before, record runs after, automatically</span>
 result = run_research_agent("quantum computing")
       </pre></div>
 
-      <h2>Pattern 3 — Mid-run checkpoint for long chains</h2>
+      <h2>Pattern 3, Mid-run checkpoint for long chains</h2>
       <p>For agents that run many steps, use <span class="inline">checkpoint()</span> to enforce a ceiling mid-run. The agent is blocked if it has already consumed too many units.</p>
       <div class="code"><pre>
 from agentbill import AgentBillClient
@@ -306,7 +306,7 @@ def run_multi_step_agent(customer_id: str, tasks: list) -> list:
         result = run_single_task(task)
         results.append(result)
 
-        <span class="comment"># Check mid-run — stop if ceiling is hit</span>
+        <span class="comment"># Check mid-run, stop if ceiling is hit</span>
         cp = client.checkpoint(
             agent_id="multi_step",
             units_so_far=i + 1,
@@ -314,7 +314,7 @@ def run_multi_step_agent(customer_id: str, tasks: list) -> list:
             customer_id=customer_id
         )
         if not cp.approved:
-            break  <span class="comment"># stopped early — no runaway cost</span>
+            break  <span class="comment"># stopped early, no runaway cost</span>
 
     client.record(agent_id="multi_step", units=len(results), customer_id=customer_id)
     return results
@@ -329,13 +329,13 @@ try:
 except CeilingExceededError:
     return {"error": "run exceeds your per-request ceiling"}
 except BudgetExhaustedError:
-    return {"error": "customer budget exhausted — top up to continue"}
+    return {"error": "customer budget exhausted, top up to continue"}
 except FreeTierExceededError as e:
     return {"error": "free tier limit reached", "upgrade_url": e.upgrade_url}
       </pre></div>
 
       <h2>Works with any LangChain component</h2>
-      <p>AgentBill wraps at the invocation level — it doesn't care what's inside the chain. Use it with:</p>
+      <p>AgentBill wraps at the invocation level, it doesn't care what's inside the chain. Use it with:</p>
       <p>
         <span class="inline">LLMChain</span> &nbsp;
         <span class="inline">AgentExecutor</span> &nbsp;
@@ -347,7 +347,7 @@ except FreeTierExceededError as e:
       <h2>Per-customer billing</h2>
       <p>Pass <span class="inline">customer_id</span> to enforce separate budgets per user. Each customer has their own usage counters and free tier allowance.</p>
       <div class="code"><pre>
-<span class="comment"># Different customers — isolated budgets</span>
+<span class="comment"># Different customers, isolated budgets</span>
 check_alice = client.preflight(agent_id="research", estimated_units=10, customer_id="alice")
 check_bob   = client.preflight(agent_id="research", estimated_units=10, customer_id="bob")
       </pre></div>
@@ -356,7 +356,7 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
       <p>For LangGraph workflows, call <span class="inline">preflight()</span> before entering the graph and <span class="inline">record()</span> after the final node completes. Use <span class="inline">checkpoint()</span> inside nodes to enforce ceilings mid-graph.</p>
 
       <hr>
-      <a href="/register" class="cta">Get your API key — free tier, no credit card</a>
+      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
       `
     ))
   })
@@ -368,10 +368,10 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
       `
       <h1>How to add a spend ceiling to an OpenAI agent</h1>
       <span class="badge">Python</span><span class="badge">Node.js</span><span class="badge">OpenAI</span>
-      <p>OpenAI's usage limits fire after the fact. AgentBill adds a preflight check — the run is blocked before the first API call if the budget says so.</p>
+      <p>OpenAI's usage limits fire after the fact. AgentBill adds a preflight check, the run is blocked before the first API call if the budget says so.</p>
 
       <h2>Why not just use OpenAI's spend limits?</h2>
-      <p>OpenAI's account-level limits are monthly caps — they don't protect you from a single expensive run. AgentBill enforces a ceiling <em>per invocation, per customer</em>, before the run starts. If the estimated units exceed your ceiling, the call is blocked with no tokens consumed.</p>
+      <p>OpenAI's account-level limits are monthly caps, they don't protect you from a single expensive run. AgentBill enforces a ceiling <em>per invocation, per customer</em>, before the run starts. If the estimated units exceed your ceiling, the call is blocked with no tokens consumed.</p>
 
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk openai</pre></div>
@@ -465,7 +465,7 @@ async function runAgent(customerId: string, task: string): Promise&lt;string&gt;
       </pre></div>
 
       <hr>
-      <a href="/register" class="cta">Get your API key — free tier, no credit card</a>
+      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
       `
     ))
   })

@@ -21,7 +21,7 @@ export async function webhooksRoute(app: FastifyInstance) {
     const event = request.body as any
     const eventType: string = event?.type ?? ''
 
-    // Subscription activated — upgrade account to paid
+    // Subscription activated, upgrade account to paid
     if (eventType === 'subscription.active' || eventType === 'order.created') {
       const polarCustomerId: string = event?.data?.customer_id ?? event?.data?.customerId ?? ''
       const accountId: string =
@@ -56,7 +56,7 @@ export async function webhooksRoute(app: FastifyInstance) {
       request.log.info({ accountId, polarCustomerId, plan, productId }, 'Account upgraded')
     }
 
-    // Subscription canceled — downgrade to free
+    // Subscription canceled, downgrade to free
     if (eventType === 'subscription.revoked' || eventType === 'subscription.canceled') {
       const accountId: string =
         event?.data?.metadata?.agentbill_account_id ??

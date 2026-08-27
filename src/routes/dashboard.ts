@@ -3,7 +3,7 @@ import { sql } from '../db/index.js'
 
 export async function dashboardRoute(app: FastifyInstance) {
 
-  // JSON endpoint — useful for external tooling
+  // JSON endpoint, useful for external tooling
   app.get('/customers', async (request, reply) => {
     const rows = await sql`
       SELECT
@@ -22,7 +22,7 @@ export async function dashboardRoute(app: FastifyInstance) {
     return reply.send(rows)
   })
 
-  // Visual dashboard — single HTML page
+  // Visual dashboard, single HTML page
   app.get('/dashboard', async (request, reply) => {
     reply.type('text/html')
     return reply.send(`<!DOCTYPE html>
@@ -56,7 +56,7 @@ export async function dashboardRoute(app: FastifyInstance) {
 </head>
 <body>
   <h1>AgentBill</h1>
-  <p class="subtitle">Customer budget usage — live view</p>
+  <p class="subtitle">Customer budget usage, live view</p>
 
   <div id="refresh">
     <button onclick="load()">↺ Refresh</button>

@@ -35,7 +35,7 @@ export async function blogRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>How preflight avoids double-billing under concurrent load — AgentBill</title>
+  <title>How preflight avoids double-billing under concurrent load · AgentBill</title>
   <meta name="description" content="The naive read-check-approve pattern has a race condition. Here's how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.">
   <style>${CSS}</style>
 </head>
@@ -62,7 +62,7 @@ export async function blogRoute(app: FastifyInstance) {
   <p>The obvious implementation of a preflight check looks like this:</p>
 
   <div class="code"><pre>
-<span class="comment"># Naive implementation — DO NOT use in production</span>
+<span class="comment"># Naive implementation, DO NOT use in production</span>
 def preflight(customer_id, estimated_units):
     customer = db.query("SELECT used_units, limit_units FROM customers WHERE id = ?", customer_id)
     remaining = customer.limit_units - customer.used_units
@@ -93,7 +93,7 @@ Thread B runs. Uses 8 units. Used = 16. Limit exceeded.
 
   <h2>The fix: atomic reservation</h2>
 
-  <p>AgentBill doesn't just read the balance — it reserves units atomically inside a transaction. The preflight <span class="inline">UPDATE</span> only succeeds when there's enough budget remaining:</p>
+  <p>AgentBill doesn't just read the balance, it reserves units atomically inside a transaction. The preflight <span class="inline">UPDATE</span> only succeeds when there's enough budget remaining:</p>
 
   <div class="code"><pre>
 <span class="comment">-- This is what happens inside AgentBill's preflight</span>
@@ -108,7 +108,7 @@ WHERE account_id = :account_id
 RETURNING limit_units, used_units, reserved_units
   </pre></div>
 
-  <p>If budget is available, the UPDATE succeeds and returns the updated row. The reservation is now reflected in <span class="inline">reserved_units</span> — visible to every subsequent transaction.</p>
+  <p>If budget is available, the UPDATE succeeds and returns the updated row. The reservation is now reflected in <span class="inline">reserved_units</span>, visible to every subsequent transaction.</p>
 
   <p>If budget is exhausted, the WHERE clause matches 0 rows. The UPDATE returns nothing. The run is blocked. No budget was consumed.</p>
 
@@ -139,13 +139,13 @@ WHERE account_id = :account_id
 
   <p>The reserved units come out. The actual units go in. The net balance reflects reality.</p>
 
-  <p>If <span class="inline">actual_units</span> differs from <span class="inline">estimated_units</span> — say you estimated 10 but the run used 7 — the difference is released back into available budget. No manual adjustment needed.</p>
+  <p>If <span class="inline">actual_units</span> differs from <span class="inline">estimated_units</span>, say you estimated 10 but the run used 7, the difference is released back into available budget. No manual adjustment needed.</p>
 
   <hr>
 
   <h2>What happens when a run fails</h2>
 
-  <p>If the agent crashes or the caller never calls <span class="inline">record()</span>, the reserved units stay reserved indefinitely. That would permanently lock budget — a leak.</p>
+  <p>If the agent crashes or the caller never calls <span class="inline">record()</span>, the reserved units stay reserved indefinitely. That would permanently lock budget, a leak.</p>
 
   <p>AgentBill handles this with a reservation expiry. Each reservation carries a timestamp. On the next preflight call for that customer, expired reservations are cleared before the budget check runs:</p>
 
@@ -216,7 +216,7 @@ record(units=7)
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Why monthly caps don't protect you from one bad LLM run — AgentBill</title>
+  <title>Why monthly caps don't protect you from one bad LLM run · AgentBill</title>
   <meta name="description" content="Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here's the pattern that actually works.">
   <style>${CSS}</style>
 </head>
@@ -236,7 +236,7 @@ record(units=7)
 
   <p>The cap didn't fire. The bill did.</p>
 
-  <p>This is not a bug. It's how monthly caps work. And if you're building AI agents in production, it will happen to you too — unless you change the pattern.</p>
+  <p>This is not a bug. It's how monthly caps work. And if you're building AI agents in production, it will happen to you too, unless you change the pattern.</p>
 
   <hr>
 
@@ -244,9 +244,9 @@ record(units=7)
 
   <p>Here's what happened in that $498 incident, reconstructed from what he described:</p>
 
-  <p>11:30pm — agent starts a research task. Fetches a URL. Gets a timeout. Retries. Gets another timeout. The retry logic calls the LLM to decide what to do next. The LLM decides to retry again. This repeats.</p>
+  <p>11:30pm, agent starts a research task. Fetches a URL. Gets a timeout. Retries. Gets another timeout. The retry logic calls the LLM to decide what to do next. The LLM decides to retry again. This repeats.</p>
 
-  <p>The monthly cap was $50. By midnight he'd burned through it. But the cap check runs on a billing cycle — not on each request. The agent kept running. By 7am it had made 4,800 API calls.</p>
+  <p>The monthly cap was $50. By midnight he'd burned through it. But the cap check runs on a billing cycle, not on each request. The agent kept running. By 7am it had made 4,800 API calls.</p>
 
   <blockquote>
     <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
@@ -258,7 +258,7 @@ record(units=7)
 
   <h2>Why the cap didn't fire</h2>
 
-  <p>Most billing systems — OpenAI's included — check spend limits asynchronously. The request goes through first. The ledger updates after. By the time the cap logic runs, hundreds more requests have already been processed.</p>
+  <p>Most billing systems, OpenAI's included, check spend limits asynchronously. The request goes through first. The ledger updates after. By the time the cap logic runs, hundreds more requests have already been processed.</p>
 
   <p>This is a fundamental property of post-hoc billing, not a bug you can patch. The cap will always lag behind the actual spend, especially during a loop that fires hundreds of requests per minute.</p>
 
@@ -268,7 +268,7 @@ record(units=7)
 
   <h2>The pattern that actually works: preflight</h2>
 
-  <p>The fix is to check budget <em>before</em> the run starts — not after it finishes. This is called a preflight check.</p>
+  <p>The fix is to check budget <em>before</em> the run starts, not after it finishes. This is called a preflight check.</p>
 
   <p>Before your agent makes a single API call, you ask: does this customer have budget for this run? If not, you block it. The agent never starts. No tokens consumed. No bill generated.</p>
 
@@ -277,7 +277,7 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># Before the agent runs — check budget</span>
+<span class="comment"># Before the agent runs, check budget</span>
 check = client.preflight(agent_id="researcher", budget=2.00)
 
 if not check.approved:
@@ -296,7 +296,7 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
 
   <h2>Monthly caps vs. per-request ceilings</h2>
 
-  <p>These solve different problems. A monthly cap is useful for overall budget visibility — you want to know your AI costs didn't triple this month. Fine.</p>
+  <p>These solve different problems. A monthly cap is useful for overall budget visibility, you want to know your AI costs didn't triple this month. Fine.</p>
 
   <p>A per-request ceiling is what protects you from a single bad run. It operates at the invocation level, before compute is consumed, with no lag between the check and the block.</p>
 
@@ -308,7 +308,7 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
 
   <p>Same agent. Same retry bug. Same overnight run.</p>
 
-  <p>First invocation: preflight checks budget. $2.00 ceiling. Approved — budget exists. Agent runs. Finishes. Cost recorded.</p>
+  <p>First invocation: preflight checks budget. $2.00 ceiling. Approved, budget exists. Agent runs. Finishes. Cost recorded.</p>
 
   <p>Second invocation (the retry loop): preflight checks again. Previous run already consumed the budget for this session. Blocked. Agent never starts.</p>
 
@@ -320,7 +320,7 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
 
   <h2>Implementing preflight in your stack</h2>
 
-  <p>The pattern works regardless of what's inside your agent — LangChain, OpenAI Agents SDK, AutoGen, custom chains. You're wrapping the invocation, not the internals.</p>
+  <p>The pattern works regardless of what's inside your agent, LangChain, OpenAI Agents SDK, AutoGen, custom chains. You're wrapping the invocation, not the internals.</p>
 
   <p><strong>Python:</strong></p>
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
@@ -368,7 +368,7 @@ async function runAgentSafely(customerId: string, task: string) {
 
   <p>Monthly caps are accounting. Preflight checks are protection. One tells you what happened; the other prevents it from happening.</p>
 
-  <p>If you're running AI agents in production — especially agents that loop, retry, or run unattended — you need a check that fires before the first token, not after the last one.</p>
+  <p>If you're running AI agents in production, especially agents that loop, retry, or run unattended, you need a check that fires before the first token, not after the last one.</p>
 
   <div class="cta-box">
     <h2>Add preflight to your agents</h2>

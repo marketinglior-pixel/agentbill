@@ -9,7 +9,7 @@ const SESSION_MAX_AGE = 7 * 24 * 3_600 // seconds
 
 export async function adminRoute(app: FastifyInstance) {
 
-  // JSON — curl -H "Authorization: Bearer <ADMIN_SECRET>" /admin/accounts
+  // JSON, curl -H "Authorization: Bearer <ADMIN_SECRET>" /admin/accounts
   app.get('/admin/accounts', async (request, reply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send({ error: 'unauthorized' })
@@ -18,7 +18,7 @@ export async function adminRoute(app: FastifyInstance) {
     return reply.send(rows)
   })
 
-  // Visual dashboard — session cookie set by POST /admin/login
+  // Visual dashboard, session cookie set by POST /admin/login
   app.get('/admin', async (request, reply) => {
     if (!checkAuth(request)) {
       reply.type('text/html')
@@ -29,7 +29,7 @@ export async function adminRoute(app: FastifyInstance) {
     return reply.send(adminPage(accounts))
   })
 
-  // POST /admin/login — form submits secret, sets HttpOnly session cookie.
+  // POST /admin/login, form submits secret, sets HttpOnly session cookie.
   // The secret never appears in a URL (query params leak into logs and browser history).
   app.post('/admin/login', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -48,7 +48,7 @@ export async function adminRoute(app: FastifyInstance) {
 }
 
 // ---------------------------------------------------------------------------
-// Auth — accepts Bearer header (curl) OR the session cookie (browser).
+// Auth, accepts Bearer header (curl) OR the session cookie (browser).
 // The cookie holds an HMAC derived from ADMIN_SECRET, not the secret itself,
 // so rotating the secret invalidates all sessions.
 // ---------------------------------------------------------------------------
@@ -218,10 +218,10 @@ function adminPage(accounts: AccountRow[]) {
 
     return `<tr class="${rowClass}">
       <td class="mono">${a.email ?? '<span class="none">no email</span>'}</td>
-      <td>${a.name ?? '<span class="none">—</span>'}</td>
+      <td>${a.name ?? '<span class="none">-</span>'}</td>
       <td><span class="badge ${a.plan}">${a.plan}</span></td>
-      <td>${a.stack ?? '<span class="muted">—</span>'}</td>
-      <td>${a.useCase ?? '<span class="muted">—</span>'}</td>
+      <td>${a.stack ?? '<span class="muted">-</span>'}</td>
+      <td>${a.useCase ?? '<span class="muted">-</span>'}</td>
       <td>
         <span class="bar-wrap"><span class="bar ${barClass}" style="width:${pct}%"></span></span>
         ${callBadge}
@@ -240,7 +240,7 @@ function adminPage(accounts: AccountRow[]) {
 </head>
 <body>
   <h1>AgentBill Admin</h1>
-  <p class="sub">All registered accounts — sorted by usage. Refresh to update.</p>
+  <p class="sub">All registered accounts, sorted by usage. Refresh to update.</p>
 
   <div class="stats">
     <div class="stat">

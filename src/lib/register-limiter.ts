@@ -1,6 +1,6 @@
 // In-memory abuse guards for the public /register endpoint.
 // Same tradeoff as the per-key rate limiter (2026-05-15): no Redis, per-machine
-// counters — damage control, not perfect distribution. Two guards:
+// counters, damage control, not perfect distribution. Two guards:
 //   - per-IP request cap (stops signup floods / email enumeration sweeps)
 //   - per-email recovery-mail cooldown (stops mail-bombing a victim's inbox)
 
@@ -36,7 +36,7 @@ export function allowRegisterAttempt(ip: string): boolean {
   return true
 }
 
-// Cooldown is only armed by markRecoverySent — a failed send must not block
+// Cooldown is only armed by markRecoverySent, a failed send must not block
 // the next attempt (or claim an email that never went out).
 export function recoveryInCooldown(email: string): boolean {
   const last = emailSends.get(email)

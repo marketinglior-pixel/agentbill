@@ -103,7 +103,7 @@ export function registerAuth(app: FastifyInstance) {
 
     const previousIp = rows[0].lastSeenIp as string | null
 
-    // Update last seen IP (fire and forget — non-blocking)
+    // Update last seen IP (fire and forget, non-blocking)
     if (clientIp && clientIp !== previousIp) {
       sql`
         UPDATE developer_api_keys

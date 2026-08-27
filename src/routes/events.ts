@@ -104,7 +104,7 @@ export async function eventsRoute(app: FastifyInstance) {
         }
 
         // ----------------------------------------------------------------
-        // 3b. Budget check — happens under the row lock.
+        // 3b. Budget check, happens under the row lock.
         // ----------------------------------------------------------------
         if (
           locked.limitUnits !== null &&
@@ -115,7 +115,7 @@ export async function eventsRoute(app: FastifyInstance) {
 
         // ----------------------------------------------------------------
         // 4. Insert event. ON CONFLICT DO NOTHING handles duplicates at
-        //    DB level without an error — idempotency is enforced here.
+        //    DB level without an error, idempotency is enforced here.
         // ----------------------------------------------------------------
         const [event] = await tx`
           INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata)
@@ -125,7 +125,7 @@ export async function eventsRoute(app: FastifyInstance) {
         `
 
         if (!event) {
-          // Duplicate — row already exists, budget untouched
+          // Duplicate, row already exists, budget untouched
           return {
             type: 'duplicate' as const,
             customerCreated,
@@ -154,7 +154,7 @@ export async function eventsRoute(app: FastifyInstance) {
           : null
 
         // ----------------------------------------------------------------
-        // 6. Task reconcile: usage is recorded even past the ceiling —
+        // 6. Task reconcile: usage is recorded even past the ceiling,
         //    records report reality (the spend already happened); only
         //    preflight prevents. Overage surfaces as task_exceeded.
         // ----------------------------------------------------------------

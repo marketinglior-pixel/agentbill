@@ -58,7 +58,7 @@ export async function tasksRoute(app: FastifyInstance) {
     return reply.send({ tasks: rows.map((r) => serialize(r as any)) })
   })
 
-  // Single task status — poll this to watch a job burn down its budget.
+  // Single task status, poll this to watch a job burn down its budget.
   app.get('/tasks/:task_ref', async (request, reply) => {
     const taskRef = (request.params as { task_ref: string }).task_ref
     const accountId = (request as any).accountId

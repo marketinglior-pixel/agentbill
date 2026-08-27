@@ -12,7 +12,7 @@ function legalShell(title: string, body: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} — AgentBill</title>
+  <title>${title} · AgentBill</title>
   <meta name="robots" content="noindex" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -94,9 +94,9 @@ export async function legalRoute(app: FastifyInstance) {
     <h2>1. What we collect</h2>
     <ul>
       <li><strong>Account data</strong>: email, optional name, optional answers about your use case
-      and stack — collected when you register.</li>
+      and stack, collected when you register.</li>
       <li><strong>Usage data</strong>: API calls your integration makes to AgentBill (agent ids,
-      budgets, costs, timestamps, and the IP address a key is used from — used for security
+      budgets, costs, timestamps, and the IP address a key is used from, used for security
       alerts).</li>
       <li><strong>Site analytics</strong>: our marketing pages may use the Meta Pixel to measure ad
       performance (page views and registrations). This involves cookies set by Meta. We do not run
@@ -110,7 +110,7 @@ export async function legalRoute(app: FastifyInstance) {
 
     <h2>3. Who processes it</h2>
     <p>Infrastructure and subprocessors: Fly.io (hosting), Supabase (database), Resend
-    (transactional email), Polar (payments — we never see your card details), and Meta (pixel
+    (transactional email), Polar (payments, we never see your card details), and Meta (pixel
     analytics on marketing pages only).</p>
 
     <h2>4. Retention and deletion</h2>

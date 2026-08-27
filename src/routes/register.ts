@@ -12,7 +12,7 @@ const SUPPORT_EMAIL = 'marketinglior@gmail.com'
 
 // Best-effort: mail the existing key to the account owner. Returns true only
 // when Resend accepted the send. (With the sandbox sender this fails for
-// arbitrary recipients until the agentbill.dev domain is verified in Resend —
+// arbitrary recipients until the agentbill.dev domain is verified in Resend,
 // the caller falls back to a support message, never to exposing the key.)
 async function emailExistingKey(email: string, apiKey: string): Promise<boolean> {
   if (!resend) return false
@@ -35,7 +35,7 @@ async function emailExistingKey(email: string, apiKey: string): Promise<boolean>
   }
 }
 
-// Existing account: never hand the key to an unauthenticated caller — that
+// Existing account: never hand the key to an unauthenticated caller, that
 // would let anyone holding an email address steal the account's live key.
 // (Deliberate change 2026-08-27; replaces the old "idempotent register"
 // behavior.) New-account creation still shows the key instantly, so the
@@ -44,7 +44,7 @@ async function existingAccountReply(reply: any, email: string, apiKey: string) {
   if (recoveryInCooldown(email)) {
     return reply.code(200).send({
       status: 'existing_account_emailed',
-      message: `This email already has an account. We recently sent your API key to ${email} — check your inbox.`,
+      message: `This email already has an account. We recently sent your API key to ${email}. Check your inbox.`,
     })
   }
   const emailed = await emailExistingKey(email, apiKey)
@@ -74,7 +74,7 @@ function generateApiKey(): string {
 
 export async function registerRoute(app: FastifyInstance) {
 
-  // Registration page — GET
+  // Registration page, GET
   app.get('/register', async (_request, reply) => {
     reply.type('text/html')
     return reply.send(`<!DOCTYPE html>
@@ -82,7 +82,7 @@ export async function registerRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Get your API key — AgentBill</title>
+  <title>Get your API key · AgentBill</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
@@ -184,7 +184,7 @@ export async function registerRoute(app: FastifyInstance) {
   <link rel="canonical" href="https://agentbill.dev/register" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/register" />
-  <meta property="og:title" content="Get your API key — AgentBill" />
+  <meta property="og:title" content="Get your API key · AgentBill" />
   <meta property="og:description" content="Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card." />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -208,7 +208,7 @@ export async function registerRoute(app: FastifyInstance) {
     </ul>
     <div class="quote">
       <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
-      <span>scarlett1908 &mdash; r/LangChain</span>
+      <span>scarlett1908 · r/LangChain</span>
     </div>
   </div>
 
@@ -324,11 +324,11 @@ export async function registerRoute(app: FastifyInstance) {
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
-      // Meta Pixel conversion — new accounts only (201), not returning-key lookups
+      // Meta Pixel conversion, new accounts only (201), not returning-key lookups
       if (res.status === 201 && typeof window.fbq === 'function') {
         window.fbq('track', 'CompleteRegistration')
       }
-      // Reddit Pixel conversion — new accounts only (201)
+      // Reddit Pixel conversion, new accounts only (201)
       if (res.status === 201 && typeof window.rdt === 'function') {
         window.rdt('track', 'SignUp')
       }
@@ -352,7 +352,7 @@ export async function registerRoute(app: FastifyInstance) {
 </html>`)
   })
 
-  // Register API — POST. New accounts get their key instantly (shown once);
+  // Register API, POST. New accounts get their key instantly (shown once);
   // existing emails get the key by email, never in the response.
   app.post('/register', async (request, reply) => {
     if (!allowRegisterAttempt(request.ip)) {
@@ -373,7 +373,7 @@ export async function registerRoute(app: FastifyInstance) {
     const { email, name, use_case, stack } = parsed.data
 
     try {
-      // Check if account already exists — return existing key instead of 409
+      // Check if account already exists, return existing key instead of 409
       const [existing] = await sql`
         SELECT k.api_key
         FROM accounts a
@@ -429,7 +429,7 @@ export async function registerRoute(app: FastifyInstance) {
 
       return reply.code(201).send({
         api_key: result.apiKey,
-        message: 'Account created. Store your API key — it will not be shown again.',
+        message: 'Account created. Store your API key. It will not be shown again.',
       })
 
     } catch (err) {

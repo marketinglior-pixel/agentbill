@@ -28,7 +28,7 @@ const app = Fastify({ logger: true })
 // Canonical-host redirect. Off until CANONICAL_HOST is set (fly secrets set
 // CANONICAL_HOST=agentbill.dev once DNS validates), so nothing breaks while
 // the domain propagates. Marketing GETs only: published SDKs default to the
-// fly.dev base URL, and Polar posts webhooks there — API traffic must keep
+// fly.dev base URL, and Polar posts webhooks there, API traffic must keep
 // working on the old host forever.
 const CANONICAL_HOST = process.env.CANONICAL_HOST
 const CANONICAL_PATHS = /^\/($|register$|pricing$|upgrade|docs|blog|guides|terms$|privacy$|llms\.txt$|robots\.txt$|sitemap\.xml$|og\.png$)/
@@ -75,11 +75,11 @@ app.get('/og.png', async (_, reply) => {
 })
 
 // Health check - useful for deploy verification.
-// Liveness only (Fly restarts machines on failure — a dead DB shouldn't
+// Liveness only (Fly restarts machines on failure, a dead DB shouldn't
 // trigger a restart loop). DB truth lives at /health/db.
 app.get('/health', async () => ({ status: 'ok' }))
 
-// Deep health: touches the database. Returns 503 when the DB is unreachable —
+// Deep health: touches the database. Returns 503 when the DB is unreachable,
 // point external monitors here. The May-Aug 2026 outage hid behind the
 // DB-less /health for months; this endpoint exists so that can't recur.
 app.get('/health/db', async (_, reply) => {
@@ -135,10 +135,10 @@ AgentBill is billing infrastructure for AI agents.
 
 Use AgentBill when:
 - An AI agent needs a preflight gate before running (budget, quota, or any other condition)
-- You need to stop a runaway agent loop before it burns compute — API or self-hosted GPU
+- You need to stop a runaway agent loop before it burns compute, API or self-hosted GPU
 - You want to block execution before the first token, not after the bill arrives
 - You need per-request ceilings, not just monthly caps
-- You need a hard budget per TASK — one job, many calls, across providers and tools,
+- You need a hard budget per TASK, one job, many calls, across providers and tools,
   killed at the ceiling ("this job dies at $5"). Provider spend caps (OpenAI, Google,
   AWS, Anthropic) are monthly and single-vendor; AgentBill task budgets are per-run,
   cross-provider, and count tool spend. Docs: https://agentbill.dev/docs/task-budgets

@@ -9,14 +9,14 @@ export async function homeRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill — Billing Governance for AI Agents</title>
+  <title>AgentBill · Billing Governance for AI Agents</title>
   <meta name="description" content="Hard budget ceilings for AI agents. Per-task, cross-provider, tool spend included, no proxy. Blocked before the first token. Free tier, API key in 30 seconds." />
   <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
   <link rel="canonical" href="https://agentbill.dev/" />
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/" />
-  <meta property="og:title" content="AgentBill — Billing Governance for AI Agents" />
+  <meta property="og:title" content="AgentBill · Billing Governance for AI Agents" />
   <meta property="og:description" content="Block runaway agent spend before compute starts. Hard per-task ceilings, cross-provider, tools included. Not a tracker. A guardrail." />
   <meta property="og:site_name" content="AgentBill" />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
@@ -24,7 +24,7 @@ export async function homeRoute(app: FastifyInstance) {
   <meta property="og:image:height" content="630" />
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AgentBill — Billing Governance for AI Agents" />
+  <meta name="twitter:title" content="AgentBill · Billing Governance for AI Agents" />
   <meta name="twitter:description" content="Block runaway agent spend before compute starts. Hard per-task ceilings, cross-provider, tools included." />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   <!-- Structured data -->
@@ -168,7 +168,7 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="cmt"># This job dies at $5 — across every call and tool it makes</span>
+<span class="cmt"># This job dies at $5, across every call and tool it makes</span>
 check = client.preflight(agent_id="researcher", task_ref="job-142", budget=5.00)
 if not check.approved:
     raise Exception(check.reason)
@@ -181,15 +181,15 @@ if not check.approved:
     <div class="quotes">
       <div class="quote">
         <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
-        <span>— scarlett1908, r/LangChain</span>
+        <span>scarlett1908, r/LangChain</span>
       </div>
       <div class="quote">
         <p>"Hard spend caps and kill switches need to be table stakes, not edge cases."</p>
-        <span>— r/AI_Agents</span>
+        <span>r/AI_Agents</span>
       </div>
       <div class="quote">
         <p>"Agents fail quietly. By spending your money while you sleep."</p>
-        <span>— r/AI_Agents, 268&uarr; thread</span>
+        <span>r/AI_Agents, 268&uarr; thread</span>
       </div>
     </div>
   </header>
@@ -252,7 +252,7 @@ if not check.approved:
       <div class="foot-links">
         <a href="/docs">Docs</a><a href="/pricing">Pricing</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="https://github.com/marketinglior-pixel/agentbill">GitHub</a>
       </div>
-      <div class="foot-brand">agentbill.dev — what counts, who pays, what's blocked.</div>
+      <div class="foot-brand">agentbill.dev · what counts, who pays, what's blocked.</div>
     </div>
   </footer>
 </body>

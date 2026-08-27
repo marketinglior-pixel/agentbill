@@ -7,7 +7,7 @@ export function pixelSnippet(): string {
   return [metaSnippet(), redditSnippet()].filter(Boolean).join('\n')
 }
 
-// Meta Pixel — renders nothing until META_PIXEL_ID is set.
+// Meta Pixel, renders nothing until META_PIXEL_ID is set.
 function metaSnippet(): string {
   const id = process.env.META_PIXEL_ID
   if (!id || !/^\d{5,20}$/.test(id)) return ''
@@ -27,7 +27,7 @@ fbq('track', 'PageView');
 src="https://www.facebook.com/tr?id=${id}&ev=PageView&noscript=1"/></noscript>`
 }
 
-// Reddit Pixel — renders nothing until REDDIT_PIXEL_ID is set.
+// Reddit Pixel, renders nothing until REDDIT_PIXEL_ID is set.
 // Ids look like "a2_xxxxxxxx" (or "t2_" for older accounts).
 function redditSnippet(): string {
   const id = process.env.REDDIT_PIXEL_ID

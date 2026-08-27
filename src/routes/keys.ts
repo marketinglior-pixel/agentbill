@@ -76,7 +76,7 @@ export async function keysRoute(app: FastifyInstance) {
       api_key: newKey,
       label: label ?? 'generated',
       expires_at: expiresAt,
-      message: 'New key generated. Store it securely — it will not be shown again.',
+      message: 'New key generated. Store it securely, it will not be shown again.',
     })
   })
 
@@ -117,7 +117,7 @@ export async function keysRoute(app: FastifyInstance) {
     })
   })
 
-  // Revoke a key — current key if no body, or specific key by prefix
+  // Revoke a key, current key if no body, or specific key by prefix
   app.post('/keys/revoke', async (request, reply) => {
     const parse = RevokeBody.safeParse(request.body ?? {})
     if (!parse.success) {

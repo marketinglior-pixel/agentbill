@@ -19,7 +19,7 @@ export async function checkpointRoute(app: FastifyInstance) {
     const { units_so_far, ceiling, customer_id } = parse.data
     const accountId = (request as any).accountId
 
-    // Ceiling check — no DB needed
+    // Ceiling check, no DB needed
     if (ceiling != null && units_so_far > ceiling) {
       return reply.send({
         approved: false,
@@ -29,7 +29,7 @@ export async function checkpointRoute(app: FastifyInstance) {
       })
     }
 
-    // Budget check — read-only, no reservation changes
+    // Budget check, read-only, no reservation changes
     const customerRef = customer_id || 'default'
     const rows = await sql`
       SELECT limit_units, used_units, reserved_units
@@ -38,7 +38,7 @@ export async function checkpointRoute(app: FastifyInstance) {
     `
 
     if (rows.length === 0) {
-      // Customer not seen before — no budget set, approved
+      // Customer not seen before, no budget set, approved
       return reply.send({
         approved: true,
         reason: null,

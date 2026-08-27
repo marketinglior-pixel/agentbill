@@ -17,12 +17,12 @@ export async function upgradeRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill — Pricing</title>
+  <title>AgentBill · Pricing</title>
   <meta name="description" content="Hard budget ceilings for AI agents. Free tier with 1,000 preflight calls/month, paid plans from $29/month. No credit card to start." />
   <link rel="canonical" href="https://agentbill.dev/pricing" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/pricing" />
-  <meta property="og:title" content="AgentBill — Pricing" />
+  <meta property="og:title" content="AgentBill · Pricing" />
   <meta property="og:description" content="Free: 1,000 preflight calls/month. Builder $29. Team $99. Scale $299. Hard per-task ceilings, cross-provider, no proxy." />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -76,7 +76,7 @@ export async function upgradeRoute(app: FastifyInstance) {
 
     <h1>Your agents get a hard budget.<br>Per task. Cross-provider. Tools included.</h1>
     <p class="sub">Provider spend caps stop at monthly totals for one vendor. AgentBill enforces the number
-    that actually matters: what this job is allowed to cost — across every model and tool it touches,
+    that actually matters: what this job is allowed to cost, across every model and tool it touches,
     blocked before the money is spent.</p>
 
     <div class="grid">
@@ -171,7 +171,7 @@ export async function upgradeRoute(app: FastifyInstance) {
   // Authenticated helper for the pricing page's "already have a key?" box:
   // turns a bearer key into checkout links carrying the account metadata, so
   // existing users can upgrade before they hit a limit. (Auth middleware
-  // resolves the key — this path is deliberately NOT in PUBLIC_PATHS.)
+  // resolves the key, this path is deliberately NOT in PUBLIC_PATHS.)
   app.get('/account/upgrade-url', async (request, reply) => {
     const accountId = (request as any).accountId
     return reply.send({

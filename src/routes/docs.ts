@@ -8,16 +8,16 @@ export async function docsRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill Docs — Preflight Billing for AI Agents</title>
+  <title>AgentBill Docs · Preflight Billing for AI Agents</title>
   <meta name="description" content="AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer." />
   <link rel="canonical" href="https://agentbill.dev/docs" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/docs" />
-  <meta property="og:title" content="AgentBill Docs — Preflight Billing for AI Agents" />
+  <meta property="og:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
   <meta property="og:description" content="Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK." />
   <meta property="og:site_name" content="AgentBill" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="AgentBill Docs — Preflight Billing for AI Agents" />
+  <meta name="twitter:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
   <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -57,15 +57,15 @@ export async function docsRoute(app: FastifyInstance) {
 
   <hr>
 
-  <h2>Quick Start — 2 minutes</h2>
+  <h2>Quick Start, 2 minutes</h2>
 
-  <h3>Step 1 — Install</h3>
+  <h3>Step 1, Install</h3>
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
-  <h3>Step 2 — Get your API key</h3>
-  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.dev/register</a> — free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
+  <h3>Step 2, Get your API key</h3>
+  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
-  <h3>Step 3 — Add 3 lines to your agent</h3>
+  <h3>Step 3, Add 3 lines to your agent</h3>
   <div class="code"><pre>
 from agentbill import AgentBillClient
 
@@ -90,13 +90,13 @@ client.record(agent_id="researcher", customer_id="user_123", units=10)
   <h2>Core Concepts</h2>
 
   <h3>Preflight</h3>
-  <p>Checks budget before compute is consumed. If the customer is out of units, the run is blocked immediately — before any tokens are spent.</p>
+  <p>Checks budget before compute is consumed. If the customer is out of units, the run is blocked immediately, before any tokens are spent.</p>
 
   <h3>Record</h3>
-  <p>Logs actual usage after a successful run. Idempotent — safe to call from retried or parallel workflows.</p>
+  <p>Logs actual usage after a successful run. Idempotent, safe to call from retried or parallel workflows.</p>
 
   <h3>Per-request ceiling</h3>
-  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> in preflight — if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts.</p>
+  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> in preflight, if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts.</p>
 
   <div class="code"><pre>
 check = client.preflight(
@@ -168,12 +168,12 @@ await bill.record({ agentId: 'researcher', customerId: 'user_123', units: 10 })
   <hr>
 
   <h2>What it does NOT do</h2>
-  <p>AgentBill does not replace your payment processor — it sits in front of it. Multi-step workflows with state machines or reversal logic are out of scope.</p>
+  <p>AgentBill does not replace your payment processor, it sits in front of it. Multi-step workflows with state machines or reversal logic are out of scope.</p>
 
   <hr>
 
   <h2>Guides</h2>
-  <p><a href="/docs/task-budgets" style="color:#a8ff78">Task budgets — a hard cost ceiling per agent job</a></p>
+  <p><a href="/docs/task-budgets" style="color:#a8ff78">Task budgets, a hard cost ceiling per agent job</a></p>
   <p><a href="/docs/limit-cost-per-agent-run" style="color:#a8ff78">How to limit cost per agent run</a></p>
   <p><a href="/docs/langchain-billing" style="color:#a8ff78">How to add billing to a LangChain agent</a></p>
   <p><a href="/docs/openai-agent-spend-ceiling" style="color:#a8ff78">How to add a spend ceiling to an OpenAI agent</a></p>

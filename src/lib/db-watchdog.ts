@@ -3,7 +3,7 @@ import { Resend } from 'resend'
 
 // The May-August 2026 outage lesson: /health said "ok" for months while the
 // database was dead, because it never touched the DB. This watchdog probes the
-// DB from inside the running app and emails the owner on sustained failure —
+// DB from inside the running app and emails the owner on sustained failure,
 // so a dead DB can never hide behind a live process again.
 
 const CHECK_INTERVAL_MS = 5 * 60_000 // 5 minutes
@@ -57,7 +57,7 @@ async function tick(): Promise<void> {
   if (consecutiveFailures >= FAILURES_BEFORE_ALERT && !alertSent) {
     alertSent = true // one alert per outage, not one per tick
     await sendAlert(
-      'AgentBill: database UNREACHABLE — signups and preflights are failing',
+      'AgentBill: database UNREACHABLE. Signups and preflights are failing',
       `<p>The production database has failed ${consecutiveFailures} consecutive probes
        (~${Math.round((consecutiveFailures * CHECK_INTERVAL_MS) / 60_000)} minutes).</p>
        <p>Last error: <code>${probe.error ?? 'unknown'}</code></p>
