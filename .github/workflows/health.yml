@@ -1,0 +1,30 @@
+name: production-health
+
+# External watchdog: probes the deep health endpoint (app + database) every
+# 30 minutes. A failed run emails the repo owner via GitHub's built-in
+# workflow-failure notifications — no external monitoring account needed.
+# Complements the in-app watchdog (src/lib/db-watchdog.ts), which cannot
+# report anything when the whole app is down.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Probe app + database
+        run: |
+          set -e
+          echo "GET https://agentbill.fly.dev/health/db"
+          response=$(curl -sS --max-time 20 -w '\n%{http_code}' https://agentbill.fly.dev/health/db)
+          body=$(echo "$response" | head -n 1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code — $body"
+          if [ "$code" != "200" ]; then
+            echo "::error::AgentBill production is degraded (HTTP $code): $body"
+            exit 1
+          fi

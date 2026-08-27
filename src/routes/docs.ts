@@ -173,6 +173,7 @@ await bill.record({ agentId: 'researcher', customerId: 'user_123', units: 10 })
   <hr>
 
   <h2>Guides</h2>
+  <p><a href="/docs/task-budgets" style="color:#a8ff78">Task budgets — a hard cost ceiling per agent job</a></p>
   <p><a href="/docs/limit-cost-per-agent-run" style="color:#a8ff78">How to limit cost per agent run</a></p>
   <p><a href="/docs/langchain-billing" style="color:#a8ff78">How to add billing to a LangChain agent</a></p>
   <p><a href="/docs/openai-agent-spend-ceiling" style="color:#a8ff78">How to add a spend ceiling to an OpenAI agent</a></p>

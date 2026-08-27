@@ -10,10 +10,11 @@ declare module 'fastify' {
 }
 
 const PUBLIC_PATHS = new Set([
-  '/', '/docs', '/health', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
+  '/', '/docs', '/health', '/health/db', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
   '/admin', '/admin/accounts', '/admin/login',
   '/robots.txt', '/sitemap.xml', '/google816aee44e74d69c3.html',
   '/docs/limit-cost-per-agent-run', '/docs/langchain-billing', '/docs/openai-agent-spend-ceiling',
+  '/docs/task-budgets',
   '/blog/monthly-caps-wont-save-you',
   '/blog/how-preflight-avoids-double-billing',
 ])

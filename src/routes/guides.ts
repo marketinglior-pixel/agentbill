@@ -43,6 +43,7 @@ function page(title: string, description: string, body: string) {
   ${body}
   <div class="also">
     <p>Related guides</p>
+    <a href="/docs/task-budgets">Task budgets — a hard cost ceiling per agent job</a>
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
     <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
@@ -53,6 +54,95 @@ function page(title: string, description: string, body: string) {
 }
 
 export async function guidesRoute(app: FastifyInstance) {
+
+  app.get('/docs/task-budgets', async (_, reply) => {
+    return reply.type('text/html').send(page(
+      'Task budgets — a hard cost ceiling per agent job',
+      'Cap what one AI agent job can spend across every provider and tool it touches. Cross-call budget ceilings with per-agent attribution — the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
+      `
+  <h1>Task budgets — the job dies at $5</h1>
+  <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no
+  cross-provider budget, and tool spend isn't counted. A <b>task budget</b> is the number that
+  actually matters — what <i>this job</i> is allowed to cost, across every model and tool it
+  touches, enforced <i>before</i> the money is spent.</p>
+
+  <h2>How it works</h2>
+  <p>A task groups many calls under one hard ceiling. Three rules:</p>
+  <p>1 — The first preflight that names a <span class="inline">task_ref</span> creates the task
+  and fixes its <span class="inline">task_ceiling</span>.<br>
+  2 — Every later preflight atomically reserves against the same budget; the call that would
+  cross the ceiling is <b>blocked before it runs</b>.<br>
+  3 — Records report reality: a failed run releases its reservation, and spend that lands past
+  the ceiling is still recorded and flagged <span class="inline">task_exceeded</span> — never
+  silently dropped.</p>
+
+  <h2>Quick start — curl</h2>
+  <div class="code"><pre><span class="comment"># First call creates the task: this job dies at 50 units</span>
+curl -X POST https://agentbill.fly.dev/preflight \\
+  -H "Authorization: Bearer agb_your_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agent_id":"researcher","estimated_units":2,
+       "task_ref":"job-42","task_ceiling":50}'
+
+<span class="comment"># ... run the LLM / tool call, then record what actually happened</span>
+curl -X POST https://agentbill.fly.dev/events \\
+  -H "Authorization: Bearer agb_your_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{"customer_id":"default","event_type":"llm_call",
+       "idempotency_key":"job-42-step-1","units":2,"task_ref":"job-42"}'
+
+<span class="comment"># The call that would cross the ceiling is refused:</span>
+<span class="comment"># {"approved":false,"reason":"task_ceiling_exceeded",</span>
+<span class="comment">#  "task_used_units":48,"task_remaining_units":2}</span></pre></div>
+
+  <h2>Python</h2>
+  <div class="code"><pre>pip install agentbill-sdk  <span class="comment"># >= 0.4.0</span></pre></div>
+  <div class="code"><pre>from agentbill import AgentBillClient, TaskCeilingExceededError
+
+client = AgentBillClient(api_key="agb_your_key")
+
+<span class="comment"># preflight before, record after — or wrap it all with the gate decorator:</span>
+@client.gate("researcher", estimated_units=2,
+             task_ref="job-42", task_ceiling=50)
+def run_step(query: str) -> str:
+    return call_llm(query)
+
+<span class="comment"># the run that would cross 50 units raises TaskCeilingExceededError</span>
+<span class="comment"># a run that throws releases its reservation automatically</span></pre></div>
+
+  <h2>Node.js</h2>
+  <div class="code"><pre>npm install agentbill  <span class="comment"># >= 0.2.0</span></pre></div>
+  <div class="code"><pre>import { preflight, record, getTask } from 'agentbill'
+
+await preflight({ agentId: 'researcher', estimatedUnits: 2,
+                  taskRef: 'job-42', taskCeiling: 50 })
+<span class="comment">// ... run the call ...</span>
+await record({ agentId: 'researcher', units: 2, taskRef: 'job-42' })
+
+const t = await getTask('job-42')  <span class="comment">// live burn-down</span>
+console.log(t.usedUnits, '/', t.ceilingUnits)</pre></div>
+
+  <h2>API reference</h2>
+  <h3>POST /preflight — extra fields</h3>
+  <p><span class="inline">task_ref</span> — job identifier (1-128 chars). Same ref = same budget.<br>
+  <span class="inline">task_ceiling</span> — required on the first preflight of a new task_ref;
+  fixed at creation, ignored afterwards.<br>
+  Approved responses include <span class="inline">task_remaining_units</span>. A blocked run returns
+  <span class="inline">reason: "task_ceiling_exceeded"</span>; a new task_ref without a ceiling
+  returns <span class="inline">422 task_ceiling_required</span>.</p>
+  <h3>POST /events — extra field</h3>
+  <p><span class="inline">task_ref</span> — attributes the spend to the task.
+  <span class="inline">success: false</span> releases the reservation without billing.
+  Responses include <span class="inline">task_used_units</span>,
+  <span class="inline">task_remaining_units</span> and <span class="inline">task_exceeded</span>.</p>
+  <h3>GET /tasks and GET /tasks/:task_ref</h3>
+  <p>Per-agent cost attribution: every job's ceiling, spend, live reservations and overage flag.
+  Filter with <span class="inline">?agent_id=</span>.</p>
+
+  <p><a class="cta" href="/register">Get a free API key →</a></p>
+`
+    ))
+  })
 
   app.get('/docs/limit-cost-per-agent-run', async (_, reply) => {
     return reply.type('text/html').send(page(

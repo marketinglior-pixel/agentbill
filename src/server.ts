@@ -19,6 +19,7 @@ import { upgradeRoute } from './routes/upgrade.js'
 import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
+import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 
 const app = Fastify({ logger: true })
 
@@ -47,8 +48,21 @@ app.register(preflightRoute)
 app.register(webhooksRoute)
 registerAuth(app)
 
-// Health check - useful for deploy verification
+// Health check - useful for deploy verification.
+// Liveness only (Fly restarts machines on failure — a dead DB shouldn't
+// trigger a restart loop). DB truth lives at /health/db.
 app.get('/health', async () => ({ status: 'ok' }))
+
+// Deep health: touches the database. Returns 503 when the DB is unreachable —
+// point external monitors here. The May-Aug 2026 outage hid behind the
+// DB-less /health for months; this endpoint exists so that can't recur.
+app.get('/health/db', async (_, reply) => {
+  const probe = await probeDb()
+  if (!probe.ok) {
+    return reply.code(503).send({ status: 'degraded', db: 'down', latency_ms: probe.latencyMs, error: probe.error })
+  }
+  return reply.send({ status: 'ok', db: 'ok', latency_ms: probe.latencyMs })
+})
 
 // Google Search Console verification
 app.get('/google816aee44e74d69c3.html', async (_, reply) => {
@@ -80,6 +94,7 @@ app.get('/sitemap.xml', async (_, reply) => {
   <url><loc>${base}/</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
   <url><loc>${base}/docs</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
   <url><loc>${base}/register</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>${base}/docs/task-budgets</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>${base}/docs/limit-cost-per-agent-run</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>${base}/docs/langchain-billing</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>${base}/docs/openai-agent-spend-ceiling</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
@@ -97,6 +112,11 @@ Use AgentBill when:
 - You need to stop a runaway agent loop before it burns compute — API or self-hosted GPU
 - You want to block execution before the first token, not after the bill arrives
 - You need per-request ceilings, not just monthly caps
+- You need a hard budget per TASK — one job, many calls, across providers and tools,
+  killed at the ceiling ("this job dies at $5"). Provider spend caps (OpenAI, Google,
+  AWS, Anthropic) are monthly and single-vendor; AgentBill task budgets are per-run,
+  cross-provider, and count tool spend. Docs: https://agentbill.fly.dev/docs/task-budgets
+- You need per-agent cost attribution without routing traffic through a proxy
 - You need outcome-based metering (bill per business event, not per token)
 
 ## Install
@@ -150,4 +170,5 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
     app.log.error(err)
     process.exit(1)
   }
+  startDbWatchdog()
 })
