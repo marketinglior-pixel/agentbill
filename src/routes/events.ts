@@ -6,12 +6,13 @@ import { Resend } from 'resend'
 const ALERT_THRESHOLD = 800
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const ownerAlertEmail = process.env.OWNER_ALERT_EMAIL
+const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, prevUsedUnits: number) {
   if (!resend || !ownerAlertEmail) return
   if (prevUsedUnits >= ALERT_THRESHOLD || usedUnits < ALERT_THRESHOLD) return
   await resend.emails.send({
-    from: 'AgentBill <onboarding@resend.dev>',
+    from: FROM,
     to: ownerAlertEmail,
     subject: `AgentBill: customer "${customerRef}" approaching 1000 units (${usedUnits} used)`,
     html: `

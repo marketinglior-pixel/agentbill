@@ -54,10 +54,15 @@ export function startConversionDigest(): void {
   const timer = setInterval(() => {
     const now = new Date()
     const day = now.toISOString().slice(0, 10)
-    if (now.getUTCHours() !== SEND_HOUR_UTC || lastSentDay === day) return
+    // An hourly tick can straddle a one-hour window (timer drift, restarts near
+    // 05:00), which is how the 2026-08-28 digest went missing. Accept any tick
+    // in a 4-hour window; lastSentDay keeps it to one digest per day.
+    const hour = now.getUTCHours()
+    if (hour < SEND_HOUR_UTC || hour >= SEND_HOUR_UTC + 4 || lastSentDay === day) return
     lastSentDay = day
-    sendDigest().catch(() => {
+    sendDigest().catch((err) => {
       // Non-critical: a failed digest never takes the app down; retries tomorrow.
+      console.error('[conversion-digest] send failed:', err)
     })
   }, 60 * 60 * 1000)
   timer.unref?.()

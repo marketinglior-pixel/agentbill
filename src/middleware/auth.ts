@@ -21,12 +21,13 @@ const PUBLIC_PATHS = new Set([
 ])
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
+const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 async function sendIpAlert(email: string, apiKey: string, oldIp: string, newIp: string) {
   if (!resend) return
   const masked = apiKey.slice(0, 8) + '...'
   await resend.emails.send({
-    from: 'AgentBill <onboarding@resend.dev>',
+    from: FROM,
     to: email,
     subject: `AgentBill: new IP detected on your API key`,
     html: `

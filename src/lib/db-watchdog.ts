@@ -11,6 +11,7 @@ const FAILURES_BEFORE_ALERT = 3      // ~15 minutes of sustained failure
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const ownerEmail = process.env.OWNER_ALERT_EMAIL
+const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 let consecutiveFailures = 0
 let alertSent = false
@@ -31,11 +32,11 @@ export async function probeDb(): Promise<{ ok: boolean; latencyMs: number; error
 async function sendAlert(subject: string, html: string): Promise<void> {
   if (!resend || !ownerEmail) return
   await resend.emails.send({
-    from: 'AgentBill <onboarding@resend.dev>',
+    from: FROM,
     to: ownerEmail,
     subject,
     html,
-  }).catch(() => {})
+  }).catch((err) => console.error('[db-watchdog] alert email failed:', err))
 }
 
 async function tick(): Promise<void> {
