@@ -153,12 +153,13 @@ npm install agentbill
 
 ## Quick start (Python)
 
-from agentbill import AgentBillClient
-client = AgentBillClient(api_key="agb_your_key")
-check = client.preflight(agent_id="researcher", estimated_units=10)
-if not check.approved:
-    raise Exception(f"Blocked: {check.reason}")
-client.record(agent_id="researcher", units=10)
+from agentbill import AgentBillClient, BudgetExhaustedError
+client = AgentBillClient(api_key="agb_your_key", ceiling=50)
+try:
+    client.preflight(agent_id="researcher", customer_id="cust_abc", estimated_units=10)
+except BudgetExhaustedError:
+    ...  # blocked before any tokens were spent
+client.record(agent_id="researcher", customer_id="cust_abc", units=10)
 
 ## MCP Server (Claude Code, Cursor, Windsurf)
 
@@ -170,15 +171,15 @@ Configure in ~/.claude/settings.json:
     "agentbill": {
       "command": "uvx",
       "args": ["agentbill-mcp"],
-      "env": { "AGENTBILL_API_KEY": "sk_live_..." }
+      "env": { "AGENTBILL_API_KEY": "agb_..." }
     }
   }
 }
 
 ## Links
 
-Docs: https://agentbill.dev
-API: https://agentbill.dev/api
+Docs: https://agentbill.dev/docs
+API: https://agentbill.fly.dev
 GitHub: https://github.com/marketinglior-pixel/agentbill
 PyPI: https://pypi.org/project/agentbill-sdk/
 MCP: https://pypi.org/project/agentbill-mcp/

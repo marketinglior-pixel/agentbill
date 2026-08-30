@@ -24,7 +24,7 @@ def _headers() -> dict:
     if not api_key:
         raise ValueError(
             "AGENTBILL_API_KEY environment variable is not set. "
-            "Get your key at agentbill.dev/dashboard"
+            "Get your key at agentbill.dev/register"
         )
     return {"Authorization": f"Bearer {api_key}"}
 
@@ -136,7 +136,7 @@ def _blocked_message(reason: str, data: dict) -> str:
     if reason == "budget_exhausted":
         return "Run blocked: customer budget is exhausted."
     if reason == "free_tier_exceeded":
-        url = data.get("upgrade_url", "agentbill.dev/dashboard")
+        url = data.get("upgrade_url", "https://agentbill.dev/upgrade")
         return f"Run blocked: free tier limit reached. Upgrade at {url}"
     return f"Run blocked: {reason}"
 

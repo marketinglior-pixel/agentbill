@@ -10,7 +10,7 @@ A preflight gate for AI agent runs. Stop runaway loops before they start.
 ---
 
 Budget exceeded? GPU quota hit? Free tier exhausted?
-AgentBill blocks the run before the first token — not after the damage is done.
+AgentBill blocks the run before the first token, not after the damage is done.
 
 Works whether you're paying OpenAI per token or running your own GPU.  
 
@@ -25,7 +25,7 @@ $ python run_agent.py
 
 [AgentBill] preflight check... BLOCKED
   reason: free_tier_exceeded (1000/1000 calls used)
-  upgrade: https://agentbill.fly.dev/upgrade
+  upgrade: https://agentbill.dev/upgrade
 
 Agent did not run. $0 spent.
 ```
@@ -40,7 +40,7 @@ $ python run_agent.py
 ```
 
 > "The moment you're using Stripe as your safety net, you've already lost the run."
-> — scarlett1908, r/LangChain
+> *scarlett1908, r/LangChain*
 
 ---
 
@@ -59,20 +59,23 @@ npm install agentbill
 ## Quick Start
 
 ```python
-from agentbill import AgentBillClient
+from agentbill import AgentBillClient, BudgetExhaustedError
 
-client = AgentBillClient(api_key="agb_your_key")
+client = AgentBillClient(api_key="agb_your_key", ceiling=50)  # max units for one run
 
-check = client.preflight(agent_id="researcher", estimated_units=10)
-if not check.approved:
-    raise Exception(f"Blocked: {check.reason}")
+try:
+    client.preflight(agent_id="researcher", customer_id="cust_abc", estimated_units=10)
+except BudgetExhaustedError:
+    ...  # customer is out of budget. Nothing ran. $0 spent.
 
 # run your agent here
 
-client.record(agent_id="researcher", units=10)
+client.record(agent_id="researcher", customer_id="cust_abc", units=10)
 ```
 
-Get your API key: https://agentbill.fly.dev/register
+Blocks raise: `BudgetExhaustedError`, `CeilingExceededError`, `TaskCeilingExceededError`, `FreeTierExceededError`, `PlanLimitExceededError`.
+
+Get your API key: https://agentbill.dev/register
 
 ---
 
@@ -82,23 +85,32 @@ Get your API key: https://agentbill.fly.dev/register
 
 **Per-request ceiling.** Monthly caps do not catch the bad single run. One 3-hour research loop can blow your budget before the cap triggers. AgentBill enforces a ceiling at the invocation level.
 
+**Per-task ceiling.** One job spans many calls across several models and tools. Pass `task_ref` with a `task_ceiling` on the first call and AgentBill enforces one hard budget for the whole job, not per call.
+
 **Outcome-based metering.** You define what counts as a billable event. Not bytes, not seconds. The business-level action the agent performed.
 
 ---
 
-## Free tier
+## Pricing
 
-1,000 preflight calls/month. No credit card required.
+| Tier | Calls/month | Price |
+|---|---|---|
+| Free | 1,000 | $0, no credit card |
+| Builder | 50,000 | $29 / month |
+| Team | 500,000 | $99 / month |
+| Scale | 2,000,000 | $299 / month |
+
+A call is one `POST /preflight`. The counter resets on the 1st of each calendar month. When you run out, the block response carries the `upgrade_url`, so your agent never needs a browser.
 
 ---
 
 ## When to use AgentBill
 
-- **Add billing to a LangChain agent** — wrap any chain with `preflight()` + `record()`. Two calls.
-- **Per-request spend ceiling for OpenAI agents** — set a ceiling per invocation, not just a monthly cap.
-- **Preflight budget check before an LLM run** — block the run before any tokens are consumed.
-- **Agent cost control in Python or Node.js** — SDK available for both.
-- **Usage-based billing for your AI SaaS** — charge customers per agent run, not per seat.
+- **Add billing to a LangChain agent.** Wrap any chain with `preflight()` + `record()`. Two calls.
+- **Per-request spend ceiling for OpenAI agents.** Set a ceiling per invocation, not just a monthly cap.
+- **Preflight budget check before an LLM run.** Block the run before any tokens are consumed.
+- **Agent cost control in Python or Node.js.** SDK available for both.
+- **Usage-based billing for your AI SaaS.** Charge customers per agent run, not per seat.
 
 ---
 
@@ -131,8 +143,8 @@ uvx agentbill-mcp
 
 The MCP server exposes two tools:
 
-- `preflight(agent_id, customer_id, estimated_units, ceiling)` — check budget before running. Blocks if exhausted.
-- `record_event(agent_id, units, customer_id, metadata)` — bill after work completes.
+- `preflight(agent_id, customer_id, estimated_units, ceiling)`. Check budget before running. Blocks if exhausted.
+- `record_event(agent_id, units, customer_id, metadata)`. Bill after work completes.
 
 Configure in `~/.claude/settings.json`:
 
@@ -142,7 +154,7 @@ Configure in `~/.claude/settings.json`:
     "agentbill": {
       "command": "uvx",
       "args": ["agentbill-mcp"],
-      "env": { "AGENTBILL_API_KEY": "sk_live_..." }
+      "env": { "AGENTBILL_API_KEY": "agb_..." }
     }
   }
 }

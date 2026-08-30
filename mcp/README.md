@@ -32,7 +32,7 @@ Add to `~/.claude/settings.json`:
       "command": "uvx",
       "args": ["agentbill-mcp"],
       "env": {
-        "AGENTBILL_API_KEY": "sk_live_your_key_here"
+        "AGENTBILL_API_KEY": "agb_your_key_here"
       }
     }
   }
@@ -49,13 +49,13 @@ Add to your MCP config:
     "command": "uvx",
     "args": ["agentbill-mcp"],
     "env": {
-      "AGENTBILL_API_KEY": "sk_live_your_key_here"
+      "AGENTBILL_API_KEY": "agb_your_key_here"
     }
   }
 }
 ```
 
-Get your API key at [agentbill.dev/dashboard](https://agentbill.dev/dashboard).
+Get your API key at [agentbill.dev/register](https://agentbill.dev/register).
 
 ## Usage
 
