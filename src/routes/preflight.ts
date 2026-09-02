@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
+import { recordDecision } from '../lib/decisions.js'
 
 const PreflightBody = z.object({
   agent_id: z.string().min(1),
@@ -32,16 +33,26 @@ export async function preflightRoute(app: FastifyInstance) {
 
     const { agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling } = parse.data
     const accountId = (request as any).accountId
+    const customerRef = customer_id || 'default'
+
+    // Every approved:false below is also written to preflight_decisions
+    // (migration 005) so the account has a record of what it was saved from.
+    // Fire-and-forget through the module-level sql, never through tx.
 
     // Ceiling check, no DB needed
     if (ceiling != null && estimated_units != null && estimated_units > ceiling) {
-      return reply.send({
+      const body = {
         approved: false,
         reason: 'ceiling_exceeded',
         estimated_units,
         ceiling,
         remaining_units: null,
+      }
+      recordDecision(request.log, {
+        accountId, agentId: agent_id, customerRef, taskRef: task_ref ?? null,
+        reason: body.reason, estimatedUnits: estimated_units, ceilingUnits: ceiling, snapshot: body,
       })
+      return reply.send(body)
     }
 
     // Load account: plan, monthly usage, billing period
@@ -77,14 +88,20 @@ export async function preflightRoute(app: FastifyInstance) {
     const planLimit =
       account.plan === 'paid' ? null : PLAN_LIMITS[account.plan] ?? PLAN_LIMITS.free
     if (planLimit !== null && account.monthlyCalls >= planLimit) {
-      return reply.send({
+      const body = {
         approved: false,
         reason: account.plan === 'free' ? 'free_tier_exceeded' : 'plan_limit_exceeded',
         plan: account.plan,
         monthly_calls: account.monthlyCalls,
         plan_limit: planLimit,
         upgrade_url: `https://agentbill.dev/upgrade?account_id=${accountId}`,
+      }
+      recordDecision(request.log, {
+        accountId, agentId: agent_id, customerRef, taskRef: task_ref ?? null,
+        reason: body.reason, estimatedUnits: estimated_units ?? null,
+        ceilingUnits: planLimit, usedUnits: account.monthlyCalls, snapshot: body,
       })
+      return reply.send(body)
     }
 
     // Per-customer budget check, atomic reserve to prevent TOCTOU race condition.
@@ -92,7 +109,6 @@ export async function preflightRoute(app: FastifyInstance) {
     // see the same remaining balance and all get approved. Instead we atomically
     // increment reserved_units inside a transaction; if the budget is exhausted the
     // UPDATE matches 0 rows and we block without a race.
-    const customerRef = customer_id || 'default'
     const reserveUnits = estimated_units ?? 1
 
     let result
@@ -181,7 +197,7 @@ export async function preflightRoute(app: FastifyInstance) {
       }
       if (err instanceof TaskRejection && err.current) {
         const t = err.current
-        return reply.send({
+        const body = {
           approved: false,
           reason: 'task_ceiling_exceeded',
           estimated_units: estimated_units ?? null,
@@ -189,19 +205,32 @@ export async function preflightRoute(app: FastifyInstance) {
           task_ceiling: t.ceilingUnits,
           task_used_units: t.usedUnits,
           task_remaining_units: Math.max(0, t.ceilingUnits - t.usedUnits - t.reservedUnits),
+        }
+        // The tx above is already rolled back; this write is outside it on purpose.
+        recordDecision(request.log, {
+          accountId, agentId: agent_id, customerRef, taskRef: task_ref ?? null,
+          reason: body.reason, estimatedUnits: estimated_units ?? null,
+          ceilingUnits: t.ceilingUnits, usedUnits: t.usedUnits, snapshot: body,
         })
+        return reply.send(body)
       }
       throw err
     }
 
     if (!result.approved) {
       const c = result.current
-      return reply.send({
+      const body = {
         approved: false,
         reason: 'budget_exhausted',
         estimated_units: estimated_units ?? null,
         remaining_units: c ? c.limitUnits - c.usedUnits - c.reservedUnits : 0,
+      }
+      recordDecision(request.log, {
+        accountId, agentId: agent_id, customerRef, taskRef: task_ref ?? null,
+        reason: body.reason, estimatedUnits: estimated_units ?? null,
+        ceilingUnits: c?.limitUnits ?? null, usedUnits: c?.usedUnits ?? null, snapshot: body,
       })
+      return reply.send(body)
     }
 
     const row = result.row

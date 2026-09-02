@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { Resend } from 'resend'
+import { recordDecision } from '../lib/decisions.js'
 
 const ALERT_THRESHOLD = 800
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
@@ -167,7 +168,7 @@ export async function eventsRoute(app: FastifyInstance) {
                 reserved_units = GREATEST(0, reserved_units - ${units}),
                 updated_at     = now()
             WHERE account_id = ${accountId} AND task_ref = ${task_ref}
-            RETURNING ceiling_units, used_units, reserved_units
+            RETURNING agent_id, ceiling_units, used_units, reserved_units
           `
           taskRow = t ?? null
         }
@@ -192,11 +193,16 @@ export async function eventsRoute(app: FastifyInstance) {
       }
 
       if (result.type === 'budget_exhausted') {
-        return reply.code(402).send({
+        const body = {
           error: 'budget_exhausted',
           message: `Customer ${result.customerRef} has 0 units remaining.`,
           customer_id: result.customerRef,
+        }
+        recordDecision(request.log, {
+          accountId, source: 'events', customerRef: result.customerRef, taskRef: task_ref ?? null,
+          reason: body.error, estimatedUnits: units, snapshot: body,
         })
+        return reply.code(402).send(body)
       }
 
       if (result.type === 'duplicate') {
@@ -211,7 +217,7 @@ export async function eventsRoute(app: FastifyInstance) {
       maybeSendThresholdAlert(result.customerRef, result.usedUnits, result.prevUsedUnits).catch(() => {})
 
       const t = result.taskRow
-      return reply.code(200).send({
+      const body = {
         event_id: result.eventId,
         status: 'recorded',
         customer_created: result.customerCreated,
@@ -223,7 +229,19 @@ export async function eventsRoute(app: FastifyInstance) {
               task_exceeded: t.usedUnits > t.ceilingUnits,
             }
           : {}),
-      })
+      }
+      // Spend that landed past the ceiling: preflight was skipped, or the
+      // actual exceeded the estimate it approved. Nothing stopped it. Recorded
+      // with blocked=false, the honest half of the receipt (a leak, not a save).
+      if (t && t.usedUnits > t.ceilingUnits) {
+        recordDecision(request.log, {
+          accountId, source: 'events', blocked: false, agentId: t.agentId ?? null,
+          customerRef: result.customerRef, taskRef: task_ref ?? null,
+          reason: 'task_overrun_recorded', estimatedUnits: units,
+          ceilingUnits: t.ceilingUnits, usedUnits: t.usedUnits, snapshot: body,
+        })
+      }
+      return reply.code(200).send(body)
 
     } catch (err) {
       request.log.error(err)

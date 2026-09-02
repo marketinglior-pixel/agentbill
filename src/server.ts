@@ -19,8 +19,10 @@ import { upgradeRoute } from './routes/upgrade.js'
 import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
+import { decisionsRoute } from './routes/decisions.js'
 import { legalRoute } from './routes/legal.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
+import { sql } from './db/index.js'
 import { startConversionDigest } from './lib/conversion-digest.js'
 import { OG_PNG } from './lib/og-image.js'
 
@@ -64,6 +66,7 @@ app.register(upgradeRoute)
 app.register(adminRoute)
 app.register(keysRoute)
 app.register(tasksRoute)
+app.register(decisionsRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 app.register(legalRoute)
@@ -201,3 +204,17 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
   startDbWatchdog()
   startConversionDigest()
 })
+
+// Drain on shutdown so fire-and-forget writes dispatched just before a deploy
+// (preflight_decisions, last_seen_ip) are not dropped on the floor. Fly sends
+// SIGINT by default with a 5s kill_timeout; 3s for the pool fits inside it.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(sig, async () => {
+    try {
+      await app.close()
+      await sql.end({ timeout: 3 })
+    } finally {
+      process.exit(0)
+    }
+  })
+}
