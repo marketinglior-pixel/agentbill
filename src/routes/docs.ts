@@ -96,14 +96,15 @@ client.record(agent_id="researcher", customer_id="user_123", units=10)
   <p>Logs actual usage after a successful run. Idempotent, safe to call from retried or parallel workflows.</p>
 
   <h3>Per-request ceiling</h3>
-  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> in preflight, if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts.</p>
+  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts and <span class="inline">CeilingExceededError</span> is raised.</p>
 
   <div class="code"><pre>
-check = client.preflight(
+client = AgentBillClient(api_key="agb_your_key", ceiling=20)  <span class="comment"># no single run may cost more than 20 units</span>
+
+client.preflight(
     agent_id="researcher",
     customer_id="user_123",
-    estimated_units=50,
-    ceiling=20  <span class="comment"># block if this run would cost more than 20 units</span>
+    estimated_units=50,  <span class="comment"># 50 &gt; 20: raises CeilingExceededError, nothing runs</span>
 )
   </pre></div>
 
@@ -153,16 +154,20 @@ check = client.preflight(
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
-import { AgentBill } from 'agentbill'
+<span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to define; here 1 unit = 1 cent.</span>
+import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-const bill = new AgentBill({ apiKey: 'agb_your_key' })
+<span class="comment">// Before each call: this job dies at $5 across every call that shares job-142.</span>
+<span class="comment">// A blocked call throws, so the expensive work never starts.</span>
+try {
+  await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+} catch (e) {
+  if (e instanceof TaskCeilingExceededError) return partial   <span class="comment">// stop cleanly</span>
+  throw e
+}
 
-<span class="comment">// Before the run</span>
-const check = await bill.preflight({ agentId: 'researcher', customerId: 'user_123', estimatedUnits: 10 })
-if (!check.approved) throw new Error('Blocked: ' + check.reason)
-
-<span class="comment">// After the run</span>
-await bill.record({ agentId: 'researcher', customerId: 'user_123', units: 10 })
+<span class="comment">// After the call: record what it actually cost</span>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   </pre></div>
 
   <hr>

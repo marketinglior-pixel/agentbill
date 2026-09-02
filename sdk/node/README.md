@@ -1,6 +1,6 @@
 # agentbill
 
-Usage-based billing for AI agents — preflight budget guardrails in 3 lines.
+Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives. Cross-provider, tool spend included, no proxy in your request path.
 
 ```bash
 npm install agentbill
@@ -8,93 +8,101 @@ npm install agentbill
 
 ## Quick start
 
+The SDK reads `AGENTBILL_API_KEY` from the environment. Get a key at [agentbill.dev/register](https://agentbill.dev/register): free, 1,000 preflight calls a month, no card.
+
 ```typescript
-import { AgentBill } from 'agentbill'
+import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-const bill = new AgentBill({ apiKey: process.env.AGENTBILL_API_KEY })
-
-// Before running the agent — check if the customer has budget
-const check = await bill.preflight({ customerId: 'user_123', agentId: 'research', estimatedUnits: 10 })
-if (!check.approved) {
-  throw new Error('Budget exceeded')
+// Units are yours to define. Here 1 unit = 1 cent: this job dies at $5,
+// across every call and tool that shares job-142.
+try {
+  await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+} catch (e) {
+  if (e instanceof TaskCeilingExceededError) return partial   // the expensive call never starts
+  throw e
 }
 
-// After the agent finishes — record what was used
-await bill.record({ customerId: 'user_123', agentId: 'research', units: 8 })
+// After the call: record what it actually cost
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 ```
+
+Every refusal shows up on your receipt at [agentbill.dev/app](https://agentbill.dev/app), with the exact response the SDK received.
 
 ## Why AgentBill?
 
-Monthly caps let agents burn through a budget in hours. AgentBill adds a **preflight check** — the agent asks permission before it runs, not after it's already spent the money.
+Monthly caps let agents burn through a budget in hours. AgentBill adds a preflight check: the agent asks permission before it runs, not after it has already spent the money.
 
-- Preflight blocks the run before it starts if the customer is over budget
-- Per-request ceiling: block any single run that would cost too much
+- A blocked call throws before any work starts
+- Task budgets: one hard ceiling across every call and tool a job makes
+- Per-request ceiling: block any single call that would cost too much
 - Idempotent recording: safe to call from retried or parallel workflows
-- Free tier: 1,000 units/customer, no credit card required
+- Free tier: 1,000 preflight calls a month, no credit card required
 
 ## API
 
-### `new AgentBill({ apiKey })`
+Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, defaults to `https://agentbill.fly.dev`; `https://agentbill.dev` works too).
 
-Get your API key at [agentbill.fly.dev/register](https://agentbill.fly.dev/register).
+### `preflight(options)`
 
-### `bill.preflight(options)`
-
-Check if a customer has budget before starting work.
+Check every budget before the call runs. Throws `TaskCeilingExceededError` or `BudgetExhaustedError` on a blocked run, so the expensive call never happens.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `agentId` | string | required | Agent or task type identifier, used for attribution |
 | `customerId` | string | `"default"` | Your internal customer ID |
-| `agentId` | string | required | Agent or task type identifier |
-| `estimatedUnits` | number | `1` | Expected units for this run |
-| `ceiling` | number | — | Block run if estimatedUnits exceeds this |
+| `estimatedUnits` | number | `1` | Expected units for this call |
+| `ceiling` | number | none | Per-request ceiling: block when `estimatedUnits` exceeds it |
+| `taskRef` | string | none | Cross-call job budget: many calls, one hard ceiling |
+| `taskCeiling` | number | none | Required on the first preflight of a new `taskRef` |
 
-Returns `{ approved: boolean, remainingUnits: number \| null }`.
+Returns `{ approved, reason, estimatedUnits, remainingUnits, taskRef?, taskRemainingUnits?, upgradeUrl? }`.
 
-### `bill.record(options)`
+### `record(options)`
 
-Record a billable event after work completes.
+Record what actually happened. The idempotency key is generated per call.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `customerId` | string | `"default"` | Your internal customer ID |
 | `agentId` | string | required | Agent or task type identifier |
+| `customerId` | string | `"default"` | Your internal customer ID |
 | `units` | number | `1` | Units consumed |
-| `metadata` | object | — | Key-value pairs stored with the event |
+| `success` | boolean | `true` | `false` releases the preflight reservation without billing |
+| `taskRef` | string | none | Attribute the spend to a task |
+| `metadata` | object | none | Key-value pairs stored with the event |
 
-Returns `{ recorded: boolean, eventId: string, remainingUnits: number \| null }`.
+### `meter(fn, options)`
+
+Wraps an async function so preflight runs before it and record after it. See `MeterOptions` in the type definitions.
 
 ## LangChain integration
 
 ```typescript
-import { AgentBill } from 'agentbill'
+import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
 
-const bill = new AgentBill({ apiKey: process.env.AGENTBILL_API_KEY })
-
 async function runAgent(customerId: string, input: string) {
-  const check = await bill.preflight({ customerId, agentId: 'assistant', estimatedUnits: 5 })
-  if (!check.approved) throw new Error(`Blocked: ${check.remainingUnits} units remaining`)
+  // one job, one ceiling: this run dies at 500 units no matter how many calls it makes
+  await preflight({ customerId, agentId: 'assistant', taskRef: `job-${customerId}`, taskCeiling: 500, estimatedUnits: 5 })
 
   const agent = createReactAgent({ llm: new ChatAnthropic({ model: 'claude-3-5-haiku-latest' }), tools: [] })
   const result = await agent.invoke({ messages: [{ role: 'user', content: input }] })
 
-  await bill.record({ customerId, agentId: 'assistant', units: 5 })
+  await record({ customerId, agentId: 'assistant', taskRef: `job-${customerId}`, units: 5 })
   return result
 }
 ```
 
 ## Links
 
-- [Dashboard](https://agentbill.fly.dev/dashboard)
-- [Full docs](https://agentbill.fly.dev/docs)
+- [Your receipt](https://agentbill.dev/app)
+- [Full docs](https://agentbill.dev/docs)
 - [GitHub](https://github.com/marketinglior-pixel/agentbill)
-- [Python SDK (PyPI)](https://pypi.org/project/agentbill/)
+- [Python SDK (PyPI)](https://pypi.org/project/agentbill-sdk/)
 
-## Task budgets — "this job dies at $5"
+## Task budgets: "this job dies at $5"
 
-A task groups many calls — across providers and tools — under one hard
+A task groups many calls, across providers and tools, under one hard
 cross-call ceiling, blocked before the money is spent.
 
 ```ts

@@ -169,13 +169,13 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="cmt"># This job dies at $5, across every call and tool it makes</span>
-check = client.preflight(agent_id="researcher", task_ref="job-142", budget=5.00)
-if not check.approved:
-    raise Exception(check.reason)
+<span class="cmt"># Units are yours to define. Here 1 unit = 1 cent, so this job</span>
+<span class="cmt"># dies at $5, across every call and tool that shares job-142.</span>
+client.preflight(agent_id="researcher", task_ref="job-142",
+                 task_ceiling=500, estimated_units=12)
 
-<span class="out-dim">&gt;&gt;&gt; run 47 of the retry loop:</span>
-<span class="out-blocked">blocked: task_ceiling_exceeded</span> <span class="out-dim">($5.00 ceiling)</span></pre>
+<span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span>
+<span class="out-blocked">TaskCeilingExceededError:</span> <span class="out-dim">Task 'job-142' blocked: 492/500 units used, 8 remaining is not enough for this call.</span></pre>
       </div>
     </div>
 

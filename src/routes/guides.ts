@@ -66,6 +66,13 @@ export async function guidesRoute(app: FastifyInstance) {
   actually matters, what <i>this job</i> is allowed to cost, across every model and tool it
   touches, enforced <i>before</i> the money is spent.</p>
 
+  <h2>What a unit is</h2>
+  <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.
+  The common convention is <b>1 unit = 1 cent</b>, so "the job dies at $5" is
+  <span class="inline">task_ceiling=500</span> and a call you expect to cost 12 cents is
+  <span class="inline">estimated_units=12</span>. Tokens, requests or tool calls work just as well,
+  as long as every call under the same task uses the same unit.</p>
+
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>
   <p>1, The first preflight that names a <span class="inline">task_ref</span> creates the task
