@@ -266,7 +266,8 @@ const CSS = `
   td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
   td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.id { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; word-break: break-all; max-width: 260px; }
+  td.id { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; max-width: 280px;
+          overflow: hidden; text-overflow: ellipsis; }
   .chip { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 700;
           letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
   .chip.block { background: #2a1212; color: #ff8a80; border: 1px solid #4a1d1d; }
@@ -395,8 +396,8 @@ async function receiptPage(v: Viewer): Promise<string> {
     return `<tr>
       <td class="num dim" title="${esc(when.toISOString())}">${rel(when)}</td>
       <td><span class="chip ${leak ? 'leak' : 'block'}" title="${esc(r.reason)}">${esc(label)}</span></td>
-      <td class="id">${r.agentId ? esc(r.agentId) : '<span class="none">none</span>'}</td>
-      <td class="id">${r.taskRef ? esc(r.taskRef) : '<span class="none">none</span>'}</td>
+      <td class="id" title="${esc(r.agentId ?? '')}">${r.agentId ? esc(r.agentId) : '<span class="none">none</span>'}</td>
+      <td class="id" title="${esc(r.taskRef ?? '')}">${r.taskRef ? esc(r.taskRef) : '<span class="none">none</span>'}</td>
       <td class="num">${r.estimatedUnits == null ? '<span class="dim">-</span>' : Number(r.estimatedUnits).toLocaleString()}
         <span class="dim">/</span> ${r.ceilingUnits == null ? '<span class="dim">-</span>' : Number(r.ceilingUnits).toLocaleString()}
         <span class="dim">/</span> ${r.usedUnits == null ? '<span class="dim">-</span>' : Number(r.usedUnits).toLocaleString()}</td>
@@ -405,7 +406,7 @@ async function receiptPage(v: Viewer): Promise<string> {
   }).join('')
 
   const agentRows = agents.map((a: any) => `<tr>
-      <td class="id">${a.agentId ? esc(a.agentId) : '<span class="none">none</span>'}</td>
+      <td class="id" title="${esc(a.agentId ?? '')}">${a.agentId ? esc(a.agentId) : '<span class="none">none</span>'}</td>
       <td class="num">${Number(a.blocked).toLocaleString()}</td>
       <td class="num ${Number(a.overruns) > 0 ? '' : 'dim'}">${Number(a.overruns).toLocaleString()}</td>
       <td class="num dim">${rel(a.lastSeen)}</td>
