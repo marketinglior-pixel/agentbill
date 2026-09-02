@@ -20,6 +20,7 @@ import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
 import { decisionsRoute } from './routes/decisions.js'
+import { appRoute } from './routes/app.js'
 import { legalRoute } from './routes/legal.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { sql } from './db/index.js'
@@ -34,7 +35,7 @@ const app = Fastify({ logger: true })
 // fly.dev base URL, and Polar posts webhooks there, API traffic must keep
 // working on the old host forever.
 const CANONICAL_HOST = process.env.CANONICAL_HOST
-const CANONICAL_PATHS = /^\/($|register$|pricing$|upgrade|docs|blog|guides|terms$|privacy$|llms\.txt$|robots\.txt$|sitemap\.xml$|og\.png$)/
+const CANONICAL_PATHS = /^\/($|app($|\/)|register$|pricing$|upgrade|docs|blog|guides|terms$|privacy$|llms\.txt$|robots\.txt$|sitemap\.xml$|og\.png$)/
 app.addHook('onRequest', async (request, reply) => {
   if (!CANONICAL_HOST) return
   const host = request.headers.host
@@ -42,7 +43,12 @@ app.addHook('onRequest', async (request, reply) => {
   if (host.startsWith('localhost') || host.startsWith('127.')) return
   if (request.method !== 'GET' && request.method !== 'HEAD') return
   if (!CANONICAL_PATHS.test(request.url.split('?')[0])) return
-  return reply.redirect(301, `https://${CANONICAL_HOST}${request.url}`)
+  // Rebuild the target from the validated path with the host forced, so no
+  // part of the incoming URL can name a different destination (CWE-601).
+  const target = new URL(request.url, `https://${CANONICAL_HOST}`)
+  target.protocol = 'https:'
+  target.host = CANONICAL_HOST
+  return reply.redirect(target.href, 301)
 })
 
 // HTML form submissions (e.g. /admin/login). Fastify only parses JSON out of the box.
@@ -67,6 +73,7 @@ app.register(adminRoute)
 app.register(keysRoute)
 app.register(tasksRoute)
 app.register(decisionsRoute)
+app.register(appRoute)
 app.register(preflightRoute)
 app.register(webhooksRoute)
 app.register(legalRoute)

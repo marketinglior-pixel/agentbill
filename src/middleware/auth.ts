@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
+import { isIP } from 'node:net'
+import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { Resend } from 'resend'
 
@@ -13,6 +15,7 @@ const PUBLIC_PATHS = new Set([
   '/', '/docs', '/health', '/health/db', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
   '/pricing', '/terms', '/privacy', '/og.png',
   '/admin', '/admin/accounts', '/admin/login',
+  '/app', '/app/', '/app/session', '/app/logout',
   '/robots.txt', '/sitemap.xml', '/google816aee44e74d69c3.html',
   '/docs/limit-cost-per-agent-run', '/docs/langchain-billing', '/docs/openai-agent-spend-ceiling',
   '/docs/task-budgets',
@@ -32,12 +35,12 @@ async function sendIpAlert(email: string, apiKey: string, oldIp: string, newIp: 
     subject: `AgentBill: new IP detected on your API key`,
     html: `
       <p>Your API key <strong>${masked}</strong> was just used from a new IP address.</p>
-      <p><strong>Previous IP:</strong> ${oldIp}<br/>
-         <strong>New IP:</strong> ${newIp}</p>
+      <p><strong>Previous IP:</strong> ${isIP(oldIp) ? oldIp : 'unparseable'}<br/>
+         <strong>New IP:</strong> ${isIP(newIp) ? newIp : 'unparseable'}</p>
       <p>If this was you, ignore this message. If not, revoke the key immediately:</p>
       <pre>curl -X POST https://agentbill.dev/keys/revoke \\
-  -H "Authorization: Bearer ${masked}"</pre>
-      <p><a href="https://agentbill.dev/dashboard">View dashboard</a></p>
+  -H "Authorization: Bearer &lt;your key&gt;"</pre>
+      <p><a href="https://agentbill.dev/app">Open your receipt</a></p>
     `,
   })
 }
@@ -99,8 +102,9 @@ export function registerAuth(app: FastifyInstance) {
       })
     }
 
-    const clientIp = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-      ?? request.ip
+    // fly-client-ip is authoritative; x-forwarded-for[0] is client-forgeable
+    // behind Fly (it appends), which let a stolen key spam the owner alert.
+    const clientIp = resolveClientIp(request)
 
     const previousIp = rows[0].lastSeenIp as string | null
 

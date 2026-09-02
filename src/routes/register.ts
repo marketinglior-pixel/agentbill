@@ -5,6 +5,7 @@ import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
+import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -72,13 +73,6 @@ function generateApiKey(): string {
   return 'agb_' + randomBytes(24).toString('hex')
 }
 
-function registerClientIp(request: { headers: Record<string, unknown>; ip: string }): string {
-  const fly = request.headers['fly-client-ip']
-  if (typeof fly === 'string' && fly.trim()) return fly.trim()
-  const xff = request.headers['x-forwarded-for']
-  const first = typeof xff === 'string' ? xff.split(',')[0]?.trim() : ''
-  return first || request.ip
-}
 
 export async function registerRoute(app: FastifyInstance) {
 
@@ -179,6 +173,10 @@ export async function registerRoute(app: FastifyInstance) {
     .ns-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent);
               background: rgba(108,99,255,0.1); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
     .ns p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .ns > div { min-width: 0; flex: 1; }
+    .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px;
+              padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--green);
+              white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
     .ns code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
                background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
     .mobile-promises { display: none; }
@@ -274,11 +272,10 @@ export async function registerRoute(app: FastifyInstance) {
         </div>
       </div>
       <div class="next-steps">
-        <h4>Next steps</h4>
-        <div class="ns"><span class="ns-num">1</span><p>Install: <code>pip install agentbill-sdk</code></p></div>
-        <div class="ns"><span class="ns-num">2</span><p>Set key: <code>export AGENTBILL_API_KEY=your_key</code></p></div>
-        <div class="ns"><span class="ns-num">3</span><p>Add <code>@meter(preflight=True)</code> to your agent function.</p></div>
-        <div class="ns"><span class="ns-num">4</span><p>Read the <a href="/docs" style="color:var(--accent)">docs</a> for ceilings &amp; outcome billing.</p></div>
+        <h4>See it refuse a call, right now</h4>
+        <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is blocked before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
+        <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app" style="color:var(--accent)">your receipt</a> and paste the key. That refusal is the first line on it.</p></div>
+        <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs" style="color:var(--accent)">Docs</a>.</p></div>
       </div>
     </div>
   </div>
@@ -329,6 +326,8 @@ export async function registerRoute(app: FastifyInstance) {
 
       apiKey = data.api_key
       document.getElementById('key-display').textContent = apiKey
+      const fc = document.getElementById('first-curl')
+      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\"Authorization: Bearer " + apiKey + "\\" -H \\"Content-Type: application/json\\" -d '{\\"agent_id\\":\\"first-run\\",\\"estimated_units\\":5,\\"ceiling\\":1}'"
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
@@ -377,7 +376,7 @@ export async function registerRoute(app: FastifyInstance) {
     // visitor on earth, which turned the per-IP cap into a global 5/hour cap
     // (found 2026-09-02). Fly sets fly-client-ip authoritatively and it cannot
     // be spoofed by the client; x-forwarded-for is the fallback off Fly.
-    const clientIp = registerClientIp(request)
+    const clientIp = resolveClientIp(request)
     if (!allowRegisterAttempt(clientIp)) {
       request.log.warn({ clientIp }, 'register rate limited')
       return reply.code(429).send({

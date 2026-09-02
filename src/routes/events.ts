@@ -19,7 +19,7 @@ async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, p
     html: `
       <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong> and is approaching the 1000 free-tier limit.</p>
       <p>This is a good time to reach out and convert them to a paying customer.</p>
-      <p><a href="https://agentbill.dev/dashboard">View dashboard</a></p>
+      <p><a href="https://agentbill.dev/admin">Open the admin radar</a></p>
     `,
   })
 }
