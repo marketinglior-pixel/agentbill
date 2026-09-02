@@ -183,8 +183,7 @@ check = client.preflight(
     customer_id="user_123"     <span class="comment"># optional: per-customer enforcement</span>
 )
 
-if not check.approved:
-    raise Exception(f"Run blocked: {check.reason}")
+<span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># Your agent runs here, budget is confirmed</span>
 result = run_agent()
@@ -217,16 +216,16 @@ except BudgetExhaustedError:
 
       <h2>Node.js</h2>
       <div class="code"><pre>
-import { AgentBillClient } from 'agentbill'
+import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
-const client = new AgentBillClient({ apiKey: 'agb_your_key', ceiling: 50 })
-
-const check = await client.preflight({ agentId: 'my_agent', estimatedUnits: 10 })
-if (!check.approved) throw new Error(check.reason)
+<span class="comment">// ceiling is per call: block any single run expected to cost more than 50 units.</span>
+<span class="comment">// budget_exhausted throws BudgetExhaustedError; ceiling_exceeded comes back as approved: false.</span>
+const check = await preflight({ agentId: 'my_agent', estimatedUnits: 10, ceiling: 50 })
+if (!check.approved) throw new Error(check.reason ?? 'blocked')  <span class="comment">// nothing expensive has run yet</span>
 
 const result = await runAgent()
 
-await client.record({ agentId: 'my_agent', units: 10 })
+await record({ agentId: 'my_agent', units: 10 })
       </pre></div>
 
       <hr>
@@ -264,8 +263,7 @@ def run_research_agent(customer_id: str, topic: str) -> str:
         estimated_units=10,
         customer_id=customer_id
     )
-    if not check.approved:
-        raise Exception(f"Blocked for {customer_id}: {check.reason}")
+    <span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
     <span class="comment"># 2. Run the LangChain chain normally (LCEL syntax)</span>
     llm = ChatOpenAI(model="gpt-4o")
@@ -399,8 +397,7 @@ def run_agent(customer_id: str, task: str) -> str:
         estimated_units=10,
         customer_id=customer_id
     )
-    if not check.approved:
-        return {"error": "budget_exceeded", "reason": check.reason}
+    <span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
     response = openai_client.chat.completions.create(
         model="gpt-4o",
@@ -448,25 +445,21 @@ except BudgetExhaustedError:
       <h2>Node.js</h2>
       <div class="code"><pre>
 import OpenAI from 'openai'
-import { AgentBillClient } from 'agentbill'
+import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
 const openai = new OpenAI()
-const agentbill = new AgentBillClient({ apiKey: 'agb_your_key', ceiling: 100 })
 
 async function runAgent(customerId: string, task: string): Promise&lt;string&gt; {
-  const check = await agentbill.preflight({
-    agentId: 'openai_assistant',
-    estimatedUnits: 10,
-    customerId
-  })
-  if (!check.approved) throw new Error(check.reason)
+  <span class="comment">// budget_exhausted throws here; ceiling_exceeded returns approved: false. Either way, no OpenAI call is made.</span>
+  const check = await preflight({ agentId: 'openai_assistant', estimatedUnits: 10, ceiling: 100, customerId })
+  if (!check.approved) throw new Error(check.reason ?? 'blocked')
 
   const res = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: task }]
   })
 
-  await agentbill.record({ agentId: 'openai_assistant', units: 10, customerId })
+  await record({ agentId: 'openai_assistant', units: 10, customerId })
   return res.choices[0].message.content ?? ''
 }
       </pre></div>

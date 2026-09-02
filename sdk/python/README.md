@@ -224,7 +224,7 @@ For atomic tasks — it's 3 lines.
 
 ## How it works
 
-```
+```text
 Your agent code
      │
      ▼

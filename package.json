@@ -7,7 +7,9 @@
     "dev": "node --env-file=.env node_modules/.bin/tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "db:migrate": "psql $DATABASE_URL -f src/db/schema.sql"
+    "db:migrate": "psql $DATABASE_URL -f src/db/schema.sql",
+    "check:snippets": "./scripts/snippets/run.sh repo",
+    "check:snippets:published": "./scripts/snippets/run.sh published"
   },
   "dependencies": {
     "@fastify/sensible": "^5.6.0",

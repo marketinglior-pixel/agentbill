@@ -44,3 +44,45 @@ jobs:
         run: pip install -e mcp/
       - name: Verify MCP imports
         run: python -c "import agentbill_mcp; print('MCP server OK')"
+
+  snippets:
+    name: Published code samples run against the SDKs in this repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      - name: Extract every <pre> and fenced block, typecheck and execute them
+        run: ./scripts/snippets/run.sh repo
+
+  snippets-published:
+    # Same samples against what PyPI and npm currently serve. Drift between
+    # the site and the published packages shows up here first. Informative,
+    # not a gate: the repo may legitimately be ahead of a publish.
+    name: Published code samples run against PyPI and npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      - run: ./scripts/snippets/run.sh published
+        continue-on-error: true
+        id: published
+      - if: steps.published.outcome == 'failure'
+        run: |
+          echo "::warning::published SDK drift: samples fail against PyPI/npm, see the job log"
+          echo "## Published SDK drift: samples fail against what PyPI/npm serve. See the snippets-published log." >> "$GITHUB_STEP_SUMMARY"

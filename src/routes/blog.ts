@@ -277,17 +277,15 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># Before the agent runs, check budget</span>
-check = client.preflight(agent_id="researcher", budget=2.00)
-
-if not check.approved:
-    raise Exception(f"Run blocked: {check.reason}")
+<span class="comment"># Before the agent runs: reserve the units this run expects to cost.</span>
+<span class="comment"># A blocked run raises here, before anything expensive happens.</span>
+client.preflight(agent_id="researcher", estimated_units=200)
 
 <span class="comment"># Agent only runs if budget is confirmed</span>
 result = run_my_agent()
 
-<span class="comment"># Record actual cost after completion</span>
-client.record(agent_id="researcher", cost=check.estimated_cost)
+<span class="comment"># Record the run: the same units preflight reserved (the server settles by the recorded amount)</span>
+client.record(agent_id="researcher", units=200)
   </pre></div>
 
   <p>Two calls. The agent either runs with a confirmed budget or it doesn't run at all. No overnight surprises.</p>
@@ -326,21 +324,18 @@ client.record(agent_id="researcher", cost=check.estimated_cost)
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
   <div class="code"><pre>
-from agentbill import AgentBillClient
+from agentbill import AgentBillClient, BudgetExhaustedError
 
 client = AgentBillClient(api_key="agb_your_key")
 
 def run_agent_safely(customer_id: str, task: str):
-    check = client.preflight(
-        agent_id="my_agent",
-        budget=2.00,
-        customer_id=customer_id
-    )
-    if not check.approved:
-        return {"blocked": True, "reason": check.reason}
+    try:
+        client.preflight(agent_id="my_agent", estimated_units=200, customer_id=customer_id)
+    except BudgetExhaustedError as e:
+        return {"blocked": True, "reason": str(e)}
 
     result = run_my_agent(task)
-    client.record(agent_id="my_agent", cost=check.estimated_cost, customer_id=customer_id)
+    client.record(agent_id="my_agent", units=200, customer_id=customer_id)
     return result
   </pre></div>
 
@@ -348,16 +343,18 @@ def run_agent_safely(customer_id: str, task: str):
   <div class="code"><pre>npm install agentbill</pre></div>
 
   <div class="code"><pre>
-import { AgentBillClient } from 'agentbill'
-
-const client = new AgentBillClient({ apiKey: 'agb_your_key' })
+import { preflight, record, BudgetExhaustedError } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
 async function runAgentSafely(customerId: string, task: string) {
-  const check = await client.preflight({ agentId: 'my_agent', budget: 2.00, customerId })
-  if (!check.approved) return { blocked: true, reason: check.reason }
+  try {
+    await preflight({ agentId: 'my_agent', estimatedUnits: 200, customerId })
+  } catch (e) {
+    if (e instanceof BudgetExhaustedError) return { blocked: true, reason: e.message }
+    throw e
+  }
 
   const result = await runMyAgent(task)
-  await client.record({ agentId: 'my_agent', cost: check.estimatedCost, customerId })
+  await record({ agentId: 'my_agent', units: 200, customerId })
   return result
 }
   </pre></div>

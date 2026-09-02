@@ -73,8 +73,7 @@ client = AgentBillClient(api_key="agb_your_key")
 
 <span class="comment"># Before the run: check if the customer has budget</span>
 check = client.preflight(agent_id="researcher", customer_id="user_123", estimated_units=10)
-if not check.approved:
-    raise Exception(f"Blocked: {check.reason}")  <span class="comment"># budget_exhausted or ceiling_exceeded</span>
+<span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># ... run your agent here ...</span>
 result = run_my_agent()
@@ -118,7 +117,7 @@ client.preflight(
     <tr><td>agent_id</td><td>string</td><td>Identifier for this agent. Appears in the dashboard.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
-    <tr><td>ceiling</td><td>int <span class="tag">optional</span></td><td>Block if estimated_units exceeds this value.</td></tr>
+    <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is blocked if estimated_units exceeds it.</td></tr>
   </table>
 
   <p>Returns:</p>
@@ -134,7 +133,7 @@ client.preflight(
   <div class="code"><pre>
 {
   "approved": false,
-  "reason": "budget_exhausted",  <span class="comment"># or "ceiling_exceeded"</span>
+  "reason": "free_tier_exceeded",  <span class="comment"># or budget_exhausted / ceiling_exceeded (no upgrade_url for those)</span>
   "remaining_units": 0,
   "upgrade_url": "https://agentbill.dev/upgrade"
 }
@@ -146,7 +145,6 @@ client.preflight(
     <tr><td>agent_id</td><td>string</td><td>Identifier for this agent or task type.</td></tr>
     <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
-    <tr><td>metadata</td><td>dict <span class="tag">optional</span></td><td>Key-value pairs stored with the event (e.g. model name, latency).</td></tr>
   </table>
 
   <hr>
@@ -158,13 +156,10 @@ client.preflight(
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
 <span class="comment">// Before each call: this job dies at $5 across every call that shares job-142.</span>
-<span class="comment">// A blocked call throws, so the expensive work never starts.</span>
-try {
-  await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
-} catch (e) {
-  if (e instanceof TaskCeilingExceededError) return partial   <span class="comment">// stop cleanly</span>
-  throw e
-}
+<span class="comment">// A blocked call throws TaskCeilingExceededError, so the expensive work never starts.</span>
+await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+
+<span class="comment">// ... your LLM or tool call ...</span>
 
 <span class="comment">// After the call: record what it actually cost</span>
 await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })

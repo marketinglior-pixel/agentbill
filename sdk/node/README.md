@@ -14,13 +14,11 @@ The SDK reads `AGENTBILL_API_KEY` from the environment. Get a key at [agentbill.
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
 // Units are yours to define. Here 1 unit = 1 cent: this job dies at $5,
-// across every call and tool that shares job-142.
-try {
-  await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
-} catch (e) {
-  if (e instanceof TaskCeilingExceededError) return partial   // the expensive call never starts
-  throw e
-}
+// across every call and tool that shares job-142. A blocked call throws
+// TaskCeilingExceededError, so the expensive work never starts.
+await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+
+// ... your LLM or tool call ...
 
 // After the call: record what it actually cost
 await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })

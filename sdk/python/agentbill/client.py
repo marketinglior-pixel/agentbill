@@ -1,5 +1,6 @@
 import functools
 import requests
+from .meter import BudgetExhaustedError, AgentBillError  # one class for both code paths
 from dataclasses import dataclass
 from typing import Optional
 
@@ -41,9 +42,6 @@ class CheckpointResult:
     remaining_units: Optional[int]
 
 class CeilingExceededError(Exception):
-    pass
-
-class BudgetExhaustedError(Exception):
     pass
 
 class FreeTierExceededError(Exception):
@@ -151,7 +149,7 @@ class AgentBillClient:
                     f"Run blocked: estimated {estimated_units} units exceeds ceiling of {self.ceiling}"
                 )
             if result.reason == "budget_exhausted":
-                raise BudgetExhaustedError("Run blocked: customer budget exhausted")
+                raise BudgetExhaustedError(customer_id or "default", "Run blocked: customer budget exhausted")
             if result.reason == "free_tier_exceeded":
                 raise FreeTierExceededError(upgrade_url=data.get("upgrade_url"))
             if result.reason == "plan_limit_exceeded":
