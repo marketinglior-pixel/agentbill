@@ -72,6 +72,14 @@ function generateApiKey(): string {
   return 'agb_' + randomBytes(24).toString('hex')
 }
 
+function registerClientIp(request: { headers: Record<string, unknown>; ip: string }): string {
+  const fly = request.headers['fly-client-ip']
+  if (typeof fly === 'string' && fly.trim()) return fly.trim()
+  const xff = request.headers['x-forwarded-for']
+  const first = typeof xff === 'string' ? xff.split(',')[0]?.trim() : ''
+  return first || request.ip
+}
+
 export async function registerRoute(app: FastifyInstance) {
 
   // Registration page, GET
@@ -355,18 +363,26 @@ export async function registerRoute(app: FastifyInstance) {
   // Register API, POST. New accounts get their key instantly (shown once);
   // existing emails get the key by email, never in the response.
   app.post('/register', async (request, reply) => {
-    if (!allowRegisterAttempt(request.ip)) {
-      return reply.code(429).send({
-        error: 'rate_limited',
-        message: 'Too many attempts from this address. Try again in an hour.',
-      })
-    }
-
+    // Validate first: a malformed body leaks nothing, so it must not burn a
+    // rate-limit slot (bot probes and typos were draining the bucket).
     const parsed = RegisterBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(422).send({
         error: 'validation_error',
         message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      })
+    }
+
+    // Behind fly-proxy request.ip is the proxy itself, one address for every
+    // visitor on earth, which turned the per-IP cap into a global 5/hour cap
+    // (found 2026-09-02). Fly sets fly-client-ip authoritatively and it cannot
+    // be spoofed by the client; x-forwarded-for is the fallback off Fly.
+    const clientIp = registerClientIp(request)
+    if (!allowRegisterAttempt(clientIp)) {
+      request.log.warn({ clientIp }, 'register rate limited')
+      return reply.code(429).send({
+        error: 'rate_limited',
+        message: 'Too many attempts from this address. Try again in an hour.',
       })
     }
 
