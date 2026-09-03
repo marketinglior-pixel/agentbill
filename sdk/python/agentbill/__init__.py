@@ -6,6 +6,7 @@ from .client import (
     PlanLimitExceededError,
     TaskCeilingExceededError,
     TaskCeilingRequiredError,
+    PreflightInProgressError,
     PreflightResult,
     TaskStatus,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "PlanLimitExceededError",
     "TaskCeilingExceededError",
     "TaskCeilingRequiredError",
+    "PreflightInProgressError",
     "PreflightResult",
     "TaskStatus",
 ]

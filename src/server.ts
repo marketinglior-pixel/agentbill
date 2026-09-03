@@ -23,6 +23,7 @@ import { decisionsRoute } from './routes/decisions.js'
 import { appRoute } from './routes/app.js'
 import { legalRoute } from './routes/legal.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
+import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
 import { startConversionDigest } from './lib/conversion-digest.js'
 import { OG_PNG } from './lib/og-image.js'
@@ -212,6 +213,7 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
   }
   startDbWatchdog()
   startConversionDigest()
+  startReservationSweeper()
 })
 
 // Drain on shutdown so fire-and-forget writes dispatched just before a deploy

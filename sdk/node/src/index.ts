@@ -210,6 +210,12 @@ export interface PreflightOptions {
   taskRef?: string
   /** Required on the first preflight of a new taskRef. */
   taskCeiling?: number
+  /**
+   * Makes a retried preflight safe. Without it a retry reserves a second time,
+   * so the mechanism meant to prevent waste is the one consuming the budget.
+   * Same key, same decision, one reservation.
+   */
+  idempotencyKey?: string
 }
 
 export interface PreflightResult {
@@ -220,6 +226,11 @@ export interface PreflightResult {
   taskRef?: string
   taskRemainingUnits?: number
   upgradeUrl?: string
+  /**
+   * Settle before this or the sweeper reclaims the reservation and the units
+   * stop being held. ISO 8601, absent when nothing was reserved.
+   */
+  reservationExpiresAt?: string
 }
 
 /**
@@ -233,12 +244,18 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (options.ceiling != null) body.ceiling = options.ceiling
   if (options.taskRef) body.task_ref = options.taskRef
   if (options.taskCeiling != null) body.task_ceiling = options.taskCeiling
+  if (options.idempotencyKey) body.idempotency_key = options.idempotencyKey
 
   const res = await apiFetch('/preflight', { method: 'POST', body: JSON.stringify(body) })
   const data = await res.json() as Record<string, any>
 
   if (res.status === 422 && data.error === 'task_ceiling_required') {
     throw new AgentBillError(String(data.message ?? 'task_ceiling required for a new task_ref'))
+  }
+  if (res.status === 409) {
+    // Never a block, and nothing was reserved: the original request holds the
+    // key and its decision is one write away.
+    throw new AgentBillError(String(data.message ?? 'preflight_in_progress, retry in a moment'))
   }
   if (!res.ok) {
     throw new AgentBillError(`AgentBill /preflight returned ${res.status}`)
@@ -268,6 +285,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     taskRef: data.task_ref,
     taskRemainingUnits: data.task_remaining_units,
     upgradeUrl: data.upgrade_url,
+    reservationExpiresAt: data.reservation_expires_at,
   }
 }
 

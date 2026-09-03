@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { Resend } from 'resend'
 import { recordDecision } from '../lib/decisions.js'
+import { consumeReservations } from '../lib/reservations.js'
 
 const ALERT_THRESHOLD = 800
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
@@ -87,9 +88,14 @@ export async function eventsRoute(app: FastifyInstance) {
         //     No event recorded, no used_units incremented.
         // ----------------------------------------------------------------
         if (!success) {
+          // Close the reservation rows this run holds and release exactly what
+          // they were holding, never the raw `units`. If the sweeper already
+          // reclaimed them, consumed is 0 and the counters are left alone
+          // instead of being decremented a second time.
+          const consumed = await consumeReservations(tx, locked.id, task_ref ?? null, units)
           await tx`
             UPDATE customers
-            SET reserved_units = GREATEST(0, reserved_units - ${units}),
+            SET reserved_units = GREATEST(0, reserved_units - ${consumed}),
                 updated_at     = now()
             WHERE id = ${locked.id}
           `
@@ -97,7 +103,7 @@ export async function eventsRoute(app: FastifyInstance) {
             // Failed run: release the task reservation, spend nothing.
             await tx`
               UPDATE task_budgets
-              SET reserved_units = GREATEST(0, reserved_units - ${units}),
+              SET reserved_units = GREATEST(0, reserved_units - ${consumed}),
                   updated_at     = now()
               WHERE account_id = ${accountId} AND task_ref = ${task_ref}
             `
@@ -138,14 +144,22 @@ export async function eventsRoute(app: FastifyInstance) {
         }
 
         // ----------------------------------------------------------------
-        // 5. Reconcile: increment used_units and release the reservation
-        //    that preflight placed. GREATEST(0, ...) guards against record
-        //    calls that arrive without a prior preflight (no reservation held).
+        // 5. Reconcile: increment used_units and close the reservation rows
+        //    preflight opened. used_units always moves by `units` because the
+        //    spend really happened; reserved_units moves by `consumed`, the
+        //    units the closed rows were actually holding. The two differ in
+        //    exactly two cases, and the difference is the point:
+        //      - record() with no prior preflight: consumed is 0, nothing to release.
+        //      - a reservation the sweeper already reclaimed: consumed is 0,
+        //        so this late settle cannot subtract it a second time and push
+        //        the counter below the units still in flight.
         // ----------------------------------------------------------------
+        const consumed = await consumeReservations(tx, customer.id, task_ref ?? null, units)
+
         const [updated] = await tx`
           UPDATE customers
           SET used_units     = used_units + ${units},
-              reserved_units = GREATEST(0, reserved_units - ${units}),
+              reserved_units = GREATEST(0, reserved_units - ${consumed}),
               updated_at     = now()
           WHERE id = ${customer.id}
           RETURNING used_units, limit_units, reserved_units
@@ -165,7 +179,7 @@ export async function eventsRoute(app: FastifyInstance) {
           const [t] = await tx`
             UPDATE task_budgets
             SET used_units     = used_units + ${units},
-                reserved_units = GREATEST(0, reserved_units - ${units}),
+                reserved_units = GREATEST(0, reserved_units - ${consumed}),
                 updated_at     = now()
             WHERE account_id = ${accountId} AND task_ref = ${task_ref}
             RETURNING agent_id, ceiling_units, used_units, reserved_units

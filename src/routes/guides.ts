@@ -133,14 +133,113 @@ await record({ agentId: 'researcher', units: 2, taskRef: 'job-42' })
 const t = await getTask('job-42')  <span class="comment">// live burn-down</span>
 console.log(t.usedUnits, '/', t.ceilingUnits)</pre></div>
 
+  <h2>End to end: one job, many calls, everything that can go wrong</h2>
+
+  <p>Every other example on this page is a fragment. This one is the whole loop, because the
+  parts that matter are the ones a three line snippet leaves out: what a retry does to a
+  reservation, what a crash does to it, and which call releases it.</p>
+
+  <div class="code"><pre>import time
+from agentbill import (
+    AgentBillClient, TaskCeilingExceededError, PreflightInProgressError,
+)
+
+client = AgentBillClient(api_key="agb_your_key")
+
+TASK     = "job-142"   <span class="comment"># one job. Every call below shares this budget.</span>
+CUSTOMER = "cust_abc"
+CEILING  = 500         <span class="comment"># 1 unit = 1 cent here, so this job dies at 5 dollars</span>
+
+
+def guarded(step: str, units: int, work):
+    <span class="comment"># Reserve, run, settle. Safe to retry, safe to crash.</span>
+    for _ in range(3):
+        try:
+            client.preflight(
+                agent_id="researcher",
+                customer_id=CUSTOMER,
+                task_ref=TASK,
+                task_ceiling=CEILING,             <span class="comment"># fixed on the first call, ignored after</span>
+                estimated_units=units,
+                idempotency_key=f"{TASK}:{step}", <span class="comment"># stable across retries: one reservation</span>
+            )
+            break
+        except PreflightInProgressError:
+            time.sleep(0.2)                       <span class="comment"># another attempt holds the key</span>
+    else:
+        raise RuntimeError(f"{step}: preflight never settled")
+
+    try:
+        result = work()
+    except Exception:
+        <span class="comment"># Release the reservation, bill nothing. units must equal what</span>
+        <span class="comment"># preflight reserved, or the difference stays held until the TTL.</span>
+        client.record(agent_id="researcher", customer_id=CUSTOMER,
+                      units=units, task_ref=TASK, success=False)
+        raise
+
+    client.record(agent_id="researcher", customer_id=CUSTOMER,
+                  units=units, task_ref=TASK, success=True)
+    return result</pre></div>
+
+  <p>Now the job itself. A model call and a tool call, different providers, one ceiling between
+  them. The retry loop is the failure this whole product exists for:</p>
+
+  <div class="code"><pre><span class="comment"># Different providers, same budget. AgentBill never sees either one,</span>
+<span class="comment"># it sees the units you decided each is worth.</span>
+notes  = guarded("summarize",    12, lambda: call_model(prompt))
+prices = guarded("fetch-prices",  3, lambda: call_tool("prices"))
+
+<span class="comment"># The loop that used to run until morning:</span>
+try:
+    for page in range(1, 200):
+        guarded(f"crawl-{page}", 4, lambda: call_tool("crawl"))
+except TaskCeilingExceededError as e:
+    <span class="comment"># Not an error to swallow. This is the product working.</span>
+    print(f"stopped at {e.task_used_units}/{e.task_ceiling} units")</pre></div>
+
+  <h3>Two workers on the same task</h3>
+  <p>Nothing above changes when two processes share a <span class="inline">task_ref</span>. The
+  reserve is a single conditional UPDATE, so when eight units remain and both workers ask for
+  eight, exactly one is approved and the other gets
+  <span class="inline">task_ceiling_exceeded</span>. There is no window where both read the same
+  remaining balance, and no application level lock to get wrong.</p>
+
+  <div class="code"><pre>from concurrent.futures import ThreadPoolExecutor
+
+<span class="comment"># Same task, same last 8 units, two workers. One wins.</span>
+with ThreadPoolExecutor(max_workers=2) as pool:
+    for future in [pool.submit(guarded, f"final-{i}", 8, work) for i in range(2)]:
+        try:
+            future.result()
+        except TaskCeilingExceededError:
+            print("blocked, the other worker took the last units")</pre></div>
+
+  <h3>What happens if the process dies</h3>
+  <p>If it dies between <span class="inline">preflight()</span> and
+  <span class="inline">record()</span>, the units stay reserved: nothing else can spend them, and
+  the job's remaining budget looks smaller than it is. A sweeper reclaims them once the
+  reservation passes its TTL, which approved responses return as
+  <span class="inline">reservation_expires_at</span> (default 60 minutes, set
+  <span class="inline">RESERVATION_TTL_MINUTES</span> if your runs are longer). Note the
+  direction: an abandoned reservation makes the ceiling tighter, never looser. The gate does not
+  open by accident.</p>
+
   <h2>API reference</h2>
   <h3>POST /preflight, extra fields</h3>
   <p><span class="inline">task_ref</span>, job identifier (1-128 chars). Same ref = same budget.<br>
   <span class="inline">task_ceiling</span>, required on the first preflight of a new task_ref;
   fixed at creation, ignored afterwards.<br>
-  Approved responses include <span class="inline">task_remaining_units</span>. A blocked run returns
+  <span class="inline">idempotency_key</span>, optional (1-128 chars). Same key = same decision,
+  one reservation, so a retried preflight cannot reserve twice. A retry that arrives while the
+  original is still being decided gets <span class="inline">409 preflight_in_progress</span>,
+  which is not a block and reserves nothing.<br>
+  Approved responses include <span class="inline">task_remaining_units</span> and
+  <span class="inline">reservation_expires_at</span>, the point after which the sweeper reclaims
+  the reservation. A blocked run returns
   <span class="inline">reason: "task_ceiling_exceeded"</span>; a new task_ref without a ceiling
-  returns <span class="inline">422 task_ceiling_required</span>.</p>
+  returns <span class="inline">422 task_ceiling_required</span>. A blocked run reserves nothing
+  and burns no plan quota: every rejection rolls the whole transaction back.</p>
   <h3>POST /events, extra field</h3>
   <p><span class="inline">task_ref</span>, attributes the spend to the task.
   <span class="inline">success: false</span> releases the reservation without billing.

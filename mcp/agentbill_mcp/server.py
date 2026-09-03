@@ -37,6 +37,7 @@ def preflight(
     ceiling: Optional[int] = None,
     task_ref: Optional[str] = None,
     task_ceiling: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
 ) -> dict:
     """
     Check if an agent is allowed to run before starting work.
@@ -61,6 +62,8 @@ def preflight(
             task_ref on every call in the job.
         task_ceiling: Total units the whole task may spend. Required on the first
             preflight of a new task_ref, ignored on later calls.
+        idempotency_key: Makes a retried preflight safe. Without it a retry
+            reserves a second time. Same key, same decision, one reservation.
     """
     payload: dict = {"agent_id": agent_id, "customer_id": customer_id}
     if estimated_units is not None:
@@ -71,6 +74,8 @@ def preflight(
         payload["task_ref"] = task_ref
     if task_ceiling is not None:
         payload["task_ceiling"] = task_ceiling
+    if idempotency_key is not None:
+        payload["idempotency_key"] = idempotency_key
 
     with httpx.Client(timeout=5) as client:
         resp = client.post(f"{BASE_URL}/preflight", json=payload, headers=_headers())
@@ -78,6 +83,15 @@ def preflight(
     # A rejected request carries no "approved" key. Never fall through to the
     # success path on an error response: a gate that approves when it cannot
     # reach a verdict is worse than no gate.
+    if resp.status_code == 409:
+        data = resp.json()
+        return {
+            "approved": False,
+            "reason": "preflight_in_progress",
+            "message": data.get("message")
+            or "Another preflight with this idempotency_key is still being decided. Retry in a moment.",
+        }
+
     if resp.status_code == 422:
         data = resp.json()
         return {

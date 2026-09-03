@@ -15,6 +15,9 @@ class PreflightResult:
     upgrade_url: Optional[str] = None
     task_ref: Optional[str] = None
     task_remaining_units: Optional[int] = None
+    # Settle before this or the sweeper reclaims the reservation and the units
+    # stop being held. ISO 8601, or None when nothing was reserved.
+    reservation_expires_at: Optional[str] = None
 
 
 @dataclass
@@ -43,6 +46,20 @@ class CheckpointResult:
 
 class CeilingExceededError(Exception):
     pass
+
+
+class PreflightInProgressError(Exception):
+    """Another preflight with this idempotency_key is still being decided.
+
+    Retry in a moment. This is never a block, and nothing was reserved for
+    this call: it means the original request holds the key and its decision
+    is one write away.
+    """
+    def __init__(self, idempotency_key: str):
+        self.idempotency_key = idempotency_key
+        super().__init__(
+            f"A preflight with idempotency_key {idempotency_key!r} is still being decided. Retry in a moment."
+        )
 
 class FreeTierExceededError(Exception):
     def __init__(self, upgrade_url: Optional[str] = None):
@@ -101,12 +118,18 @@ class AgentBillClient:
         customer_id: Optional[str] = None,
         task_ref: Optional[str] = None,
         task_ceiling: Optional[int] = None,
+        idempotency_key: Optional[str] = None,
     ) -> PreflightResult:
         """Check every budget BEFORE the call runs.
 
         task_ref groups many calls (across providers and tools) under one hard
-        cross-call ceiling — "this job dies at 50 units". Pass task_ceiling on
+        cross-call ceiling, "this job dies at 50 units". Pass task_ceiling on
         the first call for a new task_ref; later calls only need task_ref.
+
+        idempotency_key makes a retried preflight safe. Without it a retry
+        reserves a second time, so the mechanism meant to prevent waste is the
+        one consuming the budget. Same key, same decision, one reservation.
+        Raises PreflightInProgressError if the original is still being decided.
         """
         payload = {"agent_id": agent_id}
         if estimated_units is not None:
@@ -119,6 +142,8 @@ class AgentBillClient:
             payload["task_ref"] = task_ref
         if task_ceiling is not None:
             payload["task_ceiling"] = task_ceiling
+        if idempotency_key is not None:
+            payload["idempotency_key"] = idempotency_key
 
         resp = requests.post(
             f"{self.base_url}/preflight",
@@ -130,6 +155,8 @@ class AgentBillClient:
             data = resp.json()
             if data.get("error") == "task_ceiling_required":
                 raise TaskCeilingRequiredError(data.get("message", "task_ceiling required for a new task_ref"))
+        if resp.status_code == 409:
+            raise PreflightInProgressError(idempotency_key or "")
         resp.raise_for_status()
         data = resp.json()
 
@@ -141,6 +168,7 @@ class AgentBillClient:
             upgrade_url=data.get("upgrade_url"),
             task_ref=data.get("task_ref"),
             task_remaining_units=data.get("task_remaining_units"),
+            reservation_expires_at=data.get("reservation_expires_at"),
         )
 
         if not result.approved:

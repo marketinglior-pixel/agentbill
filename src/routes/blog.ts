@@ -159,9 +159,59 @@ client.record(agent_id="researcher", units=200, success=False)
 
   <p>The SDK decorator does this for you: it wraps the call in try/except and releases on the way out of a failed run.</p>
 
-  <p><strong>If <span class="inline">record()</span> never arrives at all, the units stay reserved.</strong> There is no expiry and no background sweeper. A process killed between preflight and record leaves its reservation behind, and that budget stays claimed until someone clears it.</p>
+  <p><strong>If <span class="inline">record()</span> never arrives at all, the units stay reserved until they expire.</strong> Each reservation carries a TTL, returned to the caller as <span class="inline">reservation_expires_at</span> on every approved preflight, and a sweeper reclaims the ones that pass it.</p>
 
-  <p>Note which way this fails. A leaked reservation makes the ceiling <em>tighter</em>, never looser: the run that gets blocked is a later one, not an expensive one that should have been stopped. The gate never opens by accident. But it does close quietly, so if you call preflight directly instead of through the decorator, settle every run, including the ones that fail.</p>
+  <p>Getting that sweeper right needed one change to the shape of the data. <span class="inline">reserved_units</span> is a counter, and a counter cannot be swept, because it does not know how much of itself is stale. So a reservation is a row, and the counter is the sum of the open rows:</p>
+
+  <div class="code"><pre>
+<span class="comment">-- The invariant every path maintains</span>
+customers.reserved_units    = SUM(units) of open rows for that customer
+task_budgets.reserved_units = SUM(units) of open rows for that task
+  </pre></div>
+
+  <p>Which turns the sweep into something boring, and boring is the goal on this path:</p>
+
+  <div class="code"><pre>
+<span class="comment">-- Claim expired rows and release their units, in ONE transaction.</span>
+<span class="comment">-- SKIP LOCKED because production runs more than one machine.</span>
+UPDATE reservations SET released_at = now()
+WHERE id IN (
+  SELECT id FROM reservations
+  WHERE released_at IS NULL AND expires_at &lt; now()
+  ORDER BY expires_at LIMIT 500
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING customer_id, task_ref, units
+  </pre></div>
+
+  <h2>The bug this design exists to prevent</h2>
+
+  <p>Now that two different things can release the same reservation, the sweeper and a late <span class="inline">record()</span>, the obvious implementation is wrong in the dangerous direction.</p>
+
+  <p>Consider a run that dies, gets swept an hour later, and then, somehow, settles: a queued retry, a delayed worker, a caller that kept the id. If <span class="inline">record()</span> decrements <span class="inline">reserved_units</span> by its <span class="inline">units</span> argument, those units come off twice, once from the sweeper and once from the settle. The counter now sits <em>below</em> the units genuinely in flight, and the gate starts approving runs against budget that another run is already holding. A double release is a double spend.</p>
+
+  <p>So the settle path does not decrement by what the caller sent. It closes reservation rows FIFO, counts what those rows were actually holding, and decrements by <em>that</em>:</p>
+
+  <div class="code"><pre>
+<span class="comment"># units always moves: the spend really happened.</span>
+<span class="comment"># reserved moves by what the closed rows held, which is 0</span>
+<span class="comment"># if the sweeper already reclaimed them.</span>
+consumed = consume_reservations(customer_id, task_ref, units)
+
+UPDATE customers
+SET used_units     = used_units + :units,
+    reserved_units = GREATEST(0, reserved_units - :consumed)
+  </pre></div>
+
+  <p>A settle for a reservation that no longer exists finds nothing to close, gets <span class="inline">consumed = 0</span>, and leaves the counter alone. Same code path covers <span class="inline">record()</span> calls that never had a preflight at all.</p>
+
+  <h2>The retry that reserved twice</h2>
+
+  <p>One more hole worth naming, because it was in the mechanism meant to prevent waste. <span class="inline">/events</span> has enforced <span class="inline">(account_id, idempotency_key)</span> UNIQUE since the beginning. <span class="inline">/preflight</span> had nothing, so a client that retried a timed-out preflight reserved a second time, and an aggressive retry policy could exhaust a budget without a single model call behind it.</p>
+
+  <p>preflight now takes the same <span class="inline">idempotency_key</span>. The key is claimed inside the reserving transaction, so a duplicate blocks on the unique index rather than racing: same key, same decision, one reservation. A retry that lands while the original is still being decided gets <span class="inline">409 preflight_in_progress</span>, which is not a block and reserves nothing.</p>
+
+  <p>Note which way all of this fails. An abandoned reservation makes the ceiling <em>tighter</em>, never looser: the run that gets blocked is a later one, not an expensive one that should have been stopped. Every correctness choice above preserves that direction. The gate does not open by accident.</p>
 
   <hr>
 
