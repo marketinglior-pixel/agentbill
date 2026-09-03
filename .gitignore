@@ -1,4 +1,4 @@
-# Environment — never commit real credentials
+# Environment. Never commit real credentials
 .env
 .env.local
 
@@ -19,3 +19,8 @@ npm-debug.log*
 
 # Local preview launch config (Claude Code)
 .claude/
+
+# Python build artifacts from running the SDK tests locally
+__pycache__/
+*.py[cod]
+.pytest_cache/
