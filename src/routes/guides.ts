@@ -1,49 +1,39 @@
 import { FastifyInstance } from 'fastify'
+import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 
-const CSS = `
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
-         -webkit-font-smoothing: antialiased; }
-  .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
-  h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
-    h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 8px; }
-  h2 { font-size: 18px; font-weight: 700; color: #fff; margin: 40px 0 12px; }
-  h3 { font-size: 15px; font-weight: 700; color: #fff; margin: 28px 0 10px; }
-  p { font-size: 15px; color: #a0a8a3; line-height: 1.7; margin-bottom: 16px; }
-  .nav { font-size: 13px; color: #868e88; margin-bottom: 48px; }
-  .nav a { color: #868e88; text-decoration: none; margin-right: 16px; }
-  .nav a:hover { color: #a0a8a3; }
-  .code { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
-  .code pre { font-size: 13px; color: #a8ff78; line-height: 1.7; }
-  .comment { color: #868e88; }
-  .inline { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #a8ff78; }
-  hr { border: none; border-top: 1px solid #1a1a1a; margin: 40px 0; }
-  .cta { display: inline-block; background: #fff; color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
-  .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid #1a1a1a; }
-  .also p { font-size: 13px; color: #868e88; margin-bottom: 8px; }
-  .also a { color: #a8ff78; text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
-  .badge { display: inline-block; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: #868e88; margin-right: 6px; margin-bottom: 12px; }
+const CSS = `${CHROME_CSS}
+  :root { --shell: 860px; }
+  .container { max-width: var(--shell); margin: 0 auto; padding: 60px 24px; }
+  h1, h2, h3 { font-family: var(--mono); letter-spacing: -.01em; }
+    h1 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+  h2 { font-size: 18px; font-weight: 700; color: var(--white); margin: 40px 0 12px; }
+  h3 { font-size: 15px; font-weight: 700; color: var(--white); margin: 28px 0 10px; }
+  p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
+  .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
+  .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
+  .nav a:hover { color: var(--muted); }
+  .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
+  .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }
+  .comment { color: var(--dim); }
+  .inline { background: var(--surface3); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--code); }
+  hr { border: none; border-top: 1px solid var(--surface3); margin: 40px 0; }
+  .cta { display: inline-block; background: var(--white); color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
+  .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid var(--surface3); }
+  .also p { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+  .also a { color: var(--code); text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
+  .badge { display: inline-block; background: var(--surface3); border: 1px solid #2a2a2a; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: var(--dim); margin-right: 6px; margin-bottom: 12px; }
 `
 
 function page(title: string, description: string, body: string) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <title>${title} · AgentBill</title>
-  <meta name="description" content="${description}">
-  <style>${CSS}</style>
-</head>
+  return `${head({
+    title: `${title} · AgentBill`,
+    description,
+    css: CSS,
+  })}
 <body>
+${siteNav('/docs')}
 <div class="container">
-  <div class="nav">
-    <a href="/">AgentBill</a>
-    <a href="/docs">Docs</a>
-    <a href="/register">Get API key</a>
-  </div>
   ${body}
   <div class="also">
     <p>Related guides</p>
@@ -53,6 +43,7 @@ function page(title: string, description: string, body: string) {
     <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
   </div>
 </div>
+${siteFooter()}
 </body>
 </html>`
 }

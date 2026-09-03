@@ -1,18 +1,15 @@
 import { FastifyInstance } from 'fastify'
+import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { pixelSnippet } from '../lib/pixel.js'
 
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', async (request, reply) => {
-    return reply.type('text/html').send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill · Billing Governance for AI Agents</title>
-  <meta name="description" content="Hard budget ceilings for AI agents. One ceiling per task that every call consults, in any provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds." />
-  <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
-  <link rel="canonical" href="https://agentbill.dev/" />
+    return reply.type('text/html').send(`${head({
+      title: 'AgentBill · Billing Governance for AI Agents',
+      description: 'Hard budget ceilings for AI agents. One ceiling per task that every call consults, in any provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
+      canonical: 'https://agentbill.dev/',
+      extraHead: `  <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/" />
@@ -29,55 +26,17 @@ export async function homeRoute(app: FastifyInstance) {
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   <!-- Structured data -->
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    :root {
-      --bg: #0a0a0a; --surface: #111111; --surface2: #161616;
-      --border: #232323; --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88;
-      /* --border is decorative (1.26:1). Interactive boundaries need 3:1
-         under WCAG 1.4.11, so buttons use --border-strong (3.25:1). */
-      --border-strong: #5c645f;
-      --green: #22d3a0; --code: #a8ff78; --red: #ff5757;
-    }
-    html { scroll-behavior: smooth; }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
-           font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
-    .mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
-    a { color: var(--green); }
+  ${pixelSnippet()}`,
+      css: `${CHROME_CSS}
+
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
-    .wrap { max-width: 960px; margin: 0 auto; padding-inline: 24px; }
-
-    /* Nav */
-    nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.88); backdrop-filter: blur(14px);
-          border-bottom: 1px solid var(--border); }
-    .nav-inner { max-width: 960px; margin: 0 auto; padding: 0 24px; height: 60px;
-                 display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .logo { display: flex; align-items: center; gap: 9px; font-family: 'JetBrains Mono', monospace;
-            font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
-    .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%;
-           box-shadow: 0 0 10px rgba(34,211,160,0.7); }
-    .nav-links { display: flex; align-items: center; gap: 22px; }
-    .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; }
-    .nav-links a:hover { color: var(--text); }
-    .nav-links a.btn, .nav-links a.btn:hover, .nav-links a.btn:visited { color: #05130e; }
-    .btn { display: inline-block; background: var(--green); color: #05130e; padding: 10px 18px;
-           border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
-           transition: transform .15s, box-shadow .15s; }
-    .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(34,211,160,0.25); }
-    @media (max-width: 640px) {
-      .nav-links { gap: 16px; }
-      .nav-links a.hide-sm { display: none; }
-      .nav-links a:not(.btn) { padding: 10px 0; }
-    }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
 
     /* Hero */
     .hero { padding-block: 88px 40px; }
     h1 { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: clamp(30px, 5.4vw, 46px);
-         font-weight: 700; color: #ffffff; line-height: 1.22; letter-spacing: -0.5px; max-width: 21ch; }
+         font-weight: 700; color: var(--white); line-height: 1.22; letter-spacing: -0.5px; max-width: 21ch; }
     .sub { font-size: 18px; color: var(--muted); margin: 22px 0 30px; max-width: 56ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
@@ -91,7 +50,7 @@ export async function homeRoute(app: FastifyInstance) {
     .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
                   margin: 48px 0 0; overflow: hidden; }
     .code-head { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-    .code-head span { width: 11px; height: 11px; border-radius: 50%; background: #2c2c2c; }
+    .code-head span { width: 11px; height: 11px; border-radius: 50%; background: var(--border2); }
     .code-head span:first-child { background: #3a2a2a; }
     .code-body { padding: 22px 24px; overflow-x: auto; }
     .code-body pre { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13.5px;
@@ -109,7 +68,7 @@ export async function homeRoute(app: FastifyInstance) {
     section { padding-block: 72px 0; }
     .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
                letter-spacing: 2px; text-transform: uppercase; color: var(--green); margin-bottom: 14px; }
-    h2 { font-family: 'JetBrains Mono', monospace; font-size: 26px; color: #fff; letter-spacing: -0.3px; margin-bottom: 28px; }
+    h2 { font-family: 'JetBrains Mono', monospace; font-size: 26px; color: var(--white); letter-spacing: -0.3px; margin-bottom: 28px; }
     .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
     .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
     .feature h3 { font-family: 'JetBrains Mono', monospace; font-size: 15.5px; color: var(--text); margin-bottom: 10px; }
@@ -122,7 +81,7 @@ export async function homeRoute(app: FastifyInstance) {
     .price.hot { border-color: rgba(34,211,160,0.45); }
     .price .tier { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 1.5px;
                    text-transform: uppercase; color: var(--muted); }
-    .price .amount { font-size: 26px; font-weight: 800; color: #fff; margin: 8px 0 2px; }
+    .price .amount { font-size: 26px; font-weight: 800; color: var(--white); margin: 8px 0 2px; }
     .price .amount small { font-size: 13px; color: var(--dim); font-weight: 400; }
     .price .inc { font-size: 12.5px; color: var(--dim); }
     .price-links { margin-top: 20px; display: flex; gap: 14px; align-items: center; }
@@ -133,32 +92,14 @@ export async function homeRoute(app: FastifyInstance) {
     .not-for li::before { content: "x"; position: absolute; left: 0; color: var(--red);
                           font-family: 'JetBrains Mono', monospace; font-weight: 700; }
 
-    /* Final CTA + footer */
+    /* Final CTA */
     .final { text-align: center; padding-block: 88px; }
     .final h2 { margin-bottom: 10px; }
     .final p { color: var(--muted); margin-bottom: 26px; }
-    footer { border-top: 1px solid var(--border); padding: 28px 0 48px; }
-    .foot-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-    .foot-links { display: flex; flex-wrap: wrap; gap: 4px 22px; }
-    .foot-links a { color: var(--dim); text-decoration: none; font-size: 13.5px;
-                    display: inline-block; padding: 11px 0; }
-    .foot-links a:hover { color: var(--text); }
-    .foot-brand { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim); }
-  </style>
-  ${pixelSnippet()}
-</head>
+`,
+    })}
 <body>
-  <nav>
-    <div class="nav-inner">
-      <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
-      <div class="nav-links">
-        <a href="/docs">Docs</a>
-        <a class="hide-sm" href="/pricing">Pricing</a>
-        <a class="hide-sm" href="https://github.com/marketinglior-pixel/agentbill">GitHub</a>
-        <a class="btn" href="/register">Get API key</a>
-      </div>
-    </div>
-  </nav>
+${siteNav('/')}
 
   <header class="hero wrap">
     <h1>Stop runaway AI agents before they start.</h1>
@@ -246,14 +187,7 @@ client.preflight(agent_id="researcher", task_ref="job-142",
     <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
   </div>
 
-  <footer>
-    <div class="wrap foot-inner">
-      <div class="foot-links">
-        <a href="/docs">Docs</a><a href="/pricing">Pricing</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="https://github.com/marketinglior-pixel/agentbill">GitHub</a>
-      </div>
-      <div class="foot-brand">agentbill.dev · what counts, who pays, what's blocked.</div>
-    </div>
-  </footer>
+${siteFooter()}
 </body>
 </html>
     `)

@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getTierCheckoutUrl } from '../integrations/polar.js'
 import { pixelSnippet } from '../lib/pixel.js'
+import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 
 export async function upgradeRoute(app: FastifyInstance) {
   // Served at both /upgrade (in-product links) and /pricing (what ad clickers
@@ -12,70 +14,61 @@ export async function upgradeRoute(app: FastifyInstance) {
       accountId ? getTierCheckoutUrl(tier, accountId) : '/register'
 
     reply.type('text/html')
-    return reply.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentBill · Pricing</title>
-  <meta name="description" content="Hard budget ceilings for AI agents. Free tier with 1,000 preflight calls/month, paid plans from $29/month. No credit card to start." />
-  <link rel="canonical" href="https://agentbill.dev/pricing" />
-  <meta property="og:type" content="website" />
+    return reply.send(`${head({
+      title: 'AgentBill · Pricing',
+      description: 'Hard budget ceilings for AI agents. Free tier with 1,000 preflight calls/month, paid plans from $29/month. No credit card to start.',
+      canonical: 'https://agentbill.dev/pricing',
+      extraHead: `  <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/pricing" />
   <meta property="og:title" content="AgentBill · Pricing" />
   <meta property="og:description" content="Free: 1,000 preflight calls/month. Builder $29. Team $99. Scale $299. Hard per-task ceilings, cross-provider, no proxy." />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
-  ${pixelSnippet()}
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: #0a0a0a; color: #e8ebe9;
-           min-height: 100vh; padding: 48px 24px; -webkit-font-smoothing: antialiased; }
-    h1, .logo, .tier, .price, .cta { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-    .wrap { max-width: 1040px; margin: 0 auto; }
-    .logo { color: #22d3a0; font-size: 20px; font-weight: 700; }
-    .tagline { color: #868e88; font-size: 12px; margin-top: 4px; }
+  ${pixelSnippet()}`,
+      css: `${CHROME_CSS}
+
+    :root { --shell: 1040px; }
+    body { min-height: 100vh; }
+    h1, .tier, .price, .cta { font-family: var(--mono); }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding: 48px 24px 0; }
     h1 { font-size: 26px; margin-top: 36px; line-height: 1.35; }
-    .sub { color: #a0a8a3; font-size: 14px; margin-top: 10px; max-width: 640px; line-height: 1.6; }
+    .sub { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 640px; line-height: 1.6; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-top: 40px; }
-    .card { background: #111111; border: 1px solid #232323; border-radius: 12px; padding: 28px 24px;
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px;
             display: flex; flex-direction: column; }
     .card.hot { border-color: rgba(34,211,160,.45); position: relative; }
-    .badge { position: absolute; top: -10px; right: 16px; background: #22d3a0; color: #05130e;
+    .badge { position: absolute; top: -10px; right: 16px; background: var(--green); color: var(--green-ink);
              font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 10px;
              text-transform: uppercase; letter-spacing: .06em; }
-    .tier { font-size: 13px; color: #a0a8a3; text-transform: uppercase; letter-spacing: .08em; }
+    .tier { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
     .price { font-size: 30px; font-weight: 700; margin-top: 10px; }
-    .price span { font-size: 13px; color: #868e88; font-weight: 400; }
+    .price span { font-size: 13px; color: var(--dim); font-weight: 400; }
     ul { list-style: none; margin: 20px 0 24px; flex: 1; }
-    li { font-size: 12.5px; color: #a0a8a3; line-height: 1.55; padding: 5px 0 5px 18px; position: relative; }
-    li::before { content: '✓'; color: #22d3a0; position: absolute; left: 0; }
-    .cta { display: block; background: #22d3a0; border-radius: 6px; color: #05130e; font-family: inherit;
+    li { font-size: 12.5px; color: var(--muted); line-height: 1.55; padding: 5px 0 5px 18px; position: relative; }
+    li::before { content: '✓'; color: var(--green); position: absolute; left: 0; }
+    .cta { display: block; background: var(--green); border-radius: 6px; color: var(--green-ink); font-family: inherit;
            font-size: 13.5px; font-weight: 600; padding: 12px; text-decoration: none; text-align: center; }
     .cta:hover { filter: brightness(1.08); }
-    .cta.ghost { background: transparent; border: 1px solid #374151; color: #a0a8a3; }
-    .cta.ghost:hover { border-color: #868e88; }
-    .note { margin-top: 28px; font-size: 12px; color: #868e88; line-height: 1.6; }
-    .note a { color: #22d3a0; text-decoration: none; }
-    .havekey { margin-top: 32px; background: #111111; border: 1px solid #232323; border-radius: 10px;
+    .cta.ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--muted); }
+    .cta.ghost:hover { border-color: var(--dim); }
+    .note { margin-top: 28px; font-size: 12px; color: var(--dim); line-height: 1.6; }
+    .note a { color: var(--green); text-decoration: none; }
+    .havekey { margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .havekey label { font-size: 13px; color: #a0a8a3; }
-    .havekey input { background: #0d0d0d; border: 1px solid #374151; border-radius: 6px; color: #e2e8f0;
+    .havekey label { font-size: 13px; color: var(--muted); }
+    .havekey input { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text);
                      font-family: inherit; font-size: 13px; padding: 9px 12px; flex: 1; min-width: 220px; }
-    .havekey input:focus { outline: none; border-color: #22d3a0; }
-    .havekey button { background: transparent; border: 1px solid #22d3a0; border-radius: 6px; color: #22d3a0;
+    .havekey input:focus { outline: none; border-color: var(--green); }
+    .havekey button { background: transparent; border: 1px solid var(--green); border-radius: 6px; color: var(--green);
                       font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; cursor: pointer; }
-    .havekey button:hover { background: #22d3a0; color: #05130e; }
-    .havekey .msg { font-size: 12px; color: #22d3a0; width: 100%; display: none; }
-  </style>
-</head>
+    .havekey button:hover { background: var(--green); color: var(--green-ink); }
+    .havekey .msg { font-size: 12px; color: var(--green); width: 100%; display: none; }
+`,
+    })}
 <body>
+${siteNav('/pricing')}
   <div class="wrap">
-    <div class="logo">AgentBill</div>
-    <div class="tagline">Hard budget ceilings for AI agents</div>
 
     <h1>Your agents get a hard budget.<br>Per task. One ceiling, any provider.</h1>
     <p class="sub">Provider spend caps stop at monthly totals for one vendor. AgentBill enforces the number
@@ -144,19 +137,19 @@ export async function upgradeRoute(app: FastifyInstance) {
       var k = document.getElementById('keyin').value.trim()
       var msg = document.getElementById('keymsg')
       msg.style.display = 'block'
-      if (!k) { msg.style.color = '#ff5757'; msg.textContent = 'Paste your API key first.'; return }
+      if (!k) { msg.style.color = 'var(--red)'; msg.textContent = 'Paste your API key first.'; return }
       try {
         var r = await fetch('/account/upgrade-url', { headers: { Authorization: 'Bearer ' + k } })
-        if (!r.ok) { msg.style.color = '#ff5757'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
+        if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
         var d = await r.json()
         document.querySelectorAll('[data-tier]').forEach(function (a) {
           var t = a.getAttribute('data-tier')
           if (d.checkout && d.checkout[t]) a.setAttribute('href', d.checkout[t])
         })
-        msg.style.color = '#22d3a0'
+        msg.style.color = 'var(--green)'
         msg.textContent = 'Checkout unlocked for your account. Pick a plan above.'
       } catch (e) {
-        msg.style.color = '#ff5757'
+        msg.style.color = 'var(--red)'
         msg.textContent = 'Network error. Try again.'
       }
     })
@@ -164,6 +157,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     <p class="note">One runaway retry loop costs more than a year of Builder.
     No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
   </div>
+${siteFooter()}
 </body>
 </html>`)
   }

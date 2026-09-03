@@ -1,60 +1,51 @@
 import { FastifyInstance } from 'fastify'
+import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 
 export async function docsRoute(app: FastifyInstance) {
   app.get('/docs', async (request, reply) => {
-    return reply.type('text/html').send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <title>AgentBill Docs · Preflight Billing for AI Agents</title>
-  <meta name="description" content="AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer." />
-  <link rel="canonical" href="https://agentbill.dev/docs" />
-  <meta property="og:type" content="website" />
+    return reply.type('text/html').send(`${head({
+      title: 'AgentBill Docs · Preflight Billing for AI Agents',
+      description: 'AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer.',
+      canonical: 'https://agentbill.dev/docs',
+      extraHead: `  <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/docs" />
   <meta property="og:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
   <meta property="og:description" content="Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK." />
   <meta property="og:site_name" content="AgentBill" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
-  <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />
-  <style>
+  <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />`,
+      css: `${CHROME_CSS}
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
          -webkit-font-smoothing: antialiased; }
     .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
     h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
-    h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 8px; }
-    h2 { font-size: 18px; font-weight: 700; color: #fff; margin: 48px 0 16px; }
-    h3 { font-size: 14px; font-weight: 700; color: #a0a8a3; margin: 32px 0 8px; text-transform: uppercase; letter-spacing: 1px; }
-    p { font-size: 15px; color: #a0a8a3; line-height: 1.7; margin-bottom: 16px; }
-    .nav { font-size: 13px; color: #868e88; margin-bottom: 48px; }
-    .nav a { color: #868e88; text-decoration: none; margin-right: 16px; }
-    .nav a:hover { color: #a0a8a3; }
-    .code { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
-    .code pre { font-size: 13px; color: #a8ff78; line-height: 1.7; }
-    .comment { color: #868e88; }
-    .inline { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #a8ff78; }
+    h1 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+    h2 { font-size: 18px; font-weight: 700; color: var(--white); margin: 48px 0 16px; }
+    h3 { font-size: 14px; font-weight: 700; color: var(--muted); margin: 32px 0 8px; text-transform: uppercase; letter-spacing: 1px; }
+    p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
+    .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
+    .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
+    .nav a:hover { color: var(--muted); }
+    .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
+    .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }
+    .comment { color: var(--dim); }
+    .inline { background: var(--surface3); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--code); }
     table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
-    th { text-align: left; color: #868e88; font-weight: normal; padding: 8px 12px; border-bottom: 1px solid #1a1a1a; }
-    td { padding: 10px 12px; border-bottom: 1px solid #111; color: #a0a8a3; vertical-align: top; }
-    td:first-child { color: #a8ff78; white-space: nowrap; }
-    .tag { display: inline-block; background: #1a1a1a; color: #868e88; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
-    .cta { display: inline-block; background: #fff; color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
-    hr { border: none; border-top: 1px solid #1a1a1a; margin: 48px 0; }
-  </style>
-</head>
+    th { text-align: left; color: var(--dim); font-weight: normal; padding: 8px 12px; border-bottom: 1px solid var(--surface3); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--surface); color: var(--muted); vertical-align: top; }
+    td:first-child { color: var(--code); white-space: nowrap; }
+    .tag { display: inline-block; background: var(--surface3); color: var(--dim); font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+    .cta { display: inline-block; background: var(--white); color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
+    hr { border: none; border-top: 1px solid var(--surface3); margin: 48px 0; }
+`,
+    })}
 <body>
+${siteNav('/docs')}
 <div class="container">
-
-  <div class="nav">
-    <a href="/">AgentBill</a>
-    <a href="/docs">Docs</a>
-    <a href="/register">Get API key</a>
-  </div>
 
   <h1>Documentation</h1>
   <p>Everything you need to add preflight billing to your agents.</p>
@@ -67,7 +58,7 @@ export async function docsRoute(app: FastifyInstance) {
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
   <h3>Step 2, Get your API key</h3>
-  <p>Register at <a href="/register" style="color:#a8ff78">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
+  <p>Register at <a href="/register" style="color:var(--code)">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
   <h3>Step 3, Add 3 lines to your agent</h3>
   <div class="code"><pre>
@@ -122,7 +113,7 @@ client.preflight(
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is blocked if estimated_units exceeds it.</td></tr>
-    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets" style="color:#a8ff78">task budgets</a>.</td></tr>
+    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets" style="color:var(--code)">task budgets</a>.</td></tr>
     <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Required on the first preflight of a new task_ref, ignored on later calls.</td></tr>
   </table>
 
@@ -179,16 +170,17 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   <hr>
 
   <h2>Guides</h2>
-  <p><a href="/docs/task-budgets" style="color:#a8ff78">Task budgets, a hard cost ceiling per agent job</a></p>
-  <p><a href="/docs/limit-cost-per-agent-run" style="color:#a8ff78">How to limit cost per agent run</a></p>
-  <p><a href="/docs/langchain-billing" style="color:#a8ff78">How to add billing to a LangChain agent</a></p>
-  <p><a href="/docs/openai-agent-spend-ceiling" style="color:#a8ff78">How to add a spend ceiling to an OpenAI agent</a></p>
+  <p><a href="/docs/task-budgets" style="color:var(--code)">Task budgets, a hard cost ceiling per agent job</a></p>
+  <p><a href="/docs/limit-cost-per-agent-run" style="color:var(--code)">How to limit cost per agent run</a></p>
+  <p><a href="/docs/langchain-billing" style="color:var(--code)">How to add billing to a LangChain agent</a></p>
+  <p><a href="/docs/openai-agent-spend-ceiling" style="color:var(--code)">How to add a spend ceiling to an OpenAI agent</a></p>
 
   <hr>
 
   <a href="/register" class="cta">Get your API key</a>
 
 </div>
+${siteFooter()}
 </body>
 </html>
     `)

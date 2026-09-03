@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify'
+import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
 // and Meta ad review checks destination pages for both. Plain, honest, short.
@@ -7,35 +9,27 @@ const LAST_UPDATED = 'August 27, 2026'
 const CONTACT = 'marketinglior@gmail.com'
 
 function legalShell(title: string, body: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <title>${title} · AgentBill</title>
-  <meta name="robots" content="noindex" />
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
-           line-height: 1.7; -webkit-font-smoothing: antialiased; }
-    .container { max-width: 720px; margin: 0 auto; padding: 64px 24px; }
-    a { color: #a8ff78; }
-    h1 { color: #fff; font-size: 24px; margin-bottom: 8px; }
-    .updated { color: #868e88; font-size: 13px; margin-bottom: 40px; }
-    h2 { color: #fff; font-size: 16px; margin: 32px 0 10px; }
+  return `${head({
+    title: `${title} · AgentBill`,
+    extraHead: '  <meta name="robots" content="noindex" />',
+    css: `${CHROME_CSS}
+    :root { --shell: 720px; }
+    body { line-height: 1.7; }
+    .container { max-width: var(--shell); margin: 0 auto; padding: 64px 24px; }
+    a { color: var(--code); }
+    h1 { color: var(--white); font-size: 24px; margin-bottom: 8px; }
+    .updated { color: var(--dim); font-size: 13px; margin-bottom: 40px; }
+    h2 { color: var(--white); font-size: 16px; margin: 32px 0 10px; }
     p, li { font-size: 14px; margin-bottom: 12px; }
     ul { padding-left: 20px; margin-bottom: 12px; }
-    .home { display: inline-block; margin-bottom: 32px; color: #a0a8a3; text-decoration: none; font-size: 13px; }
-    .home:hover { color: #fff; }
-  </style>
-</head>
+`,
+  })}
 <body>
+${siteNav()}
   <div class="container">
-    <a class="home" href="/">&larr; agentbill.dev</a>
     ${body}
   </div>
+${siteFooter()}
 </body>
 </html>`
 }

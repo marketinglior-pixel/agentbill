@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'crypto'
 import { sql } from '../db/index.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { clientIp } from '../lib/client-ip.js'
+import { head } from '../ui/theme.js'
 
 // /app is the console: the only browser surface a registered user has. It
 // shows live task budgets burning down, every call AgentBill refused with the
@@ -448,15 +449,11 @@ const REASON_LABEL: Record<string, string> = {
   task_overrun_recorded: 'got through',
 }
 
+// The console keeps its own nav: it is an authenticated surface with an account
+// bar, not a marketing page, so it takes neither siteNav nor siteFooter. It does
+// take the shared tokens, which is what the fragmentation finding was about.
 const CSS = `
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root { --bg: #0a0a0a; --surface: #111111; --surface2: #161616; --border: #232323;
-          --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88; --green: #22d3a0;
-          --code: #a8ff78; --red: #ff5757; --amber: #f5b942; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
-         font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
-  .mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; }
-  a { color: var(--green); }
+  body { font-size: 15px; line-height: 1.55; }
   nav { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
         justify-content: space-between; padding: 0 24px; gap: 16px; }
   .logo { display: flex; align-items: center; gap: 9px; font-family: 'JetBrains Mono', monospace;
@@ -471,10 +468,10 @@ const CSS = `
   .btn-out:hover { color: var(--text); border-color: var(--dim); }
   /* The signed-out sample console's only CTA. Filled, not ghosted: this is the
      one action a prospect on this page is meant to take. */
-  .btn-key { display: inline-flex; align-items: center; background: var(--green); color: #05130e;
+  .btn-key { display: inline-flex; align-items: center; background: var(--green); color: var(--green-ink);
              border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: 700;
              text-decoration: none; white-space: nowrap; min-height: 34px; }
-  .btn-key:hover { color: #05130e; filter: brightness(1.08); }
+  .btn-key:hover { color: var(--green-ink); filter: brightness(1.08); }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
   h1 { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
        letter-spacing: -.02em; margin-bottom: 6px; }
@@ -502,7 +499,7 @@ const CSS = `
            white-space: nowrap; }
   .seg a:last-child { border-right: none; }
   .seg a:hover { color: var(--text); background: var(--surface2); }
-  .seg a.on { color: #05130e; background: var(--green); font-weight: 700; }
+  .seg a.on { color: var(--green-ink); background: var(--green); font-weight: 700; }
 
   /* delta */
   .dl { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 5px;
@@ -520,7 +517,7 @@ const CSS = `
                flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
                color: var(--dim); font-variant-numeric: tabular-nums; }
   .quota-top b { color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-  .meter { height: 8px; background: #1c1c1c; border-radius: 999px; margin-top: 12px; overflow: hidden; }
+  .meter { height: 8px; background: var(--surface3); border-radius: 999px; margin-top: 12px; overflow: hidden; }
   .meter i { display: block; height: 100%; border-radius: 999px; background: var(--green); }
   .meter i.warn { background: var(--amber); } .meter i.hot { background: var(--red); }
 
@@ -549,7 +546,7 @@ const CSS = `
   .plot { position: relative; padding-left: 46px; }
   .grid { position: absolute; inset: 0 0 0 46px; display: flex; flex-direction: column;
           justify-content: space-between; pointer-events: none; }
-  .grid span { border-top: 1px dashed #1e1e1e; height: 0; }
+  .grid span { border-top: 1px dashed var(--border-soft); height: 0; }
   .ylab { position: absolute; left: 0; top: -7px; width: 40px; text-align: right;
           font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim);
           font-variant-numeric: tabular-nums; }
@@ -560,7 +557,7 @@ const CSS = `
   .col i { display: block; width: 100%; }
   .col i.ok { background: #1d7a5f; }
   .col i.bl { background: var(--red); }
-  .col i.zero { background: #1a1a1a; height: 2px; }
+  .col i.zero { background: var(--surface3); height: 2px; }
   .xaxis { display: flex; justify-content: space-between; margin: 9px 0 0 46px;
            font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--dim); }
   .legend { display: flex; gap: 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace;
@@ -581,7 +578,7 @@ const CSS = `
   .bnum { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted);
           font-variant-numeric: tabular-nums; white-space: nowrap; }
   .bnum b { color: var(--text); font-weight: 700; }
-  .track { height: 10px; background: #1c1c1c; border-radius: 999px; overflow: hidden; display: flex; }
+  .track { height: 10px; background: var(--surface3); border-radius: 999px; overflow: hidden; display: flex; }
   .track i { display: block; height: 100%; }
   .track i.used { background: var(--green); }
   .track i.used.warn { background: var(--amber); }
@@ -608,8 +605,8 @@ const CSS = `
   .chip.leak  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
   .chip.ok    { background: #0e2a20; color: var(--green); border: 1px solid #1b4a3a; }
   .chip.warn  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
-  .chip.dead  { background: #1c1c1c; color: var(--dim); border: 1px solid #2c2c2c; }
-  .minibar { height: 6px; width: 92px; background: #1c1c1c; border-radius: 999px; overflow: hidden;
+  .chip.dead  { background: var(--surface3); color: var(--dim); border: 1px solid var(--border2); }
+  .minibar { height: 6px; width: 92px; background: var(--surface3); border-radius: 999px; overflow: hidden;
              display: inline-block; vertical-align: middle; margin-right: 9px; }
   .minibar i { display: block; height: 100%; background: var(--green); }
   .minibar i.warn { background: var(--amber); } .minibar i.hot { background: var(--red); }
@@ -650,7 +647,7 @@ const CSS = `
           padding: 12px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px;
           margin-bottom: 14px; outline: none; min-height: 46px; }
   input:focus { border-color: var(--green); }
-  .btn { width: 100%; background: var(--green); color: #05130e; border: none; border-radius: 6px;
+  .btn { width: 100%; background: var(--green); color: var(--green-ink); border: none; border-radius: 6px;
          padding: 13px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; min-height: 46px; }
   .btn:hover { filter: brightness(1.08); }
   .err { color: var(--red); font-size: 13px; margin-bottom: 12px; }
@@ -665,17 +662,11 @@ const CSS = `
   }
 `
 
-const HEAD = (title: string) => `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="robots" content="noindex" />
-  <title>${esc(title)} · AgentBill</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <style>${CSS}</style>
-</head>`
+const HEAD = (title: string) => head({
+  title: `${esc(title)} · AgentBill`,
+  extraHead: '  <meta name="robots" content="noindex" />',
+  css: CSS,
+})
 
 const ERRORS: Record<string, string> = {
   key: 'That key was not found. It starts with agb_ and comes from /register.',

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
+import { head } from '../ui/theme.js'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
@@ -79,25 +80,22 @@ export async function registerRoute(app: FastifyInstance) {
   // Registration page, GET
   app.get('/register', async (_request, reply) => {
     reply.type('text/html')
-    return reply.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Get your API key · AgentBill</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0a0a0a; --surface: #111111; --surface2: #161616;
-      --border: #232323; --border2: #2c2c2c;
-      --text: #e8ebe9; --muted: #a0a8a3;
-      --accent: #22d3a0; --green: #22d3a0; --red: #ff5757;
-    }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
-           font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
-           min-height: 100vh; display: flex; flex-direction: column; }
+    return reply.send(`${head({
+      title: 'Get your API key · AgentBill',
+      description: 'Free API key in 30 seconds. 1,000 preflight calls/month, hard per-task budget ceilings for AI agents. No credit card.',
+      canonical: 'https://agentbill.dev/register',
+      extraHead: `  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://agentbill.dev/register" />
+  <meta property="og:title" content="Get your API key · AgentBill" />
+  <meta property="og:description" content="Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card." />
+  <meta property="og:image" content="https://agentbill.dev/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
+  ${pixelSnippet()}`,
+      css: `
+
+    :root { --accent: var(--green); }
+    body { line-height: 1.6; min-height: 100vh; display: flex; flex-direction: column; }
     nav { background: rgba(10,10,15,0.9); backdrop-filter: blur(16px);
           border-bottom: 1px solid var(--border); padding: 0 24px; height: 60px;
           display: flex; align-items: center; justify-content: space-between; }
@@ -109,7 +107,7 @@ export async function registerRoute(app: FastifyInstance) {
             padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
     .left-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
                   letter-spacing: 2px; color: var(--accent); margin-bottom: 24px; }
-    .left h1 { font-size: 30px; font-weight: 800; color: #fff; line-height: 1.2;
+    .left h1 { font-size: 30px; font-weight: 800; color: var(--white); line-height: 1.2;
                letter-spacing: -1px; margin-bottom: 16px; }
     .left p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 40px; max-width: 380px; }
     .feature-list { list-style: none; display: flex; flex-direction: column; gap: 18px; }
@@ -123,10 +121,10 @@ export async function registerRoute(app: FastifyInstance) {
     .quote { margin-top: 40px; padding: 18px 20px; background: rgba(34,211,160,0.06);
              border: 1px solid rgba(34,211,160,0.14); border-radius: 10px; }
     .quote p { font-size: 13px; font-style: italic; color: var(--muted); margin-bottom: 6px; line-height: 1.6; }
-    .quote span { font-size: 11px; color: #868e88; font-family: 'JetBrains Mono', monospace; }
+    .quote span { font-size: 11px; color: var(--dim); font-family: 'JetBrains Mono', monospace; }
     .right { padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
     .form-header { margin-bottom: 36px; }
-    .form-header h2 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 6px; letter-spacing: -0.5px; }
+    .form-header h2 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 6px; letter-spacing: -0.5px; }
     .form-header p { font-size: 14px; color: var(--muted); }
     .form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
     .field { display: flex; flex-direction: column; gap: 7px; }
@@ -140,8 +138,8 @@ export async function registerRoute(app: FastifyInstance) {
     input:focus, select:focus { border-color: rgba(34,211,160,0.55); box-shadow: 0 0 0 3px rgba(34,211,160,0.10); }
     select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a8a3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
              background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
-    select option { background: #161616; }
-    .btn-submit { background: var(--accent); color: #05130e; border: none; padding: 13px 24px;
+    select option { background: var(--surface2); }
+    .btn-submit { background: var(--accent); color: var(--green-ink); border: none; padding: 13px 24px;
                   border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
                   font-family: 'Inter', sans-serif; transition: all 0.2s; margin-top: 4px; }
     .btn-submit:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(34,211,160,0.28); }
@@ -154,7 +152,7 @@ export async function registerRoute(app: FastifyInstance) {
     .success-icon { width: 52px; height: 52px; background: rgba(34,211,160,0.1);
                     border: 1px solid rgba(34,211,160,0.2); border-radius: 13px;
                     display: flex; align-items: center; justify-content: center; font-size: 22px; }
-    .success h2 { font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .success h2 { font-size: 22px; font-weight: 700; color: var(--white); letter-spacing: -0.5px; }
     .success > p { font-size: 14px; color: var(--muted); line-height: 1.7; }
     .key-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; overflow: hidden; }
     .key-label { padding: 9px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -193,18 +191,8 @@ export async function registerRoute(app: FastifyInstance) {
       .mobile-promises { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px;
         font-size: 12.5px; color: var(--green); font-weight: 600; }
     }
-  </style>
-  <meta name="description" content="Free API key in 30 seconds. 1,000 preflight calls/month, hard per-task budget ceilings for AI agents. No credit card." />
-  <link rel="canonical" href="https://agentbill.dev/register" />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.dev/register" />
-  <meta property="og:title" content="Get your API key · AgentBill" />
-  <meta property="og:description" content="Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card." />
-  <meta property="og:image" content="https://agentbill.dev/og.png" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
-  ${pixelSnippet()}
-</head>
+`,
+    })}
 <body>
 <nav>
   <a href="/" class="nav-logo"><div class="dot"></div> AgentBill</a>
