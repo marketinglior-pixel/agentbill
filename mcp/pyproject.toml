@@ -4,13 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbill-mcp"
-version = "0.1.1"
+version = "0.2.0"
 description = "AgentBill MCP server. Add spend controls and billing to any AI agent in 3 lines."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    # Upper bound is load-bearing, not caution. mcp 2.x renamed FastMCP to
+    # MCPServer, so an unpinned ">=1.0.0" resolves to 2.x and this server dies
+    # on import. That is what shipped in 0.1.1: every fresh uvx agentbill-mcp
+    # has been failing since mcp 2 was released. Migrating to the 2.x API is a
+    # separate change; this pin restores a package that runs.
+    "mcp[cli]>=1.0.0,<2",
     "httpx>=0.27",
 ]
 authors = [
