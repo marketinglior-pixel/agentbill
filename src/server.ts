@@ -114,7 +114,7 @@ app.get('/robots.txt', async (_, reply) => {
 Allow: /
 Allow: /docs
 Allow: /register
-Disallow: /dashboard
+Disallow: /app
 Disallow: /webhooks/
 
 Sitemap: https://agentbill.dev/sitemap.xml

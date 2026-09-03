@@ -12,19 +12,22 @@ function legalShell(title: string, body: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>${title} · AgentBill</title>
   <meta name="robots" content="noindex" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; color: #ccc; font-family: 'Courier New', monospace; line-height: 1.7; }
+    body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
+           line-height: 1.7; -webkit-font-smoothing: antialiased; }
     .container { max-width: 720px; margin: 0 auto; padding: 64px 24px; }
     a { color: #a8ff78; }
     h1 { color: #fff; font-size: 24px; margin-bottom: 8px; }
-    .updated { color: #555; font-size: 13px; margin-bottom: 40px; }
+    .updated { color: #868e88; font-size: 13px; margin-bottom: 40px; }
     h2 { color: #fff; font-size: 16px; margin: 32px 0 10px; }
     p, li { font-size: 14px; margin-bottom: 12px; }
     ul { padding-left: 20px; margin-bottom: 12px; }
-    .home { display: inline-block; margin-bottom: 32px; color: #888; text-decoration: none; font-size: 13px; }
+    .home { display: inline-block; margin-bottom: 32px; color: #a0a8a3; text-decoration: none; font-size: 13px; }
     .home:hover { color: #fff; }
   </style>
 </head>

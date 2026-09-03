@@ -2,18 +2,20 @@ import { FastifyInstance } from 'fastify'
 
 const CSS = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
+  body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
   .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
-  .nav { font-size: 13px; color: #555; margin-bottom: 48px; }
-  .nav a { color: #555; text-decoration: none; margin-right: 16px; }
-  .nav a:hover { color: #aaa; }
-  h1 { font-size: 26px; font-weight: 700; color: #fff; line-height: 1.3; margin-bottom: 16px; }
-  .meta { font-size: 13px; color: #555; margin-bottom: 48px; }
+  .nav { font-size: 13px; color: #868e88; margin-bottom: 48px; }
+  .nav a { color: #868e88; text-decoration: none; margin-right: 16px; }
+  .nav a:hover { color: #a0a8a3; }
+  h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
+    h1 { font-size: 26px; font-weight: 700; color: #fff; line-height: 1.3; margin-bottom: 16px; }
+  .meta { font-size: 13px; color: #868e88; margin-bottom: 48px; }
   h2 { font-size: 18px; font-weight: 700; color: #fff; margin: 48px 0 12px; }
-  p { font-size: 15px; color: #aaa; line-height: 1.8; margin-bottom: 20px; }
+  p { font-size: 15px; color: #a0a8a3; line-height: 1.8; margin-bottom: 20px; }
   .code { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 20px; margin: 24px 0; overflow-x: auto; }
   .code pre { font-size: 13px; color: #a8ff78; line-height: 1.7; }
-  .comment { color: #555; }
+  .comment { color: #868e88; }
   .inline { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #a8ff78; }
   blockquote { border-left: 2px solid #333; padding-left: 20px; margin: 24px 0; }
   blockquote p { color: #666; font-style: italic; }
@@ -23,7 +25,7 @@ const CSS = `
   .cta-box p { margin-bottom: 20px; }
   .cta { display: inline-block; background: #fff; color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; }
   .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid #1a1a1a; }
-  .also p { font-size: 13px; color: #555; margin-bottom: 8px; }
+  .also p { font-size: 13px; color: #868e88; margin-bottom: 8px; }
   .also a { color: #a8ff78; text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
 `
 
@@ -35,6 +37,8 @@ export async function blogRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>How preflight avoids double-billing under concurrent load · AgentBill</title>
   <meta name="description" content="The naive read-check-approve pattern has a race condition. Here's how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.">
   <style>${CSS}</style>
@@ -216,6 +220,8 @@ record(units=7)
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>Why monthly caps don't protect you from one bad LLM run · AgentBill</title>
   <meta name="description" content="Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here's the pattern that actually works.">
   <style>${CSS}</style>

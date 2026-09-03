@@ -90,10 +90,10 @@ export async function registerRoute(app: FastifyInstance) {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0a0a0f; --surface: #111118; --surface2: #1a1a24;
-      --border: #ffffff10; --border2: #ffffff1a;
-      --text: #e8e8f0; --muted: #8888a0;
-      --accent: #6c63ff; --green: #22d3a0; --red: #ff5757;
+      --bg: #0a0a0a; --surface: #111111; --surface2: #161616;
+      --border: #232323; --border2: #2c2c2c;
+      --text: #e8ebe9; --muted: #a0a8a3;
+      --accent: #22d3a0; --green: #22d3a0; --red: #ff5757;
     }
     body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
            font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
@@ -120,10 +120,10 @@ export async function registerRoute(app: FastifyInstance) {
                 flex-shrink: 0; font-size: 11px; color: var(--green); font-weight: 700; margin-top: 1px; }
     .fi-text h4 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
     .fi-text p { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
-    .quote { margin-top: 40px; padding: 18px 20px; background: rgba(108,99,255,0.06);
-             border: 1px solid rgba(108,99,255,0.12); border-radius: 10px; }
+    .quote { margin-top: 40px; padding: 18px 20px; background: rgba(34,211,160,0.06);
+             border: 1px solid rgba(34,211,160,0.14); border-radius: 10px; }
     .quote p { font-size: 13px; font-style: italic; color: var(--muted); margin-bottom: 6px; line-height: 1.6; }
-    .quote span { font-size: 11px; color: #555570; font-family: 'JetBrains Mono', monospace; }
+    .quote span { font-size: 11px; color: #868e88; font-family: 'JetBrains Mono', monospace; }
     .right { padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
     .form-header { margin-bottom: 36px; }
     .form-header h2 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 6px; letter-spacing: -0.5px; }
@@ -136,15 +136,15 @@ export async function registerRoute(app: FastifyInstance) {
                     padding: 11px 14px; font-size: 14px; color: var(--text);
                     font-family: 'Inter', sans-serif; outline: none; width: 100%;
                     transition: border-color 0.15s, box-shadow 0.15s; }
-    input::placeholder { color: #444460; }
-    input:focus, select:focus { border-color: rgba(108,99,255,0.5); box-shadow: 0 0 0 3px rgba(108,99,255,0.1); }
-    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888a0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    input::placeholder { color: #5a615d; }
+    input:focus, select:focus { border-color: rgba(34,211,160,0.55); box-shadow: 0 0 0 3px rgba(34,211,160,0.10); }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a8a3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
              background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
-    select option { background: #1a1a24; }
-    .btn-submit { background: var(--accent); color: white; border: none; padding: 13px 24px;
+    select option { background: #161616; }
+    .btn-submit { background: var(--accent); color: #05130e; border: none; padding: 13px 24px;
                   border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
                   font-family: 'Inter', sans-serif; transition: all 0.2s; margin-top: 4px; }
-    .btn-submit:hover { background: #8b5cf6; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(108,99,255,0.3); }
+    .btn-submit:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(34,211,160,0.28); }
     .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
     .form-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
     .err { color: var(--red); font-size: 13px; display: none; }
@@ -161,17 +161,17 @@ export async function registerRoute(app: FastifyInstance) {
                  letter-spacing: 1.5px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
     .key-value { padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--green);
                  display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .btn-copy { background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.2); color: var(--accent);
+    .btn-copy { background: rgba(34,211,160,0.10); border: 1px solid rgba(34,211,160,0.22); color: var(--accent);
                 padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
                 font-family: 'Inter', sans-serif; transition: all 0.15s; white-space: nowrap; }
-    .btn-copy:hover { background: rgba(108,99,255,0.18); }
+    .btn-copy:hover { background: rgba(34,211,160,0.20); }
     .next-steps { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
     .next-steps h4 { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 12px;
                      text-transform: uppercase; letter-spacing: 1px; }
     .ns { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
     .ns:last-child { border-bottom: none; }
     .ns-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent);
-              background: rgba(108,99,255,0.1); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
+              background: rgba(34,211,160,0.10); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
     .ns p { font-size: 13px; color: var(--muted); line-height: 1.5; }
     .ns > div { min-width: 0; flex: 1; }
     .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px;
@@ -180,7 +180,15 @@ export async function registerRoute(app: FastifyInstance) {
     .ns code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
                background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
     .mobile-promises { display: none; }
-    @media (max-width: 768px) { .page { grid-template-columns: 1fr; } .left { display: none; }
+    @media (max-width: 768px) {
+      .page { grid-template-columns: 1fr; }
+      .left { padding: 34px 20px 30px; border-right: none; border-bottom: 1px solid var(--border);
+              justify-content: flex-start; }
+      .left-label { margin-bottom: 14px; }
+      .left h1 { font-size: 27px; }
+      .left p { margin-bottom: 0; font-size: 14.5px; }
+      .feature-list { display: none; }
+      .quote { margin-top: 22px; }
       .right { padding: 32px 20px; }
       .mobile-promises { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px;
         font-size: 12.5px; color: var(--green); font-weight: 600; }

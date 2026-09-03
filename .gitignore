@@ -16,3 +16,6 @@ sdk/node/dist/
 # Logs
 *.log
 npm-debug.log*
+
+# Local preview launch config (Claude Code)
+.claude/

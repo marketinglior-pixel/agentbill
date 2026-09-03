@@ -35,7 +35,7 @@ export async function homeRoute(app: FastifyInstance) {
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --bg: #0a0a0a; --surface: #111111; --surface2: #161616;
-      --border: #232323; --text: #e8ebe9; --muted: #a0a8a3; --dim: #6b736e;
+      --border: #232323; --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88;
       --green: #22d3a0; --code: #a8ff78; --red: #ff5757;
     }
     html { scroll-behavior: smooth; }
@@ -63,7 +63,11 @@ export async function homeRoute(app: FastifyInstance) {
            border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
            transition: transform .15s, box-shadow .15s; }
     .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(34,211,160,0.25); }
-    @media (max-width: 640px) { .nav-links a:not(.btn) { display: none; } }
+    @media (max-width: 640px) {
+      .nav-links { gap: 16px; }
+      .nav-links a.hide-sm { display: none; }
+      .nav-links a:not(.btn) { padding: 10px 0; }
+    }
 
     /* Hero */
     .hero { padding: 88px 0 40px; }
@@ -87,7 +91,12 @@ export async function homeRoute(app: FastifyInstance) {
     .code-body { padding: 22px 24px; overflow-x: auto; }
     .code-body pre { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13.5px;
                      color: var(--code); line-height: 1.75; }
-    .cmt { color: #5a635d; }
+    @media (max-width: 640px) {
+      .code-body { padding: 18px 16px; }
+      .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+      .out-blocked { display: block; margin-top: 6px; }
+    }
+    .cmt { color: #79837c; }
     .out-blocked { color: var(--red); font-weight: 700; }
     .out-dim { color: var(--dim); }
 
@@ -132,7 +141,9 @@ export async function homeRoute(app: FastifyInstance) {
     .final p { color: var(--muted); margin-bottom: 26px; }
     footer { border-top: 1px solid var(--border); padding: 28px 0 48px; }
     .foot-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-    .foot-links a { color: var(--dim); text-decoration: none; font-size: 13.5px; margin-right: 18px; }
+    .foot-links { display: flex; flex-wrap: wrap; gap: 4px 22px; }
+    .foot-links a { color: var(--dim); text-decoration: none; font-size: 13.5px;
+                    display: inline-block; padding: 11px 0; }
     .foot-links a:hover { color: var(--text); }
     .foot-brand { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim); }
   </style>
@@ -144,8 +155,8 @@ export async function homeRoute(app: FastifyInstance) {
       <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
       <div class="nav-links">
         <a href="/docs">Docs</a>
-        <a href="/pricing">Pricing</a>
-        <a href="https://github.com/marketinglior-pixel/agentbill">GitHub</a>
+        <a class="hide-sm" href="/pricing">Pricing</a>
+        <a class="hide-sm" href="https://github.com/marketinglior-pixel/agentbill">GitHub</a>
         <a class="btn" href="/register">Get API key</a>
       </div>
     </div>

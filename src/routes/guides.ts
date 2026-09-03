@@ -2,25 +2,27 @@ import { FastifyInstance } from 'fastify'
 
 const CSS = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
+  body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
   .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
-  h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
+    h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 8px; }
   h2 { font-size: 18px; font-weight: 700; color: #fff; margin: 40px 0 12px; }
   h3 { font-size: 15px; font-weight: 700; color: #fff; margin: 28px 0 10px; }
-  p { font-size: 15px; color: #aaa; line-height: 1.7; margin-bottom: 16px; }
-  .nav { font-size: 13px; color: #555; margin-bottom: 48px; }
-  .nav a { color: #555; text-decoration: none; margin-right: 16px; }
-  .nav a:hover { color: #aaa; }
+  p { font-size: 15px; color: #a0a8a3; line-height: 1.7; margin-bottom: 16px; }
+  .nav { font-size: 13px; color: #868e88; margin-bottom: 48px; }
+  .nav a { color: #868e88; text-decoration: none; margin-right: 16px; }
+  .nav a:hover { color: #a0a8a3; }
   .code { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
   .code pre { font-size: 13px; color: #a8ff78; line-height: 1.7; }
-  .comment { color: #555; }
+  .comment { color: #868e88; }
   .inline { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #a8ff78; }
   hr { border: none; border-top: 1px solid #1a1a1a; margin: 40px 0; }
   .cta { display: inline-block; background: #fff; color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
   .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid #1a1a1a; }
-  .also p { font-size: 13px; color: #555; margin-bottom: 8px; }
+  .also p { font-size: 13px; color: #868e88; margin-bottom: 8px; }
   .also a { color: #a8ff78; text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
-  .badge { display: inline-block; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: #555; margin-right: 6px; margin-bottom: 12px; }
+  .badge { display: inline-block; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: #868e88; margin-right: 6px; margin-bottom: 12px; }
 `
 
 function page(title: string, description: string, body: string) {
@@ -29,6 +31,8 @@ function page(title: string, description: string, body: string) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>${title} · AgentBill</title>
   <meta name="description" content="${description}">
   <style>${CSS}</style>

@@ -91,7 +91,7 @@ except BudgetExhaustedError as e:
 
 ### 4. Watch your dashboard
 
-Open `https://your-instance/dashboard` to see every customer's credit usage in real time:
+Open `https://agentbill.dev/app` and paste your API key to see live task budgets, every refusal, and each customer's credit usage:
 
 - Credit usage bar (turns red at 80%)
 - Remaining credits

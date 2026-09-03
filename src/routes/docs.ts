@@ -8,6 +8,8 @@ export async function docsRoute(app: FastifyInstance) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>AgentBill Docs · Preflight Billing for AI Agents</title>
   <meta name="description" content="AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer." />
   <link rel="canonical" href="https://agentbill.dev/docs" />
@@ -21,24 +23,26 @@ export async function docsRoute(app: FastifyInstance) {
   <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; color: #e5e5e5; font-family: 'Courier New', monospace; }
+    body { background: #0a0a0a; color: #e8ebe9; font-family: 'Inter', system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
     .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
+    h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
     h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 8px; }
     h2 { font-size: 18px; font-weight: 700; color: #fff; margin: 48px 0 16px; }
-    h3 { font-size: 14px; font-weight: 700; color: #888; margin: 32px 0 8px; text-transform: uppercase; letter-spacing: 1px; }
-    p { font-size: 15px; color: #aaa; line-height: 1.7; margin-bottom: 16px; }
-    .nav { font-size: 13px; color: #555; margin-bottom: 48px; }
-    .nav a { color: #555; text-decoration: none; margin-right: 16px; }
-    .nav a:hover { color: #aaa; }
+    h3 { font-size: 14px; font-weight: 700; color: #a0a8a3; margin: 32px 0 8px; text-transform: uppercase; letter-spacing: 1px; }
+    p { font-size: 15px; color: #a0a8a3; line-height: 1.7; margin-bottom: 16px; }
+    .nav { font-size: 13px; color: #868e88; margin-bottom: 48px; }
+    .nav a { color: #868e88; text-decoration: none; margin-right: 16px; }
+    .nav a:hover { color: #a0a8a3; }
     .code { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
     .code pre { font-size: 13px; color: #a8ff78; line-height: 1.7; }
-    .comment { color: #555; }
+    .comment { color: #868e88; }
     .inline { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #a8ff78; }
     table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
-    th { text-align: left; color: #555; font-weight: normal; padding: 8px 12px; border-bottom: 1px solid #1a1a1a; }
-    td { padding: 10px 12px; border-bottom: 1px solid #111; color: #aaa; vertical-align: top; }
+    th { text-align: left; color: #868e88; font-weight: normal; padding: 8px 12px; border-bottom: 1px solid #1a1a1a; }
+    td { padding: 10px 12px; border-bottom: 1px solid #111; color: #a0a8a3; vertical-align: top; }
     td:first-child { color: #a8ff78; white-space: nowrap; }
-    .tag { display: inline-block; background: #1a1a1a; color: #555; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+    .tag { display: inline-block; background: #1a1a1a; color: #868e88; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
     .cta { display: inline-block; background: #fff; color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
     hr { border: none; border-top: 1px solid #1a1a1a; margin: 48px 0; }
   </style>

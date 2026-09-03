@@ -28,44 +28,47 @@ export async function upgradeRoute(app: FastifyInstance) {
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   ${pixelSnippet()}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d0d0d; color: #e2e8f0;
-           min-height: 100vh; padding: 48px 24px; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #0a0a0a; color: #e8ebe9;
+           min-height: 100vh; padding: 48px 24px; -webkit-font-smoothing: antialiased; }
+    h1, .logo, .tier, .price, .cta { font-family: 'JetBrains Mono', ui-monospace, monospace; }
     .wrap { max-width: 1040px; margin: 0 auto; }
-    .logo { color: #a78bfa; font-size: 20px; font-weight: 700; }
-    .tagline { color: #4b5563; font-size: 12px; margin-top: 4px; }
+    .logo { color: #22d3a0; font-size: 20px; font-weight: 700; }
+    .tagline { color: #868e88; font-size: 12px; margin-top: 4px; }
     h1 { font-size: 26px; margin-top: 36px; line-height: 1.35; }
-    .sub { color: #9ca3af; font-size: 14px; margin-top: 10px; max-width: 640px; line-height: 1.6; }
+    .sub { color: #a0a8a3; font-size: 14px; margin-top: 10px; max-width: 640px; line-height: 1.6; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-top: 40px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 28px 24px;
+    .card { background: #111111; border: 1px solid #232323; border-radius: 12px; padding: 28px 24px;
             display: flex; flex-direction: column; }
-    .card.hot { border-color: #7c3aed; position: relative; }
-    .badge { position: absolute; top: -10px; right: 16px; background: #7c3aed; color: #fff;
+    .card.hot { border-color: rgba(34,211,160,.45); position: relative; }
+    .badge { position: absolute; top: -10px; right: 16px; background: #22d3a0; color: #05130e;
              font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 10px;
              text-transform: uppercase; letter-spacing: .06em; }
-    .tier { font-size: 13px; color: #9ca3af; text-transform: uppercase; letter-spacing: .08em; }
+    .tier { font-size: 13px; color: #a0a8a3; text-transform: uppercase; letter-spacing: .08em; }
     .price { font-size: 30px; font-weight: 700; margin-top: 10px; }
-    .price span { font-size: 13px; color: #6b7280; font-weight: 400; }
+    .price span { font-size: 13px; color: #868e88; font-weight: 400; }
     ul { list-style: none; margin: 20px 0 24px; flex: 1; }
-    li { font-size: 12.5px; color: #cbd5e1; line-height: 1.55; padding: 5px 0 5px 18px; position: relative; }
+    li { font-size: 12.5px; color: #a0a8a3; line-height: 1.55; padding: 5px 0 5px 18px; position: relative; }
     li::before { content: '✓'; color: #22d3a0; position: absolute; left: 0; }
-    .cta { display: block; background: #7c3aed; border-radius: 6px; color: #fff; font-family: inherit;
+    .cta { display: block; background: #22d3a0; border-radius: 6px; color: #05130e; font-family: inherit;
            font-size: 13.5px; font-weight: 600; padding: 12px; text-decoration: none; text-align: center; }
-    .cta:hover { background: #6d28d9; }
-    .cta.ghost { background: transparent; border: 1px solid #374151; color: #cbd5e1; }
-    .cta.ghost:hover { border-color: #6b7280; }
-    .note { margin-top: 28px; font-size: 12px; color: #4b5563; line-height: 1.6; }
-    .note a { color: #a78bfa; text-decoration: none; }
-    .havekey { margin-top: 32px; background: #111827; border: 1px solid #1f2937; border-radius: 10px;
+    .cta:hover { filter: brightness(1.08); }
+    .cta.ghost { background: transparent; border: 1px solid #374151; color: #a0a8a3; }
+    .cta.ghost:hover { border-color: #868e88; }
+    .note { margin-top: 28px; font-size: 12px; color: #868e88; line-height: 1.6; }
+    .note a { color: #22d3a0; text-decoration: none; }
+    .havekey { margin-top: 32px; background: #111111; border: 1px solid #232323; border-radius: 10px;
                padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .havekey label { font-size: 13px; color: #9ca3af; }
+    .havekey label { font-size: 13px; color: #a0a8a3; }
     .havekey input { background: #0d0d0d; border: 1px solid #374151; border-radius: 6px; color: #e2e8f0;
                      font-family: inherit; font-size: 13px; padding: 9px 12px; flex: 1; min-width: 220px; }
-    .havekey input:focus { outline: none; border-color: #7c3aed; }
-    .havekey button { background: transparent; border: 1px solid #7c3aed; border-radius: 6px; color: #a78bfa;
+    .havekey input:focus { outline: none; border-color: #22d3a0; }
+    .havekey button { background: transparent; border: 1px solid #22d3a0; border-radius: 6px; color: #22d3a0;
                       font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; cursor: pointer; }
-    .havekey button:hover { background: #7c3aed; color: #fff; }
+    .havekey button:hover { background: #22d3a0; color: #05130e; }
     .havekey .msg { font-size: 12px; color: #22d3a0; width: 100%; display: none; }
   </style>
 </head>

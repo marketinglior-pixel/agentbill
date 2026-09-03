@@ -4,10 +4,12 @@ import { sql } from '../db/index.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { clientIp } from '../lib/client-ip.js'
 
-// /app is the receipt: every call AgentBill refused on this account's behalf,
-// with the literal response the agent received. It is the only browser
-// surface a registered user has, and its first job is the empty state: a
-// one-line curl that gets refused before anything runs.
+// /app is the console: the only browser surface a registered user has. It
+// shows live task budgets burning down, every call AgentBill refused with the
+// literal response the agent received, per-customer balances and key health.
+// Its first job is still the empty state, because almost every account that
+// reaches it has never made a call: a one-line curl that gets refused before
+// anything runs, and ?demo=1 to see the same page with sample data.
 //
 // Auth is a pasted API key exchanged for an HttpOnly cookie bound to the key's
 // id (not the key), signed with a secret derived from ADMIN_SECRET. Revoking
@@ -41,7 +43,11 @@ export async function appRoute(app: FastifyInstance) {
       const q = request.query as Record<string, unknown>
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : ''))
     }
-    return reply.send(await receiptPage(viewer))
+    const q = request.query as Record<string, unknown>
+    const demo = q?.demo === '1'
+    const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
+    const data = demo ? demoConsole() : await loadConsole(viewer.accountId, RANGES[range].days)
+    return reply.send(consolePage(viewer, data, demo, range))
   })
 
   // The canonical-host redirect preserves a trailing slash; without this the
@@ -192,6 +198,197 @@ function allowLogin(ip: string): boolean {
   return true
 }
 
+
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
+
+type Series = { day: string; blocks: number; units: number }
+type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
+type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
+type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
+type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date }
+
+type Console = {
+  blocked: number
+  overruns: number
+  refusedUnits: number
+  lastBlock: Date | null
+  meteredUnits: number
+  prevBlocked: number
+  series: Series[]
+  tasks: TaskRow[]
+  customers: CustomerRow[]
+  keys: KeyRow[]
+  decisions: DecisionRow[]
+  truncated: boolean
+}
+
+const RANGES: Record<string, { days: number; label: string }> = {
+  '7d':  { days: 7,  label: '7 days' },
+  '30d': { days: 30, label: '30 days' },
+  '90d': { days: 90, label: '90 days' },
+}
+const DEFAULT_RANGE = '30d'
+const DAYS = 30
+
+async function loadConsole(accountId: string, days: number): Promise<Console> {
+  const [totals] = await sql`
+    SELECT count(*) FILTER (WHERE blocked)                          AS blocked,
+           count(*) FILTER (WHERE NOT blocked)                      AS overruns,
+           coalesce(sum(estimated_units) FILTER (WHERE blocked), 0) AS refused_units,
+           max(created_at) FILTER (WHERE blocked)                   AS last_block
+    FROM preflight_decisions
+    WHERE account_id = ${accountId}
+  `
+  const [metered] = await sql`
+    SELECT coalesce(sum(units), 0) AS units
+    FROM events
+    WHERE account_id = ${accountId} AND created_at >= date_trunc('month', now())
+  `
+  // Same length of window, immediately before this one. A tile with no
+  // direction is a number; with one it is a signal.
+  const [prev] = await sql`
+    SELECT count(*) FILTER (WHERE blocked) AS blocks,
+           coalesce(sum(estimated_units) FILTER (WHERE blocked), 0) AS units
+    FROM preflight_decisions
+    WHERE account_id = ${accountId}
+      AND created_at >= current_date - ${days * 2 - 1}::int
+      AND created_at <  current_date - ${days - 1}::int
+  `
+  const series = await sql`
+    SELECT to_char(d, 'YYYY-MM-DD') AS day,
+           coalesce(b.blocks, 0)    AS blocks,
+           coalesce(e.units, 0)     AS units
+    FROM generate_series(current_date - ${days - 1}::int, current_date, interval '1 day') d
+    LEFT JOIN (
+      SELECT created_at::date AS day, count(*) AS blocks
+      FROM preflight_decisions
+      WHERE account_id = ${accountId} AND blocked AND created_at >= current_date - ${days - 1}::int
+      GROUP BY 1
+    ) b ON b.day = d::date
+    LEFT JOIN (
+      SELECT created_at::date AS day, sum(units) AS units
+      FROM events
+      WHERE account_id = ${accountId} AND created_at >= current_date - ${days - 1}::int
+      GROUP BY 1
+    ) e ON e.day = d::date
+    ORDER BY d
+  `
+  const tasks = await sql`
+    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
+    FROM task_budgets
+    WHERE account_id = ${accountId}
+    ORDER BY updated_at DESC
+    LIMIT 20
+  `
+  const customers = await sql`
+    SELECT customer_ref, limit_units, used_units, reserved_units
+    FROM customers
+    WHERE account_id = ${accountId}
+    ORDER BY used_units DESC, created_at DESC
+    LIMIT 20
+  `
+  const keys = await sql`
+    SELECT api_key, label, created_at, revoked_at, expires_at, last_seen_ip
+    FROM developer_api_keys
+    WHERE account_id = ${accountId}
+    ORDER BY created_at ASC
+  `
+  const decisions = await sql`
+    SELECT agent_id, task_ref, reason, blocked, estimated_units, ceiling_units,
+           used_units, snapshot::text AS snapshot, created_at
+    FROM preflight_decisions
+    WHERE account_id = ${accountId}
+    ORDER BY created_at DESC, id DESC
+    LIMIT 100
+  `
+  return {
+    blocked: Number(totals?.blocked ?? 0),
+    overruns: Number(totals?.overruns ?? 0),
+    refusedUnits: Number(totals?.refusedUnits ?? 0),
+    lastBlock: (totals?.lastBlock as Date | null) ?? null,
+    meteredUnits: Number(metered?.units ?? 0),
+    prevBlocked: Number(prev?.blocks ?? 0),
+    series: series as unknown as Series[],
+    tasks: tasks as unknown as TaskRow[],
+    customers: customers as unknown as CustomerRow[],
+    keys: keys as unknown as KeyRow[],
+    decisions: decisions as unknown as DecisionRow[],
+    truncated: decisions.length === 100,
+  }
+}
+
+// Sample data for ?demo=1. Every surface that renders it is labelled, so a
+// screenshot of this page carries the label with it. It is never mixed with
+// real rows: demo mode replaces the account's data wholesale, it does not
+// pad it.
+function demoConsole(): Console {
+  const day = (back: number) => new Date(Date.now() - back * 86_400_000)
+  const iso = (back: number) => day(back).toISOString().slice(0, 10)
+  const shape = [0,0,3,1,0,6,4,2,9,5,3,12,7,4,18,11,6,9,14,8,21,13,7,16,24,12,9,19,15,11]
+  const series: Series[] = shape.map((n, i) => ({
+    day: iso(shape.length - 1 - i),
+    // ~13% of calls refused. High enough to be worth paying for, low enough
+    // to be a real account rather than a broken one.
+    blocks: n < 4 ? 0 : Math.round(n * 0.13),
+    units: n * 40,
+  }))
+  const blockedTotal = series.reduce((a, x) => a + x.blocks, 0)
+  const meteredTotal = series.reduce((a, x) => a + x.units, 0)
+  const mk = (back: number, mins: number, agent: string, task: string | null, reason: string,
+              blocked: boolean, est: number | null, ceil: number | null, used: number | null,
+              snapshot: object): DecisionRow => ({
+    agentId: agent, taskRef: task, reason, blocked,
+    estimatedUnits: est, ceilingUnits: ceil, usedUnits: used,
+    snapshot: JSON.stringify(snapshot),
+    createdAt: new Date(Date.now() - back * 86_400_000 - mins * 60_000),
+  })
+  return {
+    blocked: blockedTotal,
+    overruns: 2,
+    // Average ask on a refused call, times the number refused.
+    refusedUnits: blockedTotal * 173,
+    lastBlock: new Date(Date.now() - 22 * 60_000),
+    meteredUnits: meteredTotal,
+    // The equivalent window immediately before this one.
+    prevBlocked: Math.round(blockedTotal * 0.78),
+    series,
+    tasks: [
+      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
+      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
+      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
+      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
+      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1000, reservedUnits: 0, updatedAt: day(2) },
+    ],
+    customers: [
+      { customerRef: 'cust_acme',     limitUnits: 5000, usedUnits: 4820, reservedUnits: 0 },
+      { customerRef: 'cust_globex',   limitUnits: 5000, usedUnits: 2140, reservedUnits: 30 },
+      { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
+      { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
+    ],
+    keys: [
+      { apiKey: 'agb_demo0000000000000000000000000000000000000000ab', label: 'production', createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
+      { apiKey: 'agb_demo1111111111111111111111111111111111111111cd', label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
+    ],
+    decisions: [
+      mk(0, 22, 'researcher', 'job-8871', 'task_ceiling_exceeded', true, 40, 500, 492,
+        { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'job-8871' blocked: 492/500 units used, 8 remaining is not enough for this call.", task_ref: 'job-8871', task_remaining_units: 8 }),
+      mk(0, 74, 'crawler', 'nightly-crawl', 'task_ceiling_exceeded', true, 200, 2000, 1840,
+        { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'nightly-crawl' blocked: 1840/2000 units used, 160 remaining is not enough for this call.", task_ref: 'nightly-crawl', task_remaining_units: 160 }),
+      mk(0, 190, 'enricher', 'batch-2211', 'task_ceiling_exceeded', true, 25, 1000, 1000,
+        { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'batch-2211' blocked: 1000/1000 units used, 0 remaining is not enough for this call.", task_ref: 'batch-2211', task_remaining_units: 0 }),
+      mk(1, 30, 'summarizer', null, 'ceiling_exceeded', true, 120, 50, null,
+        { approved: false, reason: 'ceiling_exceeded', message: 'Estimated 120 units exceeds the per-request ceiling of 50.' }),
+      mk(1, 410, 'researcher', 'job-8864', 'budget_exhausted', true, 60, null, 1000,
+        { approved: false, reason: 'budget_exhausted', message: 'Customer cust_initech has 0 units remaining.' }),
+      mk(2, 95, 'crawler', 'nightly-crawl', 'task_overrun_recorded', false, 310, 2000, 2150,
+        { recorded: true, task_ref: 'nightly-crawl', task_used_units: 2150, task_remaining_units: 0, note: 'recorded past the ceiling: preflight was skipped for this call' }),
+    ],
+    truncated: false,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HTML
 // ---------------------------------------------------------------------------
@@ -204,10 +401,21 @@ function esc(v: unknown): string {
 function rel(iso: string | Date | null): string {
   if (!iso) return '<span class="none">never</span>'
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)
+  if (mins < 0) return 'in ' + relFuture(-mins)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
   if (mins < 2880) return `${Math.round(mins / 60)}h ago`
   return `${Math.round(mins / 1440)}d ago`
+}
+
+function relFuture(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  if (mins < 2880) return `${Math.round(mins / 60)}h`
+  return `${Math.round(mins / 1440)}d`
+}
+
+function num(n: number): string {
+  return n.toLocaleString('en-US')
 }
 
 const REASON_LABEL: Record<string, string> = {
@@ -222,14 +430,14 @@ const REASON_LABEL: Record<string, string> = {
 const CSS = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root { --bg: #0a0a0a; --surface: #111111; --surface2: #161616; --border: #232323;
-          --text: #e8ebe9; --muted: #a0a8a3; --dim: #6b736e; --green: #22d3a0;
+          --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88; --green: #22d3a0;
           --code: #a8ff78; --red: #ff5757; --amber: #f5b942; }
   body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
          font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
-  .mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; }
   a { color: var(--green); }
   nav { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
-        justify-content: space-between; padding: 0 24px; }
+        justify-content: space-between; padding: 0 24px; gap: 16px; }
   .logo { display: flex; align-items: center; gap: 9px; font-family: 'JetBrains Mono', monospace;
           font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
   .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; }
@@ -237,28 +445,127 @@ const CSS = `
          font-size: 12px; color: var(--dim); }
   .who b { color: var(--muted); font-weight: 500; }
   .btn-out { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
-             padding: 6px 11px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+             padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+             min-height: 34px; }
   .btn-out:hover { color: var(--text); border-color: var(--dim); }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 36px 24px 80px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
   h1 { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
        letter-spacing: -.02em; margin-bottom: 6px; }
-  .sub { color: var(--muted); max-width: 66ch; margin-bottom: 8px; }
-  .quota { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim);
-           margin-bottom: 28px; font-variant-numeric: tabular-nums; }
-  .quota b { color: var(--muted); font-weight: 500; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;
+  .sub { color: var(--muted); max-width: 70ch; margin-bottom: 20px; }
+
+  /* section bar */
+  .jump { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 26px;
+          border-bottom: 1px solid var(--border); }
+  .jump a { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim);
+            text-decoration: none; padding: 11px 14px; border-bottom: 2px solid transparent;
+            margin-bottom: -1px; white-space: nowrap; }
+  .jump a:hover { color: var(--text); border-bottom-color: var(--border); }
+  .jump a.on { color: var(--text); border-bottom-color: var(--green); }
+  .jump .spacer { flex: 1 1 auto; }
+
+  .rangebar { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+              flex-wrap: wrap; margin: 14px 0 12px; }
+  .rangenote { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--dim); }
+
+  /* segmented range control */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px;
+         overflow: hidden; background: var(--surface); }
+  .seg a { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--dim);
+           text-decoration: none; padding: 6px 12px; border-right: 1px solid var(--border);
+           white-space: nowrap; }
+  .seg a:last-child { border-right: none; }
+  .seg a:hover { color: var(--text); background: var(--surface2); }
+  .seg a.on { color: #05130e; background: var(--green); font-weight: 700; }
+
+  /* delta */
+  .dl { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 5px;
+        line-height: 1.45; }
+  .dl.up { color: var(--green); } .dl.down { color: var(--amber); } .dl.flat { color: var(--dim); }
+
+  /* status dot */
+  .dotm { width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+          margin-right: 7px; vertical-align: 1px; }
+
+  /* quota */
+  .quota { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+           padding: 16px 18px; margin-bottom: 14px; }
+  .quota-top { display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+               flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+               color: var(--dim); font-variant-numeric: tabular-nums; }
+  .quota-top b { color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .meter { height: 8px; background: #1c1c1c; border-radius: 999px; margin-top: 12px; overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 999px; background: var(--green); }
+  .meter i.warn { background: var(--amber); } .meter i.hot { background: var(--red); }
+
+  /* tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px;
            margin-bottom: 10px; }
-  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; }
   .tl { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .12em;
         text-transform: uppercase; color: var(--dim); }
   .tv { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; margin-top: 6px;
-        font-variant-numeric: tabular-nums; }
-  .tv.green { color: var(--green); } .tv.amber { color: var(--amber); } .tv.dim { color: var(--muted); font-size: 18px; margin-top: 12px; }
-  .honest { font-size: 12.5px; color: var(--dim); margin-bottom: 8px; max-width: 80ch; }
+        font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .tv.green { color: var(--green); } .tv.amber { color: var(--amber); }
+  .tv.dim { color: var(--muted); font-size: 17px; margin-top: 13px; }
+  .tf { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 4px; }
+  .honest { font-size: 12.5px; color: var(--dim); margin-bottom: 8px; max-width: 86ch; line-height: 1.6; }
+
   h2 { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em;
-       text-transform: uppercase; color: var(--dim); margin: 36px 0 12px; padding-bottom: 8px;
-       border-bottom: 1px solid var(--border); }
-  .tw { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+       text-transform: uppercase; color: var(--muted); margin: 40px 0 6px; padding-bottom: 8px;
+       border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;
+       align-items: baseline; gap: 12px; }
+  h2 span { color: var(--dim); font-weight: 400; letter-spacing: .04em; text-transform: none; font-size: 11.5px; }
+  .lede { font-size: 13px; color: var(--dim); margin: 10px 0 14px; max-width: 82ch; line-height: 1.6; }
+
+  /* chart */
+  .chart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .plot { position: relative; padding-left: 46px; }
+  .grid { position: absolute; inset: 0 0 0 46px; display: flex; flex-direction: column;
+          justify-content: space-between; pointer-events: none; }
+  .grid span { border-top: 1px dashed #1e1e1e; height: 0; }
+  .ylab { position: absolute; left: 0; top: -7px; width: 40px; text-align: right;
+          font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim);
+          font-variant-numeric: tabular-nums; }
+  .ylab.mid { top: calc(50% - 7px); } .ylab.low { top: auto; bottom: -7px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 148px; position: relative; }
+  .col { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end;
+         height: 100%; min-width: 0; border-radius: 3px 3px 0 0; overflow: hidden; }
+  .col i { display: block; width: 100%; }
+  .col i.ok { background: #1d7a5f; }
+  .col i.bl { background: var(--red); }
+  .col i.zero { background: #1a1a1a; height: 2px; }
+  .xaxis { display: flex; justify-content: space-between; margin: 9px 0 0 46px;
+           font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--dim); }
+  .legend { display: flex; gap: 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; color: var(--dim); flex-wrap: wrap; }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .sw.ok { background: #1d7a5f; } .sw.bl { background: var(--red); }
+
+  /* burn-down rows */
+  .burn { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .brow { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .brow:last-child { border-bottom: none; }
+  .bhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+           flex-wrap: wrap; margin-bottom: 9px; }
+  .btask { font-family: 'JetBrains Mono', monospace; font-size: 13.5px; color: var(--text);
+           overflow: hidden; text-overflow: ellipsis; }
+  .bagent { color: var(--dim); font-size: 12px; }
+  .bnum { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted);
+          font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bnum b { color: var(--text); font-weight: 700; }
+  .track { height: 10px; background: #1c1c1c; border-radius: 999px; overflow: hidden; display: flex; }
+  .track i { display: block; height: 100%; }
+  .track i.used { background: var(--green); }
+  .track i.used.warn { background: var(--amber); }
+  .track i.used.hot { background: var(--red); }
+  .track i.res { background: #3d4a44; }
+  .bfoot { margin-top: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim);
+           display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  /* tables */
+  .tw { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+        -webkit-overflow-scrolling: touch; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th { text-align: left; padding: 10px 14px; color: var(--dim); font-weight: 500; font-size: 11px;
        text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border);
@@ -266,42 +573,69 @@ const CSS = `
   td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
   td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.id { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; max-width: 280px;
+  td.id { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; max-width: 260px;
           overflow: hidden; text-overflow: ellipsis; }
   .chip { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 700;
           letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
   .chip.block { background: #2a1212; color: #ff8a80; border: 1px solid #4a1d1d; }
   .chip.leak  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
+  .chip.ok    { background: #0e2a20; color: var(--green); border: 1px solid #1b4a3a; }
+  .chip.warn  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
+  .chip.dead  { background: #1c1c1c; color: var(--dim); border: 1px solid #2c2c2c; }
+  .minibar { height: 6px; width: 92px; background: #1c1c1c; border-radius: 999px; overflow: hidden;
+             display: inline-block; vertical-align: middle; margin-right: 9px; }
+  .minibar i { display: block; height: 100%; background: var(--green); }
+  .minibar i.warn { background: var(--amber); } .minibar i.hot { background: var(--red); }
   .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); font-style: italic; }
   details summary { cursor: pointer; color: var(--green); font-family: 'JetBrains Mono', monospace;
-                    font-size: 12px; list-style: none; }
+                    font-size: 12px; list-style: none; padding: 4px 0; }
   details summary::-webkit-details-marker { display: none; }
-  details summary::before { content: '▸ '; } details[open] summary::before { content: '▾ '; }
+  details summary::before { content: '\\25B8  '; } details[open] summary::before { content: '\\25BE  '; }
   pre { background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
         font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.55; overflow-x: auto;
         color: var(--code); margin-top: 10px; }
-  .empty { background: var(--surface); border: 1px dashed #333; border-radius: 12px; padding: 28px; margin-top: 18px; }
+
+  /* empty + banners */
+  .empty { background: var(--surface); border: 1px dashed #333; border-radius: 12px; padding: 26px; margin-top: 16px; }
   .empty h3 { font-family: 'JetBrains Mono', monospace; font-size: 16px; margin-bottom: 8px; }
-  .empty p { color: var(--muted); margin-bottom: 14px; max-width: 66ch; }
+  .empty p { color: var(--muted); margin-bottom: 14px; max-width: 70ch; }
   .empty pre { margin: 0 0 14px; white-space: pre-wrap; word-break: break-all; }
   .empty details { margin-top: 6px; }
-  .foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--dim); font-size: 13px; }
+  .banner { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+            background: #2b220e; border: 1px solid #4a3a12; border-radius: 10px;
+            padding: 12px 16px; margin-bottom: 18px; }
+  .banner b { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em;
+              text-transform: uppercase; color: var(--amber); }
+  .banner p { font-size: 13px; color: #e0cfa0; margin: 0; }
+  .banner a { color: var(--amber); }
+  .nothing { padding: 22px 18px; color: var(--dim); font-size: 13.5px; }
+  .foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--dim);
+          font-size: 13px; line-height: 1.7; }
   .foot code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
+
+  /* login */
   .login { max-width: 460px; margin: 80px auto; background: var(--surface); border: 1px solid var(--border);
            border-radius: 12px; padding: 32px; }
   .login p { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
   label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em;
           text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
   input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-          padding: 11px 12px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px;
-          margin-bottom: 14px; outline: none; }
+          padding: 12px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px;
+          margin-bottom: 14px; outline: none; min-height: 46px; }
   input:focus { border-color: var(--green); }
   .btn { width: 100%; background: var(--green); color: #05130e; border: none; border-radius: 6px;
-         padding: 12px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+         padding: 13px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; min-height: 46px; }
   .btn:hover { filter: brightness(1.08); }
   .err { color: var(--red); font-size: 13px; margin-bottom: 12px; }
   .fine { font-size: 12.5px; color: var(--dim); margin-top: 16px; }
-  @media (max-width: 640px) { nav { padding: 0 16px; } .wrap { padding: 24px 16px 60px; } .who span.email, .who .dim { display: none; } }
+  a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--green); outline-offset: 2px; }
+
+  @media (max-width: 720px) {
+    nav { padding: 0 16px; } .wrap { padding: 22px 16px 60px; }
+    .who span.email { display: none; }
+    .bars { height: 112px; }
+  }
 `
 
 const HEAD = (title: string) => `<!DOCTYPE html>
@@ -325,17 +659,17 @@ const ERRORS: Record<string, string> = {
 }
 
 function loginPage(err: string): string {
-  return `${HEAD('Your receipt')}
+  return `${HEAD('Console')}
 <body>
   <nav><a class="logo" href="/"><span class="dot"></span>AgentBill</a></nav>
   <div class="login">
-    <h1 style="font-size:22px">Your receipt</h1>
-    <p>Every call AgentBill refused on your behalf, with the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
+    <h1 style="font-size:22px">Your console</h1>
+    <p>Live task budgets, every call AgentBill refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
     ${Object.hasOwn(ERRORS, err) ? `<p class="err">${esc(ERRORS[err])}</p>` : ''}
     <form method="POST" action="/app/session" autocomplete="off">
       <label for="api_key">API key</label>
       <input id="api_key" name="api_key" type="password" placeholder="agb_..." autofocus required />
-      <button class="btn" type="submit">Open receipt &rarr;</button>
+      <button class="btn" type="submit">Open console &rarr;</button>
     </form>
     <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and dies with the key. This page loads no third-party scripts.</p>
   </div>
@@ -343,54 +677,183 @@ function loginPage(err: string): string {
 </html>`
 }
 
-async function receiptPage(v: Viewer): Promise<string> {
-  const [t] = await sql`
-    SELECT count(*) FILTER (WHERE blocked)                             AS blocked,
-           count(*) FILTER (WHERE NOT blocked)                         AS overruns,
-           coalesce(sum(estimated_units) FILTER (WHERE blocked), 0)    AS refused_units,
-           max(created_at) FILTER (WHERE blocked)                      AS last_block,
-           count(DISTINCT agent_id)                                    AS agents
-    FROM preflight_decisions
-    WHERE account_id = ${v.accountId}
-  `
-  const rows = await sql`
-    SELECT agent_id, customer_ref, task_ref, reason, source, blocked,
-           estimated_units, ceiling_units, used_units, snapshot::text AS snapshot, created_at
-    FROM preflight_decisions
-    WHERE account_id = ${v.accountId}
-    ORDER BY created_at DESC, id DESC
-    LIMIT 100
-  `
-  const agents = await sql`
-    SELECT coalesce(agent_id, '') AS agent_id,
-           count(*) FILTER (WHERE blocked)     AS blocked,
-           count(*) FILTER (WHERE NOT blocked) AS overruns,
-           max(created_at)                     AS last_seen
-    FROM preflight_decisions
-    WHERE account_id = ${v.accountId}
-    GROUP BY 1
-    ORDER BY 2 DESC, 4 DESC
-    LIMIT 50
-  `
+// ---------------------------------------------------------------------------
+// Fragments
+// ---------------------------------------------------------------------------
 
-  const blocked = Number(t?.blocked ?? 0)
-  const overruns = Number(t?.overruns ?? 0)
-  const refused = Number(t?.refusedUnits ?? 0)
+// A count with no direction is trivia. Against the same window immediately
+// before it, it is a signal. "New" is the honest word when there is no prior
+// period to compare against, rather than a fake +100%.
+function delta(now: number, prev: number, label: string): string {
+  const short = label.replace(' days', 'd').replace(' day', 'd')
+  if (now === 0 && prev === 0) return `<div class="tf">none in ${esc(short)}</div>`
+  if (prev === 0) return `<div class="dl up" title="No blocks in the previous ${esc(label)}">&uarr; first ${esc(short)} with blocks</div>`
+  const pct = Math.round(((now - prev) / prev) * 100)
+  if (pct === 0) return `<div class="dl flat" title="Same as the previous ${esc(label)}">&rarr; flat vs prior ${esc(short)}</div>`
+  const cls = pct > 0 ? 'up' : 'down'
+  const arrow = pct > 0 ? '&uarr;' : '&darr;'
+  return `<div class="dl ${cls}" title="Against the ${esc(label)} immediately before this window">${arrow} ${Math.abs(pct)}% vs prior ${esc(short)}</div>`
+}
+
+function quotaBlock(v: Viewer): string {
   const limit = v.plan === 'paid' ? null : PLAN_LIMITS[v.plan] ?? PLAN_LIMITS.free
-  const quota = limit === null
-    ? `<b>${esc(v.plan)}</b> · ${v.monthlyCalls.toLocaleString()} calls this month · unlimited`
-    : `<b>${esc(v.plan)}</b> · ${v.monthlyCalls.toLocaleString()} / ${limit.toLocaleString()} calls this month`
-  const keyTail = v.apiKey.slice(0, 8) + '…' + v.apiKey.slice(-4)
+  if (limit === null) {
+    return `<div class="quota"><div class="quota-top"><span><b>${esc(v.plan)}</b></span>
+      <span>${num(v.monthlyCalls)} calls this month · metered, no included cap</span></div></div>`
+  }
+  const pct = Math.min(100, Math.round((v.monthlyCalls / limit) * 100))
+  const cls = pct >= 90 ? 'hot' : pct >= 75 ? 'warn' : ''
+  const upsell = pct >= 75
+    ? ` · <a href="/pricing?account_id=${encodeURIComponent(v.accountId)}">raise the ceiling</a>`
+    : ''
+  return `<div class="quota">
+    <div class="quota-top">
+      <span><b>${esc(v.plan)}</b> plan</span>
+      <span>${num(v.monthlyCalls)} / ${num(limit)} calls this month · ${pct}%${upsell}</span>
+    </div>
+    <div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>
+  </div>`
+}
 
-  const empty = rows.length === 0
-  const curlBlock = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"first-run","estimated_units":5,"ceiling":1}'`
-  const curlTask1 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","task_ceiling":5,"estimated_units":3}'`
-  const curlTask2 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","estimated_units":3}'`
+// 30-day column chart. Approved metered units and blocks stack in one column
+// so the two sit on the same axis: the green is what ran, the red is what did
+// not. Pure CSS, no script, because this page renders a live API key and runs
+// under default-src 'none'.
+function chartBlock(series: Series[]): string {
+  const unitMax = Math.max(1, ...series.map((s) => Number(s.units)))
+  const blockMax = Math.max(1, ...series.map((s) => Number(s.blocks)))
+  // Blocks are rarer than units by orders of magnitude; give them their own
+  // scale capped at 45% of the column so a single block is still visible.
+  const cols = series.map((s) => {
+    const units = Number(s.units)
+    const blocks = Number(s.blocks)
+    const uh = units > 0 ? Math.max(3, Math.round((units / unitMax) * 55)) : 0
+    const bh = blocks > 0 ? Math.max(3, Math.round((blocks / blockMax) * 32)) : 0
+    const label = `${s.day}: ${num(units)} units metered, ${num(blocks)} blocked`
+    const inner = uh + bh === 0
+      ? '<i class="zero"></i>'
+      : `${bh ? `<i class="bl" style="height:${bh}%"></i>` : ''}${uh ? `<i class="ok" style="height:${uh}%"></i>` : ''}`
+    return `<div class="col" title="${esc(label)}">${inner}</div>`
+  }).join('')
+  const first = series[0]?.day ?? ''
+  const last = series[series.length - 1]?.day ?? ''
+  const mid = series[Math.floor(series.length / 2)]?.day ?? ''
+  return `<div class="chart">
+    <div class="plot">
+      <div class="grid"><span></span><span></span><span></span></div>
+      <div class="ylab">${num(unitMax)}</div>
+      <div class="ylab mid">${num(Math.round(unitMax / 2))}</div>
+      <div class="ylab low">0</div>
+      <div class="bars">${cols}</div>
+    </div>
+    <div class="xaxis"><span>${esc(first)}</span><span>${esc(mid)}</span><span>${esc(last)}</span></div>
+    <div class="legend">
+      <span><i class="sw ok"></i> units metered</span>
+      <span><i class="sw bl"></i> calls blocked, on their own scale</span>
+      <span class="dim">hover a column for that day</span>
+    </div>
+  </div>`
+}
 
-  const decisionRows = rows.map((r: any) => {
+function tasksBlock(tasks: TaskRow[]): string {
+  if (tasks.length === 0) {
+    return `<div class="burn"><p class="nothing">No task budgets yet. Pass <code class="mono">task_ref</code> and <code class="mono">task_ceiling</code> on a preflight call and the job shows up here, burning down live.</p></div>`
+  }
+  const rows = tasks.map((t) => {
+    const ceiling = Number(t.ceilingUnits)
+    const used = Number(t.usedUnits)
+    const reserved = Number(t.reservedUnits)
+    const remaining = Math.max(0, ceiling - used - reserved)
+    const usedPct = Math.min(100, (used / ceiling) * 100)
+    const resPct = Math.min(100 - usedPct, (reserved / ceiling) * 100)
+    const ratio = (used + reserved) / ceiling
+    const cls = ratio >= 1 ? 'hot' : ratio >= 0.8 ? 'warn' : ''
+    const state = used >= ceiling
+      ? '<span class="chip block">ceiling hit</span>'
+      : ratio >= 0.8 ? '<span class="chip warn">close</span>' : '<span class="chip ok">running</span>'
+    return `<div class="brow">
+      <div class="bhead">
+        <div class="btask">${esc(t.taskRef)} <span class="bagent">· ${esc(t.agentId)}</span></div>
+        <div class="bnum"><b>${num(used)}</b> / ${num(ceiling)} units ${state}</div>
+      </div>
+      <div class="track">
+        <i class="used ${cls}" style="width:${usedPct.toFixed(1)}%"></i>
+        <i class="res" style="width:${resPct.toFixed(1)}%"></i>
+      </div>
+      <div class="bfoot">
+        <span>${num(remaining)} left${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}</span>
+        <span>${rel(t.updatedAt)}</span>
+      </div>
+    </div>`
+  }).join('')
+  return `<div class="burn">${rows}</div>`
+}
+
+function customersBlock(rows: CustomerRow[]): string {
+  if (rows.length === 0) {
+    return `<div class="tw"><p class="nothing">No customers yet. Pass <code class="mono">customer_id</code> on a preflight or record call and each of your end users gets an independent balance here.</p></div>`
+  }
+  const body = rows.map((c) => {
+    const used = Number(c.usedUnits)
+    const limit = c.limitUnits == null ? null : Number(c.limitUnits)
+    const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
+    const cls = pct >= 100 ? 'hot' : pct >= 80 ? 'warn' : ''
+    const bar = limit
+      ? `<span class="minibar"><i class="${cls}" style="width:${pct}%"></i></span>${pct}%`
+      : '<span class="dim">unlimited</span>'
+    const status = limit && used >= limit
+      ? '<span class="chip block">blocked</span>'
+      : '<span class="chip ok">ok</span>'
+    return `<tr>
+      <td class="id" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
+      <td class="num">${bar}</td>
+      <td class="num">${num(used)}</td>
+      <td class="num">${limit == null ? '<span class="dim">&infin;</span>' : num(limit)}</td>
+      <td class="num">${limit == null ? '<span class="dim">&infin;</span>' : num(Math.max(0, limit - used))}</td>
+      <td>${status}</td>
+    </tr>`
+  }).join('')
+  return `<div class="tw"><table>
+    <thead><tr><th>Customer</th><th>Usage</th><th>Used</th><th>Limit</th><th>Remaining</th><th>Status</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`
+}
+
+function keysBlock(rows: KeyRow[]): string {
+  if (rows.length === 0) return `<div class="tw"><p class="nothing">No keys on this account.</p></div>`
+  const now = Date.now()
+  const body = rows.map((k) => {
+    const mask = k.apiKey.slice(0, 8) + '…' + k.apiKey.slice(-4)
+    const revoked = k.revokedAt ? new Date(k.revokedAt).getTime() : null
+    const expires = k.expiresAt ? new Date(k.expiresAt).getTime() : null
+    let chip = '<span class="chip ok">active</span>'
+    if (revoked !== null && revoked <= now) chip = '<span class="chip dead">revoked</span>'
+    else if (revoked !== null) chip = '<span class="chip warn">rotating</span>'
+    else if (expires !== null && expires <= now) chip = '<span class="chip dead">expired</span>'
+    else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip warn">expiring</span>'
+    return `<tr>
+      <td class="id">${esc(mask)}</td>
+      <td>${k.label ? esc(k.label) : '<span class="none">no label</span>'}</td>
+      <td>${chip}</td>
+      <td class="num dim">${rel(k.createdAt)}</td>
+      <td class="num dim">${k.expiresAt ? rel(k.expiresAt) : '<span class="none">never</span>'}</td>
+      <td class="num dim">${k.lastSeenIp ? esc(k.lastSeenIp) : '<span class="none">unused</span>'}</td>
+    </tr>`
+  }).join('')
+  return `<div class="tw"><table>
+    <thead><tr><th>Key</th><th>Label</th><th>Status</th><th>Created</th><th>Expires</th><th>Last seen from</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`
+}
+
+function decisionsBlock(rows: DecisionRow[], truncated: boolean): string {
+  if (rows.length === 0) {
+    return `<div class="tw"><p class="nothing">Nothing refused yet. Every block AgentBill makes lands here with the literal JSON your agent received.</p></div>`
+  }
+  const body = rows.map((r) => {
     const leak = r.blocked === false
-    const label = REASON_LABEL[r.reason as string] ?? (r.reason as string)
-    let pretty = r.snapshot as string
+    const label = REASON_LABEL[r.reason] ?? r.reason
+    let pretty = r.snapshot
     try { pretty = JSON.stringify(JSON.parse(r.snapshot), null, 2) } catch { /* leave verbatim */ }
     const when = new Date(r.createdAt)
     return `<tr>
@@ -398,21 +861,58 @@ async function receiptPage(v: Viewer): Promise<string> {
       <td><span class="chip ${leak ? 'leak' : 'block'}" title="${esc(r.reason)}">${esc(label)}</span></td>
       <td class="id" title="${esc(r.agentId ?? '')}">${r.agentId ? esc(r.agentId) : '<span class="none">none</span>'}</td>
       <td class="id" title="${esc(r.taskRef ?? '')}">${r.taskRef ? esc(r.taskRef) : '<span class="none">none</span>'}</td>
-      <td class="num">${r.estimatedUnits == null ? '<span class="dim">-</span>' : Number(r.estimatedUnits).toLocaleString()}
-        <span class="dim">/</span> ${r.ceilingUnits == null ? '<span class="dim">-</span>' : Number(r.ceilingUnits).toLocaleString()}
-        <span class="dim">/</span> ${r.usedUnits == null ? '<span class="dim">-</span>' : Number(r.usedUnits).toLocaleString()}</td>
+      <td class="num">${r.estimatedUnits == null ? '<span class="dim">-</span>' : num(Number(r.estimatedUnits))}
+        <span class="dim">/</span> ${r.ceilingUnits == null ? '<span class="dim">-</span>' : num(Number(r.ceilingUnits))}
+        <span class="dim">/</span> ${r.usedUnits == null ? '<span class="dim">-</span>' : num(Number(r.usedUnits))}</td>
       <td><details><summary>response</summary><pre>${esc(pretty)}</pre></details></td>
     </tr>`
   }).join('')
+  return `<div class="tw"><table>
+    <thead><tr><th>When</th><th>Why</th><th>Agent</th><th>Task</th><th>Asked / ceiling / used</th><th>What the agent got</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>
+  ${truncated ? '<p class="honest" style="margin-top:8px">Showing the latest 100. The full list is on <code class="mono">GET /decisions</code>.</p>' : ''}`
+}
 
-  const agentRows = agents.map((a: any) => `<tr>
-      <td class="id" title="${esc(a.agentId ?? '')}">${a.agentId ? esc(a.agentId) : '<span class="none">none</span>'}</td>
-      <td class="num">${Number(a.blocked).toLocaleString()}</td>
-      <td class="num ${Number(a.overruns) > 0 ? '' : 'dim'}">${Number(a.overruns).toLocaleString()}</td>
-      <td class="num dim">${rel(a.lastSeen)}</td>
-    </tr>`).join('')
+// ---------------------------------------------------------------------------
+// Console page
+// ---------------------------------------------------------------------------
 
-  return `${HEAD('Your receipt')}
+function consolePage(v: Viewer, d: Console, demo: boolean, range: string): string {
+  const keyTail = v.apiKey.slice(0, 8) + '…' + v.apiKey.slice(-4)
+  const rangeLabel = RANGES[range]?.label ?? RANGES[DEFAULT_RANGE].label
+  const blockedInRange = d.series.reduce((a, x) => a + Number(x.blocks), 0)
+  const activeTasks = d.tasks.filter((t) => Number(t.usedUnits) < Number(t.ceilingUnits)).length
+  const virgin = !demo && d.decisions.length === 0 && d.tasks.length === 0 &&
+                 d.customers.length === 0 && d.meteredUnits === 0
+
+  const curlBlock = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"first-run","estimated_units":5,"ceiling":1}'`
+  const curlTask1 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","task_ceiling":5,"estimated_units":3}'`
+  const curlTask2 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${v.apiKey}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","estimated_units":3}'`
+
+  const banner = demo
+    ? `<div class="banner">
+        <b>Sample data</b>
+        <p>Nothing on this page is from your account. It shows what the console looks like once your agents are calling preflight. <a href="/app">Back to your real console</a>.</p>
+      </div>`
+    : ''
+
+  const onboarding = virgin ? `
+    <div class="empty">
+      <h3>Nothing here yet, and that is the honest state.</h3>
+      <p>A block only happens when a call is checked first. This one asks for 5 units against a ceiling of 1, so it is refused before anything runs. Paste it in a terminal, then reload this page.</p>
+      <pre>${esc(curlBlock)}</pre>
+      <p>You should get back <span class="mono" style="color:var(--code)">{"approved":false,"reason":"ceiling_exceeded",…}</span> and a first line below.</p>
+      <details>
+        <summary>A real one: a job that dies at 5 units across calls</summary>
+        <p style="margin-top:10px">The first call opens the task with its ceiling and reserves 3. The second asks for 3 more, 3 + 3 &gt; 5, and is refused. The ceiling holds across every call and tool that shares the task_ref.</p>
+        <pre>${esc(curlTask1)}</pre>
+        <pre>${esc(curlTask2)}</pre>
+      </details>
+      <p style="margin:16px 0 0"><a href="/app?demo=1">Show me the console with sample data &rarr;</a></p>
+    </div>` : ''
+
+  return `${HEAD('Console')}
 <body>
   <nav>
     <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
@@ -423,46 +923,57 @@ async function receiptPage(v: Viewer): Promise<string> {
     </div>
   </nav>
   <div class="wrap">
-    <h1>Your receipt</h1>
-    <p class="sub">Every call AgentBill refused on your behalf, newest first, with the exact response your agent got back.</p>
-    <p class="quota">${quota}</p>
+    <h1>Console</h1>
+    <p class="sub">What your agents spent, what they were stopped from spending, and the exact response each blocked call got back.</p>
+    ${banner}
+    <nav class="jump">
+      <a class="on" href="#activity">Activity</a>
+      <a href="#tasks">Task budgets</a>
+      <a href="#refusals">Refusals</a>
+      <a href="#customers">Customers</a>
+      <a href="#keys">API keys</a>
+      <span class="spacer"></span>
+      ${demo ? '<a href="/app">Your data</a>' : '<a href="/app?demo=1">Sample data</a>'}
+    </nav>
+
+    ${quotaBlock(v)}
 
     <div class="tiles">
-      <div class="tile"><div class="tl">Blocked</div><div class="tv green">${blocked.toLocaleString()}</div></div>
-      <div class="tile"><div class="tl">Units refused</div><div class="tv">${refused.toLocaleString()}</div></div>
-      <div class="tile"><div class="tl">Got through</div><div class="tv ${overruns > 0 ? 'amber' : ''}">${overruns.toLocaleString()}</div></div>
-      <div class="tile"><div class="tl">Last block</div><div class="tv dim">${rel(t?.lastBlock ?? null)}</div></div>
+      <div class="tile"><div class="tl">Blocked</div><div class="tv green">${num(blockedInRange)}</div>${delta(blockedInRange, d.prevBlocked, rangeLabel)}</div>
+      <div class="tile"><div class="tl">Units refused</div><div class="tv">${num(d.refusedUnits)}</div><div class="tf">all time</div></div>
+      <div class="tile"><div class="tl">Got through</div><div class="tv ${d.overruns > 0 ? 'amber' : ''}">${num(d.overruns)}</div><div class="tf">all time, should be 0</div></div>
+      <div class="tile"><div class="tl">Metered</div><div class="tv">${num(d.meteredUnits)}</div><div class="tf">units this month</div></div>
+      <div class="tile"><div class="tl">Live tasks</div><div class="tv dim">${num(activeTasks)}</div><div class="tf">under a ceiling now</div></div>
     </div>
     <p class="honest">Units refused is what was asked for and denied. It is not a dollar figure: AgentBill cannot know what a run it stopped would have gone on to cost. "Got through" is spend that landed past a task ceiling anyway, because preflight was skipped or the estimate was low. That number should be zero.</p>
 
-    ${empty ? `
-    <div class="empty">
-      <h3>Nothing on the receipt yet.</h3>
-      <p>A block only happens when a call is checked first. This one asks for 5 units against a ceiling of 1, so it is refused before anything runs. Paste it in a terminal, then refresh this page.</p>
-      <pre>${esc(curlBlock)}</pre>
-      <p>You should get back <span class="mono" style="color:var(--code)">{"approved":false,"reason":"ceiling_exceeded",…}</span> and a first line here.</p>
-      <details>
-        <summary>A real one: a job that dies at 5 units across calls</summary>
-        <p style="margin-top:10px">The first call opens the task with its ceiling and reserves 3. The second asks for 3 more, 3 + 3 &gt; 5, and is refused. The ceiling holds across every call and tool that shares the task_ref.</p>
-        <pre>${esc(curlTask1)}</pre>
-        <pre>${esc(curlTask2)}</pre>
-      </details>
-    </div>` : `
-    <h2>Refusals</h2>
-    <div class="tw"><table>
-      <thead><tr><th>When</th><th>Why</th><th>Agent</th><th>Task</th><th>Asked / ceiling / used</th><th>What the agent got</th></tr></thead>
-      <tbody>${decisionRows}</tbody>
-    </table></div>
-    ${rows.length === 100 ? '<p class="honest" style="margin-top:8px">Showing the latest 100. The full list is on <code class="mono">GET /decisions</code>.</p>' : ''}
+    ${onboarding}
 
-    <h2>By agent</h2>
-    <div class="tw"><table>
-      <thead><tr><th>Agent</th><th>Blocked</th><th>Got through</th><th>Last seen</th></tr></thead>
-      <tbody>${agentRows}</tbody>
-    </table></div>`}
+    <h2 id="activity">Activity <span>units metered against calls blocked</span></h2>
+    <div class="rangebar">
+      <span class="rangenote">Last ${esc(rangeLabel)}</span>
+      <span class="seg">${Object.entries(RANGES).map(([k, r]) =>
+        `<a class="${k === range ? 'on' : ''}" href="/app?${demo ? 'demo=1&amp;' : ''}range=${k}#activity">${esc(r.label)}</a>`).join('')}</span>
+    </div>
+    ${chartBlock(d.series)}
+
+    <h2 id="tasks">Task budgets <span>one job, many calls, one ceiling</span></h2>
+    <p class="lede">Each bar is a live job burning down its ceiling across every call and tool that shares its <code class="mono">task_ref</code>. Green is spent, grey is reserved by a call in flight. When the bar fills, the next call is refused before it runs.</p>
+    ${tasksBlock(d.tasks)}
+
+    <h2 id="refusals">Refusals <span>newest first, with the literal response</span></h2>
+    ${decisionsBlock(d.decisions, d.truncated)}
+
+    <h2 id="customers">Customers <span>independent balance per end user</span></h2>
+    ${customersBlock(d.customers)}
+
+    <h2 id="keys">API keys <span>status, expiry, last address seen</span></h2>
+    ${keysBlock(d.keys)}
 
     <div class="foot">
-      Machine-readable, same data: <code>curl https://agentbill.dev/decisions -H "Authorization: Bearer &lt;your key&gt;"</code>
+      Every number on this page is on the API too.
+      <code>curl https://agentbill.dev/decisions -H "Authorization: Bearer &lt;your key&gt;"</code>
+      for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys.
     </div>
   </div>
 </body>
