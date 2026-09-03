@@ -220,10 +220,6 @@ export async function registerRoute(app: FastifyInstance) {
       <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Multi-tenant out of the box</h4><p>Independent credit balances per customer_id. Zero config.</p></div></li>
       <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Production in 5 minutes</h4><p>One decorator. One env var. That's the integration.</p></div></li>
     </ul>
-    <div class="quote">
-      <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
-      <span>scarlett1908 · r/LangChain</span>
-    </div>
   </div>
 
   <div class="right">

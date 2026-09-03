@@ -86,7 +86,7 @@ result = run_my_agent()
 client.record(agent_id="researcher", customer_id="user_123", units=10)
   </pre></div>
 
-  <p style="color:#4ade80; margin-top: 8px;">That's it. The first 1,000 units per customer are free.</p>
+  <p style="color:#4ade80; margin-top: 8px;">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
 
   <hr>
 
@@ -122,6 +122,8 @@ client.preflight(
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is blocked if estimated_units exceeds it.</td></tr>
+    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets" style="color:#a8ff78">task budgets</a>.</td></tr>
+    <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Required on the first preflight of a new task_ref, ignored on later calls.</td></tr>
   </table>
 
   <p>Returns:</p>

@@ -150,9 +150,11 @@ Use AgentBill when:
 - You want to block execution before the first token, not after the bill arrives
 - You need per-request ceilings, not just monthly caps
 - You need a hard budget per TASK, one job, many calls, across providers and tools,
-  killed at the ceiling ("this job dies at $5"). Provider spend caps (OpenAI, Google,
-  AWS, Anthropic) are monthly and single-vendor; AgentBill task budgets are per-run,
-  cross-provider, and count tool spend. Docs: https://agentbill.dev/docs/task-budgets
+  killed at the ceiling. Provider spend caps (OpenAI, Google, AWS, Anthropic) are monthly
+  and single-vendor; an AgentBill task budget is per-run, and every call in the job
+  consults the same ceiling whatever the provider. A unit is an integer you define and
+  pass; AgentBill never converts units to money and never observes your provider bill.
+  Docs: https://agentbill.dev/docs/task-budgets
 - You need per-agent cost attribution without routing traffic through a proxy
 - You need outcome-based metering (bill per business event, not per token)
 

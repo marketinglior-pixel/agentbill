@@ -10,14 +10,14 @@ export async function homeRoute(app: FastifyInstance) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentBill · Billing Governance for AI Agents</title>
-  <meta name="description" content="Hard budget ceilings for AI agents. Per-task, cross-provider, tool spend included, no proxy. Blocked before the first token. Free tier, API key in 30 seconds." />
+  <meta name="description" content="Hard budget ceilings for AI agents. One ceiling per task that every call consults, in any provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds." />
   <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
   <link rel="canonical" href="https://agentbill.dev/" />
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/" />
   <meta property="og:title" content="AgentBill · Billing Governance for AI Agents" />
-  <meta property="og:description" content="Block runaway agent spend before compute starts. Hard per-task ceilings, cross-provider, tools included. Not a tracker. A guardrail." />
+  <meta property="og:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job. Not a tracker. A guardrail." />
   <meta property="og:site_name" content="AgentBill" />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
   <meta property="og:image:width" content="1200" />
@@ -25,7 +25,7 @@ export async function homeRoute(app: FastifyInstance) {
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="AgentBill · Billing Governance for AI Agents" />
-  <meta name="twitter:description" content="Block runaway agent spend before compute starts. Hard per-task ceilings, cross-provider, tools included." />
+  <meta name="twitter:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job." />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   <!-- Structured data -->
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
@@ -100,13 +100,6 @@ export async function homeRoute(app: FastifyInstance) {
     .out-blocked { color: var(--red); font-weight: 700; }
     .out-dim { color: var(--dim); }
 
-    /* Quotes */
-    .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 64px 0 0; }
-    .quote { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
-    .quote p { font-size: 14.5px; color: var(--muted); line-height: 1.6; }
-    .quote span { display: block; margin-top: 12px; font-family: 'JetBrains Mono', monospace;
-                  font-size: 11.5px; color: var(--dim); }
-
     /* Features */
     section { padding: 72px 0 0; }
     .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
@@ -164,8 +157,9 @@ export async function homeRoute(app: FastifyInstance) {
 
   <header class="hero wrap">
     <h1>Stop runaway AI agents before they start.</h1>
-    <p class="sub">A hard budget ceiling for every agent task. Cross-provider, tool spend included,
-    no proxy in your request path. Blocked before the first token, not after the bill arrives.</p>
+    <p class="sub">One hard ceiling per agent task, and every call in the job consults it, whatever
+    the provider. You pass the number each call is worth. Blocked before the first token, not after
+    the bill arrives.</p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
       <a class="btn-ghost" href="/docs">Read the docs</a>
@@ -189,21 +183,6 @@ client.preflight(agent_id="researcher", task_ref="job-142",
 <span class="out-blocked">TaskCeilingExceededError:</span> <span class="out-dim">Task 'job-142' blocked: 492/500 units used, 8 remaining is not enough for this call.</span></pre>
       </div>
     </div>
-
-    <div class="quotes">
-      <div class="quote">
-        <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
-        <span>scarlett1908, r/LangChain</span>
-      </div>
-      <div class="quote">
-        <p>"Hard spend caps and kill switches need to be table stakes, not edge cases."</p>
-        <span>r/AI_Agents</span>
-      </div>
-      <div class="quote">
-        <p>"Agents fail quietly. By spending your money while you sleep."</p>
-        <span>r/AI_Agents, 268&uarr; thread</span>
-      </div>
-    </div>
   </header>
 
   <section class="wrap">
@@ -212,13 +191,15 @@ client.preflight(agent_id="researcher", task_ref="job-142",
     <div class="features">
       <div class="feature">
         <h3>Per-task ceilings</h3>
-        <p>One job, many calls, one budget. "This task dies at $5." Provider spend caps stop at
-        monthly org totals; your ceiling stops the run that's burning money right now.</p>
+        <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
+        unit is worth. Provider spend caps stop at monthly org totals; your ceiling stops the run
+        that's burning money right now.</p>
       </div>
       <div class="feature">
-        <h3>Cross-provider, tools included</h3>
-        <p>One ceiling across OpenAI, Anthropic, your own GPU, and every tool call in the run.
-        Not per vendor. Per job. With per-agent attribution for every dollar.</p>
+        <h3>One ceiling, any provider</h3>
+        <p>OpenAI, Anthropic, your own GPU, a tool call: anything in the run consults the same task
+        budget, because you decide what each one costs in units. Not per vendor. Per job, with
+        per-agent attribution on every call.</p>
       </div>
       <div class="feature">
         <h3>No proxy in your request path</h3>

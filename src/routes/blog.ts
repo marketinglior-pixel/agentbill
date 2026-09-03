@@ -149,20 +149,19 @@ WHERE account_id = :account_id
 
   <h2>What happens when a run fails</h2>
 
-  <p>If the agent crashes or the caller never calls <span class="inline">record()</span>, the reserved units stay reserved indefinitely. That would permanently lock budget, a leak.</p>
-
-  <p>AgentBill handles this with a reservation expiry. Each reservation carries a timestamp. On the next preflight call for that customer, expired reservations are cleared before the budget check runs:</p>
+  <p>A reservation is released in exactly one place: <span class="inline">record()</span>. Call it with <span class="inline">success=false</span> and the reserved units go back without billing anything.</p>
 
   <div class="code"><pre>
-<span class="comment">-- Clear stale reservations before checking budget</span>
-UPDATE customers
-SET reserved_units = 0
-WHERE account_id = :account_id
-  AND customer_ref = :customer_ref
-  AND reservation_expires_at &lt; NOW()
+<span class="comment"># The run failed. Release the reservation, bill nothing.</span>
+<span class="comment"># units must match what preflight reserved.</span>
+client.record(agent_id="researcher", units=200, success=False)
   </pre></div>
 
-  <p>This means a crashed run releases its reserved budget on the next invocation. The customer isn't permanently locked out because a single run failed to settle.</p>
+  <p>The SDK decorator does this for you: it wraps the call in try/except and releases on the way out of a failed run.</p>
+
+  <p><strong>If <span class="inline">record()</span> never arrives at all, the units stay reserved.</strong> There is no expiry and no background sweeper. A process killed between preflight and record leaves its reservation behind, and that budget stays claimed until someone clears it.</p>
+
+  <p>Note which way this fails. A leaked reservation makes the ceiling <em>tighter</em>, never looser: the run that gets blocked is a later one, not an expensive one that should have been stopped. The gate never opens by accident. But it does close quietly, so if you call preflight directly instead of through the decorator, settle every run, including the ones that fail.</p>
 
   <hr>
 
@@ -238,7 +237,7 @@ record(units=7)
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
   <div class="meta">May 2026 · 5 min read</div>
 
-  <p>A developer on r/SaaS posted this last week: <em>"My AI agent ran overnight. Woke up to this."</em> The screenshot showed a $498 API bill. He had a monthly cap set at $50.</p>
+  <p>An agent starts a task at night. A retry loop gets stuck. By morning the bill is many times the monthly cap that was supposed to prevent exactly this.</p>
 
   <p>The cap didn't fire. The bill did.</p>
 
@@ -248,15 +247,11 @@ record(units=7)
 
   <h2>The timeline of a bad run</h2>
 
-  <p>Here's what happened in that $498 incident, reconstructed from what he described:</p>
+  <p>The shape of the failure is always the same:</p>
 
   <p>11:30pm, agent starts a research task. Fetches a URL. Gets a timeout. Retries. Gets another timeout. The retry logic calls the LLM to decide what to do next. The LLM decides to retry again. This repeats.</p>
 
-  <p>The monthly cap was $50. By midnight he'd burned through it. But the cap check runs on a billing cycle, not on each request. The agent kept running. By 7am it had made 4,800 API calls.</p>
-
-  <blockquote>
-    <p>"The moment you're using Stripe as your safety net, you've already lost the run."</p>
-  </blockquote>
+  <p>The monthly cap is passed somewhere around midnight. But the cap check runs on a billing cycle, not on each request, so nothing stops. The agent keeps looping until someone wakes up and kills it, thousands of calls later.</p>
 
   <p>Monthly caps are accounting tools. They tell you what happened. They don't stop anything from happening.</p>
 
@@ -268,7 +263,7 @@ record(units=7)
 
   <p>This is a fundamental property of post-hoc billing, not a bug you can patch. The cap will always lag behind the actual spend, especially during a loop that fires hundreds of requests per minute.</p>
 
-  <p>A $50/month cap and a $500 bill can coexist. They operate at different time scales.</p>
+  <p>A monthly cap and a bill many times its size can coexist. They operate at different time scales.</p>
 
   <hr>
 
@@ -308,15 +303,15 @@ client.record(agent_id="researcher", units=200)
 
   <hr>
 
-  <h2>The $498 run, replayed with preflight</h2>
+  <h2>The same run, replayed with preflight</h2>
 
   <p>Same agent. Same retry bug. Same overnight run.</p>
 
-  <p>First invocation: preflight checks budget. $2.00 ceiling. Approved, budget exists. Agent runs. Finishes. Cost recorded.</p>
+  <p>First invocation: preflight checks the task budget. Approved, units remain. Agent runs. Finishes. Cost recorded.</p>
 
   <p>Second invocation (the retry loop): preflight checks again. Previous run already consumed the budget for this session. Blocked. Agent never starts.</p>
 
-  <p>Total bill: $2.00. Not $498.</p>
+  <p>The run stops at the ceiling you set, not at whatever the loop reaches by morning.</p>
 
   <p>The retry bug still exists. But it can't compound into a runaway loop when each invocation requires a budget check to proceed.</p>
 

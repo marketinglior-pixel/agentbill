@@ -35,46 +35,84 @@ def preflight(
     customer_id: str = "default",
     estimated_units: int = 1,
     ceiling: Optional[int] = None,
+    task_ref: Optional[str] = None,
+    task_ceiling: Optional[int] = None,
 ) -> dict:
     """
     Check if an agent is allowed to run before starting work.
 
     Call this at the start of every agent invocation. Returns approved=True when
-    the customer has remaining budget. Returns approved=False with a reason when
-    the run should be blocked (budget_exhausted, ceiling_exceeded, free_tier_exceeded).
+    the run has budget. Returns approved=False with a reason when the run should be
+    blocked (budget_exhausted, ceiling_exceeded, free_tier_exceeded,
+    task_ceiling_exceeded).
+
+    A unit is an integer you define and pass. AgentBill reserves the number you send
+    and never converts units to money, so the ceiling is only as tight as your
+    estimate. The common convention is 1 unit = 1 cent.
 
     Args:
         agent_id: Identifier for this agent or task type (e.g. "research_agent").
         customer_id: Your internal customer identifier. Defaults to "default".
-        estimated_units: How many units this run is expected to consume. Used for ceiling check.
+        estimated_units: How many units you expect this run to consume. This is the
+            number reserved against every budget below.
         ceiling: Max units allowed per single run. Run is blocked if estimated_units exceeds this.
+        task_ref: Groups many calls under one cross-call budget, so one job spanning
+            several providers and tools shares a single ceiling. Pass the same
+            task_ref on every call in the job.
+        task_ceiling: Total units the whole task may spend. Required on the first
+            preflight of a new task_ref, ignored on later calls.
     """
     payload: dict = {"agent_id": agent_id, "customer_id": customer_id}
     if estimated_units is not None:
         payload["estimated_units"] = estimated_units
     if ceiling is not None:
         payload["ceiling"] = ceiling
+    if task_ref is not None:
+        payload["task_ref"] = task_ref
+    if task_ceiling is not None:
+        payload["task_ceiling"] = task_ceiling
 
     with httpx.Client(timeout=5) as client:
         resp = client.post(f"{BASE_URL}/preflight", json=payload, headers=_headers())
 
+    # A rejected request carries no "approved" key. Never fall through to the
+    # success path on an error response: a gate that approves when it cannot
+    # reach a verdict is worse than no gate.
+    if resp.status_code == 422:
+        data = resp.json()
+        return {
+            "approved": False,
+            "reason": data.get("error", "validation_error"),
+            "message": data.get("message")
+            or "Preflight was rejected as invalid. The run did not start.",
+        }
+
+    resp.raise_for_status()
     data = resp.json()
 
     if not data.get("approved", True):
         reason = data.get("reason", "unknown")
-        return {
+        blocked = {
             "approved": False,
             "reason": reason,
             "remaining_units": data.get("remaining_units"),
             "upgrade_url": data.get("upgrade_url"),
             "message": _blocked_message(reason, data),
         }
+        if data.get("task_ref"):
+            blocked["task_ref"] = data.get("task_ref")
+            blocked["task_remaining_units"] = data.get("task_remaining_units")
+        return blocked
 
-    return {
+    result = {
         "approved": True,
         "remaining_units": data.get("remaining_units"),
         "estimated_units": data.get("estimated_units"),
     }
+    if data.get("task_ref"):
+        result["task_ref"] = data.get("task_ref")
+        result["task_remaining_units"] = data.get("task_remaining_units")
+    return result
 
 
 @mcp.tool()
@@ -132,6 +170,17 @@ def _blocked_message(reason: str, data: dict) -> str:
         return (
             f"Run blocked: estimated {data.get('estimated_units')} units "
             f"exceeds per-request ceiling of {data.get('ceiling')}."
+        )
+    if reason == "task_ceiling_exceeded":
+        return (
+            f"Run blocked: task {data.get('task_ref')!r} has spent "
+            f"{data.get('task_used_units')}/{data.get('task_ceiling')} units, "
+            f"{data.get('task_remaining_units')} remaining is not enough for this call."
+        )
+    if reason == "task_ceiling_required":
+        return (
+            "Run blocked: this task_ref is unknown. Pass task_ceiling on the first "
+            "preflight of a new task."
         )
     if reason == "budget_exhausted":
         return "Run blocked: customer budget is exhausted."

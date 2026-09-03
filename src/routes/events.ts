@@ -15,9 +15,9 @@ async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, p
   await resend.emails.send({
     from: FROM,
     to: ownerAlertEmail,
-    subject: `AgentBill: customer "${customerRef}" approaching 1000 units (${usedUnits} used)`,
+    subject: `AgentBill: customer "${customerRef}" has used ${usedUnits} units`,
     html: `
-      <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong> and is approaching the 1000 free-tier limit.</p>
+      <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong>, past the ${ALERT_THRESHOLD}-unit alert threshold. This is a usage signal, not the account's plan quota, which is counted in preflight calls per month.</p>
       <p>This is a good time to reach out and convert them to a paying customer.</p>
       <p><a href="https://agentbill.dev/admin">Open the admin radar</a></p>
     `,

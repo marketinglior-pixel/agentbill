@@ -1,6 +1,6 @@
 # agentbill
 
-Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives. Cross-provider, tool spend included, no proxy in your request path.
+Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives. One ceiling per task that every call consults, on units you define, no proxy in your request path.
 
 ```bash
 npm install agentbill

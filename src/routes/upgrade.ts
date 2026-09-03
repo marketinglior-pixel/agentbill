@@ -77,7 +77,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     <div class="logo">AgentBill</div>
     <div class="tagline">Hard budget ceilings for AI agents</div>
 
-    <h1>Your agents get a hard budget.<br>Per task. Cross-provider. Tools included.</h1>
+    <h1>Your agents get a hard budget.<br>Per task. One ceiling, any provider.</h1>
     <p class="sub">Provider spend caps stop at monthly totals for one vendor. AgentBill enforces the number
     that actually matters: what this job is allowed to cost, across every model and tool it touches,
     blocked before the money is spent.</p>
