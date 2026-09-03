@@ -20,7 +20,7 @@ jobs:
       - run: npm run build
 
   python-sdk:
-    name: Python SDK install check
+    name: Python SDK install and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +31,12 @@ jobs:
         run: pip install -e "sdk/python[dev]"
       - name: Verify SDK imports
         run: python -c "from agentbill import AgentBillClient; print('SDK OK')"
+      # These two tests existed since f66dfed and nothing ran them: the job
+      # installed pytest as a dev dep and then only imported the package, so
+      # the repo looked covered and was not.
+      - name: Unit tests
+        working-directory: sdk/python
+        run: python -m pytest tests -q
 
   mcp:
     name: MCP server smoke test
@@ -77,9 +83,15 @@ jobs:
         run: ./scripts/snippets/run.sh repo
 
   snippets-published:
-    # Same samples against what PyPI and npm currently serve. Drift between
-    # the site and the published packages shows up here first. Informative,
-    # not a gate: the repo may legitimately be ahead of a publish.
+    # Same samples against what PyPI and npm actually serve. A GATE since
+    # 2026-09-03, not a warning. It spent three days reporting success while
+    # the live site taught an idempotency_key that no published SDK had,
+    # because continue-on-error paints a failed job green and nobody reads a
+    # green job. A check whose failure is invisible is not a check.
+    #
+    # The contract: main is what the site deploys, so a sample on the site has
+    # to run against the packages a reader can actually install. If a sample
+    # starts using a new SDK feature, publish the SDK before pushing it.
     name: Published code samples run against PyPI and npm
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -94,9 +106,8 @@ jobs:
           python-version: "3.11"
       - run: npm ci
       - run: ./scripts/snippets/run.sh published
-        continue-on-error: true
-        id: published
-      - if: steps.published.outcome == 'failure'
+      - if: failure()
         run: |
-          echo "::warning::published SDK drift: samples fail against PyPI/npm, see the job log"
-          echo "## Published SDK drift: samples fail against what PyPI/npm serve. See the snippets-published log." >> "$GITHUB_STEP_SUMMARY"
+          echo "## Published SDK drift" >> "$GITHUB_STEP_SUMMARY"
+          echo "A published code sample does not run against what PyPI or npm currently serve." >> "$GITHUB_STEP_SUMMARY"
+          echo "Either the sample is wrong, or the SDK it documents has not been published yet." >> "$GITHUB_STEP_SUMMARY"
