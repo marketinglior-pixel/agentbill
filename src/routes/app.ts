@@ -38,14 +38,21 @@ export async function appRoute(app: FastifyInstance) {
     reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer')
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-    const viewer = await loadSession(request)
-    if (!viewer) {
-      const q = request.query as Record<string, unknown>
-      return reply.send(loginPage(typeof q?.err === 'string' ? q.err : ''))
-    }
     const q = request.query as Record<string, unknown>
     const demo = q?.demo === '1'
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
+    const viewer = await loadSession(request)
+
+    // The sample console is the only place a prospect can see what the product
+    // actually produces, so it is public. Without a session it renders against
+    // a stand-in viewer and swaps the account chrome for a signup CTA. This
+    // check must stay ABOVE the login return: it used to sit below it, which
+    // made ?demo=1 reachable only to people who had already signed up.
+    if (!viewer) {
+      if (demo) return reply.send(consolePage(DEMO_VIEWER, demoConsole(), true, range, true))
+      return reply.send(loginPage(typeof q?.err === 'string' ? q.err : ''))
+    }
+
     const data = demo ? demoConsole() : await loadConsole(viewer.accountId, RANGES[range].days)
     return reply.send(consolePage(viewer, data, demo, range))
   })
@@ -319,6 +326,20 @@ async function loadConsole(accountId: string, days: number): Promise<Console> {
   }
 }
 
+// The viewer behind an anonymous ?demo=1. The key is not a real key and never
+// authenticates anything; it only fills the key column of the sample keys
+// table. Calls-this-month sits well under the Builder limit so the quota bar
+// reads as a healthy account rather than one that is out of room.
+const DEMO_VIEWER: Viewer = {
+  keyId: 'demo',
+  apiKey: 'agb_demo0000000000000000000000000000000000000000ab',
+  keyLabel: 'production',
+  accountId: 'demo',
+  email: null,
+  plan: 'builder',
+  monthlyCalls: 12480,
+}
+
 // Sample data for ?demo=1. Every surface that renders it is labelled, so a
 // screenshot of this page carries the label with it. It is never mixed with
 // real rows: demo mode replaces the account's data wholesale, it does not
@@ -448,6 +469,12 @@ const CSS = `
              padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
              min-height: 34px; }
   .btn-out:hover { color: var(--text); border-color: var(--dim); }
+  /* The signed-out sample console's only CTA. Filled, not ghosted: this is the
+     one action a prospect on this page is meant to take. */
+  .btn-key { display: inline-flex; align-items: center; background: var(--green); color: #05130e;
+             border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: 700;
+             text-decoration: none; white-space: nowrap; min-height: 34px; }
+  .btn-key:hover { color: #05130e; filter: brightness(1.08); }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
   h1 { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
        letter-spacing: -.02em; margin-bottom: 6px; }
@@ -878,7 +905,7 @@ function decisionsBlock(rows: DecisionRow[], truncated: boolean): string {
 // Console page
 // ---------------------------------------------------------------------------
 
-function consolePage(v: Viewer, d: Console, demo: boolean, range: string): string {
+function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon = false): string {
   const keyTail = v.apiKey.slice(0, 8) + '…' + v.apiKey.slice(-4)
   const rangeLabel = RANGES[range]?.label ?? RANGES[DEFAULT_RANGE].label
   const blockedInRange = d.series.reduce((a, x) => a + Number(x.blocks), 0)
@@ -893,7 +920,9 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string): strin
   const banner = demo
     ? `<div class="banner">
         <b>Sample data</b>
-        <p>Nothing on this page is from your account. It shows what the console looks like once your agents are calling preflight. <a href="/app">Back to your real console</a>.</p>
+        <p>${anon
+            ? 'Every number here is invented. This is what the console looks like once your agents are calling preflight. <a href="/register">Get an API key</a> and it fills with your own runs.'
+            : 'Nothing on this page is from your account. It shows what the console looks like once your agents are calling preflight. <a href="/app">Back to your real console</a>.'}</p>
       </div>`
     : ''
 
@@ -916,10 +945,12 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string): strin
 <body>
   <nav>
     <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
-    <div class="who">
-      <span class="email">${esc(v.email ?? 'no email')}</span>
+    <div class="who">${anon
+      ? `<span class="dim">Sample console</span>
+      <a class="btn-key" href="/register">Get your API key</a>`
+      : `<span class="email">${esc(v.email ?? 'no email')}</span>
       <span>key <b>${esc(keyTail)}</b>${v.keyLabel ? ` <span class="dim">(${esc(v.keyLabel)})</span>` : ''}</span>
-      <form method="POST" action="/app/logout"><button class="btn-out" type="submit">Sign out</button></form>
+      <form method="POST" action="/app/logout"><button class="btn-out" type="submit">Sign out</button></form>`}
     </div>
   </nav>
   <div class="wrap">
@@ -933,7 +964,9 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string): strin
       <a href="#customers">Customers</a>
       <a href="#keys">API keys</a>
       <span class="spacer"></span>
-      ${demo ? '<a href="/app">Your data</a>' : '<a href="/app?demo=1">Sample data</a>'}
+      ${demo
+        ? (anon ? '<a href="/register">Get your API key &rarr;</a>' : '<a href="/app">Your data</a>')
+        : '<a href="/app?demo=1">Sample data</a>'}
     </nav>
 
     ${quotaBlock(v)}

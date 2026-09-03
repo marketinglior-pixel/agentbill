@@ -36,6 +36,9 @@ export async function homeRoute(app: FastifyInstance) {
     :root {
       --bg: #0a0a0a; --surface: #111111; --surface2: #161616;
       --border: #232323; --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88;
+      /* --border is decorative (1.26:1). Interactive boundaries need 3:1
+         under WCAG 1.4.11, so buttons use --border-strong (3.25:1). */
+      --border-strong: #5c645f;
       --green: #22d3a0; --code: #a8ff78; --red: #ff5757;
     }
     html { scroll-behavior: smooth; }
@@ -44,7 +47,9 @@ export async function homeRoute(app: FastifyInstance) {
            font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
     .mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
     a { color: var(--green); }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+    /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
+       so neither can wipe the other via the padding shorthand. */
+    .wrap { max-width: 960px; margin: 0 auto; padding-inline: 24px; }
 
     /* Nav */
     nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.88); backdrop-filter: blur(14px);
@@ -70,13 +75,13 @@ export async function homeRoute(app: FastifyInstance) {
     }
 
     /* Hero */
-    .hero { padding: 88px 0 40px; }
+    .hero { padding-block: 88px 40px; }
     h1 { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: clamp(30px, 5.4vw, 46px);
          font-weight: 700; color: #ffffff; line-height: 1.22; letter-spacing: -0.5px; max-width: 21ch; }
     .sub { font-size: 18px; color: var(--muted); margin: 22px 0 30px; max-width: 56ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
-    .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border);
+    .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
                  padding: 13px 22px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 15px; }
     .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
     .trust { margin-top: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim); }
@@ -101,7 +106,7 @@ export async function homeRoute(app: FastifyInstance) {
     .out-dim { color: var(--dim); }
 
     /* Features */
-    section { padding: 72px 0 0; }
+    section { padding-block: 72px 0; }
     .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
                letter-spacing: 2px; text-transform: uppercase; color: var(--green); margin-bottom: 14px; }
     h2 { font-family: 'JetBrains Mono', monospace; font-size: 26px; color: #fff; letter-spacing: -0.3px; margin-bottom: 28px; }
@@ -129,7 +134,7 @@ export async function homeRoute(app: FastifyInstance) {
                           font-family: 'JetBrains Mono', monospace; font-weight: 700; }
 
     /* Final CTA + footer */
-    .final { text-align: center; padding: 88px 0; }
+    .final { text-align: center; padding-block: 88px; }
     .final h2 { margin-bottom: 10px; }
     .final p { color: var(--muted); margin-bottom: 26px; }
     footer { border-top: 1px solid var(--border); padding: 28px 0 48px; }
@@ -162,6 +167,7 @@ export async function homeRoute(app: FastifyInstance) {
     the bill arrives.</p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
+      <a class="btn-ghost" href="/app?demo=1">See a live console</a>
       <a class="btn-ghost" href="/docs">Read the docs</a>
     </div>
     <p class="trust"><b>free tier</b> · 1,000 preflight calls/mo · no card · key in 30 seconds</p>
