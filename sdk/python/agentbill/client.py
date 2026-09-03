@@ -74,7 +74,7 @@ class PlanLimitExceededError(Exception):
         super().__init__(f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
 
 class TaskCeilingExceededError(Exception):
-    """The cross-call budget for this task is spent — the job dies here.
+    """The cross-call budget for this task is spent. The job dies here.
 
     Catch this to stop the run cleanly:
 
@@ -326,7 +326,7 @@ class AgentBillClient:
                     return result
                 except Exception:
                     # success=False releases the preflight reservation without
-                    # billing — units must equal what preflight reserved, or the
+                    # billing: units must equal what preflight reserved, or the
                     # reservation leaks and eats the budget forever.
                     self.record(
                         agent_id=agent_id,

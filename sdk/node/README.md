@@ -52,8 +52,9 @@ Check every budget before the call runs. Throws `TaskCeilingExceededError` or `B
 | `ceiling` | number | none | Per-request ceiling: block when `estimatedUnits` exceeds it |
 | `taskRef` | string | none | Cross-call job budget: many calls, one hard ceiling |
 | `taskCeiling` | number | none | Required on the first preflight of a new `taskRef` |
+| `idempotencyKey` | string | none | Same key, same decision, one reservation. Without it a retry reserves a second time |
 
-Returns `{ approved, reason, estimatedUnits, remainingUnits, taskRef?, taskRemainingUnits?, upgradeUrl? }`.
+Returns `{ approved, reason, estimatedUnits, remainingUnits, reservationExpiresAt?, taskRef?, taskRemainingUnits?, upgradeUrl? }`.
 
 ### `record(options)`
 
@@ -126,3 +127,25 @@ try {
 const status = await getTask('job-42')
 console.log(status.usedUnits, '/', status.ceilingUnits)
 ```
+
+## Retries and abandoned runs
+
+A reservation is placed by `preflight` and released by `record`. Two things can go wrong between them, and both are handled explicitly.
+
+**A retried preflight.** Without an idempotency key, retrying a timed-out check reserves the budget a second time, so the mechanism meant to prevent waste is the one consuming it. Pass a key that is stable across retries:
+
+```ts
+import { preflight } from 'agentbill'
+
+await preflight({
+  agentId: 'researcher', estimatedUnits: 12,
+  taskRef: 'job-142', taskCeiling: 500,
+  idempotencyKey: 'job-142:summarize',   // stable across retries
+})
+```
+
+Same key, same decision, one reservation. A retry that lands while the original is still being decided throws with `preflight_in_progress`, which is not a block and reserves nothing: wait a moment and try again.
+
+**A run that never comes back.** If the process dies between `preflight` and `record`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `reservationExpiresAt`.
+
+Note the direction. An abandoned reservation makes the ceiling tighter, never looser. The gate does not open by accident.

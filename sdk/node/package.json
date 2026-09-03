@@ -1,7 +1,7 @@
 {
   "name": "agentbill",
-  "version": "0.2.0",
-  "description": "Usage-based billing for AI agents \u2014 3-line integration with pre-flight budget guardrails",
+  "version": "0.3.0",
+  "description": "Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

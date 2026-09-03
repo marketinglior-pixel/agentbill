@@ -34,7 +34,7 @@ _BASE_URL = os.environ.get("AGENTBILL_BASE_URL", "https://agentbill.fly.dev")
 
 
 # ---------------------------------------------------------------------------
-# Public exceptions — import and handle these in your agent code
+# Public exceptions, import and handle these in your agent code
 # ---------------------------------------------------------------------------
 
 class BudgetExhaustedError(Exception):
@@ -115,7 +115,7 @@ def _build_payload(customer_id: str, event: str, units: int, metadata: dict | No
         "customer_id": customer_id,
         "event_type": event,
         "units": units,
-        # Auto-generated — unique per invocation, safe for retries
+        # Auto-generated, unique per invocation, safe for retries
         "idempotency_key": f"{event}_{uuid.uuid4().hex}",
     }
     if metadata:
@@ -238,12 +238,12 @@ def meter(
 
     Examples::
 
-        # Async agent — reads customer_id from function param
+        # Async agent, reads customer_id from function param
         @meter(event="research_run", customer_id_from="customer_id")
         async def run_agent(customer_id: str, topic: str) -> str:
             ...
 
-        # Sync function — fixed customer
+        # Sync function, fixed customer
         @meter(event="report_generated", customer_id="internal_ops", units=1)
         def generate_report(date: str) -> bytes:
             ...

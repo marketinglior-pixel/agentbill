@@ -1,5 +1,5 @@
 /**
- * agentbill — Node.js SDK
+ * agentbill: the Node.js SDK
  *
  * Usage-based billing for AI agents. 3-line integration.
  *
@@ -38,7 +38,7 @@ export class AgentBillError extends Error {
   }
 }
 
-/** The cross-call budget for this task is spent — the job dies here. */
+/** The cross-call budget for this task is spent. The job dies here. */
 export class TaskCeilingExceededError extends Error {
   readonly taskRef: string
   readonly taskCeiling?: number
@@ -196,11 +196,11 @@ function randomHex(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Public low-level API — preflight / record / getTask
+// Public low-level API: preflight / record / getTask
 // ---------------------------------------------------------------------------
 
 export interface PreflightOptions {
-  /** Agent identifier — used for attribution. */
+  /** Agent identifier, used for attribution. */
   agentId: string
   customerId?: string
   estimatedUnits?: number
@@ -358,7 +358,7 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
  * no event is recorded and the customer is not billed.
  *
  * @example
- * // Basic — reads customer_id from args
+ * // Basic: reads customer_id from args
  * const runAgent = meter(
  *   async ({ customerId, topic }: { customerId: string; topic: string }) => {
  *     const result = await callLLM(topic)

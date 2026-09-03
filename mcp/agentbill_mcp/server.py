@@ -140,7 +140,7 @@ def record_event(
     Record a billable event after agent work is complete.
 
     Call this once per unit of work completed. Safe to call from retried or
-    parallel workflows — duplicate submissions are ignored automatically.
+    parallel workflows, duplicate submissions are ignored automatically.
 
     Args:
         agent_id: Identifier for this agent or task type. Appears in the dashboard.
