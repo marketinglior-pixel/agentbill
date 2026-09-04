@@ -147,6 +147,68 @@ ok('reserved released', c.reservedUnits === 0, `got ${c.reservedUnits}`)
 ok('nothing billed', c.usedUnits === usedBefore, `got ${c.usedUnits}`)
 ok('invariant holds', c.reservedUnits === await openSum(c.id))
 
+// ---------------------------------------------------------------- 4: key lifecycle
+console.log('\n[4] revoke can kill a key that is mid-rotation')
+// /keys/rotate parks a FUTURE timestamp in revoked_at and auth.ts treats that
+// as a live 24h grace window. /keys/revoke matched on `revoked_at IS NULL`, so
+// it skipped exactly those keys and answered "already_revoked" about a key that
+// was still authenticating requests. A compromised key you had just rotated
+// away from could not be killed through the API for 24 hours; the one on
+// 2026-09-02 had to be closed by hand in the database.
+//
+// This phase runs last and on its own throwaway key, because it ends by
+// revoking what it created.
+const post = (path, body, key = KEY) => fetch(`${API}${path}`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(body ?? {}),
+}).then(async r => ({ status: r.status, body: await r.json() }))
+
+const alive = (key) => fetch(`${API}/keys`, { headers: { 'Authorization': `Bearer ${key}` } })
+  .then(r => r.status)
+
+const gen = await post('/keys/generate', { label: 'lifecycle-test' })
+ok('generated a scratch key', gen.status === 200 && typeof gen.body.api_key === 'string', JSON.stringify(gen.body))
+const victim = gen.body.api_key
+const prefix = victim.slice(0, 16)
+
+ok('the new key authenticates', await alive(victim) === 200)
+
+const rot = await post('/keys/rotate', {}, victim)
+ok('rotate issued a replacement', rot.status === 200 && typeof rot.body.api_key === 'string', JSON.stringify(rot.body))
+ok('rotated key still works during its grace window', await alive(victim) === 200)
+
+// Asked in SQL, not against the host clock. The database runs ~120ms ahead of
+// this process against a local container, which is enough to invert a
+// just-written NOW() and is the second bug this phase found.
+const rotatingRow = (await sql`
+  SELECT revoked_at IS NOT NULL AS scheduled, revoked_at > NOW() AS in_future
+  FROM developer_api_keys WHERE api_key = ${victim}`)[0]
+ok('grace window is a FUTURE revoked_at, not NULL',
+   rotatingRow.scheduled === true && rotatingRow.inFuture === true,
+   JSON.stringify(rotatingRow))
+
+// The regression itself. This used to return 400 already_revoked and leave the
+// key authenticating for the rest of the window.
+const rev = await post('/keys/revoke', { key_prefix: prefix })
+ok('revoke kills a mid-rotation key', rev.status === 200 && rev.body.revoked === true, JSON.stringify(rev.body))
+ok('revoked key is dead on the very next request', await alive(victim) === 401, `got ${await alive(victim)}`)
+
+const revokedRow = (await sql`
+  SELECT revoked_at <= NOW() AS is_past FROM developer_api_keys WHERE api_key = ${victim}`)[0]
+ok('revoked_at was pulled back to the past', revokedRow.isPast === true, JSON.stringify(revokedRow))
+
+// The two zero-row cases must not answer with the same sentence any more.
+const again = await post('/keys/revoke', { key_prefix: prefix })
+ok('revoking it twice reports already_revoked',
+   again.status === 400 && again.body.error === 'already_revoked', JSON.stringify(again.body))
+
+const missing = await post('/keys/revoke', { key_prefix: 'agb_thiskeydoesnotexist' })
+ok('an unknown prefix reports key_not_found, not already_revoked',
+   missing.status === 400 && missing.body.error === 'key_not_found', JSON.stringify(missing.body))
+
+ok('the replacement key from the rotation is untouched', await alive(rot.body.api_key) === 200)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

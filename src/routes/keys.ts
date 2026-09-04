@@ -130,6 +130,16 @@ export async function keysRoute(app: FastifyInstance) {
 
     let result
 
+    // The predicate is "not revoked YET", not "revoked_at IS NULL".
+    //
+    // /keys/rotate parks a future timestamp in revoked_at, and auth.ts reads a
+    // future revoked_at as a live grace window (auth.ts: revoked only when
+    // revoked_at <= now). Matching on IS NULL therefore skipped every key that
+    // was mid-rotation and answered "already revoked" about a key that was
+    // still authenticating requests. The key you most urgently need to kill,
+    // a compromised one you have just rotated away from, was the single key
+    // this endpoint refused to kill, for 24 hours. Pulling the timestamp back
+    // to NOW() both revokes a live key and cuts a grace window short.
     if (parse.data.key_prefix) {
       // Revoke a specific key belonging to this account by prefix
       result = await sql`
@@ -137,7 +147,7 @@ export async function keysRoute(app: FastifyInstance) {
         SET revoked_at = NOW()
         WHERE account_id = ${accountId}
           AND api_key LIKE ${parse.data.key_prefix + '%'}
-          AND revoked_at IS NULL
+          AND (revoked_at IS NULL OR revoked_at > NOW())
         RETURNING revoked_at, api_key
       `
     } else {
@@ -146,22 +156,51 @@ export async function keysRoute(app: FastifyInstance) {
         UPDATE developer_api_keys
         SET revoked_at = NOW()
         WHERE api_key = ${currentToken}
-          AND revoked_at IS NULL
+          AND (revoked_at IS NULL OR revoked_at > NOW())
         RETURNING revoked_at, api_key
       `
     }
 
     if (result.length === 0) {
+      // Say which of the two reasons it was. Answering "already revoked" about
+      // a key that does not exist is misleading on a security path, and it is
+      // exactly what made the bug above look like ordinary behaviour: the one
+      // response that should have raised an alarm read like a no-op.
+      const [existing] = parse.data.key_prefix
+        ? await sql`
+            SELECT revoked_at FROM developer_api_keys
+            WHERE account_id = ${accountId}
+              AND api_key LIKE ${parse.data.key_prefix + '%'}
+            LIMIT 1
+          `
+        : await sql`
+            SELECT revoked_at FROM developer_api_keys
+            WHERE api_key = ${currentToken}
+            LIMIT 1
+          `
+
+      if (!existing) {
+        return reply.code(400).send({
+          error: 'key_not_found',
+          message: 'No key on this account matches that prefix.',
+        })
+      }
+
       return reply.code(400).send({
         error: 'already_revoked',
-        message: 'Key not found or already revoked.',
+        message: 'That key was already revoked. It stopped working when it was revoked.',
       })
     }
 
     return reply.send({
       revoked: true,
       revoked_at: result[0].revokedAt,
-      message: 'Key revoked immediately. Generate a new one with POST /keys/generate.',
+      // A prefix can legitimately match more than one key. During an incident
+      // the count is the thing you need to see.
+      revoked_count: result.length,
+      message: result.length > 1
+        ? `${result.length} keys revoked immediately. Generate a new one with POST /keys/generate.`
+        : 'Key revoked immediately. Generate a new one with POST /keys/generate.',
     })
   })
 }

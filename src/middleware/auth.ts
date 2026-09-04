@@ -69,9 +69,19 @@ export function registerAuth(app: FastifyInstance) {
       })
     }
 
-    // Look up key in DB: account, revocation, expiry, and IP tracking
+    // Look up key in DB: account, revocation, expiry, and IP tracking.
+    //
+    // is_revoked and is_expired are decided in SQL on purpose. revoked_at is
+    // written by the database clock (`SET revoked_at = NOW()` in /keys/revoke),
+    // so comparing it against the application's clock lets any skew between the
+    // two machines become a window in which a revoked key still authenticates.
+    // Measured at ~120ms against a local container, and app and database are
+    // different hosts in production. The clock that writes the timestamp is the
+    // clock that must read it.
     const rows = await sql`
-      SELECT k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, a.email
+      SELECT k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, a.email,
+             (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
+             (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired
       FROM developer_api_keys k
       JOIN accounts a ON a.id = k.account_id
       WHERE k.api_key = ${token}
@@ -85,17 +95,15 @@ export function registerAuth(app: FastifyInstance) {
       })
     }
 
-    const now = new Date()
-
     // revoked_at in the past = immediately revoked; in the future = grace period (rotation)
-    if (rows[0].revokedAt !== null && new Date(rows[0].revokedAt) <= now) {
+    if (rows[0].isRevoked) {
       return reply.code(401).send({
         error: 'key_revoked',
         message: 'This API key has been revoked. Generate a new one with POST /keys/generate.',
       })
     }
 
-    if (rows[0].expiresAt !== null && new Date(rows[0].expiresAt) <= now) {
+    if (rows[0].isExpired) {
       return reply.code(401).send({
         error: 'key_expired',
         message: 'This API key has expired. Generate a new one with POST /keys/generate.',

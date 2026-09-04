@@ -72,16 +72,20 @@ export async function appRoute(app: FastifyInstance) {
     const key = typeof body?.api_key === 'string' ? body.api_key.trim() : ''
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(key)) return reply.redirect('/app?err=key', 303)
 
+    // Decided in SQL, same reason as the API middleware: revoked_at is written
+    // by the database clock, so an app-side comparison turns clock skew into a
+    // window where a revoked key can still open the console.
     const [row] = await sql`
-      SELECT id, revoked_at, expires_at
+      SELECT id,
+             (revoked_at IS NOT NULL AND revoked_at <= NOW()) AS is_revoked,
+             (expires_at IS NOT NULL AND expires_at <= NOW()) AS is_expired
       FROM developer_api_keys
       WHERE api_key = ${key}
       LIMIT 1
     `
-    const now = new Date()
     if (!row) return reply.redirect('/app?err=key', 303)
-    if (row.revokedAt && new Date(row.revokedAt) <= now) return reply.redirect('/app?err=revoked', 303)
-    if (row.expiresAt && new Date(row.expiresAt) <= now) return reply.redirect('/app?err=expired', 303)
+    if (row.isRevoked) return reply.redirect('/app?err=revoked', 303)
+    if (row.isExpired) return reply.redirect('/app?err=expired', 303)
 
     reply.header(
       'Set-Cookie',
@@ -155,7 +159,9 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
   if (!keyId) return null
 
   const [row] = await sql`
-    SELECT k.id AS key_id, k.api_key, k.label, k.revoked_at, k.expires_at,
+    SELECT k.id AS key_id, k.api_key, k.label,
+           (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
+           (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired,
            a.id AS account_id, a.email, a.plan, a.monthly_calls
     FROM developer_api_keys k
     JOIN accounts a ON a.id = k.account_id
@@ -163,9 +169,10 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
     LIMIT 1
   `
   if (!row) return null
-  const now = new Date()
-  if (row.revokedAt && new Date(row.revokedAt) <= now) return null
-  if (row.expiresAt && new Date(row.expiresAt) <= now) return null
+  // Same clock rule as the API middleware: an existing session dies the moment
+  // its key is revoked, not one clock-skew later.
+  if (row.isRevoked) return null
+  if (row.isExpired) return null
   return {
     keyId: row.keyId as string,
     apiKey: row.apiKey as string,
