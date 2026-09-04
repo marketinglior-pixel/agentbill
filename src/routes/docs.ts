@@ -1,10 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
-import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { docsShell } from '../ui/docs.js'
 
 export async function docsRoute(app: FastifyInstance) {
   app.get('/docs', async (request, reply) => {
-    return reply.type('text/html').send(`${head({
+    return reply.type('text/html').send(docsShell({
       title: 'AgentBill Docs · Preflight Billing for AI Agents',
       description: 'AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer.',
       canonical: 'https://agentbill.dev/docs',
@@ -16,41 +15,9 @@ export async function docsRoute(app: FastifyInstance) {
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
   <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />`,
-      css: `${CHROME_CSS}
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
-         -webkit-font-smoothing: antialiased; }
-    .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
-    h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; }
-    h2 { color: var(--white); margin: 56px 0 18px; }
-    h3 { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 500; color: var(--dim);
-         margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .14em; }
-    p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
-    .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
-    .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
-    .nav a:hover { color: var(--muted); }
-    .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
-    .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }
-    .comment { color: var(--dim); }
-    .inline { background: var(--surface3); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--code); }
-    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
-    th { text-align: left; color: var(--dim); font-weight: normal; padding: 8px 12px; border-bottom: 1px solid var(--surface3); }
-    td { padding: 10px 12px; border-bottom: 1px solid var(--surface); color: var(--muted); vertical-align: top; }
-    td:first-child { color: var(--code); white-space: nowrap; }
-    .tag { display: inline-block; background: var(--surface3); color: var(--dim); font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
-    .cta { display: inline-block; background: var(--white); color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
-    hr { border: none; border-top: 1px solid var(--surface3); margin: 48px 0; }
-`,
-    })}
-<body>
-${siteNav('/docs')}
-<div class="container">
-
+      body: `
   <h1>Documentation</h1>
-  <p>Everything you need to add preflight billing to your agents.</p>
-
-  <hr>
+  <p class="lede">Everything you need to add preflight billing to your agents.</p>
 
   <h2>Quick Start, 2 minutes</h2>
 
@@ -58,7 +25,7 @@ ${siteNav('/docs')}
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
   <h3>Step 2, Get your API key</h3>
-  <p>Register at <a href="/register" style="color:var(--code)">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
+  <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
   <h3>Step 3, Add 3 lines to your agent</h3>
   <div class="code"><pre>
@@ -77,9 +44,7 @@ result = run_my_agent()
 client.record(agent_id="researcher", customer_id="user_123", units=10)
   </pre></div>
 
-  <p style="color:#4ade80; margin-top: 8px;">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
-
-  <hr>
+  <p class="ok">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
 
   <h2>Core Concepts</h2>
 
@@ -101,8 +66,6 @@ client.preflight(
     estimated_units=50,  <span class="comment"># 50 &gt; 20: raises CeilingExceededError, nothing runs</span>
 )
   </pre></div>
-
-  <hr>
 
   <h2 id="reservation">The reservation</h2>
 
@@ -147,8 +110,7 @@ WHERE account_id = :account
 
   <p>Note which way this fails. An abandoned reservation makes your ceiling <em>tighter</em>, never
   looser. The gate does not open by accident.
-  <a href="/blog/how-preflight-avoids-double-billing" style="color:var(--code)">Full walkthrough of
-  the concurrency design</a>.</p>
+  <a href="/blog/how-preflight-avoids-double-billing">Full walkthrough of the concurrency design</a>.</p>
 
   <h3>What the reservation is not</h3>
 
@@ -162,8 +124,6 @@ WHERE account_id = :account
   <span class="inline">task_ref</span> cannot exceed it. What you do not get is an opinion about
   what a call was worth. That number is yours.</p>
 
-  <hr>
-
   <h2>API Reference</h2>
 
   <h3>preflight()</h3>
@@ -173,7 +133,7 @@ WHERE account_id = :account
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is blocked if estimated_units exceeds it.</td></tr>
-    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets" style="color:var(--code)">task budgets</a>.</td></tr>
+    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets">task budgets</a>.</td></tr>
     <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Required on the first preflight of a new task_ref, ignored on later calls.</td></tr>
   </table>
 
@@ -212,8 +172,6 @@ WHERE account_id = :account
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
   </table>
 
-  <hr>
-
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
@@ -230,27 +188,17 @@ await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, e
 await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   </pre></div>
 
-  <hr>
-
   <h2>What it does NOT do</h2>
   <p>AgentBill does not replace your payment processor, it sits in front of it. Multi-step workflows with state machines or reversal logic are out of scope.</p>
 
-  <hr>
-
   <h2>Guides</h2>
-  <p><a href="/docs/task-budgets" style="color:var(--code)">Task budgets, a hard cost ceiling per agent job</a></p>
-  <p><a href="/docs/limit-cost-per-agent-run" style="color:var(--code)">How to limit cost per agent run</a></p>
-  <p><a href="/docs/langchain-billing" style="color:var(--code)">How to add billing to a LangChain agent</a></p>
-  <p><a href="/docs/openai-agent-spend-ceiling" style="color:var(--code)">How to add a spend ceiling to an OpenAI agent</a></p>
+  <p><a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a></p>
+  <p><a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a></p>
+  <p><a href="/docs/langchain-billing">How to add billing to a LangChain agent</a></p>
+  <p><a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a></p>
 
-  <hr>
-
-  <a href="/register" class="cta">Get your API key</a>
-
-</div>
-${siteFooter()}
-</body>
-</html>
-    `)
+  <div class="end"><a href="/register" class="btn">Get your API key</a></div>
+`,
+    }))
   })
 }

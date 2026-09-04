@@ -1,50 +1,24 @@
 import { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
-import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { docsShell } from '../ui/docs.js'
 
-const CSS = `${CHROME_CSS}
-  :root { --shell: 860px; }
-  .container { max-width: var(--shell); margin: 0 auto; padding: 60px 24px; }
-  h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; }
-  h2 { color: var(--white); margin: 52px 0 16px; }
-  h3 { color: var(--white); margin: 30px 0 10px; }
-  p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
-  .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
-  .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
-  .nav a:hover { color: var(--muted); }
-  .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 16px 0; overflow-x: auto; }
-  .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }
-  .comment { color: var(--dim); }
-  .inline { background: var(--surface3); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--code); }
-  hr { border: none; border-top: 1px solid var(--surface3); margin: 40px 0; }
-  .cta { display: inline-block; background: var(--white); color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; margin-top: 8px; }
-  .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid var(--surface3); }
-  .also p { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
-  .also a { color: var(--code); text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
-  .badge { display: inline-block; background: var(--surface3); border: 1px solid #2a2a2a; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: var(--dim); margin-right: 6px; margin-bottom: 12px; }
-`
-
+// Guides render through the shared content shell in src/ui/docs.ts: one copy
+// of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
+// The guide copy below is untouched. Two frame-level things changed inside the
+// bodies: the closing CTA is the site's .btn instead of a white .cta of its
+// own, and its label is short enough to stay on one line at 320px.
 function page(title: string, description: string, body: string) {
-  return `${head({
+  return docsShell({
     title: `${title} · AgentBill`,
     description,
-    css: CSS,
-  })}
-<body>
-${siteNav('/docs')}
-<div class="container">
-  ${body}
+    body: `${body}
   <div class="also">
     <p>Related guides</p>
     <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
     <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
-  </div>
-</div>
-${siteFooter()}
-</body>
-</html>`
+  </div>`,
+  })
 }
 
 export async function guidesRoute(app: FastifyInstance) {
@@ -241,7 +215,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <p>Per-agent cost attribution: every job's ceiling, spend, live reservations and overage flag.
   Filter with <span class="inline">?agent_id=</span>.</p>
 
-  <p><a class="cta" href="/register">Get a free API key →</a></p>
+  <p class="end"><a class="btn" href="/register">Get your API key &rarr;</a></p>
 `
     ))
   })
@@ -322,8 +296,7 @@ const result = await runAgent()
 await record({ agentId: 'my_agent', units: 10 })
       </pre></div>
 
-      <hr>
-      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
+      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
       `
     ))
   })
@@ -454,8 +427,7 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
       <h2>LangGraph support</h2>
       <p>For LangGraph workflows, call <span class="inline">preflight()</span> before entering the graph and <span class="inline">record()</span> after the final node completes. Use <span class="inline">checkpoint()</span> inside nodes to enforce ceilings mid-graph.</p>
 
-      <hr>
-      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
+      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
       `
     ))
   })
@@ -557,8 +529,7 @@ async function runAgent(customerId: string, task: string): Promise&lt;string&gt;
 }
       </pre></div>
 
-      <hr>
-      <a href="/register" class="cta">Get your API key, free tier, no credit card</a>
+      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
       `
     ))
   })

@@ -13,7 +13,10 @@ const GITHUB = 'https://github.com/marketinglior-pixel/agentbill'
 
 /** Header + footer CSS. Include once per page, after theme BASE. */
 export const CHROME_CSS = `
-  :root { --shell: 960px; }
+  /* --banner-height is the nav's rendered height. Anything else that sticks
+     docks at top: var(--banner-height) so it sits beneath the nav instead of
+     painting over it during scroll. Change .nav-inner's height and this together. */
+  :root { --shell: 960px; --banner-height: 60px; }
 
   .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.88);
               backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
