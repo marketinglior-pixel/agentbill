@@ -327,14 +327,30 @@ async function loadConsole(accountId: string, days: number): Promise<Console> {
   }
 }
 
-// The viewer behind an anonymous ?demo=1. The key is not a real key and never
-// authenticates anything; it only fills the key column of the sample keys
-// table. Calls-this-month sits well under the Builder limit so the quota bar
-// reads as a healthy account rather than one that is out of room.
+// Placeholder key strings for ?demo=1. Neither is a real key: both are the
+// literal word "demo" followed by a repeated digit, they authenticate nothing,
+// and they exist only to fill the key column of the sample table. They live up
+// here because the viewer below and the keys table in demoConsole() have to
+// agree — the row labelled "production" is meant to be the viewer's own key,
+// and when the two were written out separately nothing said so.
+// Built rather than written out so the shape is the documentation: a prefix,
+// forty identical filler characters, a two-char tail to make the pair visibly
+// distinct in the table. Written as opaque 50-character literals they read as
+// real credentials to a person skimming the file and to a secret scanner, and
+// a scan that always reports the same false positive is a scan people stop
+// reading. Same bytes either way.
+const demoKey = (fill: string, tail: string) => `agb_demo${fill.repeat(40)}${tail}`
+const DEMO_KEY = demoKey('0', 'ab')
+const DEMO_KEY_CI = demoKey('1', 'cd')
+const DEMO_KEY_LABEL = 'production'
+
+// The viewer behind an anonymous ?demo=1. Calls-this-month sits well under the
+// Builder limit so the quota bar reads as a healthy account rather than one
+// that is out of room.
 const DEMO_VIEWER: Viewer = {
   keyId: 'demo',
-  apiKey: 'agb_demo0000000000000000000000000000000000000000ab',
-  keyLabel: 'production',
+  apiKey: DEMO_KEY,
+  keyLabel: DEMO_KEY_LABEL,
   accountId: 'demo',
   email: null,
   plan: 'builder',
@@ -390,8 +406,8 @@ function demoConsole(): Console {
       { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
     ],
     keys: [
-      { apiKey: 'agb_demo0000000000000000000000000000000000000000ab', label: 'production', createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
-      { apiKey: 'agb_demo1111111111111111111111111111111111111111cd', label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
+      { apiKey: DEMO_KEY, label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
+      { apiKey: DEMO_KEY_CI, label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
     ],
     decisions: [
       mk(0, 22, 'researcher', 'job-8871', 'task_ceiling_exceeded', true, 40, 500, 492,

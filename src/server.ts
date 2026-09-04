@@ -44,12 +44,19 @@ app.addHook('onRequest', async (request, reply) => {
   if (host.startsWith('localhost') || host.startsWith('127.')) return
   if (request.method !== 'GET' && request.method !== 'HEAD') return
   if (!CANONICAL_PATHS.test(request.url.split('?')[0])) return
-  // Rebuild the target from the validated path with the host forced, so no
-  // part of the incoming URL can name a different destination (CWE-601).
-  const target = new URL(request.url, `https://${CANONICAL_HOST}`)
-  target.protocol = 'https:'
-  target.host = CANONICAL_HOST
-  return reply.redirect(target.href, 301)
+  // Take only the path and query off the parsed URL and hang them on an origin
+  // we build ourselves. Overwriting .host on a parsed URL also works, but it
+  // leaves the incoming userinfo and port in place and it reads as if the
+  // attacker's host were merely being corrected. Nothing from the request can
+  // reach the authority here, so there is no destination to redirect to but
+  // ours (CWE-601).
+  let parsed: URL
+  try {
+    parsed = new URL(request.url, `https://${CANONICAL_HOST}`)
+  } catch {
+    return
+  }
+  return reply.redirect(`https://${CANONICAL_HOST}${parsed.pathname}${parsed.search}`, 301)
 })
 
 // HTML form submissions (e.g. /admin/login). Fastify only parses JSON out of the box.
