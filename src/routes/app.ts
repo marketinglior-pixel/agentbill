@@ -338,7 +338,7 @@ async function loadConsole(accountId: string, days: number): Promise<Console> {
 // literal word "demo" followed by a repeated digit, they authenticate nothing,
 // and they exist only to fill the key column of the sample table. They live up
 // here because the viewer below and the keys table in demoConsole() have to
-// agree — the row labelled "production" is meant to be the viewer's own key,
+// agree: the row labelled "production" is meant to be the viewer's own key,
 // and when the two were written out separately nothing said so.
 // Built rather than written out so the shape is the documentation: a prefix,
 // forty identical filler characters, a two-char tail to make the pair visibly
@@ -481,8 +481,8 @@ const REASON_LABEL: Record<string, string> = {
 const CSS = `
   /* Colour semantics for this page, and why they had to be written down.
      Red used to mark a blocked call in the chart, a task that hit its ceiling
-     and a customer at their limit — all three of which are the product doing
-     exactly its job — and also a plan bar at 100%, which is a real problem.
+     and a customer at their limit, all three of which are the product doing
+     exactly its job, and also a plan bar at 100%, which is a real problem.
      Green was simultaneously the brand, "metered", "OK", "RUNNING" and
      "ACTIVE". A colour that means two things means nothing, so each gets one
      job and nothing else is allowed to borrow it:
@@ -497,7 +497,7 @@ const CSS = `
        --fail  needs a human. Spend that got past a ceiling, or an account
                about to stop working. Nothing else on this page is red. */
   :root {
-    --flow: #5d6b75; --flow-ink: #97a6b0;
+    --shell: 1080px;
     --held: var(--green); --near: var(--amber); --fail: var(--red);
   }
 
@@ -509,25 +509,25 @@ const CSS = `
      selector reaching a class it was never meant to touch. */
   nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
         justify-content: space-between; padding: 0 24px; gap: 16px; }
-  .logo { display: flex; align-items: center; gap: 9px; font-family: 'JetBrains Mono', monospace;
+  .logo { display: flex; align-items: center; gap: 9px; font-family: var(--mono);
           font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
   .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; }
-  .who { display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace;
+  .who { display: flex; align-items: center; gap: 14px; font-family: var(--mono);
          font-size: 12px; color: var(--dim); white-space: nowrap; }
   .who b { color: var(--muted); font-weight: 500; }
-  .btn-out { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
-             padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
-             min-height: 34px; }
+  .btn-out { background: none; border: 1px solid var(--border-strong); color: var(--muted); border-radius: 8px;
+             padding: 0 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+             min-height: 44px; display: inline-flex; align-items: center; }
   .btn-out:hover { color: var(--text); border-color: var(--dim); }
   /* The signed-out sample console's only CTA. Filled, not ghosted: this is the
      one action a prospect on this page is meant to take. */
   .btn-key { display: inline-flex; align-items: center; background: var(--green); color: var(--green-ink);
-             border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: 700;
-             text-decoration: none; white-space: nowrap; min-height: 34px; }
+             border-radius: 8px; padding: 0 14px; font-size: 12px; font-weight: 700;
+             text-decoration: none; white-space: nowrap; min-height: 44px; }
   .btn-key:hover { color: var(--green-ink); filter: brightness(1.08); }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
-  h1 { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
-       letter-spacing: -.02em; margin-bottom: 6px; }
+  .wrap { max-width: var(--shell); margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-family: var(--display); font-size: 28px; font-weight: 700;
+       letter-spacing: -.022em; margin-bottom: 6px; }
   .sub { color: var(--muted); max-width: 70ch; margin-bottom: 20px; }
 
   /* A contents rail, not tabs. These were styled as tabs with "Activity"
@@ -537,21 +537,21 @@ const CSS = `
      row wrapped into two ragged lines. Now it reads as the jump list it is. */
   .jump { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px;
           margin: 0 0 26px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-  .jump b { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500;
+  .jump b { font-family: var(--mono); font-size: 10.5px; font-weight: 500;
             letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
-  .jump a { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted);
+  .jump a { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
             text-decoration: none; padding: 11px 0; white-space: nowrap; }
   .jump a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
   .jump .spacer { flex: 1 1 auto; }
 
   .rangebar { display: flex; align-items: center; justify-content: space-between; gap: 14px;
               flex-wrap: wrap; margin: 14px 0 12px; }
-  .rangenote { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--dim); }
+  .rangenote { font-family: var(--mono); font-size: 12px; color: var(--dim); }
 
   /* segmented range control */
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px;
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px;
          overflow: hidden; background: var(--surface); }
-  .seg a { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--dim);
+  .seg a { font-family: var(--mono); font-size: 11.5px; color: var(--dim);
            text-decoration: none; padding: 6px 12px; border-right: 1px solid var(--border);
            white-space: nowrap; }
   .seg a:last-child { border-right: none; }
@@ -559,7 +559,7 @@ const CSS = `
   .seg a.on { color: var(--green-ink); background: var(--green); font-weight: 700; }
 
   /* delta */
-  .dl { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 5px;
+  .dl { font-family: var(--mono); font-size: 11px; margin-top: 5px;
         line-height: 1.45; }
   .dl.up { color: var(--green); } .dl.down { color: var(--amber); } .dl.flat { color: var(--dim); }
 
@@ -571,7 +571,7 @@ const CSS = `
   .quota { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
            padding: 16px 18px; margin-bottom: 14px; }
   .quota-top { display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
-               flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+               flex-wrap: wrap; font-family: var(--mono); font-size: 12.5px;
                color: var(--dim); font-variant-numeric: tabular-nums; }
   .quota-top b { color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
   /* The one bar on this page that is about the account rather than the
@@ -584,14 +584,14 @@ const CSS = `
   /* tiles */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px;
            margin-bottom: 10px; }
-  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; }
-  .tl { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .12em;
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; }
+  .tl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
         text-transform: uppercase; color: var(--dim); }
-  .tv { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; margin-top: 6px;
+  .tv { font-family: var(--mono); font-size: 26px; font-weight: 700; margin-top: 6px;
         font-variant-numeric: tabular-nums; line-height: 1.15; }
   .tv.held { color: var(--held); }
   .tv.dim { color: var(--muted); font-size: 17px; margin-top: 13px; }
-  .tf { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 4px; }
+  .tf { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-top: 4px; }
   .honest { font-size: 12.5px; color: var(--dim); margin-bottom: 8px; max-width: 86ch; line-height: 1.6; }
 
   /* Leaked spend is not a peer of the four tiles above it. It is the only
@@ -601,17 +601,17 @@ const CSS = `
      explanation attached to it instead of to the whole tile block. */
   .leaked { display: flex; align-items: flex-start; gap: 16px; margin: 12px 0 8px;
             background: var(--surface); border: 1px solid var(--border);
-            border-left: 3px solid var(--flow); border-radius: 10px; padding: 14px 18px; }
-  .leaked-n { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
+            border-radius: 12px; padding: 14px 18px; }
+  .leaked-n { font-family: var(--mono); font-size: 26px; font-weight: 700;
               line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--flow-ink); }
-  .leaked-t b { display: block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  .leaked-t b { display: block; font-family: var(--mono); font-size: 10.5px;
                 letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
   .leaked-t p { font-size: 12.5px; color: var(--dim); margin: 5px 0 0; max-width: 78ch; line-height: 1.6; }
-  .leaked.bad { border-left-color: var(--fail); }
+  .leaked.bad { border-color: var(--fail-line); }
   .leaked.bad .leaked-n { color: var(--fail); }
   .leaked.bad .leaked-t b { color: var(--fail); }
 
-  h2 { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+  h2 { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .1em;
        text-transform: uppercase; color: var(--muted); margin: 40px 0 6px; padding-bottom: 8px;
        border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;
        align-items: baseline; gap: 12px; }
@@ -625,7 +625,7 @@ const CSS = `
           justify-content: space-between; pointer-events: none; }
   .grid span { border-top: 1px dashed var(--border-soft); height: 0; }
   .ylab { position: absolute; left: 0; top: -7px; width: 40px; text-align: right;
-          font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim);
+          font-family: var(--mono); font-size: 10px; color: var(--dim);
           font-variant-numeric: tabular-nums; }
   .ylab.mid { top: calc(50% - 7px); } .ylab.low { top: auto; bottom: -7px; }
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 148px; position: relative; }
@@ -640,8 +640,8 @@ const CSS = `
   .col i.held { background: var(--held); }
   .col i.zero { background: var(--surface3); height: 2px; }
   .xaxis { display: flex; justify-content: space-between; margin: 9px 0 0 46px;
-           font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--dim); }
-  .legend { display: flex; gap: 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace;
+           font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  .legend { display: flex; gap: 16px; margin-top: 12px; font-family: var(--mono);
             font-size: 11px; color: var(--dim); flex-wrap: wrap; }
   .legend span { display: flex; align-items: center; gap: 6px; }
   .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
@@ -653,10 +653,10 @@ const CSS = `
   .brow:last-child { border-bottom: none; }
   .bhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
            flex-wrap: wrap; margin-bottom: 9px; }
-  .btask { font-family: 'JetBrains Mono', monospace; font-size: 13.5px; color: var(--text);
+  .btask { font-family: var(--mono); font-size: 13.5px; color: var(--text);
            overflow: hidden; text-overflow: ellipsis; }
   .bagent { color: var(--dim); font-size: 12px; }
-  .bnum { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted);
+  .bnum { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
           font-variant-numeric: tabular-nums; white-space: nowrap; }
   .bnum b { color: var(--text); font-weight: 700; }
   .track { height: 10px; background: var(--surface3); border-radius: 999px; overflow: hidden; display: flex; }
@@ -664,27 +664,27 @@ const CSS = `
   .track i.used { background: var(--flow); }
   .track i.used.near { background: var(--near); }
   .track i.used.held { background: var(--held); }
-  .track i.res { background: #3a444b; }
-  .bfoot { margin-top: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim);
+  .track i.res { background: var(--res); }
+  .bfoot { margin-top: 7px; font-family: var(--mono); font-size: 11px; color: var(--dim);
            display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
   /* tables */
-  .tw { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  .tw { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
         -webkit-overflow-scrolling: touch; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th { text-align: left; padding: 10px 14px; color: var(--dim); font-weight: 500; font-size: 11px;
        text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border);
-       white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
+       white-space: nowrap; font-family: var(--mono); }
   td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
-  td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.id { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; max-width: 260px;
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.id { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; max-width: 260px;
           overflow: hidden; text-overflow: ellipsis; }
-  .chip { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 700;
+  .chip { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 700;
           letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
-  .chip.held { background: #0e2a20; color: var(--green); border: 1px solid #1b4a3a; }
-  .chip.near { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
-  .chip.fail { background: #2a1212; color: #ff8a80; border: 1px solid #4a1d1d; }
+  .chip.held { background: var(--held-bg); color: var(--green); border: 1px solid var(--held-line); }
+  .chip.near { background: var(--near-bg); color: var(--amber); border: 1px solid var(--near-line); }
+  .chip.fail { background: var(--fail-bg); color: var(--fail-ink); border: 1px solid var(--fail-line); }
   .chip.flow { background: var(--surface3); color: var(--flow-ink); border: 1px solid var(--border2); }
   .chip.dead { background: var(--surface3); color: var(--dim); border: 1px solid var(--border2); }
   .minibar { height: 6px; width: 92px; background: var(--surface3); border-radius: 999px; overflow: hidden;
@@ -692,43 +692,43 @@ const CSS = `
   .minibar i { display: block; height: 100%; background: var(--flow); }
   .minibar i.near { background: var(--near); } .minibar i.held { background: var(--held); }
   .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); font-style: italic; }
-  details summary { cursor: pointer; color: var(--green); font-family: 'JetBrains Mono', monospace;
+  details summary { cursor: pointer; color: var(--green); font-family: var(--mono);
                     font-size: 12px; list-style: none; padding: 4px 0; }
   details summary::-webkit-details-marker { display: none; }
   details summary::before { content: '\\25B8  '; } details[open] summary::before { content: '\\25BE  '; }
-  pre { background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
-        font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.55; overflow-x: auto;
+  pre { background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+        font-family: var(--mono); font-size: 12.5px; line-height: 1.55; overflow-x: auto;
         color: var(--code); margin-top: 10px; }
 
   /* empty + banners */
-  .empty { background: var(--surface); border: 1px dashed #333; border-radius: 12px; padding: 26px; margin-top: 16px; }
-  .empty h3 { font-family: 'JetBrains Mono', monospace; font-size: 16px; margin-bottom: 8px; }
+  .empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: 12px; padding: 26px; margin-top: 16px; }
+  .empty h3 { font-family: var(--mono); font-size: 16px; margin-bottom: 8px; }
   .empty p { color: var(--muted); margin-bottom: 14px; max-width: 70ch; }
   .empty pre { margin: 0 0 14px; white-space: pre-wrap; word-break: break-all; }
   .empty details { margin-top: 6px; }
   .banner { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-            background: #2b220e; border: 1px solid #4a3a12; border-radius: 10px;
+            background: var(--near-bg); border: 1px solid var(--near-line); border-radius: 12px;
             padding: 12px 16px; margin-bottom: 18px; }
-  .banner b { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em;
+  .banner b { font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
               text-transform: uppercase; color: var(--amber); }
-  .banner p { font-size: 13px; color: #e0cfa0; margin: 0; }
+  .banner p { font-size: 13px; color: var(--near-ink); margin: 0; }
   .banner a { color: var(--amber); }
   .nothing { padding: 22px 18px; color: var(--dim); font-size: 13.5px; }
   .foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--dim);
           font-size: 13px; line-height: 1.7; }
-  .foot code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
+  .foot code { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
   /* login */
   .login { max-width: 460px; margin: 80px auto; background: var(--surface); border: 1px solid var(--border);
            border-radius: 12px; padding: 32px; }
+  .login h1 { font-size: 22px; }
   .login p { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
-  label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em;
+  label { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
           text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
-  input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-          padding: 12px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 14px;
-          margin-bottom: 14px; outline: none; min-height: 46px; }
-  input:focus { border-color: var(--green); }
-  .btn { width: 100%; background: var(--green); color: var(--green-ink); border: none; border-radius: 6px;
+  input { width: 100%; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px;
+          padding: 12px; color: var(--text); font-family: var(--mono); font-size: 14px;
+          margin-bottom: 14px; outline: 2px solid transparent; outline-offset: 2px; min-height: 46px; }
+  .btn { width: 100%; background: var(--green); color: var(--green-ink); border: none; border-radius: 8px;
          padding: 13px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; min-height: 46px; }
   .btn:hover { filter: brightness(1.08); }
   .err { color: var(--red); font-size: 13px; margin-bottom: 12px; }
@@ -746,7 +746,6 @@ const CSS = `
        rather than left to wrap. The key tail stays: it is the one thing that
        says which key this console is showing. */
     .who span.email, .who span.mode, .who span.lbl { display: none; }
-    .btn-key, .btn-out { min-height: 44px; padding-block: 12px; }
     .bars { height: 112px; }
     /* One scrolling row beats three wrapped ones for a rail this long. */
     .jump { flex-wrap: nowrap; overflow-x: auto; gap: 0 16px;
@@ -775,7 +774,7 @@ function loginPage(err: string): string {
 <body>
   <nav class="top"><a class="logo" href="/"><span class="dot"></span>AgentBill</a></nav>
   <div class="login">
-    <h1 style="font-size:22px">Your console</h1>
+    <h1>Your console</h1>
     <p>Live task budgets, every call AgentBill refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
     ${Object.hasOwn(ERRORS, err) ? `<p class="err">${esc(ERRORS[err])}</p>` : ''}
     <form method="POST" action="/app/session" autocomplete="off">

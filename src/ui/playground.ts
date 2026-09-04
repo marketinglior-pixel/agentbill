@@ -61,7 +61,7 @@ export const PLAYGROUND_CSS = `
 
   .pg-split { display: grid; grid-template-columns: 1fr 1fr; }
   .pg-left { border-right: 1px solid var(--border); padding: 20px; }
-  .pg-right { padding: 20px; background: #0d0d0d; display: flex; flex-direction: column; }
+  .pg-right { padding: 20px; background: var(--bg-deep); display: flex; flex-direction: column; }
   .pg-h { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.18em;
           text-transform: uppercase; color: var(--dim); display: flex;
           justify-content: space-between; align-items: baseline; margin-bottom: 14px; }

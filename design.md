@@ -55,6 +55,13 @@ Headings are roman. Never italic. Emphasis is weight or colour.
 - `--code` is **syntax only**. Not links, not emphasis, not prose.
 - `--red` and `--amber` are states that need a human. Red means exactly one
   thing on a page; on the console it means a leak.
+- Console semantics are global tokens in `theme.ts`, not per-page copies:
+  `--flow` / `--flow-ink` (ordinary traffic), `--res` (units held by an
+  unsettled reservation), the chip grounds and hairlines `--held-bg` /
+  `--held-line`, `--near-bg` / `--near-line` / `--near-ink`, `--fail-bg` /
+  `--fail-line` / `--fail-ink`, and `--bg-deep` (the ground under code inside a
+  surface). The console aliases `--held` / `--near` / `--fail` to the brand
+  green, amber and red for its own readability; those aliases stay in `app.ts`.
 - Borders: `--border` is decorative. Anything that carries an affordance uses
   `--border-strong`, which clears 3:1. Assume any hand-picked dark border fails
   until measured.
@@ -105,9 +112,13 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
 
 ## What pages must share
 
-The nav and footer from `chrome.ts`. The three faces. `--green` as the only
-chromatic accent for actions. The code-block frame: a typographic label bar
-("python · the whole integration"), never window chrome.
+The nav and footer from `chrome.ts` on marketing and content pages. App pages
+(`/app`, `/admin`) keep their own account bar (`nav.top`: wordmark, who is
+signed in, sign out or the one CTA) and carry no marketing footer; their
+closing `.foot` is an in-page note. The three faces. `--green` as the only
+chromatic accent for actions. A 44px floor on every button and input. Frames
+at 12px radius, controls at 8px. The code-block frame: a typographic label
+bar ("python · the whole integration"), never window chrome.
 
 ## What pages may differ on
 

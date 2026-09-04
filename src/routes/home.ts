@@ -126,14 +126,9 @@ export async function homeRoute(app: FastifyInstance) {
      * pre-emit critique: P4 H4 E4 S5 R5 V4 */
 
     :root { --shell: 1080px;
-            /* Console colours the panels need. Same values as app.ts, same
-               meaning: --flow is ordinary traffic, --res is units held by a
-               reservation that has not settled yet, the held/near pairs are the
-               chip grounds and hairlines the console already uses. Lifted here
-               so nothing below this block names a colour by hex. */
-            --flow: #5d6b75; --res: #3a444b;
-            --held-bg: #0e2a20; --held-line: #1b4a3a;
-            --near-bg: #2b220e; --near-line: #4a3a12;
+            /* Page-local: the refusal band's ground and the code-comment ink.
+               The console colours the panels use (--flow, --res, the chip
+               grounds) live in theme.ts, one copy for every page. */
             --band-hi: #121212; --band-lo: #0c0c0c;
             --cmt: #79837c; }
 

@@ -25,6 +25,16 @@ export const TOKENS = `
        only; --red and --amber are states that need a human. */
     --green: #22d3a0; --green-ink: #05130e; --code: #a8ff78;
     --red: #ff5757; --amber: #f5b942;
+    /* Console semantics, shared by every page that shows the console's rows
+       (the console itself, the homepage panels). --flow is ordinary traffic,
+       --res is units held by a reservation that has not settled, the *-bg /
+       *-line pairs are chip grounds and hairlines, --bg-deep is the ground
+       under code that sits inside a surface. One copy, here: app.ts and
+       home.ts each used to carry their own. */
+    --flow: #5d6b75; --flow-ink: #97a6b0; --res: #3a444b; --bg-deep: #0d0d0d;
+    --held-bg: #0e2a20; --held-line: #1b4a3a;
+    --near-bg: #2b220e; --near-line: #4a3a12; --near-ink: #e0cfa0;
+    --fail-bg: #2a1212; --fail-line: #4a1d1d; --fail-ink: #ff8a80;
     /* Type. Three faces, three jobs, no overlap.
        --display carries every heading. It is a narrow industrial grotesque, so
        it reads as infrastructure and, more importantly, it contrasts with the
