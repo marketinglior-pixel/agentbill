@@ -52,13 +52,15 @@ export async function guidesRoute(app: FastifyInstance) {
   app.get('/docs/task-budgets', async (_, reply) => {
     return reply.type('text/html').send(page(
       'Task budgets, a hard cost ceiling per agent job',
-      'Cap what one AI agent job can spend across every provider and tool it touches. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
+      'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
       `
-  <h1>Task budgets, the job dies at $5</h1>
+  <h1>Task budgets, the job dies at your number</h1>
   <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no
-  cross-provider budget, and tool spend isn't counted. A <b>task budget</b> is the number that
-  actually matters, what <i>this job</i> is allowed to cost, across every model and tool it
-  touches, enforced <i>before</i> the money is spent.</p>
+  cross-provider budget, and tool spend isn't counted at all. A <b>task budget</b> is the number
+  that actually matters, what <i>this job</i> is allowed to spend, across every call that passes
+  the same <span class="inline">task_ref</span>. Instrument a tool with that same
+  <span class="inline">task_ref</span> and it draws down the same ceiling. Enforced <i>before</i>
+  the call runs.</p>
 
   <h2>What a unit is</h2>
   <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.

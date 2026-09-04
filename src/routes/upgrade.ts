@@ -77,8 +77,8 @@ ${siteNav('/pricing')}
 
     <h1>Your agents get a hard budget.<br>Per task. One ceiling, any provider.</h1>
     <p class="sub">Provider spend caps stop at monthly totals for one vendor. AgentBill enforces the number
-    that actually matters: what this job is allowed to cost, across every model and tool it touches,
-    blocked before the money is spent.</p>
+    that actually matters: what this job is allowed to spend, in units you define, across every call
+    that passes the same task_ref. Blocked before the call goes out.</p>
 
     <div class="grid">
       <div class="card">
