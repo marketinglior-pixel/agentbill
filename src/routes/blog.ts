@@ -1,41 +1,20 @@
 import { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
-import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { docsShell } from '../ui/docs.js'
+import { PLAN_LIMITS } from '../integrations/polar.js'
 
-const CSS = `${CHROME_CSS}
-  :root { --shell: 780px; }
-  .container { max-width: var(--shell); margin: 0 auto; padding: 60px 24px; }
-  h1 { font-size: clamp(27px, 3.4vw, 38px); color: var(--white); margin-bottom: 18px; max-width: 24ch; }
-  .meta { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
-  h2 { color: var(--white); margin: 52px 0 16px; }
-  p { font-size: 15px; color: var(--muted); line-height: 1.8; margin-bottom: 20px; }
-  .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 24px 0; overflow-x: auto; }
-  .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }
-  .comment { color: var(--dim); }
-  .inline { background: var(--surface3); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--code); }
-  blockquote { border-left: 2px solid #333; padding-left: 20px; margin: 24px 0; }
-  blockquote p { color: #666; font-style: italic; }
-  hr { border: none; border-top: 1px solid var(--surface3); margin: 48px 0; }
-  .cta-box { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px; padding: 32px; margin-top: 48px; }
-  .cta-box h2 { margin-top: 0; }
-  .cta-box p { margin-bottom: 20px; }
-  .cta { display: inline-block; background: var(--white); color: #000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; }
-  .also { margin-top: 48px; padding-top: 32px; border-top: 1px solid var(--surface3); }
-  .also p { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
-  .also a { color: var(--code); text-decoration: none; font-size: 14px; display: block; margin-bottom: 6px; }
-`
+// Posts render through the shared content shell in src/ui/docs.ts: one copy of
+// the content CSS, and an "On this page" rail built from each post's <h2>s.
+// Post copy is untouched; only the frame and the closing CTA changed.
+const free = PLAN_LIMITS.free.toLocaleString('en-US')
 
 export async function blogRoute(app: FastifyInstance) {
 
   app.get('/blog/how-preflight-avoids-double-billing', async (_, reply) => {
-    return reply.type('text/html').send(`${head({
+    return reply.type('text/html').send(docsShell({
       title: 'How preflight avoids double-billing under concurrent load · AgentBill',
       description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
-      css: CSS,
-    })}
-<body>
-${siteNav()}
-<div class="container">
+      current: '',
+      body: `
 
   <h1>How preflight avoids double-billing under concurrent load</h1>
   <div class="meta">May 2026 · 6 min read</div>
@@ -44,7 +23,6 @@ ${siteNav()}
 
   <p>It's the right question. The naive implementation of a preflight check has a race condition that causes exactly this problem. Here's how AgentBill solves it.</p>
 
-  <hr>
 
   <h2>The problem: read-check-approve is broken under concurrency</h2>
 
@@ -78,7 +56,6 @@ Thread B runs. Uses 8 units. Used = 16. Limit exceeded.
 
   <p>This is a classic TOCTOU race: Time Of Check, Time Of Use. The check and the use happen at different times, and the state can change between them.</p>
 
-  <hr>
 
   <h2>The fix: atomic reservation</h2>
 
@@ -112,7 +89,6 @@ Thread A runs. Completes. record() converts reserved → used.
 
   <p>The database handles the serialization. No application-level locking required.</p>
 
-  <hr>
 
   <h2>Settlement: converting reserved to used</h2>
 
@@ -130,7 +106,6 @@ WHERE account_id = :account_id
 
   <p>If <span class="inline">actual_units</span> differs from <span class="inline">estimated_units</span>, say you estimated 10 but the run used 7, the difference is released back into available budget. No manual adjustment needed.</p>
 
-  <hr>
 
   <h2>What happens when a run fails</h2>
 
@@ -198,7 +173,6 @@ SET used_units     = used_units + :units,
 
   <p>Note which way all of this fails. An abandoned reservation makes the ceiling <em>tighter</em>, never looser: the run that gets blocked is a later one, not an expensive one that should have been stopped. Every correctness choice above preserves that direction. The gate does not open by accident.</p>
 
-  <hr>
 
   <h2>Why this matters for metering accuracy</h2>
 
@@ -210,7 +184,6 @@ SET used_units     = used_units + :units,
 
   <p><strong>3. Accurate settlement.</strong> The <span class="inline">record()</span> call replaces estimated with actual. The reservation was a claim, not a charge. The charge happens at settlement with the real number.</p>
 
-  <hr>
 
   <h2>The full flow</h2>
 
@@ -229,13 +202,10 @@ record(units=7)
 
   <p>If two runs start simultaneously, only one can atomically claim the budget. The other is blocked at the database level before any compute runs.</p>
 
-  <hr>
 
-  <div class="cta-box">
-    <h2>Add preflight to your agents</h2>
-    <p>Free tier: 1,000 preflight calls/month. No credit card required.</p>
-    <a href="/register" class="cta">Get your API key</a>
-  </div>
+  <h2>Add preflight to your agents</h2>
+  <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
+  <p class="end"><a href="/register" class="btn">Get your API key</a></p>
 
   <div class="also">
     <p>Related</p>
@@ -243,21 +213,16 @@ record(units=7)
     <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
   </div>
 
-</div>
-${siteFooter()}
-</body>
-</html>`)
+`,
+    }))
   })
 
   app.get('/blog/monthly-caps-wont-save-you', async (_, reply) => {
-    return reply.type('text/html').send(`${head({
+    return reply.type('text/html').send(docsShell({
       title: 'Why monthly caps don\'t protect you from one bad LLM run · AgentBill',
       description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',
-      css: CSS,
-    })}
-<body>
-${siteNav()}
-<div class="container">
+      current: '',
+      body: `
 
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
   <div class="meta">May 2026 · 5 min read</div>
@@ -268,7 +233,6 @@ ${siteNav()}
 
   <p>This is not a bug. It's how monthly caps work. And if you're building AI agents in production, it will happen to you too, unless you change the pattern.</p>
 
-  <hr>
 
   <h2>The timeline of a bad run</h2>
 
@@ -280,7 +244,6 @@ ${siteNav()}
 
   <p>Monthly caps are accounting tools. They tell you what happened. They don't stop anything from happening.</p>
 
-  <hr>
 
   <h2>Why the cap didn't fire</h2>
 
@@ -290,7 +253,6 @@ ${siteNav()}
 
   <p>A monthly cap and a bill many times its size can coexist. They operate at different time scales.</p>
 
-  <hr>
 
   <h2>The pattern that actually works: preflight</h2>
 
@@ -316,7 +278,6 @@ client.record(agent_id="researcher", units=200)
 
   <p>Two calls. The agent either runs with a confirmed budget or it doesn't run at all. No overnight surprises.</p>
 
-  <hr>
 
   <h2>Monthly caps vs. per-request ceilings</h2>
 
@@ -326,7 +287,6 @@ client.record(agent_id="researcher", units=200)
 
   <p>You need both. The monthly cap catches drift. The preflight ceiling catches catastrophe.</p>
 
-  <hr>
 
   <h2>The same run, replayed with preflight</h2>
 
@@ -340,7 +300,6 @@ client.record(agent_id="researcher", units=200)
 
   <p>The retry bug still exists. But it can't compound into a runaway loop when each invocation requires a budget check to proceed.</p>
 
-  <hr>
 
   <h2>Implementing preflight in your stack</h2>
 
@@ -385,7 +344,6 @@ async function runAgentSafely(customerId: string, task: string) {
 }
   </pre></div>
 
-  <hr>
 
   <h2>Summary</h2>
 
@@ -393,11 +351,9 @@ async function runAgentSafely(customerId: string, task: string) {
 
   <p>If you're running AI agents in production, especially agents that loop, retry, or run unattended, you need a check that fires before the first token, not after the last one.</p>
 
-  <div class="cta-box">
-    <h2>Add preflight to your agents</h2>
-    <p>Free tier: 1,000 preflight calls/month. No credit card required.</p>
-    <a href="/register" class="cta">Get your API key</a>
-  </div>
+  <h2>Add preflight to your agents</h2>
+  <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
+  <p class="end"><a href="/register" class="btn">Get your API key</a></p>
 
   <div class="also">
     <p>Related guides</p>
@@ -406,10 +362,8 @@ async function runAgentSafely(customerId: string, task: string) {
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
   </div>
 
-</div>
-${siteFooter()}
-</body>
-</html>`)
+`,
+    }))
   })
 
 }

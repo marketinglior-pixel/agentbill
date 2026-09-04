@@ -32,12 +32,17 @@ export const DOCS_CSS = `${CHROME_CSS}
   .rail a:active { color: var(--white); }
 
   .container { min-width: 0; }
-  h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; overflow-wrap: anywhere; }
+  h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; overflow-wrap: anywhere; max-width: 26ch; }
   .lede { font-size: var(--fs-lede); color: var(--muted); max-width: 60ch; margin-bottom: 8px; }
+  /* A post's dateline: date and reading time, in the label register. */
+  .meta { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 8px; }
+  .meta + h2, .lede + h2 { margin-top: 44px; }
+  blockquote { border-left: 2px solid var(--border2); padding-left: 20px; margin: 24px 0; max-width: 68ch; }
+  blockquote p { color: var(--dim); font-style: italic; }
   /* Sections are separated by space, not by rules. The first h2 after the lede
      sits closer than the rest so the page does not open with a gap. */
   h2 { color: var(--white); margin: 72px 0 18px; overflow-wrap: anywhere; scroll-margin-top: calc(var(--banner-height) + 24px); }
-  .lede + h2, .lede ~ .badge + h2 { margin-top: 44px; }
+  .lede ~ .badge + h2 { margin-top: 44px; }
   h3 { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 500; color: var(--dim);
        margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .14em; }
   p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; max-width: 68ch; }
@@ -143,12 +148,14 @@ type ShellOpts = {
   description: string
   canonical?: string
   extraHead?: string
+  /** Which nav link is current. Docs and guides pass "/docs"; a blog post passes "" (none). */
+  current?: string
   /** The page body. Its <h2>s become the rail. */
   body: string
 }
 
 /** Doctype through </html> for a content page: shared CSS, nav, rail, body, footer. */
-export function docsShell({ title, description, canonical, extraHead, body }: ShellOpts): string {
+export function docsShell({ title, description, canonical, extraHead, current = '/docs', body }: ShellOpts): string {
   const { body: anchored, toc } = withAnchors(body)
   const rail = toc.length
     ? `  <nav class="rail" aria-label="On this page">
@@ -158,7 +165,7 @@ ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
     : '  <div></div>'
   return `${head({ title, description, canonical, css: DOCS_CSS, extraHead })}
 <body>
-${siteNav('/docs')}
+${siteNav(current)}
 <div class="docs">
 ${rail}
   <main class="container">
