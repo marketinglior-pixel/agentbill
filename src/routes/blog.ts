@@ -5,10 +5,9 @@ import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 const CSS = `${CHROME_CSS}
   :root { --shell: 780px; }
   .container { max-width: var(--shell); margin: 0 auto; padding: 60px 24px; }
-  h1, h2, h3 { font-family: var(--mono); letter-spacing: -.01em; }
-    h1 { font-size: 26px; font-weight: 700; color: var(--white); line-height: 1.3; margin-bottom: 16px; }
+  h1 { font-size: clamp(27px, 3.4vw, 38px); color: var(--white); margin-bottom: 18px; max-width: 24ch; }
   .meta { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
-  h2 { font-size: 18px; font-weight: 700; color: var(--white); margin: 48px 0 12px; }
+  h2 { color: var(--white); margin: 52px 0 16px; }
   p { font-size: 15px; color: var(--muted); line-height: 1.8; margin-bottom: 20px; }
   .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px; padding: 20px; margin: 24px 0; overflow-x: auto; }
   .code pre { font-size: 13px; color: var(--code); line-height: 1.7; }

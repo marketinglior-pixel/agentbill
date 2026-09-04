@@ -5,11 +5,10 @@ import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 const CSS = `${CHROME_CSS}
   :root { --shell: 860px; }
   .container { max-width: var(--shell); margin: 0 auto; padding: 60px 24px; }
-  h1, h2, h3 { font-family: var(--mono); letter-spacing: -.01em; }
-    h1 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
-  h2 { font-size: 18px; font-weight: 700; color: var(--white); margin: 40px 0 12px; }
-  h3 { font-size: 15px; font-weight: 700; color: var(--white); margin: 28px 0 10px; }
-  p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
+  h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; }
+  h2 { color: var(--white); margin: 52px 0 16px; }
+  h3 { color: var(--white); margin: 30px 0 10px; }
+  p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
   .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
   .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
   .nav a:hover { color: var(--muted); }

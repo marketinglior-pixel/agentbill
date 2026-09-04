@@ -107,7 +107,7 @@ export async function registerRoute(app: FastifyInstance) {
             padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
     .left-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
                   letter-spacing: 2px; color: var(--accent); margin-bottom: 24px; }
-    .left h1 { font-size: 30px; font-weight: 800; color: var(--white); line-height: 1.2;
+    .left h1 { font-size: clamp(30px, 3.2vw, 40px); color: var(--white); line-height: 1.08;
                letter-spacing: -1px; margin-bottom: 16px; }
     .left p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 40px; max-width: 380px; }
     .feature-list { list-style: none; display: flex; flex-direction: column; gap: 18px; }

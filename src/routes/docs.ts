@@ -22,11 +22,11 @@ export async function docsRoute(app: FastifyInstance) {
     body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
          -webkit-font-smoothing: antialiased; }
     .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
-    h1, h2, h3 { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace; letter-spacing: -.01em; }
-    h1 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
-    h2 { font-size: 18px; font-weight: 700; color: var(--white); margin: 48px 0 16px; }
-    h3 { font-size: 14px; font-weight: 700; color: var(--muted); margin: 32px 0 8px; text-transform: uppercase; letter-spacing: 1px; }
-    p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
+    h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); margin-bottom: 12px; }
+    h2 { color: var(--white); margin: 56px 0 18px; }
+    h3 { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 500; color: var(--dim);
+         margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .14em; }
+    p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
     .nav { font-size: 13px; color: var(--dim); margin-bottom: 48px; }
     .nav a { color: var(--dim); text-decoration: none; margin-right: 16px; }
     .nav a:hover { color: var(--muted); }

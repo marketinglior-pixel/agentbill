@@ -25,9 +25,28 @@ export const TOKENS = `
        only; --red and --amber are states that need a human. */
     --green: #22d3a0; --green-ink: #05130e; --code: #a8ff78;
     --red: #ff5757; --amber: #f5b942;
-    /* type */
+    /* Type. Three faces, three jobs, no overlap.
+       --display carries every heading. It is a narrow industrial grotesque, so
+       it reads as infrastructure and, more importantly, it contrasts with the
+       mono instead of imitating it: the headings are the human voice and the
+       code output is the machine's. Setting headings in mono, which is what
+       this site did everywhere, collapses that distinction into costume.
+       --mono is for code, data columns, key strings and the wordmark. Nothing
+       else. */
+    --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
     --sans: 'Inter', system-ui, -apple-system, sans-serif;
     --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    /* A five-step scale with large intervals. The old set ran
+       46 / 26 / 15.5 / 15, so a card title and its body text were half a pixel
+       apart and nothing read as a hierarchy. Weight and colour carry the rest. */
+    --fs-display: clamp(34px, 5.4vw, 58px);
+    --fs-h2: clamp(26px, 3.4vw, 34px);
+    --fs-h3: 19px;
+    --fs-lede: 18px;
+    --fs-body: 16px;
+    --fs-small: 13.5px;
+    --fs-micro: 12px;
   }`
 
 /** Reset plus the element defaults every page shares. */
@@ -36,7 +55,11 @@ export const BASE = `
   html { scroll-behavior: smooth; }
   html, body { overflow-x: clip; }
   body { background: var(--bg); color: var(--text); font-family: var(--sans);
-         font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+         font-size: var(--fs-body); line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  h1, h2, h3, h4 { font-family: var(--display); text-wrap: balance; }
+  h1 { font-size: var(--fs-display); font-weight: 800; letter-spacing: -0.03em; line-height: 1.04; }
+  h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -0.022em; line-height: 1.12; }
+  h3 { font-size: var(--fs-h3); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
   a { color: var(--green); }
   .mono { font-family: var(--mono); }
   :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -47,7 +70,7 @@ export const BASE = `
 
 const FONTS = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
 
 type HeadOpts = {
   /** Full <title>. Falls back to "<name> · AgentBill". */

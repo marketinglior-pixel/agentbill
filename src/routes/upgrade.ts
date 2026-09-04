@@ -30,9 +30,14 @@ export async function upgradeRoute(app: FastifyInstance) {
 
     :root { --shell: 1040px; }
     body { min-height: 100vh; }
-    h1, .tier, .price, .cta { font-family: var(--mono); }
+    /* .tier is a data label and stays mono; the headline and the figures
+       are display type. */
+    .tier { font-family: var(--mono); }
+    .price { font-family: var(--display); font-weight: 800; letter-spacing: -0.02em; }
     .wrap { max-width: var(--shell); margin: 0 auto; padding: 48px 24px 0; }
-    h1 { font-size: 26px; margin-top: 36px; line-height: 1.35; }
+    /* A two-sentence headline on a secondary page is not a hero: it steps down
+       a rung rather than inheriting the display clamp's hero maximum. */
+    h1 { font-size: clamp(28px, 3.6vw, 40px); margin-top: 40px; max-width: 30ch; }
     .sub { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 640px; line-height: 1.6; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-top: 40px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px;

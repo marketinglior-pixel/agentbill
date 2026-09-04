@@ -35,9 +35,8 @@ export async function homeRoute(app: FastifyInstance) {
 
     /* Hero */
     .hero { padding-block: 88px 40px; }
-    h1 { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: clamp(30px, 5.4vw, 46px);
-         font-weight: 700; color: var(--white); line-height: 1.22; letter-spacing: -0.5px; max-width: 21ch; }
-    .sub { font-size: 18px; color: var(--muted); margin: 22px 0 30px; max-width: 56ch; }
+    h1 { color: var(--white); max-width: 17ch; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 54ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
     .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
@@ -66,14 +65,11 @@ export async function homeRoute(app: FastifyInstance) {
 
     /* Features */
     section { padding-block: 72px 0; }
-    .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
-               letter-spacing: 2px; text-transform: uppercase; color: var(--green); margin-bottom: 14px; }
-    h2 { font-family: 'JetBrains Mono', monospace; font-size: 26px; color: var(--white); letter-spacing: -0.3px; margin-bottom: 28px; }
+    h2 { color: var(--white); margin-bottom: 32px; max-width: 20ch; }
     .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
     .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
-    .feature h3 { font-family: 'JetBrains Mono', monospace; font-size: 15.5px; color: var(--text); margin-bottom: 10px; }
-    .feature h3::before { content: "▸ "; color: var(--green); }
-    .feature p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+    .feature h3 { color: var(--white); margin-bottom: 12px; }
+    .feature p { font-size: var(--fs-small); color: var(--muted); line-height: 1.7; }
 
     /* Pricing strip */
     .price-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
@@ -81,14 +77,15 @@ export async function homeRoute(app: FastifyInstance) {
     .price.hot { border-color: rgba(34,211,160,0.45); }
     .price .tier { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 1.5px;
                    text-transform: uppercase; color: var(--muted); }
-    .price .amount { font-size: 26px; font-weight: 800; color: var(--white); margin: 8px 0 2px; }
+    .price .amount { font-family: var(--display); font-size: 30px; font-weight: 800;
+                     letter-spacing: -0.02em; color: var(--white); margin: 8px 0 2px; }
     .price .amount small { font-size: 13px; color: var(--dim); font-weight: 400; }
     .price .inc { font-size: 12.5px; color: var(--dim); }
     .price-links { margin-top: 20px; display: flex; gap: 14px; align-items: center; }
 
     /* Not-for */
     .not-for ul { list-style: none; }
-    .not-for li { color: var(--muted); font-size: 14.5px; margin-bottom: 10px; padding-left: 22px; position: relative; }
+    .not-for li { color: var(--muted); font-size: var(--fs-small); margin-bottom: 12px; padding-left: 22px; position: relative; }
     .not-for li::before { content: "x"; position: absolute; left: 0; color: var(--red);
                           font-family: 'JetBrains Mono', monospace; font-weight: 700; }
 
@@ -133,7 +130,6 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   </header>
 
   <section class="wrap">
-    <div class="eyebrow">The gap providers admit</div>
     <h2>Monthly caps don't stop tonight's loop.</h2>
     <div class="features">
       <div class="feature">
@@ -157,7 +153,6 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   </section>
 
   <section class="wrap">
-    <div class="eyebrow">Pricing</div>
     <h2>Free to start. Insurance-cheap to scale.</h2>
     <div class="price-strip">
       <div class="price"><div class="tier">Free</div><div class="amount">$0</div><div class="inc">1,000 calls/mo</div></div>
@@ -172,7 +167,6 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   </section>
 
   <section class="wrap not-for">
-    <div class="eyebrow">Honesty section</div>
     <h2>What AgentBill does NOT do</h2>
     <ul>
       <li>Multi-step workflows with reversal logic (out of scope)</li>
