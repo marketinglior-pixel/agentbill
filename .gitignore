@@ -19,6 +19,7 @@ npm-debug.log*
 
 # Local preview launch config (Claude Code)
 .claude/
+.hallmark/
 
 # Python build artifacts from running the SDK tests locally
 __pycache__/

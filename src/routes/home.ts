@@ -3,6 +3,115 @@ import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
+import { demoConsole } from './app.js'
+import { PLAN_LIMITS } from '../integrations/polar.js'
+
+// The page is a Split Studio: every claim below the fold sits beside a panel
+// that shows the product doing the thing the claim describes. The panels are
+// not mockups. They render the same sample rows the demo console renders,
+// through the same rule the console applies, so the homepage cannot show a
+// number the console would disagree with. Where a panel is sample data it
+// says so inside its own frame, so a screenshot carries the label with it.
+
+const esc = (s: unknown) =>
+  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const num = (n: number) => n.toLocaleString('en-US')
+
+// Monthly prices also live in upgrade.ts. Two files, one fact: known
+// duplication, left alone in a design pass. Call limits come from PLAN_LIMITS,
+// which is also what preflight enforces, so those cannot drift.
+const PRICES: Record<string, string> = { free: '$0', builder: '$29', team: '$99', scale: '$299' }
+const TIERS = ['free', 'builder', 'team', 'scale'] as const
+const RECOMMENDED = 'team'
+
+/** Task budgets burning down: the first three rows of the demo console. */
+function taskPanel(): string {
+  const rows = demoConsole().tasks.slice(0, 3).map((t) => {
+    // Same two tests the console applies in app.ts: the chip reads the settled
+    // number, the bar colour reads settled plus in-flight. Keep them identical.
+    const ratio = (t.usedUnits + t.reservedUnits) / t.ceilingUnits
+    const held = t.usedUnits >= t.ceilingUnits
+    const chip = held
+      ? '<span class="chip held">ceiling hit</span>'
+      : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
+    const barCls = ratio >= 1 ? ' held' : ratio >= 0.8 ? ' near' : ''
+    const usedPct = Math.min(100, (t.usedUnits / t.ceilingUnits) * 100)
+    const resPct = Math.min(100 - usedPct, (t.reservedUnits / t.ceilingUnits) * 100)
+    return `
+        <div class="task">
+          <div class="task-top">
+            <span class="ref">${esc(t.taskRef)}</span>
+            <span class="agent">${esc(t.agentId)}</span>
+            ${chip}
+          </div>
+          <div class="track" aria-hidden="true">
+            <i class="used${barCls}" style="width:${usedPct.toFixed(1)}%"></i>
+            <i class="res" style="width:${resPct.toFixed(1)}%"></i>
+          </div>
+          <div class="task-nums"><b>${num(t.usedUnits)}</b> / ${num(t.ceilingUnits)} units${
+            t.reservedUnits ? ` <span class="dimtxt">· ${num(t.reservedUnits)} reserved</span>` : ''}</div>
+        </div>`
+  }).join('')
+  return `<div class="panel">
+        <div class="panel-h"><span>Task budgets</span><span>one job, many calls, one ceiling</span></div>
+        ${rows}
+        <div class="panel-f">Sample rows, the same ones the demo console shows. Units are an integer you define.</div>
+      </div>`
+}
+
+/** Three refusals from three agents, with the literal body each one got back. */
+function refusalPanel(): string {
+  const rows = demoConsole().decisions.filter((d) => d.blocked && d.taskRef).slice(0, 3).map((d) => {
+    const body = JSON.parse(d.snapshot) as { message?: string }
+    return `
+        <div class="ref-row">
+          <div class="ref-top">
+            <span class="agent">${esc(d.agentId ?? '')}</span>
+            <span class="ref">${esc(d.taskRef ?? '')}</span>
+            <span class="chip held">blocked</span>
+            <span class="ask">asked ${num(d.estimatedUnits ?? 0)}</span>
+          </div>
+          <div class="ref-msg">${esc(body.message ?? d.reason)}</div>
+        </div>`
+  }).join('')
+  return `<div class="panel">
+        <div class="panel-h"><span>Refusals</span><span>what the agent got back</span></div>
+        ${rows}
+        <div class="panel-f">Sample rows. Three agents, three tasks, one rule. "Asked" is units, not a dollar figure.</div>
+      </div>`
+}
+
+/** The whole request path, as a shape. No proxy is a fact about this shape. */
+function requestPanel(): string {
+  return `<div class="panel">
+        <div class="panel-h"><span>POST /preflight</span><span>the entire integration surface</span></div>
+        <div class="req"><span class="k">request</span>
+{ "agent_id": "researcher", "task_ref": "job-142",
+  "task_ceiling": 500, "estimated_units": 12 }
+
+<span class="k">approved</span>
+{ "approved": <span class="t">true</span>, "task_ref": "job-142",
+  "task_remaining_units": 488 }
+
+<span class="k">blocked</span>
+{ "approved": <span class="f">false</span>, "reason": "task_ceiling_exceeded",
+  "task_ref": "job-142", "task_remaining_units": 8 }</div>
+        <div class="panel-f">Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
+      </div>`
+}
+
+function pricingStrip(): string {
+  const rows = TIERS.map((tier) => `
+        <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
+          <td class="tier">${tier}</td>
+          <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
+          <td class="amount">${PRICES[tier]}${tier === 'free' ? '' : '<span class="dimtxt"> / mo</span>'}</td>
+        </tr>`).join('')
+  return `<table class="tiers">
+        <tbody>${rows}
+        </tbody>
+      </table>`
+}
 
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', async (request, reply) => {
@@ -29,108 +138,68 @@ export async function homeRoute(app: FastifyInstance) {
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
   ${pixelSnippet()}`,
       css: `${CHROME_CSS}${PLAYGROUND_CSS}
+    /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
+     * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
+     * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
+     * pre-emit critique: P4 H4 E4 S5 R5 V4 */
 
-    /* The marketing page runs wider than the 960px reading shell. At 960 in a
-       1440 viewport the whole page was a narrow ribbon with 240px of dead
-       ground on either side, which is what made it read as unfinished rather
-       than as restrained. Nav and footer read the same token, so they widen
-       with it and stay aligned to the content. Same override pattern /blog
-       already uses to go narrower. */
-    :root { --shell: 1080px; }
+    :root { --shell: 1080px;
+            /* Console colours the panels need. Same values as app.ts, same
+               meaning: --flow is ordinary traffic, --res is units held by a
+               reservation that has not settled yet, the held/near pairs are the
+               chip grounds and hairlines the console already uses. Lifted here
+               so nothing below this block names a colour by hex. */
+            --flow: #5d6b75; --res: #3a444b;
+            --held-bg: #0e2a20; --held-line: #1b4a3a;
+            --near-bg: #2b220e; --near-line: #4a3a12;
+            --band-hi: #121212; --band-lo: #0c0c0c;
+            --cmt: #79837c; }
 
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
     .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
 
-    /* Hero */
-    .hero { padding-block: 88px 40px; position: relative; isolation: isolate; }
-    /* One soft source of light behind the headline, off-centre so the page has
-       a direction. Positive z-index on the pseudo and on the children rather
-       than z-index:-1, which would drop it behind the body background. */
-    .hero::before { content: ""; position: absolute; z-index: 0; pointer-events: none;
-                    inset: -160px -240px auto -240px; height: 560px;
-                    background: radial-gradient(54% 60% at 22% 6%, rgba(34,211,160,0.13), transparent 70%); }
-    .hero > * { position: relative; z-index: 1; }
-    h1 { color: var(--white); max-width: 17ch; }
-    .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 54ch; }
+    /* Hero: a diptych. Type on the left, the whole integration on the right.
+       The right half used to be empty at desktop; the code sample was too wide
+       to sit there, so it got shorter, not the column wider. */
+    .hero { padding-block: 64px 88px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 56px; align-items: center; }
+    h1, h2 { overflow-wrap: anywhere; min-width: 0; }
+    h1 { color: var(--white); max-width: 14ch; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 46ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
     .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
-                 padding: 13px 22px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 15px; }
+                 padding: 13px 22px; border-radius: 10px; text-decoration: none; font-weight: 600;
+                 font-size: 15px; white-space: nowrap; }
     .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
-    .trust { margin-top: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim); }
+    .btn-ghost:active, .chip-link:active { transform: translateY(1px); }
+    .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
     .trust b { color: var(--green); font-weight: 500; }
 
-    /* Code */
     .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-                  margin: 48px 0 0; overflow: hidden; }
-    /* This bar used to be three grey circles imitating a macOS title bar. The
-       block is not a window, nothing here closes or zooms, and the borrowed
-       chrome is the cheapest tell there is. It says what the code is instead. */
+                  overflow: hidden; min-width: 0; }
     .code-head { display: flex; align-items: center; justify-content: space-between; gap: 16px;
                  padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--surface2);
                  font-family: var(--mono); font-size: 11.5px; letter-spacing: 1.1px; color: var(--dim); }
     .code-head b { color: var(--muted); font-weight: 500; }
     .code-body { padding: 22px 24px; overflow-x: auto; }
-    .code-body pre { font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13.5px;
-                     color: var(--code); line-height: 1.75; }
-    @media (max-width: 640px) {
-      .code-body { padding: 18px 16px; }
-      .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
-      .out-blocked { display: block; margin-top: 6px; }
-    }
-    .cmt { color: #79837c; }
-    .out-blocked { color: var(--red); font-weight: 700; }
+    .code-body pre { font-family: var(--mono); font-size: 13.5px; color: var(--code); line-height: 1.75; }
+    .cmt { color: var(--cmt); }
     .out-dim { color: var(--dim); }
-
-    /* Features */
-    section { padding-block: 72px 0; }
-    h2 { color: var(--white); margin-bottom: 32px; max-width: 20ch; }
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-    .feature { background: linear-gradient(180deg, var(--surface2), var(--surface));
-               border: 1px solid var(--border); border-radius: 12px; padding: 24px;
-               box-shadow: var(--edge), var(--lift); transition: border-color .15s, transform .15s; }
-    .feature:hover { border-color: var(--border2); transform: translateY(-2px); }
-    .feature h3 { color: var(--white); margin-bottom: 12px; }
-    .feature p { font-size: var(--fs-small); color: var(--muted); line-height: 1.7; }
-
-    /* Pricing strip */
-    .price-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .price { background: linear-gradient(180deg, var(--surface2), var(--surface));
-             border: 1px solid var(--border); border-radius: 12px; padding: 24px 20px; text-align: center;
-             box-shadow: var(--edge), var(--lift); }
-    /* The recommended tier is the one that should carry weight, so it gets the
-       accent edge AND the light, not a slightly different border colour. */
-    .price.hot { border-color: rgba(34,211,160,0.45);
-                 box-shadow: inset 0 1px 0 rgba(34,211,160,0.22), var(--lift), 0 0 44px rgba(34,211,160,0.07); }
-    .price .tier { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 1.5px;
-                   text-transform: uppercase; color: var(--muted); }
-    .price .amount { font-family: var(--display); font-size: 30px; font-weight: 800;
-                     letter-spacing: -0.02em; color: var(--white); margin: 8px 0 2px; }
-    .price .amount small { font-size: 13px; color: var(--dim); font-weight: 400; }
-    .price .inc { font-size: 12.5px; color: var(--dim); }
-    .price-links { margin-top: 20px; display: flex; gap: 14px; align-items: center; }
-
-    /* Not-for */
-    .not-for ul { list-style: none; }
-    .not-for li { color: var(--muted); font-size: var(--fs-small); margin-bottom: 12px; padding-left: 22px; position: relative; }
-    .not-for li::before { content: "x"; position: absolute; left: 0; color: var(--red);
-                          font-family: 'JetBrains Mono', monospace; font-weight: 700; }
 
     /* The refusal band. Every other section on this page is a 1080px column of
        left-aligned type; this one is full bleed with its own ground, because it
        carries the one string the whole product exists to produce. Breaking the
        grid once is what stops the page reading as a template. */
-    .refusal { padding-block: 0; margin-top: 64px;
-               background: linear-gradient(180deg, #121212, #0c0c0c 72%);
+    .refusal { padding-block: 0;
+               background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
                border-block: 1px solid var(--border2); box-shadow: var(--edge); }
     .refusal .wrap { padding-block: 60px 56px; }
     .refusal-name, .refusal-msg { font-family: var(--mono); }
     /* One unbreakable 24-character token, so the floor of this clamp is not a
-       taste call: at 0.6em of mono advance, 24 chars need 14.4em, and 320px
-       minus the 48px gutter leaves 272px. A 21px floor wants 302px and blows
-       the gutter on a small phone. 17px needs 245px and fits, and the steeper
-       vw coefficient gets it back to full display size by tablet. */
+       taste call: at 0.585em of measured mono advance, 24 chars need 14.04em,
+       and 320px minus the 48px gutter leaves 272px. 17px fits; 21px does not. */
     .refusal-name { font-size: clamp(17px, 5.6vw, 40px); font-weight: 700; color: var(--red);
                     letter-spacing: -0.015em; line-height: 1.1; }
     .refusal-msg { font-size: clamp(13px, 1.5vw, 17px); color: var(--muted); line-height: 1.6;
@@ -139,39 +208,136 @@ export async function homeRoute(app: FastifyInstance) {
                     padding-top: 22px; border-top: 1px solid var(--border); }
     .refusal-note b { color: var(--muted); font-weight: 600; }
 
-    /* Final CTA */
-    .final { text-align: center; padding-block: 88px; }
-    .final h2 { margin-bottom: 10px; }
-    .final p { color: var(--muted); margin-bottom: 26px; }
+    /* Diptychs. Text on one side, the product on the other, direction alternating.
+       A gutter, no rule: the two halves are one argument, not two cards. Padding
+       is uneven on purpose, generous above the first and tight between the rest,
+       so the three read as a sequence rather than three stamped sections. */
+    section { padding-block: 72px 0; }
+    .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center;
+           padding-block: 40px 0; }
+    .dip + .dip { padding-block: 64px 0; }
+    .dip.flip .dip-text { order: 2; }
+    .dip h2 { color: var(--white); margin-bottom: 16px; max-width: 16ch; }
+    .dip p { color: var(--muted); line-height: 1.7; max-width: 46ch; }
+    .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
+                 padding: 0 18px; border: 1px solid var(--border-strong); border-radius: 8px;
+                 color: var(--text); text-decoration: none; font-weight: 600; font-size: 14.5px;
+                 white-space: nowrap; transition: border-color .15s; }
+    .chip-link:hover { border-color: var(--text); }
+    .lead-h2 { color: var(--white); margin-bottom: 8px; max-width: 22ch; }
+    .lead-p { color: var(--muted); max-width: 58ch; }
+
+    /* Product panels. One containment layer, the console's own vocabulary. */
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+             overflow: hidden; min-width: 0; box-shadow: var(--edge), var(--lift); }
+    .panel-h { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 18px;
+               border-bottom: 1px solid var(--border); background: var(--surface2);
+               font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+               color: var(--dim); }
+    .panel-h span:last-child { text-transform: none; letter-spacing: 0; font-size: 12px; text-align: right; }
+    .panel-f { padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface2);
+               font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.5; }
+
+    .task { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
+    .task:last-of-type { border-bottom: 0; }
+    .task-top, .ref-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .ref { font-family: var(--mono); font-size: 14px; color: var(--text); }
+    .agent { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+    .task-nums { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 8px;
+                 font-variant-numeric: tabular-nums; }
+    .task-nums b { color: var(--text); font-weight: 500; }
+    .dimtxt { color: var(--dim); }
+    .track { height: 8px; background: var(--surface3); border-radius: 999px; overflow: hidden; display: flex; }
+    .track i { display: block; height: 100%; }
+    .track i.used { background: var(--flow); }
+    .track i.used.near { background: var(--amber); }
+    .track i.used.held { background: var(--green); }
+    .track i.res { background: var(--res); }
+    .chip { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+            padding: 3px 9px; border-radius: 4px; border: 1px solid; margin-left: auto; }
+    .chip.held { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
+    .chip.near { color: var(--amber); border-color: var(--near-line); background: var(--near-bg); }
+    .chip.flow { color: var(--muted); border-color: var(--border2); background: var(--surface3); }
+    .ask { font-family: var(--mono); font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .ref-row { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
+    .ref-row:last-of-type { border-bottom: 0; }
+    .ref-row .chip { margin-left: 0; }
+    .ref-msg { font-family: var(--mono); font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+    .req { padding: 18px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--code);
+           white-space: pre; overflow-x: auto; }
+    .req .k { color: var(--dim); text-transform: uppercase; letter-spacing: .14em; font-size: 11px; }
+    .req .t { color: var(--green); }
+    .req .f { color: var(--red); font-weight: 700; }
+
+    /* Pricing: a spec sheet, not four cards. The recommended tier carries weight
+       through type, and the numbers line up because they are a table. */
+    .tiers { width: 100%; border-collapse: collapse; margin-top: 28px; font-variant-numeric: tabular-nums; }
+    .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px; }
+    .tiers tr:first-child td { border-top: 1px solid var(--border); }
+    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
+                   color: var(--dim); width: 18%; }
+    .tiers .amount { text-align: right; font-family: var(--display); font-size: 22px; font-weight: 700;
+                     color: var(--text); letter-spacing: -0.02em; }
+    .tiers tr.rec .tier { color: var(--green); }
+    .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
+    .price-links { margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+
+    .not-for ul { list-style: none; max-width: 60ch; }
+    .not-for li { color: var(--muted); font-size: var(--fs-small); margin-bottom: 12px; padding-left: 22px; position: relative; }
+    .not-for li::before { content: "x"; position: absolute; left: 0; color: var(--red);
+                          font-family: var(--mono); font-weight: 700; }
+
+    .final { padding-block: 88px 24px; }
+    .final h2 { color: var(--white); margin-bottom: 10px; }
+    .final p { color: var(--muted); margin-bottom: 26px; max-width: 54ch; }
+
+    @media (max-width: 900px) {
+      .hero, .dip { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .dip.flip .dip-text { order: 0; }
+      .hero { padding-block: 48px 64px; }
+      .sub { max-width: 54ch; }
+      section { padding-block: 56px 0; }
+    }
+    @media (max-width: 640px) {
+      .code-body { padding: 18px 16px; }
+      .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+      .panel-h { flex-direction: column; gap: 4px; }
+      .panel-h span:last-child { text-align: left; }
+      .tiers .amount { font-size: 19px; }
+      .tiers td { font-size: 14.5px; }
+    }
 `,
     })}
 <body>
 ${siteNav('/')}
 
   <header class="hero wrap">
-    <h1>Your loop won't stop itself.</h1>
-    <p class="sub">One hard ceiling per task. Every call in that job checks it before it runs,
-    whatever the provider, and you pass what each call is worth. Blocked before the call goes out,
-    not after the bill shows up.</p>
-    <div class="hero-cta">
-      <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
-      <a class="btn-ghost" href="/app?demo=1">See a live console</a>
-      <a class="btn-ghost" href="/docs">Read the docs</a>
+    <div>
+      <h1>Your loop won't stop itself.</h1>
+      <p class="sub">One hard ceiling per task. Every call in that job checks it before it runs,
+      whatever the provider, and you pass what each call is worth. Blocked before the call goes out,
+      not after the bill shows up.</p>
+      <div class="hero-cta">
+        <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
+        <a class="btn-ghost" href="/app?demo=1">See a live console</a>
+      </div>
+      <p class="trust"><b>free tier</b> · 1,000 preflight calls/mo · no card · key in 30 seconds</p>
     </div>
-    <p class="trust"><b>free tier</b> · 1,000 preflight calls/mo · no card · key in 30 seconds</p>
 
     <div class="code-block">
       <div class="code-head"><span>python <b>&middot;</b> the whole integration</span><span>agentbill-sdk</span></div>
       <div class="code-body">
-        <pre><span class="cmt"># 3 lines. That's it.</span>
-from agentbill import AgentBillClient
+        <pre>from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="cmt"># Units are yours. Here 1 unit = 1 cent, so this job stops at</span>
-<span class="cmt"># 500 units. Every call passing the same task_ref draws it down.</span>
-client.preflight(agent_id="researcher", task_ref="job-142",
-                 task_ceiling=500, estimated_units=12)
+<span class="cmt"># 1 unit = 1 cent here. job-142 dies at 500 units,</span>
+<span class="cmt"># across every call that passes the same task_ref.</span>
+client.preflight(agent_id="researcher",
+                 task_ref="job-142",
+                 task_ceiling=500,
+                 estimated_units=12)
 
 <span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
       </div>
@@ -191,36 +357,47 @@ client.preflight(agent_id="researcher", task_ref="job-142",
 ${playgroundSection()}
 
   <section class="wrap">
-    <h2>Monthly caps don't stop tonight's loop.</h2>
-    <div class="features">
-      <div class="feature">
-        <h3>Per-task ceilings</h3>
+    <h2 class="lead-h2">Monthly caps don't stop tonight's loop.</h2>
+    <p class="lead-p">Provider spend caps stop at monthly org totals. These three things stop the run
+    that is burning money right now.</p>
+
+    <div class="dip">
+      <div class="dip-text">
+        <h2>Per-task ceilings</h2>
         <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
-        unit is worth. Provider spend caps stop at monthly org totals. Yours stops the run that's
-        burning money right now.</p>
+        unit is worth. The ceiling is consulted before each call, and the total across the whole
+        job cannot pass it.</p>
+        <a class="chip-link" href="/app?demo=1#tasks">Watch budgets burn down &rarr;</a>
       </div>
-      <div class="feature">
-        <h3>One ceiling, any provider</h3>
+      ${taskPanel()}
+    </div>
+
+    <div class="dip flip">
+      <div class="dip-text">
+        <h2>One ceiling, any provider</h2>
         <p>OpenAI, Anthropic, your own GPU, a tool call. Whatever it is, if it passes the same
         task_ref it draws down the same ceiling, and you decide what it costs in units. We never
-        look at your provider bill. Not per vendor, per job, with per-agent attribution.</p>
+        look at your provider bill. Per job, with per-agent attribution.</p>
+        <a class="chip-link" href="/app?demo=1#refusals">See the refusals &rarr;</a>
       </div>
-      <div class="feature">
-        <h3>No proxy in your request path</h3>
+      ${refusalPanel()}
+    </div>
+
+    <div class="dip">
+      <div class="dip-text">
+        <h2>No proxy in your request path</h2>
         <p>An SDK call, not a gateway. Nothing to route your traffic through, nothing to deploy,
-        nothing to compromise. The ceiling is something your tools consult.</p>
+        nothing to compromise. The ceiling is something your tools consult, and the reservation
+        it takes is atomic.</p>
+        <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
       </div>
+      ${requestPanel()}
     </div>
   </section>
 
   <section class="wrap">
-    <h2>Free to start. Cheap enough to leave on.</h2>
-    <div class="price-strip">
-      <div class="price"><div class="tier">Free</div><div class="amount">$0</div><div class="inc">1,000 calls/mo</div></div>
-      <div class="price"><div class="tier">Builder</div><div class="amount">$29<small>/mo</small></div><div class="inc">50,000 calls/mo</div></div>
-      <div class="price hot"><div class="tier">Team</div><div class="amount">$99<small>/mo</small></div><div class="inc">500,000 calls/mo</div></div>
-      <div class="price"><div class="tier">Scale</div><div class="amount">$299<small>/mo</small></div><div class="inc">2,000,000 calls/mo</div></div>
-    </div>
+    <h2 class="lead-h2">Free to start. Cheap enough to leave on.</h2>
+    ${pricingStrip()}
     <div class="price-links">
       <a class="btn" href="/register">Start free</a>
       <a class="btn-ghost" href="/pricing">Full pricing</a>
@@ -228,7 +405,7 @@ ${playgroundSection()}
   </section>
 
   <section class="wrap not-for">
-    <h2>What AgentBill does NOT do</h2>
+    <h2 class="lead-h2">What AgentBill does NOT do</h2>
     <ul>
       <li>Undo a multi-step workflow. We stop calls, we don't unwind them.</li>
       <li>Replace your payment processor. We sit in front of it.</li>

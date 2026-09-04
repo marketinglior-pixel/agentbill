@@ -30,10 +30,6 @@
 /** Playground CSS. Include once, after theme BASE and the page's .wrap rule. */
 export const PLAYGROUND_CSS = `
   .pg-sec { padding-block: 76px 0; }
-  .pg-eyebrow { font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: 0.22em;
-                text-transform: uppercase; color: var(--green); display: flex;
-                align-items: center; gap: 10px; margin-bottom: 16px; }
-  .pg-eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 62ch; margin-top: 12px; }
 
   .pg { margin-top: 30px; border: 1px solid var(--border); background: var(--surface);
@@ -136,7 +132,6 @@ export const PLAYGROUND_CSS = `
 /** The section markup. Drop it straight after the hero. */
 export function playgroundSection(): string {
   return `  <section class="wrap pg-sec">
-    <div class="pg-eyebrow">Try it</div>
     <h2>Run an agent into its ceiling.</h2>
     <p class="pg-lede">Set a ceiling for the whole job. Run the agent. The call that would break
     the budget never goes out. You get back the same response body your SDK gets.</p>

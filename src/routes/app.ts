@@ -368,7 +368,10 @@ const DEMO_VIEWER: Viewer = {
 // screenshot of this page carries the label with it. It is never mixed with
 // real rows: demo mode replaces the account's data wholesale, it does not
 // pad it.
-function demoConsole(): Console {
+// Exported so the homepage can render the same task and refusal rows this
+// console shows under ?demo=1. Two pages that describe one sample account must
+// read one source, or the numbers drift apart the first time either is edited.
+export function demoConsole(): Console {
   const day = (back: number) => new Date(Date.now() - back * 86_400_000)
   const iso = (back: number) => day(back).toISOString().slice(0, 10)
   const shape = [0,0,3,1,0,6,4,2,9,5,3,12,7,4,18,11,6,9,14,8,21,13,7,16,24,12,9,19,15,11]
