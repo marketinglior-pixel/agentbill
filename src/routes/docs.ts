@@ -104,6 +104,66 @@ client.preflight(
 
   <hr>
 
+  <h2 id="reservation">The reservation</h2>
+
+  <p>Preflight does not read your balance and then decide. It takes the budget in the same
+  statement that checks it:</p>
+
+  <div class="code"><pre>
+UPDATE customers
+SET reserved_units = reserved_units + :units
+WHERE account_id = :account
+  AND customer_ref = :customer
+  AND (limit_units IS NULL
+       OR used_units + reserved_units + :units &lt;= limit_units)
+  </pre></div>
+
+  <p>Zero rows back means the budget is gone, and nothing was taken. The task ceiling reserves the
+  same way against <span class="inline">task_budgets</span>, scoped to your
+  <span class="inline">task_ref</span>. Both happen in one transaction with the monthly quota, so a
+  rejected call reserves nothing and burns no quota.</p>
+
+  <p>This matters for one reason. Read the balance, compare it in your process, then act, and ten
+  parallel calls read the same remaining number and all ten pass. The budget is already spent by the
+  time the eleventh is refused. Putting the condition in the <span class="inline">WHERE</span>
+  clause is what makes that impossible.</p>
+
+  <p>So the counter cannot go below zero. Not "usually", not "we alert you". The database refuses
+  the write.</p>
+
+  <p><strong>A ceiling that can go negative is not a ceiling.</strong> It is an invoice line you
+  read afterwards. On the revenue side an overage is billable, so letting a balance overshoot is a
+  reasonable design. On your side the overage is money already spent, and there is nobody to bill
+  it to.</p>
+
+  <h3>Reservations expire</h3>
+
+  <p>Each reservation is a row with a TTL, returned to you as
+  <span class="inline">reservation_expires_at</span> on every approved preflight. Default is 60
+  minutes, set <span class="inline">RESERVATION_TTL_MINUTES</span> to change it. If
+  <span class="inline">record()</span> never arrives, a sweeper reclaims the units. Settling closes
+  reservation rows FIFO and decrements by what those rows actually held, not by what you passed, so
+  a late settle after a sweep cannot release the same units twice.</p>
+
+  <p>Note which way this fails. An abandoned reservation makes your ceiling <em>tighter</em>, never
+  looser. The gate does not open by accident.
+  <a href="/blog/how-preflight-avoids-double-billing" style="color:var(--code)">Full walkthrough of
+  the concurrency design</a>.</p>
+
+  <h3>What the reservation is not</h3>
+
+  <p>It is not a measurement. AgentBill never sees your provider, your GPU or your tool call. The
+  number reserved is the <span class="inline">estimated_units</span> you passed, and
+  <span class="inline">record()</span> settles with the number you pass. Units are an integer you
+  define.</p>
+
+  <p>What you get is ordering and arithmetic that hold under concurrent load: the ceiling is
+  consulted before the work starts, and the total across every call sharing a
+  <span class="inline">task_ref</span> cannot exceed it. What you do not get is an opinion about
+  what a call was worth. That number is yours.</p>
+
+  <hr>
+
   <h2>API Reference</h2>
 
   <h3>preflight()</h3>
