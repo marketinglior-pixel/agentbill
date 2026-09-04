@@ -28,9 +28,14 @@ export const CHROME_CSS = `
   .nav-links a:hover { color: var(--text); }
   .nav-links a[aria-current="page"] { color: var(--text); }
   .nav-links a.btn, .nav-links a.btn:hover, .nav-links a.btn:visited { color: var(--green-ink); }
-  .btn { display: inline-block; background: var(--green); color: var(--green-ink); padding: 10px 18px;
+  /* nowrap is load-bearing: a wrapped label made the nav CTA 66px tall inside a
+     60px header and it broke out of the bar. Button labels are all short. */
+  /* 11px of block padding, not 10: it puts the button at 45px so the primary
+     CTA clears the 44px touch-target guideline on a tablet too, not only
+     inside the phone media query below. */
+  .btn { display: inline-block; background: var(--green); color: var(--green-ink); padding: 11px 18px;
          border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
-         transition: transform .15s, box-shadow .15s; }
+         white-space: nowrap; transition: transform .15s, box-shadow .15s; }
   .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(34,211,160,0.25); }
 
   .site-foot { border-top: 1px solid var(--border); padding: 28px 0 48px; margin-top: 80px; }
@@ -45,10 +50,24 @@ export const CHROME_CSS = `
 
   @media (max-width: 640px) {
     /* Only GitHub drops on a phone. Pricing stays: it is a conversion page and
-       phones are where the paid traffic lands. */
-    .nav-links { gap: 16px; }
+       phones are where the paid traffic lands. Keeping both text links plus a
+       non-wrapping CTA is tight at 375px, so the row pays for it in gap and in
+       the button's inline padding rather than by dropping a link. */
+    .nav-links { gap: 14px; }
     .nav-links a.hide-sm { display: none; }
-    .nav-links a:not(.btn) { padding: 10px 0; }
+    .nav-links a:not(.btn) { padding: 11px 0; }
+    .nav-links a.btn { padding: 11px 14px; }
+    .logo { font-size: 15px; gap: 7px; }
+  }
+
+  /* Below ~400px the wordmark, two text links and a non-wrapping CTA want
+     326px of a 272px row, so something has to go. Docs goes, not Pricing:
+     Docs is also the hero's second button and a footer link, while Pricing is
+     the conversion page and has neither. */
+  @media (max-width: 400px) {
+    .nav-links { gap: 12px; }
+    .nav-links a.hide-xs { display: none; }
+    .nav-links a.btn { padding: 11px 13px; }
   }`
 
 /** `current` marks the active link, e.g. "/docs" or "/pricing". */
@@ -58,7 +77,7 @@ export function siteNav(current = ''): string {
     <div class="nav-inner">
       <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
       <div class="nav-links">
-        <a href="/docs"${at('/docs')}>Docs</a>
+        <a class="hide-xs" href="/docs"${at('/docs')}>Docs</a>
         <a href="/pricing"${at('/pricing')}>Pricing</a>
         <a class="hide-sm" href="${GITHUB}">GitHub</a>
         <a class="btn" href="/register">Get API key</a>
