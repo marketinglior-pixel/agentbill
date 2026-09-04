@@ -4,7 +4,7 @@ import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
-import { PLAN_LIMITS } from '../integrations/polar.js'
+import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
@@ -18,11 +18,8 @@ const esc = (s: unknown) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const num = (n: number) => n.toLocaleString('en-US')
 
-// Monthly prices also live in upgrade.ts. Two files, one fact: known
-// duplication, left alone in a design pass. Call limits come from PLAN_LIMITS,
-// which is also what preflight enforces, so those cannot drift.
-const PRICES: Record<string, string> = { free: '$0', builder: '$29', team: '$99', scale: '$299' }
-const TIERS = ['free', 'builder', 'team', 'scale'] as const
+// Limits, prices and order all come from polar.ts, the same tables preflight
+// enforces and /pricing renders, so no number here can drift from either.
 const RECOMMENDED = 'team'
 
 /** Task budgets burning down: the first three rows of the demo console. */
@@ -83,11 +80,11 @@ function refusalPanel(): string {
 }
 
 function pricingStrip(): string {
-  const rows = TIERS.map((tier) => `
+  const rows = PLAN_ORDER.map((tier) => `
         <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
           <td class="tier">${tier}</td>
           <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
-          <td class="amount">${PRICES[tier]}${tier === 'free' ? '' : '<span class="dimtxt"> / mo</span>'}</td>
+          <td class="amount">$${PLAN_PRICES[tier]}${tier === 'free' ? '' : '<span class="dimtxt"> / mo</span>'}</td>
         </tr>`).join('')
   return `<table class="tiers">
         <tbody>${rows}
@@ -145,12 +142,11 @@ export async function homeRoute(app: FastifyInstance) {
     h1 { color: var(--white); max-width: 14ch; }
     .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 46ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    /* The hero pair runs one size up from the site's buttons. The ghost gives
+       back the pixel its border adds so the two sit at one height. */
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
-    .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
-                 padding: 13px 22px; border-radius: 10px; text-decoration: none; font-weight: 600;
-                 font-size: 15px; white-space: nowrap; }
-    .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
-    .btn-ghost:active, .chip-link:active { transform: translateY(1px); }
+    .btn-ghost.btn-lg { padding: 13px 25px; }
+    .chip-link:active { transform: translateY(1px); }
     .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
     .trust b { color: var(--green); font-weight: 500; }
 
@@ -280,7 +276,7 @@ ${siteNav('/')}
       not after the bill shows up.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
-        <a class="btn-ghost" href="/app?demo=1">See a live console</a>
+        <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
       </div>
       <p class="trust"><b>free tier</b> · 1,000 preflight calls/mo · no card · key in 30 seconds</p>
     </div>

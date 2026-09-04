@@ -101,6 +101,17 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
 - **Claims match the code.** Copy that describes a mechanism is checked against
   the source before it ships. The locked mechanism is in `voice-dna.md`.
 - **Never name a competitor.** Position against the gap.
+- **One representation per fact.** Every number a page shows is rendered from
+  the one place that defines it: tier limits, prices and order from
+  `src/integrations/polar.ts` (`PLAN_LIMITS`, `PLAN_PRICES`, `PLAN_ORDER`,
+  the same tables preflight enforces); the sample account from
+  `demoConsole()` in `app.ts`; console colours from `theme.ts`. A value typed
+  into a second file, even with a comment saying it matches, is a copy that
+  will drift.
+- **Tiers sell headroom, not capability.** Nothing in the code gates a
+  feature by plan; only `PLAN_LIMITS` is read. Pricing copy therefore lists
+  every shipped feature as included on every plan, and the only per-tier lines
+  besides calls and price are service promises, labelled as service.
 
 ## CTA voice
 

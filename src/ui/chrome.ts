@@ -38,8 +38,19 @@ export const CHROME_CSS = `
      inside the phone media query below. */
   .btn { display: inline-block; background: var(--green); color: var(--green-ink); padding: 11px 18px;
          border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
-         white-space: nowrap; transition: transform .15s, box-shadow .15s; }
-  .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(34,211,160,0.25); }
+         white-space: nowrap; transition: filter .15s, transform .12s; }
+  /* One hover effect, not a lift plus a glow. A coloured halo on a dark ground
+     is the shadow-glow tell, and two simultaneous effects is the other one. */
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { transform: translateY(1px); }
+  /* The site's secondary action, paired with .btn at the same height: one
+     pixel less padding pays for the border. Defined once here; pages used to
+     each carry their own. */
+  .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
+               padding: 10px 17px; border-radius: 8px; text-decoration: none; font-weight: 600;
+               font-size: 14px; white-space: nowrap; transition: border-color .15s, color .15s, transform .12s; }
+  .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
+  .btn-ghost:active { transform: translateY(1px); }
 
   .site-foot { border-top: 1px solid var(--border); padding: 28px 0 48px; margin-top: 80px; }
   .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px;

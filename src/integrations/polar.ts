@@ -28,9 +28,11 @@ export function getCheckoutUrl(accountId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Pricing tiers (2026-08-26): Free / Builder $29 / Team $99 / Scale $299.
-// Monthly included preflight calls are enforced app-side; the legacy 'paid'
-// plan (pay-as-you-go) stays metered per call and unlimited.
+// Pricing tiers (2026-08-26). The two tables below are the ONLY place the
+// tiers are defined: preflight enforces PLAN_LIMITS, and /, /pricing and the
+// console render both tables. A price or limit typed anywhere else is a copy
+// that will drift. Monthly included preflight calls are enforced app-side;
+// the legacy 'paid' plan (pay-as-you-go) stays metered per call and unlimited.
 // ---------------------------------------------------------------------------
 
 export const PLAN_LIMITS: Record<string, number> = {
@@ -39,6 +41,17 @@ export const PLAN_LIMITS: Record<string, number> = {
   team: 500_000,
   scale: 2_000_000,
 }
+
+/** Monthly price in whole US dollars. Free is 0 on purpose, not absent. */
+export const PLAN_PRICES: Record<string, number> = {
+  free: 0,
+  builder: 29,
+  team: 99,
+  scale: 299,
+}
+
+/** Display order for the four tiers wherever they are listed. */
+export const PLAN_ORDER = ['free', 'builder', 'team', 'scale'] as const
 
 const TIER_PRODUCTS: Record<string, string> = {
   [process.env.POLAR_PRODUCT_ID_BUILDER ?? '__builder_unset']: 'builder',
