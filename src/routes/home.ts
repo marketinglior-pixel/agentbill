@@ -7,7 +7,7 @@ export async function homeRoute(app: FastifyInstance) {
   app.get('/', async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: 'AgentBill · Billing Governance for AI Agents',
-      description: 'Hard budget ceilings for AI agents. One ceiling per task that every call consults, in any provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
+      description: 'Hard budget ceilings for AI agents. One ceiling per task. Every call that shares the task ref draws it down, whatever the provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
       canonical: 'https://agentbill.dev/',
       extraHead: `  <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
   <!-- Open Graph -->
@@ -118,8 +118,8 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="cmt"># Units are yours to define. Here 1 unit = 1 cent, so this job</span>
-<span class="cmt"># dies at $5, across every call and tool that shares job-142.</span>
+<span class="cmt"># Units are yours. Here 1 unit = 1 cent, so this job stops at</span>
+<span class="cmt"># 500 units. Every call passing the same task_ref draws it down.</span>
 client.preflight(agent_id="researcher", task_ref="job-142",
                  task_ceiling=500, estimated_units=12)
 
@@ -140,9 +140,9 @@ client.preflight(agent_id="researcher", task_ref="job-142",
       </div>
       <div class="feature">
         <h3>One ceiling, any provider</h3>
-        <p>OpenAI, Anthropic, your own GPU, a tool call: anything in the run consults the same task
-        budget, because you decide what each one costs in units. Not per vendor. Per job, with
-        per-agent attribution on every call.</p>
+        <p>OpenAI, Anthropic, your own GPU, a tool call. Whatever it is, if it passes the same
+        task_ref it draws down the same ceiling, and you decide what it costs in units. We never
+        look at your provider bill. Not per vendor, per job, with per-agent attribution.</p>
       </div>
       <div class="feature">
         <h3>No proxy in your request path</h3>
