@@ -6,14 +6,14 @@ import { pixelSnippet } from '../lib/pixel.js'
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', async (request, reply) => {
     return reply.type('text/html').send(`${head({
-      title: 'AgentBill · Billing Governance for AI Agents',
+      title: 'AgentBill · Hard budget ceilings for AI agents',
       description: 'Hard budget ceilings for AI agents. One ceiling per task. Every call that shares the task ref draws it down, whatever the provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
       canonical: 'https://agentbill.dev/',
       extraHead: `  <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://agentbill.dev/" />
-  <meta property="og:title" content="AgentBill · Billing Governance for AI Agents" />
+  <meta property="og:title" content="AgentBill · Hard budget ceilings for AI agents" />
   <meta property="og:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job. Not a tracker. A guardrail." />
   <meta property="og:site_name" content="AgentBill" />
   <meta property="og:image" content="https://agentbill.dev/og.png" />
@@ -21,7 +21,7 @@ export async function homeRoute(app: FastifyInstance) {
   <meta property="og:image:height" content="630" />
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AgentBill · Billing Governance for AI Agents" />
+  <meta name="twitter:title" content="AgentBill · Hard budget ceilings for AI agents" />
   <meta name="twitter:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job." />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   <!-- Structured data -->
@@ -99,10 +99,10 @@ export async function homeRoute(app: FastifyInstance) {
 ${siteNav('/')}
 
   <header class="hero wrap">
-    <h1>Stop runaway AI agents before they start.</h1>
-    <p class="sub">One hard ceiling per agent task, and every call in the job consults it, whatever
-    the provider. You pass the number each call is worth. Blocked before the first token, not after
-    the bill arrives.</p>
+    <h1>Your loop won't stop itself.</h1>
+    <p class="sub">One hard ceiling per task. Every call in that job checks it before it runs,
+    whatever the provider, and you pass what each call is worth. Blocked before the call goes out,
+    not after the bill shows up.</p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
       <a class="btn-ghost" href="/app?demo=1">See a live console</a>
@@ -135,8 +135,8 @@ client.preflight(agent_id="researcher", task_ref="job-142",
       <div class="feature">
         <h3>Per-task ceilings</h3>
         <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
-        unit is worth. Provider spend caps stop at monthly org totals; your ceiling stops the run
-        that's burning money right now.</p>
+        unit is worth. Provider spend caps stop at monthly org totals. Yours stops the run that's
+        burning money right now.</p>
       </div>
       <div class="feature">
         <h3>One ceiling, any provider</h3>
@@ -153,7 +153,7 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   </section>
 
   <section class="wrap">
-    <h2>Free to start. Insurance-cheap to scale.</h2>
+    <h2>Free to start. Cheap enough to leave on.</h2>
     <div class="price-strip">
       <div class="price"><div class="tier">Free</div><div class="amount">$0</div><div class="inc">1,000 calls/mo</div></div>
       <div class="price"><div class="tier">Builder</div><div class="amount">$29<small>/mo</small></div><div class="inc">50,000 calls/mo</div></div>
@@ -169,14 +169,14 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   <section class="wrap not-for">
     <h2>What AgentBill does NOT do</h2>
     <ul>
-      <li>Multi-step workflows with reversal logic (out of scope)</li>
-      <li>Replace your payment processor (we sit in front of it)</li>
-      <li>No-code dashboard for non-developers</li>
+      <li>Undo a multi-step workflow. We stop calls, we don't unwind them.</li>
+      <li>Replace your payment processor. We sit in front of it.</li>
+      <li>Give your ops team a no-code dashboard. This is an SDK.</li>
     </ul>
   </section>
 
   <div class="final wrap">
-    <h2>Your agent gets a budget now.</h2>
+    <h2>Give one job a ceiling.</h2>
     <p>Free tier. No card. If this page took you longer to read than the integration takes, we did our job.</p>
     <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
   </div>
