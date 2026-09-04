@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
 
 export async function homeRoute(app: FastifyInstance) {
@@ -27,7 +28,7 @@ export async function homeRoute(app: FastifyInstance) {
   <!-- Structured data -->
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
   ${pixelSnippet()}`,
-      css: `${CHROME_CSS}
+      css: `${CHROME_CSS}${PLAYGROUND_CSS}
 
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
@@ -129,6 +130,8 @@ client.preflight(agent_id="researcher", task_ref="job-142",
     </div>
   </header>
 
+${playgroundSection()}
+
   <section class="wrap">
     <h2>Monthly caps don't stop tonight's loop.</h2>
     <div class="features">
@@ -182,6 +185,7 @@ client.preflight(agent_id="researcher", task_ref="job-142",
   </div>
 
 ${siteFooter()}
+${PLAYGROUND_JS}
 </body>
 </html>
     `)
