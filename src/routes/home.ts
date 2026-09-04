@@ -5,6 +5,7 @@ import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection } from '../ui/playgrou
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
+import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
 // that shows the product doing the thing the claim describes. The panels are
@@ -81,25 +82,6 @@ function refusalPanel(): string {
       </div>`
 }
 
-/** The whole request path, as a shape. No proxy is a fact about this shape. */
-function requestPanel(): string {
-  return `<div class="panel">
-        <div class="panel-h"><span>POST /preflight</span><span>the entire integration surface</span></div>
-        <div class="req"><span class="k">request</span>
-{ "agent_id": "researcher", "task_ref": "job-142",
-  "task_ceiling": 500, "estimated_units": 12 }
-
-<span class="k">approved</span>
-{ "approved": <span class="t">true</span>, "task_ref": "job-142",
-  "task_remaining_units": 488 }
-
-<span class="k">blocked</span>
-{ "approved": <span class="f">false</span>, "reason": "task_ceiling_exceeded",
-  "task_ref": "job-142", "task_remaining_units": 8 }</div>
-        <div class="panel-f">Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
-      </div>`
-}
-
 function pricingStrip(): string {
   const rows = TIERS.map((tier) => `
         <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
@@ -137,7 +119,7 @@ export async function homeRoute(app: FastifyInstance) {
   <!-- Structured data -->
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
   ${pixelSnippet()}`,
-      css: `${CHROME_CSS}${PLAYGROUND_CSS}
+      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
@@ -227,17 +209,8 @@ export async function homeRoute(app: FastifyInstance) {
     .lead-h2 { color: var(--white); margin-bottom: 8px; max-width: 22ch; }
     .lead-p { color: var(--muted); max-width: 58ch; }
 
-    /* Product panels. One containment layer, the console's own vocabulary. */
-    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-             overflow: hidden; min-width: 0; box-shadow: var(--edge), var(--lift); }
-    .panel-h { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 18px;
-               border-bottom: 1px solid var(--border); background: var(--surface2);
-               font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
-               color: var(--dim); }
-    .panel-h span:last-child { text-transform: none; letter-spacing: 0; font-size: 12px; text-align: right; }
-    .panel-f { padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface2);
-               font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.5; }
-
+    /* Panel contents. The frame (.panel) comes from ui/panels.ts; what goes
+       inside is this page's, in the console's own vocabulary. */
     .task { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
     .task:last-of-type { border-bottom: 0; }
     .task-top, .ref-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -263,12 +236,6 @@ export async function homeRoute(app: FastifyInstance) {
     .ref-row:last-of-type { border-bottom: 0; }
     .ref-row .chip { margin-left: 0; }
     .ref-msg { font-family: var(--mono); font-size: 13px; color: var(--muted); line-height: 1.6; }
-
-    .req { padding: 18px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--code);
-           white-space: pre; overflow-x: auto; }
-    .req .k { color: var(--dim); text-transform: uppercase; letter-spacing: .14em; font-size: 11px; }
-    .req .t { color: var(--green); }
-    .req .f { color: var(--red); font-weight: 700; }
 
     /* Pricing: a spec sheet, not four cards. The recommended tier carries weight
        through type, and the numbers line up because they are a table. */
@@ -302,8 +269,6 @@ export async function homeRoute(app: FastifyInstance) {
     @media (max-width: 640px) {
       .code-body { padding: 18px 16px; }
       .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
-      .panel-h { flex-direction: column; gap: 4px; }
-      .panel-h span:last-child { text-align: left; }
       .tiers .amount { font-size: 19px; }
       .tiers td { font-size: 14.5px; }
     }

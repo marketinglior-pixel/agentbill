@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
 import { head } from '../ui/theme.js'
+import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
@@ -92,128 +94,121 @@ export async function registerRoute(app: FastifyInstance) {
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://agentbill.dev/og.png" />
   ${pixelSnippet()}`,
-      css: `
+      css: `${CHROME_CSS}${PANEL_CSS}
+    /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
+     * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
+     * enrichment: none, the request panel is real */
 
-    :root { --accent: var(--green); }
-    body { line-height: 1.6; min-height: 100vh; display: flex; flex-direction: column; }
-    nav { background: rgba(10,10,15,0.9); backdrop-filter: blur(16px);
-          border-bottom: 1px solid var(--border); padding: 0 24px; height: 60px;
-          display: flex; align-items: center; justify-content: space-between; }
-    .nav-logo { font-size: 16px; font-weight: 700; color: var(--text); text-decoration: none;
-                display: flex; align-items: center; gap: 8px; }
-    .dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; }
-    .page { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: calc(100vh - 60px); }
-    .left { background: var(--surface); border-right: 1px solid var(--border);
-            padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
-    .left-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
-                  letter-spacing: 2px; color: var(--accent); margin-bottom: 24px; }
-    .left h1 { font-size: clamp(30px, 3.2vw, 40px); color: var(--white); line-height: 1.08;
-               letter-spacing: -1px; margin-bottom: 16px; }
-    .left p { font-size: 15px; color: var(--muted); line-height: 1.7; margin-bottom: 40px; max-width: 380px; }
-    .feature-list { list-style: none; display: flex; flex-direction: column; gap: 18px; }
-    .fi { display: flex; align-items: flex-start; gap: 12px; }
-    .fi-check { width: 22px; height: 22px; background: rgba(34,211,160,0.1);
-                border: 1px solid rgba(34,211,160,0.2); border-radius: 6px;
-                display: flex; align-items: center; justify-content: center;
-                flex-shrink: 0; font-size: 11px; color: var(--green); font-weight: 700; margin-top: 1px; }
-    .fi-text h4 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
-    .fi-text p { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
-    .quote { margin-top: 40px; padding: 18px 20px; background: rgba(34,211,160,0.06);
-             border: 1px solid rgba(34,211,160,0.14); border-radius: 10px; }
-    .quote p { font-size: 13px; font-style: italic; color: var(--muted); margin-bottom: 6px; line-height: 1.6; }
-    .quote span { font-size: 11px; color: var(--dim); font-family: 'JetBrains Mono', monospace; }
-    .right { padding: 64px 48px; display: flex; flex-direction: column; justify-content: center; }
-    .form-header { margin-bottom: 36px; }
-    .form-header h2 { font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 6px; letter-spacing: -0.5px; }
-    .form-header p { font-size: 14px; color: var(--muted); }
-    .form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
-    .field { display: flex; flex-direction: column; gap: 7px; }
-    label { font-size: 13px; font-weight: 600; color: var(--text); }
-    label .opt { color: var(--muted); font-weight: 400; margin-left: 4px; }
-    input, select { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px;
-                    padding: 11px 14px; font-size: 14px; color: var(--text);
-                    font-family: 'Inter', sans-serif; outline: none; width: 100%;
-                    transition: border-color 0.15s, box-shadow 0.15s; }
-    input::placeholder { color: #5a615d; }
-    input:focus, select:focus { border-color: rgba(34,211,160,0.55); box-shadow: 0 0 0 3px rgba(34,211,160,0.10); }
-    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a8a3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-             background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+    :root { --shell: 1080px; }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
+
+    /* Three grid items, two columns. The form is the whole right column so it
+       starts at the top beside the headline; the proof panel sits under the
+       pitch. On one column the order becomes pitch, form, proof: the form is
+       what a phone arriving from a paid click came for. */
+    .reg { padding-block: 56px 88px; display: grid; gap: 40px 56px; align-items: start;
+           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+           grid-template-areas: "pitch form" "proof form"; }
+    .pitch { grid-area: pitch; } .proof { grid-area: proof; } .form-col { grid-area: form; }
+
+    h1 { color: var(--white); font-size: clamp(30px, 3.2vw, 40px); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
+    .lede { font-size: var(--fs-lede); color: var(--muted); margin: 20px 0 28px; max-width: 44ch; line-height: 1.6; }
+    .facts { list-style: none; display: grid; gap: 14px; max-width: 50ch; }
+    .facts li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; align-items: baseline;
+                color: var(--muted); font-size: var(--fs-small); line-height: 1.6; }
+    .facts b { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+               color: var(--green); font-weight: 500; }
+    .trust { margin-top: 28px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+    .trust b { color: var(--green); font-weight: 500; }
+
+    /* Form. Inputs and the button share one 44px floor; state changes move
+       colour, outline and background, never border width, so nothing shifts. */
+    .form-h h2 { color: var(--white); margin-bottom: 6px; }
+    .form-h p { color: var(--muted); font-size: 14.5px; margin-bottom: 28px; }
+    .form { display: grid; gap: 16px; max-width: 440px; }
+    .field { display: grid; gap: 6px; }
+    label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+    label .opt { color: var(--dim); font-weight: 400; margin-left: 4px; }
+    input, select { min-height: 44px; width: 100%; background: var(--surface); color: var(--text);
+                    border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 14px;
+                    font-family: var(--sans); font-size: 15px;
+                    outline: 2px solid transparent; outline-offset: 1px;
+                    transition: border-color .15s, background-color .15s; }
+    input::placeholder { color: var(--dim); }
+    @media (hover: hover) { input:hover, select:hover { border-color: var(--dim); } }
+    input:focus-visible, select:focus-visible { outline-color: var(--green); }
+    input[aria-invalid="true"] { border-color: var(--red); }
+    input:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+    /* The arrow is the one colour that cannot come through a token: an SVG data
+       URI takes no var(). %23a0a8a3 is --muted. */
+    select { appearance: none; padding-right: 36px; cursor: pointer;
+             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a8a3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+             background-repeat: no-repeat; background-position: right 12px center; }
     select option { background: var(--surface2); }
-    .btn-submit { background: var(--accent); color: var(--green-ink); border: none; padding: 13px 24px;
-                  border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
-                  font-family: 'Inter', sans-serif; transition: all 0.2s; margin-top: 4px; }
-    .btn-submit:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(34,211,160,0.28); }
-    .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
-    .form-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
-    .err { color: var(--red); font-size: 13px; display: none; }
+    /* Reserved slot, so an error appearing does not push the button down. */
+    .msg-slot { min-height: 1lh; }
+    .err { color: var(--red); font-size: 13.5px; line-height: 1.5; display: none; }
+    .btn-submit { min-height: 44px; background: var(--green); color: var(--green-ink); border: 0; border-radius: 8px;
+                  padding: 0 22px; font-family: var(--sans); font-size: 15px; font-weight: 700; cursor: pointer;
+                  white-space: nowrap; transition: filter .15s, transform .12s; }
+    @media (hover: hover) { .btn-submit:hover { filter: brightness(1.06); } }
+    .btn-submit:active { transform: translateY(1px); }
+    .btn-submit:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+    .form-note { font-size: 12.5px; color: var(--dim); line-height: 1.6; }
 
-    /* Success state */
-    .success { display: none; flex-direction: column; gap: 22px; max-width: 420px; }
-    .success-icon { width: 52px; height: 52px; background: rgba(34,211,160,0.1);
-                    border: 1px solid rgba(34,211,160,0.2); border-radius: 13px;
-                    display: flex; align-items: center; justify-content: center; font-size: 22px; }
-    .success h2 { font-size: 22px; font-weight: 700; color: var(--white); letter-spacing: -0.5px; }
-    .success > p { font-size: 14px; color: var(--muted); line-height: 1.7; }
-    .key-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; overflow: hidden; }
-    .key-label { padding: 9px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase;
-                 letter-spacing: 1.5px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
-    .key-value { padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--green);
-                 display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .btn-copy { background: rgba(34,211,160,0.10); border: 1px solid rgba(34,211,160,0.22); color: var(--accent);
-                padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
-                font-family: 'Inter', sans-serif; transition: all 0.15s; white-space: nowrap; }
-    .btn-copy:hover { background: rgba(34,211,160,0.20); }
-    .next-steps { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
-    .next-steps h4 { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 12px;
-                     text-transform: uppercase; letter-spacing: 1px; }
-    .ns { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
-    .ns:last-child { border-bottom: none; }
-    .ns-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent);
-              background: rgba(34,211,160,0.10); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
-    .ns p { font-size: 13px; color: var(--muted); line-height: 1.5; }
-    .ns > div { min-width: 0; flex: 1; }
-    .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px;
-              padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--green);
+    /* Success. Same panel frame as everywhere else on the site. */
+    .success { display: none; flex-direction: column; gap: 20px; max-width: 440px; }
+    .success h2 { color: var(--white); }
+    .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
+    .key-value { padding: 14px 18px; font-family: var(--mono); font-size: 13px; color: var(--green);
+                 display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .key-value span { overflow-wrap: anywhere; min-width: 0; }
+    .btn-copy { min-height: 36px; padding: 0 12px; background: transparent; color: var(--text);
+                border: 1px solid var(--border-strong); border-radius: 6px; font-family: var(--sans);
+                font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+                transition: border-color .15s; }
+    @media (hover: hover) { .btn-copy:hover { border-color: var(--text); } }
+    .btn-copy:active { transform: translateY(1px); }
+    .steps { padding: 6px 18px 10px; }
+    .ns { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0;
+          border-bottom: 1px solid var(--border-soft); align-items: start; }
+    .ns:last-child { border-bottom: 0; }
+    .ns-num { font-family: var(--mono); font-size: 12px; color: var(--green); padding-top: 2px; }
+    .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
+              padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code);
               white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
-    .ns code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text);
-               background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
-    .mobile-promises { display: none; }
-    @media (max-width: 768px) {
-      .page { grid-template-columns: 1fr; }
-      .left { padding: 34px 20px 30px; border-right: none; border-bottom: 1px solid var(--border);
-              justify-content: flex-start; }
-      .left-label { margin-bottom: 14px; }
-      .left h1 { font-size: 27px; }
-      .left p { margin-bottom: 0; font-size: 14.5px; }
-      .feature-list { display: none; }
-      .quote { margin-top: 22px; }
-      .right { padding: 32px 20px; }
-      .mobile-promises { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px;
-        font-size: 12.5px; color: var(--green); font-weight: 600; }
+    .ns code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
+               padding: 1px 5px; border-radius: 3px; }
+
+    @media (max-width: 900px) {
+      .reg { grid-template-columns: minmax(0, 1fr); grid-template-areas: "pitch" "form" "proof"; gap: 36px;
+             padding-block: 40px 64px; }
+      .lede { margin-bottom: 20px; }
+      .form, .success { max-width: none; }
     }
 `,
     })}
 <body>
-<nav>
-  <a href="/" class="nav-logo"><div class="dot"></div> AgentBill</a>
-</nav>
-<div class="page">
-  <div class="left">
-    <div class="left-label">Free forever &middot; No credit card</div>
-    <h1>Your agents deserve<br/>proper governance.</h1>
-    <p>Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>
-    <ul class="feature-list">
-      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>1,000 free preflight calls/month</h4><p>No expiry. Full API access on the free tier.</p></div></li>
-      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Per-request ceiling enforcement</h4><p>Block before compute starts. Not after the invoice.</p></div></li>
-      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Multi-tenant out of the box</h4><p>Independent credit balances per customer_id. Zero config.</p></div></li>
-      <li class="fi"><div class="fi-check">&#10003;</div><div class="fi-text"><h4>Production in 5 minutes</h4><p>One decorator. One env var. That's the integration.</p></div></li>
+${siteNav('/register', { cta: false })}
+
+<div class="reg wrap">
+  <div class="pitch">
+    <h1>Give one job a ceiling.</h1>
+    <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>
+    <ul class="facts">
+      <li><b>free tier</b><span>1,000 preflight calls a month, per account. No card, no expiry.</span></li>
+      <li><b>blocked</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
+      <li><b>any provider</b><span>One ceiling per task. You pass what each call is worth; we never look at your provider bill.</span></li>
     </ul>
+    <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
   </div>
 
-  <div class="right">
-    <div class="mobile-promises"><span>&#10003; Free forever</span><span>&#10003; No credit card</span><span>&#10003; 1,000 preflight calls/mo</span></div>
+  <div class="proof">${requestPanel()}</div>
+
+  <div class="form-col">
     <div id="form-state">
-      <div class="form-header">
+      <div class="form-h">
         <h2>Get your API key</h2>
         <p>Takes 30 seconds. No setup call. No credit card.</p>
       </div>
@@ -246,32 +241,35 @@ export async function registerRoute(app: FastifyInstance) {
             <option value="other">Other</option>
           </select>
         </div>
-        <p class="err" id="err"></p>
+        <div class="msg-slot"><p class="err" id="err" aria-live="polite"></p></div>
         <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
-        <p class="form-note">By registering you agree to our <a href="/terms" style="color:var(--accent)">Terms of Service</a> and <a href="/privacy" style="color:var(--accent)">Privacy Policy</a>. No marketing email. Just a key.</p>
+        <p class="form-note">By registering you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email. Just a key.</p>
       </form>
     </div>
 
     <div class="success" id="success-state">
-      <div class="success-icon">&#128273;</div>
       <h2>Your API key is ready.</h2>
       <p>Copy it now. We won't show it again. Store it in your environment variables, not your code.</p>
-      <div class="key-box">
-        <div class="key-label">API Key</div>
+      <div class="panel">
+        <div class="panel-h"><span>API key</span><span>shown once</span></div>
         <div class="key-value">
           <span id="key-display"></span>
           <button class="btn-copy" onclick="copyKey()">Copy</button>
         </div>
       </div>
-      <div class="next-steps">
-        <h4>See it refuse a call, right now</h4>
-        <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is blocked before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
-        <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app" style="color:var(--accent)">your receipt</a> and paste the key. That refusal is the first line on it.</p></div>
-        <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs" style="color:var(--accent)">Docs</a>.</p></div>
+      <div class="panel">
+        <div class="panel-h"><span>Next</span><span>see it refuse a call, right now</span></div>
+        <div class="steps">
+          <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is blocked before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
+          <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app">your console</a> and paste the key. That refusal is the first row on it.</p></div>
+          <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs">Docs</a>.</p></div>
+        </div>
       </div>
     </div>
   </div>
 </div>
+
+${siteFooter()}
 
 <script>
   let apiKey = ''
@@ -342,7 +340,7 @@ export async function registerRoute(app: FastifyInstance) {
   function copyKey() {
     navigator.clipboard.writeText(apiKey)
     const btn = document.querySelector('.btn-copy')
-    btn.textContent = 'Copied!'
+    btn.textContent = 'Copied'
     btn.style.color = 'var(--green)'
     setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
   }

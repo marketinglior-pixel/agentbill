@@ -73,8 +73,12 @@ export const CHROME_CSS = `
     .nav-links a.btn { padding: 11px 13px; }
   }`
 
-/** `current` marks the active link, e.g. "/docs" or "/pricing". */
-export function siteNav(current = ''): string {
+/**
+ * `current` marks the active link, e.g. "/docs" or "/pricing".
+ * `cta: false` drops the "Get API key" button; /register uses it, because a
+ * button that links to the page you are already on is noise beside the form.
+ */
+export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
   return `  <nav class="site-nav">
     <div class="nav-inner">
@@ -82,8 +86,8 @@ export function siteNav(current = ''): string {
       <div class="nav-links">
         <a class="hide-xs" href="/docs"${at('/docs')}>Docs</a>
         <a href="/pricing"${at('/pricing')}>Pricing</a>
-        <a class="hide-sm" href="${GITHUB}">GitHub</a>
-        <a class="btn" href="/register">Get API key</a>
+        <a class="hide-sm" href="${GITHUB}">GitHub</a>${cta ? `
+        <a class="btn" href="/register">Get API key</a>` : ''}
       </div>
     </div>
   </nav>`
