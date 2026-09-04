@@ -47,6 +47,14 @@ export const TOKENS = `
     --fs-body: 16px;
     --fs-small: 13.5px;
     --fs-micro: 12px;
+
+    /* Depth. A dark surface one shade off the ground reads flat and cheap; the
+       thing that makes it read as a raised object is a single lit pixel along
+       its top edge, the way real light falls on a bevel. --edge is that pixel
+       and --lift is the shadow under it. Use them together on anything that is
+       supposed to sit ON the page rather than be cut out of it. */
+    --edge: inset 0 1px 0 rgba(255,255,255,0.055);
+    --lift: 0 1px 2px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.28);
   }`
 
 /** Reset plus the element defaults every page shares. */
