@@ -469,14 +469,41 @@ const REASON_LABEL: Record<string, string> = {
 // bar, not a marketing page, so it takes neither siteNav nor siteFooter. It does
 // take the shared tokens, which is what the fragmentation finding was about.
 const CSS = `
+  /* Colour semantics for this page, and why they had to be written down.
+     Red used to mark a blocked call in the chart, a task that hit its ceiling
+     and a customer at their limit — all three of which are the product doing
+     exactly its job — and also a plan bar at 100%, which is a real problem.
+     Green was simultaneously the brand, "metered", "OK", "RUNNING" and
+     "ACTIVE". A colour that means two things means nothing, so each gets one
+     job and nothing else is allowed to borrow it:
+
+       --flow  ordinary traffic. Metered units, a running task, a live key.
+               Nothing happened. Not an achievement and not a warning, so it
+               stays out of the way and lets the other three be visible.
+       --held  AgentBill stopped something. A blocked call, a ceiling that
+               held, a customer limit that bit. This is what the product is
+               for, so it carries the accent instead of an alarm.
+       --near  approaching a limit. Worth a glance; nothing is wrong yet.
+       --fail  needs a human. Spend that got past a ceiling, or an account
+               about to stop working. Nothing else on this page is red. */
+  :root {
+    --flow: #5d6b75; --flow-ink: #97a6b0;
+    --held: var(--green); --near: var(--amber); --fail: var(--red);
+  }
+
   body { font-size: 15px; line-height: 1.55; }
-  nav { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
+  /* Scoped to .top on purpose. This was a bare \`nav\` type selector, and the
+     jump rail below is also a <nav>, so it inherited height:60px and its
+     second row overflowed the fixed box and printed on top of the plan
+     block. Same collision as the two dead rules on the homepage: a type
+     selector reaching a class it was never meant to touch. */
+  nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
         justify-content: space-between; padding: 0 24px; gap: 16px; }
   .logo { display: flex; align-items: center; gap: 9px; font-family: 'JetBrains Mono', monospace;
           font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
   .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; }
   .who { display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace;
-         font-size: 12px; color: var(--dim); }
+         font-size: 12px; color: var(--dim); white-space: nowrap; }
   .who b { color: var(--muted); font-weight: 500; }
   .btn-out { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
              padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
@@ -493,14 +520,18 @@ const CSS = `
        letter-spacing: -.02em; margin-bottom: 6px; }
   .sub { color: var(--muted); max-width: 70ch; margin-bottom: 20px; }
 
-  /* section bar */
-  .jump { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 26px;
-          border-bottom: 1px solid var(--border); }
-  .jump a { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--dim);
-            text-decoration: none; padding: 11px 14px; border-bottom: 2px solid transparent;
-            margin-bottom: -1px; white-space: nowrap; }
-  .jump a:hover { color: var(--text); border-bottom-color: var(--border); }
-  .jump a.on { color: var(--text); border-bottom-color: var(--green); }
+  /* A contents rail, not tabs. These were styled as tabs with "Activity"
+     carrying a selected underline, which promised a filter the page never
+     applied: every section renders regardless, so clicking one only scrolls.
+     A selected state the UI does not honour is a lie, and on a phone the tab
+     row wrapped into two ragged lines. Now it reads as the jump list it is. */
+  .jump { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px;
+          margin: 0 0 26px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .jump b { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500;
+            letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .jump a { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted);
+            text-decoration: none; padding: 11px 0; white-space: nowrap; }
+  .jump a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
   .jump .spacer { flex: 1 1 auto; }
 
   .rangebar { display: flex; align-items: center; justify-content: space-between; gap: 14px;
@@ -533,9 +564,12 @@ const CSS = `
                flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
                color: var(--dim); font-variant-numeric: tabular-nums; }
   .quota-top b { color: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  /* The one bar on this page that is about the account rather than the
+     product. Running out of plan means calls stop being metered, which needs
+     a human, so this is where --fail legitimately lives. */
   .meter { height: 8px; background: var(--surface3); border-radius: 999px; margin-top: 12px; overflow: hidden; }
-  .meter i { display: block; height: 100%; border-radius: 999px; background: var(--green); }
-  .meter i.warn { background: var(--amber); } .meter i.hot { background: var(--red); }
+  .meter i { display: block; height: 100%; border-radius: 999px; background: var(--flow); }
+  .meter i.near { background: var(--near); } .meter i.fail { background: var(--fail); }
 
   /* tiles */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px;
@@ -545,10 +579,27 @@ const CSS = `
         text-transform: uppercase; color: var(--dim); }
   .tv { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; margin-top: 6px;
         font-variant-numeric: tabular-nums; line-height: 1.15; }
-  .tv.green { color: var(--green); } .tv.amber { color: var(--amber); }
+  .tv.held { color: var(--held); }
   .tv.dim { color: var(--muted); font-size: 17px; margin-top: 13px; }
   .tf { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 4px; }
   .honest { font-size: 12.5px; color: var(--dim); margin-bottom: 8px; max-width: 86ch; line-height: 1.6; }
+
+  /* Leaked spend is not a peer of the four tiles above it. It is the only
+     number here whose good value is zero, and it used to sit in the grid
+     styled exactly like the four where bigger is better, needing three lines
+     of grey prose underneath to explain that. Its own row, with the
+     explanation attached to it instead of to the whole tile block. */
+  .leaked { display: flex; align-items: flex-start; gap: 16px; margin: 12px 0 8px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-left: 3px solid var(--flow); border-radius: 10px; padding: 14px 18px; }
+  .leaked-n { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
+              line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--flow-ink); }
+  .leaked-t b { display: block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+                letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
+  .leaked-t p { font-size: 12.5px; color: var(--dim); margin: 5px 0 0; max-width: 78ch; line-height: 1.6; }
+  .leaked.bad { border-left-color: var(--fail); }
+  .leaked.bad .leaked-n { color: var(--fail); }
+  .leaked.bad .leaked-t b { color: var(--fail); }
 
   h2 { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em;
        text-transform: uppercase; color: var(--muted); margin: 40px 0 6px; padding-bottom: 8px;
@@ -570,9 +621,13 @@ const CSS = `
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 148px; position: relative; }
   .col { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end;
          height: 100%; min-width: 0; border-radius: 3px 3px 0 0; overflow: hidden; }
+  /* Metered units are the ground here, not the story: they are just traffic.
+     The blocks are what the customer is paying for, so they are the segment
+     that gets the accent. Red on this chart used to mean "the product
+     worked", which is the exact inversion this page was making everywhere. */
   .col i { display: block; width: 100%; }
-  .col i.ok { background: #1d7a5f; }
-  .col i.bl { background: var(--red); }
+  .col i.met { background: var(--flow); }
+  .col i.held { background: var(--held); }
   .col i.zero { background: var(--surface3); height: 2px; }
   .xaxis { display: flex; justify-content: space-between; margin: 9px 0 0 46px;
            font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--dim); }
@@ -580,7 +635,7 @@ const CSS = `
             font-size: 11px; color: var(--dim); flex-wrap: wrap; }
   .legend span { display: flex; align-items: center; gap: 6px; }
   .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-  .sw.ok { background: #1d7a5f; } .sw.bl { background: var(--red); }
+  .sw.met { background: var(--flow); } .sw.held { background: var(--held); }
 
   /* burn-down rows */
   .burn { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
@@ -596,10 +651,10 @@ const CSS = `
   .bnum b { color: var(--text); font-weight: 700; }
   .track { height: 10px; background: var(--surface3); border-radius: 999px; overflow: hidden; display: flex; }
   .track i { display: block; height: 100%; }
-  .track i.used { background: var(--green); }
-  .track i.used.warn { background: var(--amber); }
-  .track i.used.hot { background: var(--red); }
-  .track i.res { background: #3d4a44; }
+  .track i.used { background: var(--flow); }
+  .track i.used.near { background: var(--near); }
+  .track i.used.held { background: var(--held); }
+  .track i.res { background: #3a444b; }
   .bfoot { margin-top: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim);
            display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
@@ -617,15 +672,15 @@ const CSS = `
           overflow: hidden; text-overflow: ellipsis; }
   .chip { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 700;
           letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
-  .chip.block { background: #2a1212; color: #ff8a80; border: 1px solid #4a1d1d; }
-  .chip.leak  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
-  .chip.ok    { background: #0e2a20; color: var(--green); border: 1px solid #1b4a3a; }
-  .chip.warn  { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
-  .chip.dead  { background: var(--surface3); color: var(--dim); border: 1px solid var(--border2); }
+  .chip.held { background: #0e2a20; color: var(--green); border: 1px solid #1b4a3a; }
+  .chip.near { background: #2b220e; color: var(--amber); border: 1px solid #4a3a12; }
+  .chip.fail { background: #2a1212; color: #ff8a80; border: 1px solid #4a1d1d; }
+  .chip.flow { background: var(--surface3); color: var(--flow-ink); border: 1px solid var(--border2); }
+  .chip.dead { background: var(--surface3); color: var(--dim); border: 1px solid var(--border2); }
   .minibar { height: 6px; width: 92px; background: var(--surface3); border-radius: 999px; overflow: hidden;
              display: inline-block; vertical-align: middle; margin-right: 9px; }
-  .minibar i { display: block; height: 100%; background: var(--green); }
-  .minibar i.warn { background: var(--amber); } .minibar i.hot { background: var(--red); }
+  .minibar i { display: block; height: 100%; background: var(--flow); }
+  .minibar i.near { background: var(--near); } .minibar i.held { background: var(--held); }
   .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); font-style: italic; }
   details summary { cursor: pointer; color: var(--green); font-family: 'JetBrains Mono', monospace;
                     font-size: 12px; list-style: none; padding: 4px 0; }
@@ -672,9 +727,22 @@ const CSS = `
     outline: 2px solid var(--green); outline-offset: 2px; }
 
   @media (max-width: 720px) {
-    nav { padding: 0 16px; } .wrap { padding: 22px 16px 60px; }
-    .who span.email { display: none; }
+    nav.top { padding: 0 16px; } .wrap { padding: 22px 16px 60px; }
+    /* Both of these are said better a few pixels lower: the email is not
+       needed to use the page, and the SAMPLE DATA banner announces the mode
+       far louder than a grey label next to the wordmark. Dropping them is
+       what keeps the CTA from being pushed off the right edge. */
+    /* .who is nowrap now, so anything that does not fit has to be dropped
+       rather than left to wrap. The key tail stays: it is the one thing that
+       says which key this console is showing. */
+    .who span.email, .who span.mode, .who span.lbl { display: none; }
+    .btn-key, .btn-out { min-height: 44px; padding-block: 12px; }
     .bars { height: 112px; }
+    /* One scrolling row beats three wrapped ones for a rail this long. */
+    .jump { flex-wrap: nowrap; overflow-x: auto; gap: 0 16px;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .jump::-webkit-scrollbar { display: none; }
+    .jump b { flex: none; }
   }
 `
 
@@ -695,7 +763,7 @@ const ERRORS: Record<string, string> = {
 function loginPage(err: string): string {
   return `${HEAD('Console')}
 <body>
-  <nav><a class="logo" href="/"><span class="dot"></span>AgentBill</a></nav>
+  <nav class="top"><a class="logo" href="/"><span class="dot"></span>AgentBill</a></nav>
   <div class="login">
     <h1 style="font-size:22px">Your console</h1>
     <p>Live task budgets, every call AgentBill refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
@@ -736,7 +804,7 @@ function quotaBlock(v: Viewer): string {
       <span>${num(v.monthlyCalls)} calls this month · metered, no included cap</span></div></div>`
   }
   const pct = Math.min(100, Math.round((v.monthlyCalls / limit) * 100))
-  const cls = pct >= 90 ? 'hot' : pct >= 75 ? 'warn' : ''
+  const cls = pct >= 90 ? 'fail' : pct >= 75 ? 'near' : ''
   const upsell = pct >= 75
     ? ` · <a href="/pricing?account_id=${encodeURIComponent(v.accountId)}">raise the ceiling</a>`
     : ''
@@ -766,7 +834,7 @@ function chartBlock(series: Series[]): string {
     const label = `${s.day}: ${num(units)} units metered, ${num(blocks)} blocked`
     const inner = uh + bh === 0
       ? '<i class="zero"></i>'
-      : `${bh ? `<i class="bl" style="height:${bh}%"></i>` : ''}${uh ? `<i class="ok" style="height:${uh}%"></i>` : ''}`
+      : `${bh ? `<i class="held" style="height:${bh}%"></i>` : ''}${uh ? `<i class="met" style="height:${uh}%"></i>` : ''}`
     return `<div class="col" title="${esc(label)}">${inner}</div>`
   }).join('')
   const first = series[0]?.day ?? ''
@@ -782,8 +850,8 @@ function chartBlock(series: Series[]): string {
     </div>
     <div class="xaxis"><span>${esc(first)}</span><span>${esc(mid)}</span><span>${esc(last)}</span></div>
     <div class="legend">
-      <span><i class="sw ok"></i> units metered</span>
-      <span><i class="sw bl"></i> calls blocked, on their own scale</span>
+      <span><i class="sw met"></i> units metered</span>
+      <span><i class="sw held"></i> blocked before they ran, on their own scale</span>
       <span class="dim">hover a column for that day</span>
     </div>
   </div>`
@@ -801,10 +869,10 @@ function tasksBlock(tasks: TaskRow[]): string {
     const usedPct = Math.min(100, (used / ceiling) * 100)
     const resPct = Math.min(100 - usedPct, (reserved / ceiling) * 100)
     const ratio = (used + reserved) / ceiling
-    const cls = ratio >= 1 ? 'hot' : ratio >= 0.8 ? 'warn' : ''
+    const cls = ratio >= 1 ? 'held' : ratio >= 0.8 ? 'near' : ''
     const state = used >= ceiling
-      ? '<span class="chip block">ceiling hit</span>'
-      : ratio >= 0.8 ? '<span class="chip warn">close</span>' : '<span class="chip ok">running</span>'
+      ? '<span class="chip held">ceiling hit</span>'
+      : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
     return `<div class="brow">
       <div class="bhead">
         <div class="btask">${esc(t.taskRef)} <span class="bagent">· ${esc(t.agentId)}</span></div>
@@ -831,13 +899,14 @@ function customersBlock(rows: CustomerRow[]): string {
     const used = Number(c.usedUnits)
     const limit = c.limitUnits == null ? null : Number(c.limitUnits)
     const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
-    const cls = pct >= 100 ? 'hot' : pct >= 80 ? 'warn' : ''
+    const cls = pct >= 100 ? 'held' : pct >= 80 ? 'near' : ''
     const bar = limit
       ? `<span class="minibar"><i class="${cls}" style="width:${pct}%"></i></span>${pct}%`
       : '<span class="dim">unlimited</span>'
+    // A customer at their limit is a limit that held, not an incident.
     const status = limit && used >= limit
-      ? '<span class="chip block">blocked</span>'
-      : '<span class="chip ok">ok</span>'
+      ? '<span class="chip held">blocked</span>'
+      : '<span class="chip flow">ok</span>'
     return `<tr>
       <td class="id" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
       <td class="num">${bar}</td>
@@ -860,11 +929,13 @@ function keysBlock(rows: KeyRow[]): string {
     const mask = k.apiKey.slice(0, 8) + '…' + k.apiKey.slice(-4)
     const revoked = k.revokedAt ? new Date(k.revokedAt).getTime() : null
     const expires = k.expiresAt ? new Date(k.expiresAt).getTime() : null
-    let chip = '<span class="chip ok">active</span>'
+    // A working key is not an achievement, so it stays neutral. Green here
+    // would be a third meaning for the accent.
+    let chip = '<span class="chip flow">active</span>'
     if (revoked !== null && revoked <= now) chip = '<span class="chip dead">revoked</span>'
-    else if (revoked !== null) chip = '<span class="chip warn">rotating</span>'
+    else if (revoked !== null) chip = '<span class="chip near">rotating</span>'
     else if (expires !== null && expires <= now) chip = '<span class="chip dead">expired</span>'
-    else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip warn">expiring</span>'
+    else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip near">expiring</span>'
     return `<tr>
       <td class="id">${esc(mask)}</td>
       <td>${k.label ? esc(k.label) : '<span class="none">no label</span>'}</td>
@@ -892,7 +963,7 @@ function decisionsBlock(rows: DecisionRow[], truncated: boolean): string {
     const when = new Date(r.createdAt)
     return `<tr>
       <td class="num dim" title="${esc(when.toISOString())}">${rel(when)}</td>
-      <td><span class="chip ${leak ? 'leak' : 'block'}" title="${esc(r.reason)}">${esc(label)}</span></td>
+      <td><span class="chip ${leak ? 'fail' : 'held'}" title="${esc(r.reason)}">${esc(label)}</span></td>
       <td class="id" title="${esc(r.agentId ?? '')}">${r.agentId ? esc(r.agentId) : '<span class="none">none</span>'}</td>
       <td class="id" title="${esc(r.taskRef ?? '')}">${r.taskRef ? esc(r.taskRef) : '<span class="none">none</span>'}</td>
       <td class="num">${r.estimatedUnits == null ? '<span class="dim">-</span>' : num(Number(r.estimatedUnits))}
@@ -950,13 +1021,13 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
 
   return `${HEAD('Console')}
 <body>
-  <nav>
+  <nav class="top">
     <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
     <div class="who">${anon
-      ? `<span class="dim">Sample console</span>
+      ? `<span class="dim mode">Sample console</span>
       <a class="btn-key" href="/register">Get your API key</a>`
       : `<span class="email">${esc(v.email ?? 'no email')}</span>
-      <span>key <b>${esc(keyTail)}</b>${v.keyLabel ? ` <span class="dim">(${esc(v.keyLabel)})</span>` : ''}</span>
+      <span>key <b>${esc(keyTail)}</b>${v.keyLabel ? ` <span class="dim lbl">(${esc(v.keyLabel)})</span>` : ''}</span>
       <form method="POST" action="/app/logout"><button class="btn-out" type="submit">Sign out</button></form>`}
     </div>
   </nav>
@@ -964,8 +1035,9 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
     <h1>Console</h1>
     <p class="sub">What your agents spent, what they were stopped from spending, and the exact response each blocked call got back.</p>
     ${banner}
-    <nav class="jump">
-      <a class="on" href="#activity">Activity</a>
+    <nav class="jump" aria-label="Sections on this page">
+      <b>Jump to</b>
+      <a href="#activity">Activity</a>
       <a href="#tasks">Task budgets</a>
       <a href="#refusals">Refusals</a>
       <a href="#customers">Customers</a>
@@ -979,13 +1051,20 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
     ${quotaBlock(v)}
 
     <div class="tiles">
-      <div class="tile"><div class="tl">Blocked</div><div class="tv green">${num(blockedInRange)}</div>${delta(blockedInRange, d.prevBlocked, rangeLabel)}</div>
-      <div class="tile"><div class="tl">Units refused</div><div class="tv">${num(d.refusedUnits)}</div><div class="tf">all time</div></div>
-      <div class="tile"><div class="tl">Got through</div><div class="tv ${d.overruns > 0 ? 'amber' : ''}">${num(d.overruns)}</div><div class="tf">all time, should be 0</div></div>
+      <div class="tile"><div class="tl">Blocked</div><div class="tv held">${num(blockedInRange)}</div>${delta(blockedInRange, d.prevBlocked, rangeLabel)}</div>
+      <div class="tile"><div class="tl">Units refused</div><div class="tv">${num(d.refusedUnits)}</div><div class="tf">all time · units asked for, not dollars</div></div>
       <div class="tile"><div class="tl">Metered</div><div class="tv">${num(d.meteredUnits)}</div><div class="tf">units this month</div></div>
       <div class="tile"><div class="tl">Live tasks</div><div class="tv dim">${num(activeTasks)}</div><div class="tf">under a ceiling now</div></div>
     </div>
-    <p class="honest">Units refused is what was asked for and denied. It is not a dollar figure: AgentBill cannot know what a run it stopped would have gone on to cost. "Got through" is spend that landed past a task ceiling anyway, because preflight was skipped or the estimate was low. That number should be zero.</p>
+    <div class="leaked${d.overruns > 0 ? ' bad' : ''}">
+      <div class="leaked-n">${num(d.overruns)}</div>
+      <div class="leaked-t">
+        <b>Leaked past a ceiling</b>
+        <p>${d.overruns > 0
+            ? 'Calls that ran after their task was already at its limit, because preflight was skipped or the estimate came in low. All time. This is the one number here that should be zero.'
+            : 'Nothing has run past a ceiling. All time. This is the one number here that should stay at zero, and it has.'}</p>
+      </div>
+    </div>
 
     ${onboarding}
 
@@ -998,7 +1077,7 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
     ${chartBlock(d.series)}
 
     <h2 id="tasks">Task budgets <span>one job, many calls, one ceiling</span></h2>
-    <p class="lede">Each bar is a live job burning down its ceiling across every call and tool that shares its <code class="mono">task_ref</code>. Green is spent, grey is reserved by a call in flight. When the bar fills, the next call is refused before it runs.</p>
+    <p class="lede">Each bar is a live job burning down its ceiling across every call and tool that shares its <code class="mono">task_ref</code>. Slate is spent, grey is reserved by a call in flight, amber means it is close. A bar that turns green is a ceiling that held: the next call was refused before it ran.</p>
     ${tasksBlock(d.tasks)}
 
     <h2 id="refusals">Refusals <span>newest first, with the literal response</span></h2>
