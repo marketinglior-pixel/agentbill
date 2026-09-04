@@ -312,9 +312,8 @@ except BudgetExhaustedError:
 import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
 <span class="comment">// ceiling is per call: block any single run expected to cost more than 50 units.</span>
-<span class="comment">// budget_exhausted throws BudgetExhaustedError; ceiling_exceeded comes back as approved: false.</span>
-const check = await preflight({ agentId: 'my_agent', estimatedUnits: 10, ceiling: 50 })
-if (!check.approved) throw new Error(check.reason ?? 'blocked')  <span class="comment">// nothing expensive has run yet</span>
+<span class="comment">// A blocked run throws, so nothing expensive can happen by forgetting a check.</span>
+await preflight({ agentId: 'my_agent', estimatedUnits: 10, ceiling: 50 })
 
 const result = await runAgent()
 
@@ -543,9 +542,8 @@ import { preflight, record } from 'agentbill'  <span class="comment">// reads AG
 const openai = new OpenAI()
 
 async function runAgent(customerId: string, task: string): Promise&lt;string&gt; {
-  <span class="comment">// budget_exhausted throws here; ceiling_exceeded returns approved: false. Either way, no OpenAI call is made.</span>
-  const check = await preflight({ agentId: 'openai_assistant', estimatedUnits: 10, ceiling: 100, customerId })
-  if (!check.approved) throw new Error(check.reason ?? 'blocked')
+  <span class="comment">// A blocked run throws before this line returns, so no OpenAI call is made.</span>
+  await preflight({ agentId: 'openai_assistant', estimatedUnits: 10, ceiling: 100, customerId })
 
   const res = await openai.chat.completions.create({
     model: 'gpt-4o',

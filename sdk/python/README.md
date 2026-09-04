@@ -89,6 +89,30 @@ except BudgetExhaustedError as e:
     show_paywall(e.customer_id)
 ```
 
+**One rule, identical in the Node SDK: it raises when your spend rule stopped the run, and returns a result when AgentBill's own billing did.**
+
+| Refusal | What you get |
+|---|---|
+| `ceiling_exceeded` | raises `CeilingExceededError` |
+| `task_ceiling_exceeded` | raises `TaskCeilingExceededError` |
+| `budget_exhausted` | raises `BudgetExhaustedError` |
+| `free_tier_exceeded` | returns `approved=False` with `.upgrade_url` |
+| `plan_limit_exceeded` | returns `approved=False` with `.upgrade_url` |
+
+The last two mean *our* quota ran out, not that your budget did. AgentBill running out of quota must never crash your agent, so those come back as a result you can degrade on rather than an exception that takes the process down.
+
+```python
+check = client.preflight("researcher", estimated_units=5)
+if not check.approved:
+    # only free_tier_exceeded / plan_limit_exceeded reach here; the rest raised
+    alert_ops(f"AgentBill quota: {check.reason}", check.upgrade_url)
+```
+
+> **Changed in 0.6.0.** `free_tier_exceeded` and `plan_limit_exceeded` used to raise
+> `FreeTierExceededError` / `PlanLimitExceededError`. They now return a result. Both classes are
+> still exported so your imports keep working, but nothing raises them any more — if you were
+> catching them, check `result.approved` instead. The other three are unchanged.
+
 ### 4. Watch your dashboard
 
 Open `https://agentbill.dev/app` and paste your API key to see live task budgets, every refusal, and each customer's credit usage:

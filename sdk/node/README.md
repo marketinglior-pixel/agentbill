@@ -42,7 +42,21 @@ Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, def
 
 ### `preflight(options)`
 
-Check every budget before the call runs. Throws `TaskCeilingExceededError` or `BudgetExhaustedError` on a blocked run, so the expensive call never happens.
+Check every budget before the call runs, so the expensive call never happens.
+
+**One rule, identical in the Python SDK: it throws when your spend rule stopped the run, and returns a result when AgentBill's own billing did.**
+
+| Refusal | What you get |
+|---|---|
+| `ceiling_exceeded` | throws `CeilingExceededError` |
+| `task_ceiling_exceeded` | throws `TaskCeilingExceededError` |
+| `budget_exhausted` | throws `BudgetExhaustedError` |
+| `free_tier_exceeded` | returns `approved: false` with `upgradeUrl` |
+| `plan_limit_exceeded` | returns `approved: false` with `upgradeUrl` |
+
+The last two mean *our* quota ran out, not that your budget did. AgentBill running out of quota must never crash your agent, so those come back as a result you can degrade on rather than an exception that takes the process down.
+
+> **Changed in 0.4.0.** `ceiling_exceeded` used to return `approved: false` and now throws `CeilingExceededError`. If you were checking `if (!check.approved)` to catch it, that branch no longer fires — wrap the call in `try/catch` instead. The other four are unchanged.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|

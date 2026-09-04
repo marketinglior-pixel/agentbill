@@ -38,6 +38,18 @@ export class AgentBillError extends Error {
   }
 }
 
+/** This single call asked for more than its own per-request ceiling. */
+export class CeilingExceededError extends Error {
+  readonly estimatedUnits?: number
+  readonly ceiling?: number
+  constructor(estimatedUnits?: number, ceiling?: number, message?: string) {
+    super(message ?? `Run blocked: estimated ${estimatedUnits} units exceeds ceiling of ${ceiling}.`)
+    this.name = 'CeilingExceededError'
+    this.estimatedUnits = estimatedUnits
+    this.ceiling = ceiling
+  }
+}
+
 /** The cross-call budget for this task is spent. The job dies here. */
 export class TaskCeilingExceededError extends Error {
   readonly taskRef: string
@@ -234,8 +246,14 @@ export interface PreflightResult {
 }
 
 /**
- * Check every budget BEFORE the call runs. Throws TaskCeilingExceededError /
- * BudgetExhaustedError on a blocked run so the expensive call never happens.
+ * Check every budget BEFORE the call runs, so the expensive call never happens.
+ *
+ * Throws when YOUR spend rule stopped the run — CeilingExceededError,
+ * TaskCeilingExceededError, BudgetExhaustedError.
+ *
+ * Returns `approved: false` with `upgradeUrl` set when AGENTBILL'S OWN BILLING
+ * stopped it (`free_tier_exceeded`, `plan_limit_exceeded`), because our quota
+ * must never crash your agent.
  */
 export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
   const body: Record<string, unknown> = { agent_id: options.agentId }
@@ -273,8 +291,19 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     if (data.reason === 'budget_exhausted') {
       throw new BudgetExhaustedError(options.customerId ?? 'default')
     }
-    // free_tier_exceeded / plan_limit_exceeded / ceiling_exceeded fall through
-    // as a non-approved result so callers can route to data.upgrade_url.
+    if (data.reason === 'ceiling_exceeded') {
+      throw new CeilingExceededError(data.estimated_units, options.ceiling)
+    }
+    // free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw.
+    //
+    // One rule, and it is the same in both SDKs as of 0.4.0 / 0.6.0: throw
+    // when YOUR spend rule stopped the run, return a result when AGENTBILL'S
+    // OWN BILLING did. Those two mean our quota ran out, not that your budget
+    // did. Throwing would let an AgentBill billing state crash your production
+    // agent, making us a single point of failure in your critical path, which
+    // is the opposite of what "no proxy in your request path" is meant to buy
+    // you. They come back as approved:false with upgradeUrl set, so you can
+    // degrade, alert, or send a human to upgrade, and keep running.
   }
 
   return {

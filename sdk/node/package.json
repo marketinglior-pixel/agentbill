@@ -1,6 +1,6 @@
 {
   "name": "agentbill",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

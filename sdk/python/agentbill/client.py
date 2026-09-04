@@ -62,12 +62,25 @@ class PreflightInProgressError(Exception):
         )
 
 class FreeTierExceededError(Exception):
+    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
+    and `except` clauses do not break on upgrade.
+
+    Running out of AgentBill's free tier is our billing state, not your spend
+    rule, and it must not be able to crash your agent. preflight() now returns
+    `approved=False, reason="free_tier_exceeded"` with `.upgrade_url` set.
+    Check `result.approved` instead of catching this.
+    """
     def __init__(self, upgrade_url: Optional[str] = None):
         self.upgrade_url = upgrade_url
         super().__init__("Free tier limit reached. Upgrade to continue.")
 
 class PlanLimitExceededError(Exception):
-    """The account hit its plan's monthly call quota."""
+    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
+    and `except` clauses do not break on upgrade. See FreeTierExceededError.
+
+    preflight() now returns `approved=False, reason="plan_limit_exceeded"`
+    with `.upgrade_url` set.
+    """
     def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None):
         self.plan = plan
         self.upgrade_url = upgrade_url
@@ -171,6 +184,17 @@ class AgentBillClient:
             reservation_expires_at=data.get("reservation_expires_at"),
         )
 
+        # One rule, and it is the same in both SDKs as of 0.6.0 / 0.4.0:
+        # raise when YOUR spend rule stopped the run, return a result when
+        # AGENTBILL'S OWN BILLING did.
+        #
+        # free_tier_exceeded and plan_limit_exceeded mean our quota ran out,
+        # not that your budget did. Raising on those would let an AgentBill
+        # billing state crash your production agent, which would make us a
+        # single point of failure in your critical path — the opposite of what
+        # "no proxy in your request path" is supposed to mean. They come back
+        # as approved=False with .upgrade_url set, so you can degrade, alert,
+        # or route a human to upgrade, and keep running.
         if not result.approved:
             if result.reason == "ceiling_exceeded":
                 raise CeilingExceededError(
@@ -178,10 +202,6 @@ class AgentBillClient:
                 )
             if result.reason == "budget_exhausted":
                 raise BudgetExhaustedError(customer_id or "default", "Run blocked: customer budget exhausted")
-            if result.reason == "free_tier_exceeded":
-                raise FreeTierExceededError(upgrade_url=data.get("upgrade_url"))
-            if result.reason == "plan_limit_exceeded":
-                raise PlanLimitExceededError(plan=data.get("plan"), upgrade_url=data.get("upgrade_url"))
             if result.reason == "task_ceiling_exceeded":
                 raise TaskCeilingExceededError(
                     task_ref=data.get("task_ref") or task_ref or "",

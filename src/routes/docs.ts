@@ -136,6 +136,14 @@ client.preflight(
 }
   </pre></div>
 
+  <p>That is the raw HTTP shape. Both SDKs then apply one rule to it, and it is the same rule in
+  Python and Node: they <strong>raise when your spend rule stopped the run</strong>
+  (<span class="inline">ceiling_exceeded</span>, <span class="inline">task_ceiling_exceeded</span>,
+  <span class="inline">budget_exhausted</span>) and <strong>return the result when AgentBill's own
+  billing stopped it</strong> (<span class="inline">free_tier_exceeded</span>,
+  <span class="inline">plan_limit_exceeded</span>), with
+  <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.</p>
+
   <h3>record()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
