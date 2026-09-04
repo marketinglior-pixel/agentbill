@@ -5,10 +5,12 @@
 // them produce that exact line themselves in about five seconds, which is the
 // difference between reading a claim and watching it happen.
 //
-// Why it matters here specifically: 13 accounts had registered and 3 had ever
-// made a call. The gap is not that people disbelieve the pitch, it is that they
-// never see the product do anything before they are asked to integrate it. This
-// is the cheapest place to close that gap.
+// Why it matters here specifically: this product has had two external signups,
+// ever, and neither has made a call. The account table shows 13 rows and eleven
+// of them are our own aliases and test accounts, so the problem is not that
+// registered users fail to activate. It is that almost nobody gets far enough
+// to register. This is the cheapest place to let a visitor watch the product
+// work before being asked for an email.
 //
 // HONESTY. preflight() below is a port of the task-budget branch of
 // src/routes/preflight.ts, not a mock: same rule, same field names, same
