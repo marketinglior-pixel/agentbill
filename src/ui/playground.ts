@@ -83,13 +83,53 @@ export const REFUSAL = {
     + `${REFUSED.remaining} remaining is not enough for this call.`,
 } as const
 
+
+/** Total the plan asks for. Rendered, never typed: it is sum(PLAN). */
+const PLAN_TOTAL = PLAN.reduce((n, [, u]) => n + u, 0)
+
+/**
+ * The resting state: the plan, not the run.
+ *
+ * Showing the finished run here was the obvious alternative and it is wrong.
+ * The refusal band sits directly above with the same string at 40px, so the
+ * outcome twice in one scroll deflates both, and it removes the reason to press
+ * the button. The plan sets up the section without asserting anything happened:
+ * the reader watches the running total arrive at the wall before clicking.
+ *
+ * Rendered from the same PLAN the run walks, so the two cannot disagree.
+ */
+function plannedRows(): string {
+  let cum = 0
+  return PLAN.map(([name, units], i) => {
+    cum += units
+    return `        <div class="pg-row planned" data-i="${i}">` +
+      `<span class="ar">&middot;</span>` +
+      `<span class="nm">${name}</span>` +
+      `<span class="un">${units}</span>` +
+      `<span class="cum">${cum.toLocaleString('en-US')}</span></div>`
+  }).join('\n')
+}
+
+/** The request body for the first call, painted the way the response is. */
+function restingRequest(): string {
+  const fields: ReadonlyArray<readonly [string, string, string]> = [
+    ['agent_id', '"researcher"', 's'],
+    ['task_ref', `"${TASK_REF}"`, 's'],
+    ['task_ceiling', String(DEFAULT_CEILING), 'n'],
+    ['estimated_units', String(PLAN[0][1]), 'n'],
+  ]
+  return '{\n' + fields.map(([k, v, cls], i) =>
+    `  <span class="k">"${k}"</span>: <span class="${cls}">${v}</span>${i < fields.length - 1 ? ',' : ''}`
+  ).join('\n') + '\n}'
+}
+
 /** Playground CSS. Include once, after theme BASE and the page's .wrap rule. */
 export const PLAYGROUND_CSS = `
   .pg-sec { padding-block: 76px 0; }
   .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 62ch; margin-top: 12px; }
 
   .pg { margin-top: 30px; border: 1px solid var(--border); background: var(--surface);
-        border-radius: 3px; overflow: hidden; }
+        border-radius: var(--r-frame); overflow: hidden; }
 
   .pg-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 24px;
             padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface2); }
@@ -108,7 +148,7 @@ export const PLAYGROUND_CSS = `
   .pg-sl:disabled { opacity: 0.4; cursor: not-allowed; }
   .pg-actions { margin-left: auto; display: flex; gap: 10px; }
   .pg-btn { font-family: var(--sans); font-size: 14.5px; font-weight: 600; padding: 9px 20px;
-            border-radius: 2px; cursor: pointer; border: 1px solid var(--border-strong);
+            border-radius: var(--r-control); cursor: pointer; border: 1px solid var(--border-strong);
             background: transparent; color: var(--text); transition: border-color 0.15s; }
   .pg-btn:hover:not(:disabled) { border-color: var(--text); }
   .pg-btn.pri { background: var(--green); color: var(--green-ink); border-color: var(--green); }
@@ -136,17 +176,36 @@ export const PLAYGROUND_CSS = `
               background: repeating-linear-gradient(45deg, var(--red) 0 3px, transparent 3px 7px); }
   .pg-ghost.on { opacity: 0.85; }
 
-  .pg-log { min-height: 292px; display: flex; flex-direction: column; gap: 1px; }
-  .pg-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 12px; align-items: baseline;
+  /* No min-height. It used to reserve 292px whether or not there were rows, so
+     the tallest element on the homepage held the height of a run it had not
+     done and none of its content: two ~300px voids side by side until someone
+     clicked. The rows are server-rendered at rest now, so the content sets the
+     height, the height never changes when the run starts, and the section says
+     something with JavaScript off. */
+  .pg-log { display: flex; flex-direction: column; gap: 1px; }
+  .pg-cols { display: grid; grid-template-columns: 24px 1fr auto 68px; gap: 12px;
+             font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em;
+             text-transform: uppercase; color: var(--dim); padding-bottom: 6px;
+             border-bottom: 1px solid var(--border); }
+  .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
+  .pg-row { display: grid; grid-template-columns: 24px 1fr auto 68px; gap: 12px; align-items: baseline;
             font-family: var(--mono); font-size: 14.5px; padding: 7px 0;
-            border-bottom: 1px solid var(--border-soft);
-            animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
+            border-bottom: 1px solid var(--border-soft); }
+  /* Only a row that CHANGES state animates. At rest every row is already there,
+     so entry animation would be ten rows sliding in for no reason. */
+  .pg-row.ran, .pg-row.blocked { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-slip { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
   .pg-row .ar { color: var(--green); }
   .pg-row .nm { color: var(--muted); }
   .pg-row .un { color: var(--dim); }
-  .pg-row.blocked { border-bottom-color: var(--red); }
-  .pg-row.blocked .ar, .pg-row.blocked .nm, .pg-row.blocked .un { color: var(--red); }
+  .pg-row .cum { color: var(--dim); text-align: right; }
+  /* At rest the whole row is quiet: this is a plan, not a result. */
+  .pg-row.planned { opacity: .55; }
+  .pg-row.planned .ar { color: var(--dim); }
+  .pg-row.blocked { border-bottom-color: var(--red); opacity: 1; }
+  .pg-row.blocked .ar, .pg-row.blocked .nm, .pg-row.blocked .un, .pg-row.blocked .cum { color: var(--red); }
+  .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; }
+  .pg-ask b { color: var(--muted); font-weight: 500; }
   .pg-note { font-family: var(--mono); font-size: 13.5px; color: var(--red); padding-top: 11px;
              animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   .pg-note.calm { color: var(--dim); }
@@ -160,11 +219,11 @@ export const PLAYGROUND_CSS = `
   .pg-json .f { color: var(--red); font-weight: 700; }
   .pg-json .nl { color: var(--dim); }
   .pg-status { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em;
-               text-transform: uppercase; padding: 5px 11px; border-radius: 2px; border: 1px solid; }
-  .pg-status.ok { color: var(--green); border-color: #14493a; background: #07231b; }
-  .pg-status.no { color: var(--red); border-color: #4a1f1f; background: #1c0d0d; }
+               text-transform: uppercase; padding: 5px 11px; border-radius: var(--r-chip); border: 1px solid; }
+  .pg-status.ok { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
+  .pg-status.no { color: var(--red); border-color: var(--fail-line); background: var(--fail-bg); }
   .pg-status.idle { color: var(--dim); border-color: var(--border2); }
-  .pg-throw { margin-top: 16px; border: 1px solid var(--red); background: #160c0c;
+  .pg-throw { margin-top: 16px; border: 1px solid var(--red); background: var(--fail-bg);
               padding: 12px 14px; font-family: var(--mono); font-size: 14px; color: var(--red);
               animation: pg-pop 0.3s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-pop { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
@@ -217,19 +276,24 @@ export function playgroundSection(): string {
             </div>
             <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
           </div>
-          <div class="pg-log" id="pg-log" aria-live="polite"><div class="pg-empty">Press Run agent.</div></div>
+          <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span></div>
+          <div class="pg-log" id="pg-log" aria-live="polite">
+${plannedRows()}
+          </div>
+          <div class="pg-ask" id="pg-ask">this plan asks for <b>${PLAN_TOTAL.toLocaleString('en-US')}</b> units.</div>
         </div>
 
         <div class="pg-right">
-          <div class="pg-h"><span>POST /preflight</span><span class="pg-status idle" id="pg-status">idle</span></div>
-          <div class="pg-json" id="pg-json">// the response to the latest call appears here</div>
+          <div class="pg-h"><span id="pg-verb">POST /preflight</span><span class="pg-status idle" id="pg-status">request</span></div>
+          <div class="pg-json" id="pg-json">${restingRequest()}</div>
           <div id="pg-throw"></div>
         </div>
       </div>
 
       <div class="pg-foot">
         <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
-        <div class="pg-disc">Runs in your browser, not against your account.<br />
+        <div class="pg-disc">The plan above is what the agent will send. Pressing Run
+        executes it in your browser, against no account.<br />
         Same rule and same response body as <a href="/docs">POST /preflight</a>.</div>
       </div>
     </div>
@@ -276,6 +340,9 @@ export const PLAYGROUND_JS = `<script>
     } catch (e) {}
   }
   var task = null, timer = null, running = false, idx = 0;
+  // Captured from the server-rendered markup rather than duplicated in this
+  // script, so the resting request has exactly one definition.
+  var REQUEST_HTML = el('json').innerHTML;
 
   // Ported from the task-budget branch of src/routes/preflight.ts. preflight()
   // reserves; record() settles the reservation into used.
@@ -328,11 +395,21 @@ export const PLAYGROUND_JS = `<script>
   function reset(){
     clearTimeout(timer); running = false; idx = 0;
     task = { ceiling: parseInt(el('ceil').value,10), used:0, reserved:0 };
-    el('log').innerHTML = '<div class="pg-empty">Press Run agent.</div>';
-    el('json').textContent = '// the response to the latest call appears here';
+    // The rows are server-rendered and stay put: reset returns them to the
+    // planned state instead of rebuilding the list. Nothing is added or removed
+    // at any point in a run, so the panel's height never changes.
+    var rows = el('log').querySelectorAll('.pg-row');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].className = 'pg-row planned';
+      rows[i].querySelector('.ar').innerHTML = '&middot;';
+    }
+    var note = el('log').querySelector('.pg-note');
+    if (note) note.parentNode.removeChild(note);
+    el('json').innerHTML = REQUEST_HTML;
+    el('ask').style.visibility = '';
     el('throw').innerHTML = '';
     el('count').textContent = '0 calls';
-    el('status').className = 'pg-status idle'; el('status').textContent = 'idle';
+    el('status').className = 'pg-status idle'; el('status').textContent = 'request';
     el('fill').style.width = '0'; el('fill').classList.remove('blocked');
     el('ghost').classList.remove('on'); el('ghost').style.width = '0';
     el('used').textContent = '0'; el('used').classList.remove('over');
@@ -345,12 +422,13 @@ export const PLAYGROUND_JS = `<script>
     var res = preflight({ agentId:'researcher', taskRef:TASK_REF,
                           taskCeiling:task.ceiling, estimatedUnits:units });
 
-    if (idx === 0) el('log').innerHTML = '';
-    var row = document.createElement('div');
-    row.className = 'pg-row' + (res.approved ? '' : ' blocked');
-    row.innerHTML = '<span class="ar">' + (res.approved ? '&rarr;' : '&#10005;') + '</span>'
-      + '<span class="nm">' + name + '</span><span class="un">' + units + '</span>';
-    el('log').appendChild(row);
+    // Convert the row that is already there. No append, no layout shift.
+    var row = el('log').querySelector('.pg-row[data-i="' + idx + '"]');
+    if (row) {
+      row.className = 'pg-row ' + (res.approved ? 'ran' : 'blocked');
+      row.querySelector('.ar').innerHTML = res.approved ? '&rarr;' : '&#10005;';
+    }
+    if (idx === 0) el('ask').style.visibility = 'hidden';
     el('json').innerHTML = paint(res);
     el('count').textContent = (idx+1) + (idx ? ' calls' : ' call');
 
@@ -368,6 +446,9 @@ export const PLAYGROUND_JS = `<script>
     note.textContent = res.task_remaining_units + ' units left, this call asked for '
       + units + '. it never ran.';
     el('log').appendChild(note);
+    // Rows the run never reached stay planned rather than going blank, so the
+    // reader can see what the ceiling stopped as well as what it allowed.
+    el('ask').style.visibility = 'hidden';
     el('throw').innerHTML = '<div class="pg-throw"><b>throw TaskCeilingExceededError</b>'
       + '<span>the SDK throws here, so the expensive call never starts</span></div>';
     pulse('playground_blocked', task.ceiling);
@@ -384,6 +465,7 @@ export const PLAYGROUND_JS = `<script>
       var d = document.createElement('div');
       d.className = 'pg-note calm'; d.textContent = msg;
       el('log').appendChild(d);
+      el('ask').style.visibility = 'hidden';
     }
   }
 

@@ -154,15 +154,26 @@ break exists (marketing yes, content no).
 
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
-- No `--space-*` scale, and no `--radius-*` scale, so the 12/8 rule above is
-  a sentence rather than a token and three files break it.
-- `playground.ts` carries five raw hexes below its `:root` line
-  (`.pg-status.ok`, `.pg-status.no`, `.pg-throw`), which the colour rule
-  above forbids. All five have exact-intent twins in `theme.ts`.
-- `.pg` frames at 3px and `.pg-btn` at 2px, against the 12/8 rule.
+- `admin.ts` is the last file off the system: it does not call `head()`, has no
+  viewport meta, and carries 44 raw hexes including a violet accent that
+  encodes nothing.
 - `legal.ts` sets prose links to `--code`, which is syntax only.
 - No page has ever been checked by eye. Every "verified" in the log below
   is grep and arithmetic. That is how a 230px empty panel shipped.
+
+## Resting states
+
+The largest element on a page is never empty before interaction. A resting
+state renders from the same source the interactive state renders from, and says
+inside its own frame that it has not run yet. The homepage playground reserved
+292px for a run it had not done and filled it with one line of text; it now
+renders the plan, from the same `PLAN` the run walks, so the two cannot
+disagree and the section says something with JavaScript off.
+
+Growth in response to a click is not layout shift. The panel holds one height
+through every approved call and grows once, when the refusal and the thrown
+error appear, because that is new information arriving because the reader asked
+for it.
 
 ## Log
 
