@@ -50,7 +50,12 @@ export async function appRoute(app: FastifyInstance) {
     reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
       .header('X-Robots-Tag', 'noindex')
       .header('X-Content-Type-Options', 'nosniff')
-      .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+      // img-src and manifest-src are here because head() emits the favicon and
+      // manifest links on every page, and this is the one page with a real CSP:
+      // under default-src 'none' the browser blocked all four and logged a
+      // violation for each on every load. 'self' only, plus data: for the one
+      // inline SVG the site uses as a select arrow.
+      .header('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; manifest-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     const q = request.query as Record<string, unknown>
     const demo = q?.demo === '1'
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
