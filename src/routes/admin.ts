@@ -24,12 +24,12 @@ export async function adminRoute(app: FastifyInstance) {
   // Visual dashboard, session cookie set by POST /admin/login
   app.get('/admin', publicRoute(), async (request, reply) => {
     if (!checkAuth(request)) {
-      reply.type('text/html')
+      reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
       return reply.send(loginPage())
     }
     const accounts = await getAccountsWithSignals()
     const pulse = await getPlaygroundPulse()
-    reply.type('text/html')
+    reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
     return reply.send(adminPage(accounts, pulse))
   })
 
@@ -40,7 +40,7 @@ export async function adminRoute(app: FastifyInstance) {
     const secret = typeof body?.secret === 'string' ? body.secret : ''
     const expected = process.env.ADMIN_SECRET ?? ''
     if (!expected || !safeEqual(secret, expected)) {
-      reply.type('text/html')
+      reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
       return reply.send(loginPage('Wrong secret.'))
     }
     reply.header(

@@ -32,6 +32,7 @@ import { OG_PNG } from './lib/og-image.js'
 import { FAVICON_ICO, APPLE_TOUCH_PNG } from './lib/icons.js'
 import { FAVICON_SVG } from './ui/mark.js'
 import { BRAND } from './ui/theme.js'
+import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 
 const app = Fastify({ logger: true })
 
@@ -41,14 +42,29 @@ const app = Fastify({ logger: true })
 // fly.dev base URL, and Polar posts webhooks there, API traffic must keep
 // working on the old host forever.
 const CANONICAL_HOST = process.env.CANONICAL_HOST
-const CANONICAL_PATHS = /^\/($|app($|\/)|register$|pricing$|upgrade|docs|blog|guides|terms$|privacy$|llms\.txt$|robots\.txt$|sitemap\.xml$|og\.png$)/
+// Inverted 2026-09-05. This was an allow-list of marketing paths, which meant
+// every new page had to be added to a regex in this file or silently stopped
+// being canonicalised, and it still named `guides`, a route that does not exist.
+//
+// It is now a deny-list of API prefixes, and the entries are load-bearing: the
+// redirect is cross-host, and a 301 to another host drops the Authorization
+// header in curl without --location-trusted, in requests, and in fetch. Every
+// authenticated GET a published SDK might call against agentbill.fly.dev has to
+// be on this list or its callers start getting 401s. Enumerated from
+// `grep -rn "app.get(" src/routes/`; the CI audit asserts each still 401s.
+const API_PREFIXES = [
+  '/preflight', '/events', '/keys', '/tasks', '/budget', '/customers',
+  '/checkpoint', '/step', '/decisions', '/webhook-config', '/webhooks/',
+  '/health', '/pulse', '/account/',
+]
+const isApiPath = (path: string) => API_PREFIXES.some((p) => path === p || path.startsWith(p))
 app.addHook('onRequest', async (request, reply) => {
   if (!CANONICAL_HOST) return
   const host = request.headers.host
   if (!host || host === CANONICAL_HOST) return
   if (host.startsWith('localhost') || host.startsWith('127.')) return
   if (request.method !== 'GET' && request.method !== 'HEAD') return
-  if (!CANONICAL_PATHS.test(request.url.split('?')[0])) return
+  if (isApiPath(request.url.split('?')[0])) return
   // Take only the path and query off the parsed URL and hang them on an origin
   // we build ourselves. Overwriting .host on a parsed URL also works, but it
   // leaves the incoming userinfo and port in place and it reads as if the
@@ -165,34 +181,50 @@ app.get('/google816aee44e74d69c3.html', publicRoute(), async (_, reply) => {
   return 'google-site-verification: google816aee44e74d69c3.html'
 })
 
-// robots.txt
+// robots.txt, generated from the page registry so a page marked non-indexable
+// in one place cannot be forgotten in the other.
 app.get('/robots.txt', publicRoute(), async (_, reply) => {
   reply.type('text/plain')
-  return `User-agent: *
+  const denied = PAGES.filter((pg) => !pg.index).map((pg) => pg.path)
+  return `# /app is crawlable on purpose, and this is the part that reads backwards.
+# A Disallowed URL can still be indexed URL-only from an external link, because
+# the crawler is forbidden from fetching it and therefore never reads the
+# noindex inside. Disallow plus noindex is a pair that defeats itself. /app
+# sends noindex in its head and X-Robots-Tag on the response, which is the
+# directive that actually works, and it is where the homepage's own "See a live
+# console" button points: for months robots.txt forbade the site's best proof.
+#
+# AI crawlers are not blocked. This site publishes /llms.txt specifically to be
+# read by them; blocking GPTBot or ClaudeBot while advertising llms.txt would be
+# incoherent.
+User-agent: *
 Allow: /
-Allow: /docs
-Allow: /register
-Disallow: /app
+${denied.map((d) => `Disallow: ${d}\nDisallow: ${d}/`).join('\n')}
 Disallow: /webhooks/
 
-Sitemap: https://agentbill.dev/sitemap.xml
+Sitemap: ${ORIGIN}/sitemap.xml
 `
 })
 
-// sitemap.xml
+// sitemap.xml, from the registry.
+//
+// lastmod used to be new Date(), so all seven URLs claimed they had changed
+// today, every day. A sitemap whose lastmod is obviously synthetic is one
+// search engines learn to discount. It now reads PageMeta.updated, a date the
+// author bumps, and for blog posts it is the same field that renders the
+// visible dateline.
+//
+// The old list was also missing /pricing, both posts, both legal pages and the
+// blog index.
 app.get('/sitemap.xml', publicRoute(), async (_, reply) => {
-  const base = 'https://agentbill.dev'
-  const now = new Date().toISOString().split('T')[0]
   reply.type('application/xml')
+  const urls = indexable().map((pg) =>
+    `  <url><loc>${abs(pg.path)}</loc><lastmod>${pg.updated}</lastmod>` +
+    `<changefreq>${pg.changefreq}</changefreq><priority>${pg.priority.toFixed(1)}</priority></url>`
+  ).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${base}/</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>${base}/docs</loc><lastmod>${now}</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>${base}/register</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>${base}/docs/task-budgets</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>${base}/docs/limit-cost-per-agent-run</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>${base}/docs/langchain-billing</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>${base}/docs/openai-agent-spend-ceiling</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+${urls}
 </urlset>`
 })
 

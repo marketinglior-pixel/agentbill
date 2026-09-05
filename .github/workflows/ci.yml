@@ -37,6 +37,29 @@ jobs:
       - name: Copy and head rules
         run: npm run check:hygiene
 
+  urls:
+    name: Sitemap URLs resolve and self-canonicalise
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      # No database: every page in the sitemap is static HTML. The server boots
+      # against an unreachable DATABASE_URL and the marketing routes do not
+      # touch it. If one ever does, this job is where that shows up.
+      - name: Boot and crawl the sitemap
+        env:
+          DATABASE_URL: postgres://unused@127.0.0.1:1/unused
+          PORT: "3998"
+        run: |
+          node dist/server.js &
+          for i in $(seq 1 40); do curl -sf http://localhost:3998/health >/dev/null && break; sleep 0.5; done
+          ./scripts/seo/urls.sh http://localhost:3998
+
   python-sdk:
     name: Python SDK install and unit tests
     runs-on: ubuntu-latest

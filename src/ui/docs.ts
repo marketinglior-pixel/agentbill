@@ -155,14 +155,19 @@ type ShellOpts = {
   og?: { type?: string; title?: string; description?: string }
   /** Which nav link is current. Docs and guides pass "/docs"; a blog post passes "" (none). */
   current?: string
+  /**
+   * Suppress the "On this page" rail. An index page's h2s ARE its content, so
+   * a rail listing them is the page written twice.
+   */
+  rail?: boolean
   /** The page body. Its <h2>s become the rail. */
   body: string
 }
 
 /** Doctype through </html> for a content page: shared CSS, nav, rail, body, footer. */
-export function docsShell({ title, description, path, extraHead, jsonLd, og, current = '/docs', body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, og, current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
   const { body: anchored, toc } = withAnchors(body)
-  const rail = toc.length
+  const rail = wantRail && toc.length
     ? `  <nav class="rail" aria-label="On this page">
     <p class="rail-h">On this page</p>
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}

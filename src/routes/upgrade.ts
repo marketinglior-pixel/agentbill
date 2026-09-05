@@ -210,8 +210,16 @@ ${siteFooter()}
 </html>`)
   }
 
-  app.get('/upgrade', publicRoute(), pricingPage)
   app.get('/pricing', publicRoute(), pricingPage)
+
+  // /upgrade served byte-identical HTML to /pricing from this same handler, and
+  // only /pricing was canonicalised. Two URLs for one page is a duplicate that
+  // a canonical papers over rather than fixes. 301, permanently.
+  //
+  // This must ship with the polar.ts change in the same commit: getCheckoutUrl
+  // returned https://agentbill.dev/upgrade as its fallback, and a redirect here
+  // without that edit turns the buy button into a 301 back to the current page.
+  app.get('/upgrade', publicRoute(), async (_, reply) => reply.redirect('/pricing', 301))
 
   // Authenticated helper for the pricing page's "already have a key?" box:
   // turns a bearer key into checkout links carrying the account metadata, so

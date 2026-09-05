@@ -43,7 +43,12 @@ export async function appRoute(app: FastifyInstance) {
     // which is what made every real-browser login 403 while curl passed.
     // Nothing secret is ever in this page's URL, and same-origin still sends no
     // referrer to anyone else.
+    // X-Robots-Tag as well as the meta, so the directive survives a response
+    // that is not HTML. robots.txt no longer Disallows this path: a Disallowed
+    // URL is one the crawler cannot fetch, and therefore one whose noindex it
+    // never reads.
     reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex')
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     const q = request.query as Record<string, unknown>

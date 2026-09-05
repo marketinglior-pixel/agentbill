@@ -9,32 +9,70 @@ import { byPath, monthYear } from '../ui/site.js'
 // Post copy is untouched; only the frame and the closing CTA changed.
 const free = PLAN_LIMITS.free.toLocaleString('en-US')
 
+
+// One definition per post. The title, the description, the reading time and the
+// dateline were each written twice: once in the head and once in the markup a
+// few lines below it. The index added a third copy of every one of them, so it
+// is built from this instead.
+//
+// Dates live in the page registry beside the sitemap's lastmod, so a post
+// cannot tell a reader one date and a crawler another.
+type Post = {
+  path: '/blog/how-preflight-avoids-double-billing' | '/blog/monthly-caps-wont-save-you'
+  title: string
+  description: string
+  minutes: number
+}
+
+const POSTS: readonly Post[] = [
+  {
+    path: '/blog/monthly-caps-wont-save-you',
+    title: "Why monthly caps don't protect you from one bad LLM run",
+    description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',
+    minutes: 5,
+  },
+  {
+    path: '/blog/how-preflight-avoids-double-billing',
+    title: 'How preflight avoids double-billing under concurrent load',
+    description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
+    minutes: 6,
+  },
+]
+
+const post = (path: Post['path']): Post => POSTS.find((x) => x.path === path)!
+
+/** Dateline and reading time, from the two places that define them. */
+const dateline = (path: Post['path']): string =>
+  `${monthYear(byPath.get(path)!.published!)} · ${post(path).minutes} min read`
+
+/** BlogPosting for one post. datePublished is the value the dateline renders. */
+const postLd = (path: Post['path']) => ({
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post(path).title,
+  description: post(path).description,
+  url: `https://agentbill.dev${path}`,
+  datePublished: byPath.get(path)!.published,
+  dateModified: byPath.get(path)!.updated,
+  inLanguage: 'en-US',
+  author: { '@id': 'https://agentbill.dev/#organization' },
+  publisher: { '@id': 'https://agentbill.dev/#organization' },
+  isPartOf: { '@id': 'https://agentbill.dev/#website' },
+})
+
 export async function blogRoute(app: FastifyInstance) {
 
   app.get('/blog/how-preflight-avoids-double-billing', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
       path: '/blog/how-preflight-avoids-double-billing',
-      // datePublished is the same value that renders the visible dateline
-      // below, so the machine-readable date and the human one cannot disagree.
-      jsonLd: {
-        '@context': 'https://schema.org',
-        '@type': 'BlogPosting',
-        headline: 'How preflight avoids double-billing under concurrent load'.replace(/\u2019/g, "'"),
-        url: 'https://agentbill.dev/blog/how-preflight-avoids-double-billing',
-        datePublished: byPath.get('/blog/how-preflight-avoids-double-billing')?.published,
-        dateModified: byPath.get('/blog/how-preflight-avoids-double-billing')?.updated,
-        inLanguage: 'en-US',
-        author: { '@id': 'https://agentbill.dev/#organization' },
-        publisher: { '@id': 'https://agentbill.dev/#organization' },
-        isPartOf: { '@id': 'https://agentbill.dev/#website' },
-      },
-      title: 'How preflight avoids double-billing under concurrent load · AgentBill',
-      description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
+      title: `${post('/blog/how-preflight-avoids-double-billing').title} · AgentBill`,
+      description: post('/blog/how-preflight-avoids-double-billing').description,
+      jsonLd: postLd('/blog/how-preflight-avoids-double-billing'),
       current: '',
       body: `
 
   <h1>How preflight avoids double-billing under concurrent load</h1>
-  <div class="meta">${monthYear(byPath.get('/blog/how-preflight-avoids-double-billing')!.published!)} · 6 min read</div>
+  <div class="meta">${dateline('/blog/how-preflight-avoids-double-billing')}</div>
 
   <p>A developer on Reddit asked a sharp question about AgentBill's checkpoint pattern: <em>"Most checkpoint patterns I've seen either re-meter or skip metering and lose accuracy. How does the read-only check stay consistent with the final settlement?"</em></p>
 
@@ -237,27 +275,14 @@ record(units=7)
   app.get('/blog/monthly-caps-wont-save-you', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
       path: '/blog/monthly-caps-wont-save-you',
-      // datePublished is the same value that renders the visible dateline
-      // below, so the machine-readable date and the human one cannot disagree.
-      jsonLd: {
-        '@context': 'https://schema.org',
-        '@type': 'BlogPosting',
-        headline: "Why monthly caps don't protect you from one bad LLM run".replace(/\u2019/g, "'"),
-        url: 'https://agentbill.dev/blog/monthly-caps-wont-save-you',
-        datePublished: byPath.get('/blog/monthly-caps-wont-save-you')?.published,
-        dateModified: byPath.get('/blog/monthly-caps-wont-save-you')?.updated,
-        inLanguage: 'en-US',
-        author: { '@id': 'https://agentbill.dev/#organization' },
-        publisher: { '@id': 'https://agentbill.dev/#organization' },
-        isPartOf: { '@id': 'https://agentbill.dev/#website' },
-      },
-      title: 'Why monthly caps don\'t protect you from one bad LLM run · AgentBill',
-      description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',
+      title: `${post('/blog/monthly-caps-wont-save-you').title} · AgentBill`,
+      description: post('/blog/monthly-caps-wont-save-you').description,
+      jsonLd: postLd('/blog/monthly-caps-wont-save-you'),
       current: '',
       body: `
 
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
-  <div class="meta">${monthYear(byPath.get('/blog/monthly-caps-wont-save-you')!.published!)} · 5 min read</div>
+  <div class="meta">${dateline('/blog/monthly-caps-wont-save-you')}</div>
 
   <p>An agent starts a task at night. A retry loop gets stuck. By morning the bill is many times the monthly cap that was supposed to prevent exactly this.</p>
 
@@ -398,4 +423,43 @@ async function runAgentSafely(customerId: string, task: string) {
     }))
   })
 
+
+  // The blog index did not exist. Both posts linked to /blog and so did the
+  // docs, and /blog answered 401 to the public because it was never added to
+  // the allowlist that used to guard every page. It was redesigned in 280f24e
+  // while nobody outside could load it.
+  app.get('/blog', publicRoute(), async (_, reply) => {
+    return reply.type('text/html').send(docsShell({
+      path: '/blog',
+      title: 'Blog · AgentBill',
+      description: 'Notes on budget ceilings for AI agents: why monthly caps fire too late, and how an atomic reserve keeps a preflight check consistent with settlement.',
+      current: '',
+      // No rail: on an index the h2s are the content, so a rail listing them
+      // would be the same two titles printed twice on one screen.
+      rail: false,
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'Blog',
+        '@id': 'https://agentbill.dev/blog#blog',
+        url: 'https://agentbill.dev/blog',
+        name: 'AgentBill',
+        inLanguage: 'en-US',
+        publisher: { '@id': 'https://agentbill.dev/#organization' },
+        blogPost: POSTS.map((x) => ({
+          '@type': 'BlogPosting',
+          headline: x.title,
+          url: `https://agentbill.dev${x.path}`,
+          datePublished: byPath.get(x.path)!.published,
+        })),
+      },
+      body: `
+  <h1>Blog</h1>
+  <p class="lede">Two posts, both about the same thing: a ceiling that fires while the run is still going.</p>
+${POSTS.map((x) => `
+  <h2><a href="${x.path}">${x.title}</a></h2>
+  <div class="meta">${dateline(x.path)}</div>
+  <p>${x.description}</p>`).join('')}
+`,
+    }))
+  })
 }
