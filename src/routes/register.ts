@@ -307,6 +307,9 @@ ${siteNav('/register', { cta: false })}
         <p>Takes 30 seconds. No setup call. No credit card.</p>
       </div>
       <form class="form" id="reg-form">
+        <noscript><p class="msg-slot" style="display:block">This form needs JavaScript to submit. Without it, ask for a key
+          from a terminal: <code>curl -X POST https://agentbill.dev/register -H 'Content-Type: application/json'
+          -d '{"email":"you@company.com"}'</code></p></noscript>
         <div class="field">
           <label for="email">Work email</label>
           <input type="email" id="email" placeholder="you@company.com" required autocomplete="email" />

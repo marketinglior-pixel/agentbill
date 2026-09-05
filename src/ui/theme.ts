@@ -262,7 +262,12 @@ export function head({ title, description, path, canonical, css = '', extraHead 
   const meta = path ? byPath.get(path) : undefined
   const href = path ? abs(path) : canonical
   const hidden = noindex ?? (meta ? !meta.index : false)
-  const card = meta && meta.og !== 'default' ? `${ORIGIN}/og/${meta.og}.png` : `${ORIGIN}/og.png`
+  // One card for every page, for now. head() used to point non-default sections
+  // at /og/<section>.png, and those routes were never built, so every share of
+  // /docs, /pricing, /register and /blog carried a broken image for a day. The
+  // registry keeps the per-section `og` field so cards can exist later; until a
+  // route serves them, nothing may reference them.
+  const card = `${ORIGIN}/og.png`
   const ogTitle = og?.title ?? title
   const ogDesc = og?.description ?? description ?? ''
   const blocks = hidden ? [] : [...sitewideLd(), ...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [])]

@@ -74,6 +74,15 @@ export const DOCS_CSS = `${CHROME_CSS}
   .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px;
           padding: 20px; margin: 16px 0; overflow-x: auto; }
   .code pre { font-family: var(--mono); font-size: 13px; color: var(--code); line-height: 1.7; }
+  /* A block that scrolls sideways used to look exactly like one that does not,
+     so a reader saw a sentence end mid-word and had no way to know there was
+     more. Four of eight blocks on /docs did this at 1280px. The script below
+     marks the ones that overflow, and only those get a fade on the right edge,
+     which lifts once they are scrolled to the end. Keywords, not hexes: the
+     drift ratchet counts hexes below :root. */
+  .code.overflows:not(.at-end) { mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent);
+                                 -webkit-mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent); }
+  .code.overflows { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .comment { color: var(--dim); }
   .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 8px; border-radius: 4px;
             font-size: 13px; color: var(--code); }
@@ -136,6 +145,19 @@ const DOCS_SRC = `
     if (el) io.observe(el);
   });
 })();
+
+  // Mark code blocks that overflow, and un-mark them once scrolled to the end.
+  var codes = document.querySelectorAll('.code');
+  function mark() {
+    for (var i = 0; i < codes.length; i++) {
+      var c = codes[i];
+      c.classList.toggle('overflows', c.scrollWidth > c.clientWidth + 2);
+      c.classList.toggle('at-end', c.scrollLeft + c.clientWidth >= c.scrollWidth - 2);
+    }
+  }
+  for (var j = 0; j < codes.length; j++) codes[j].addEventListener('scroll', mark, { passive: true });
+  window.addEventListener('resize', mark);
+  mark();
 `
 
 const dj = inlineScript(DOCS_SRC)
