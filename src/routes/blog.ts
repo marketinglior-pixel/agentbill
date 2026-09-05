@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { publicRoute } from '../middleware/auth.js'
+import { byPath, monthYear } from '../ui/site.js'
 
 // Posts render through the shared content shell in src/ui/docs.ts: one copy of
 // the content CSS, and an "On this page" rail built from each post's <h2>s.
@@ -12,13 +13,28 @@ export async function blogRoute(app: FastifyInstance) {
 
   app.get('/blog/how-preflight-avoids-double-billing', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
+      path: '/blog/how-preflight-avoids-double-billing',
+      // datePublished is the same value that renders the visible dateline
+      // below, so the machine-readable date and the human one cannot disagree.
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'BlogPosting',
+        headline: 'How preflight avoids double-billing under concurrent load'.replace(/\u2019/g, "'"),
+        url: 'https://agentbill.dev/blog/how-preflight-avoids-double-billing',
+        datePublished: byPath.get('/blog/how-preflight-avoids-double-billing')?.published,
+        dateModified: byPath.get('/blog/how-preflight-avoids-double-billing')?.updated,
+        inLanguage: 'en-US',
+        author: { '@id': 'https://agentbill.dev/#organization' },
+        publisher: { '@id': 'https://agentbill.dev/#organization' },
+        isPartOf: { '@id': 'https://agentbill.dev/#website' },
+      },
       title: 'How preflight avoids double-billing under concurrent load · AgentBill',
       description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
       current: '',
       body: `
 
   <h1>How preflight avoids double-billing under concurrent load</h1>
-  <div class="meta">May 2026 · 6 min read</div>
+  <div class="meta">${monthYear(byPath.get('/blog/how-preflight-avoids-double-billing')!.published!)} · 6 min read</div>
 
   <p>A developer on Reddit asked a sharp question about AgentBill's checkpoint pattern: <em>"Most checkpoint patterns I've seen either re-meter or skip metering and lose accuracy. How does the read-only check stay consistent with the final settlement?"</em></p>
 
@@ -220,13 +236,28 @@ record(units=7)
 
   app.get('/blog/monthly-caps-wont-save-you', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
+      path: '/blog/monthly-caps-wont-save-you',
+      // datePublished is the same value that renders the visible dateline
+      // below, so the machine-readable date and the human one cannot disagree.
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'BlogPosting',
+        headline: "Why monthly caps don't protect you from one bad LLM run".replace(/\u2019/g, "'"),
+        url: 'https://agentbill.dev/blog/monthly-caps-wont-save-you',
+        datePublished: byPath.get('/blog/monthly-caps-wont-save-you')?.published,
+        dateModified: byPath.get('/blog/monthly-caps-wont-save-you')?.updated,
+        inLanguage: 'en-US',
+        author: { '@id': 'https://agentbill.dev/#organization' },
+        publisher: { '@id': 'https://agentbill.dev/#organization' },
+        isPartOf: { '@id': 'https://agentbill.dev/#website' },
+      },
       title: 'Why monthly caps don\'t protect you from one bad LLM run · AgentBill',
       description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',
       current: '',
       body: `
 
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
-  <div class="meta">May 2026 · 5 min read</div>
+  <div class="meta">${monthYear(byPath.get('/blog/monthly-caps-wont-save-you')!.published!)} · 5 min read</div>
 
   <p>An agent starts a task at night. A retry loop gets stuck. By morning the bill is many times the monthly cap that was supposed to prevent exactly this.</p>
 

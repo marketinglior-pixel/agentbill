@@ -98,25 +98,34 @@ export async function homeRoute(app: FastifyInstance) {
     return reply.type('text/html').send(`${head({
       title: 'AgentBill · Hard budget ceilings for AI agents',
       description: 'Hard budget ceilings for AI agents. One ceiling per task. Every call that shares the task ref draws it down, whatever the provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
-      canonical: 'https://agentbill.dev/',
-      extraHead: `  <meta name="keywords" content="billing for AI agents, AI agent budget limit, per task budget AI, LLM cost control, agent spend firewall, preflight billing, usage based billing AI, agentbill, langchain billing, AI agent spend" />
-  <!-- Open Graph -->
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.dev/" />
-  <meta property="og:title" content="AgentBill · Hard budget ceilings for AI agents" />
-  <meta property="og:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job. Not a tracker. A guardrail." />
-  <meta property="og:site_name" content="AgentBill" />
-  <meta property="og:image" content="https://agentbill.dev/og.png" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AgentBill · Hard budget ceilings for AI agents" />
-  <meta name="twitter:description" content="Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job." />
-  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
-  <!-- Structured data -->
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentBill","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.","url":"https://agentbill.dev","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free tier: 1,000 preflight calls/month"}}</script>
-  ${pixelSnippet()}`,
+      path: '/',
+      og: {
+        description: 'Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job. Not a tracker. A guardrail.',
+      },
+      // Offers render from PLAN_ORDER / PLAN_PRICES / PLAN_LIMITS rather than
+      // being typed here. A price written twice is a price that will disagree
+      // with itself, and this one would disagree with the table 200px below it.
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        '@id': 'https://agentbill.dev/#software',
+        name: 'AgentBill',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Any',
+        description: 'Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.',
+        url: 'https://agentbill.dev',
+        provider: { '@id': 'https://agentbill.dev/#organization' },
+        offers: PLAN_ORDER.map((tier) => ({
+          '@type': 'Offer',
+          name: tier[0].toUpperCase() + tier.slice(1),
+          price: String(PLAN_PRICES[tier]),
+          priceCurrency: 'USD',
+          description: `${PLAN_LIMITS[tier].toLocaleString('en-US')} preflight calls/month`,
+        })),
+      },
+      // meta keywords has been ignored by every major engine since 2009. It was
+      // 300 bytes on the most-fetched page of the site.
+      extraHead: pixelSnippet(),
       css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)

@@ -146,8 +146,13 @@ export function withAnchors(body: string): { body: string; toc: { id: string; la
 type ShellOpts = {
   title: string
   description: string
-  canonical?: string
+  /** Path in the registry. Drives canonical, the share card and the robots directive. */
+  path: string
   extraHead?: string
+  /** JSON-LD for this page, beside the automatic Organization and WebSite. */
+  jsonLd?: unknown | unknown[]
+  /** Share-card overrides. Type and description only; the title is the page's. */
+  og?: { type?: string; title?: string; description?: string }
   /** Which nav link is current. Docs and guides pass "/docs"; a blog post passes "" (none). */
   current?: string
   /** The page body. Its <h2>s become the rail. */
@@ -155,7 +160,7 @@ type ShellOpts = {
 }
 
 /** Doctype through </html> for a content page: shared CSS, nav, rail, body, footer. */
-export function docsShell({ title, description, canonical, extraHead, current = '/docs', body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, og, current = '/docs', body }: ShellOpts): string {
   const { body: anchored, toc } = withAnchors(body)
   const rail = toc.length
     ? `  <nav class="rail" aria-label="On this page">
@@ -163,7 +168,7 @@ export function docsShell({ title, description, canonical, extraHead, current = 
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : '  <div></div>'
-  return `${head({ title, description, canonical, css: DOCS_CSS, extraHead })}
+  return `${head({ title, description, path, jsonLd, og, css: DOCS_CSS, extraHead })}
 <body>
 ${siteNav(current)}
 <div class="docs">

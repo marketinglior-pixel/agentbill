@@ -37,7 +37,8 @@ function notFoundPage(): string {
   return `${head({
     title: 'Page not found · AgentBill',
     description: 'That page is not on agentbill.dev.',
-    extraHead: '  <meta name="robots" content="noindex" />',
+    // Not in the page registry, because it is not a page. noindex is explicit.
+    noindex: true,
     css: CSS,
   })}
 <body>

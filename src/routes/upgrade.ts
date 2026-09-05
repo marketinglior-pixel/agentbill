@@ -48,15 +48,30 @@ export async function upgradeRoute(app: FastifyInstance) {
     return reply.send(`${head({
       title: 'AgentBill · Pricing',
       description: `Hard budget ceilings for AI agents. Free tier with ${num(PLAN_LIMITS.free)} preflight calls/month, paid plans from $${PLAN_PRICES.builder}/month. No credit card to start.`,
-      canonical: 'https://agentbill.dev/pricing',
-      extraHead: `  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.dev/pricing" />
-  <meta property="og:title" content="AgentBill · Pricing" />
-  <meta property="og:description" content="Free: ${num(PLAN_LIMITS.free)} preflight calls/month. ${paidSummary}. Hard per-task ceilings, cross-provider, no proxy." />
-  <meta property="og:image" content="https://agentbill.dev/og.png" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
-  ${pixelSnippet()}`,
+      // Both /pricing and /upgrade render this, and both canonicalise to
+      // /pricing, which is the registry's only entry for the page.
+      path: '/pricing',
+      og: { description: `Free: ${num(PLAN_LIMITS.free)} preflight calls/month. ${paidSummary}. Hard per-task ceilings, cross-provider, no proxy.` },
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        // Same @id as the homepage on purpose: two pages describing one product
+        // should merge into one entity rather than compete as two.
+        '@id': 'https://agentbill.dev/#software',
+        name: 'AgentBill',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Any',
+        url: 'https://agentbill.dev',
+        provider: { '@id': 'https://agentbill.dev/#organization' },
+        offers: PLAN_ORDER.map((tier) => ({
+          '@type': 'Offer',
+          name: tier[0].toUpperCase() + tier.slice(1),
+          price: String(PLAN_PRICES[tier]),
+          priceCurrency: 'USD',
+          description: `${num(PLAN_LIMITS[tier])} preflight calls/month`,
+        })),
+      },
+      extraHead: pixelSnippet(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, spec-sheet page (F3)
      * design-system: design.md · designed-as-app · nav: N1b shared · footer: Ft2 shared

@@ -9,15 +9,18 @@ import { publicRoute } from '../middleware/auth.js'
 const LAST_UPDATED = 'August 27, 2026'
 const CONTACT = 'marketinglior@gmail.com'
 
-function legalShell(title: string, body: string): string {
+function legalShell(title: string, path: string, body: string): string {
   return `${head({
     title: `${title} · AgentBill`,
-    extraHead: '  <meta name="robots" content="noindex" />',
+    description: `${title} for AgentBill, budget ceilings for AI agents.`,
+    path,
     css: `${CHROME_CSS}
     :root { --shell: 720px; }
     body { line-height: 1.7; }
-    .container { max-width: var(--shell); margin: 0 auto; padding: 64px 24px; }
-    a { color: var(--code); }
+    .container { max-width: var(--shell); margin: 0 auto;
+                  padding-inline: var(--gutter); padding-block: var(--s8); }
+    /* --code is syntax only (design.md). Prose links are the brand green. */
+    a { color: var(--green); }
     h1 { color: var(--white); font-size: 24px; margin-bottom: 8px; }
     .updated { color: var(--dim); font-size: 13px; margin-bottom: 40px; }
     h2 { color: var(--white); font-size: 16px; margin: 32px 0 10px; }
@@ -38,7 +41,7 @@ ${siteFooter()}
 export async function legalRoute(app: FastifyInstance) {
   app.get('/terms', publicRoute(), async (_, reply) => {
     reply.type('text/html')
-    return reply.send(legalShell('Terms of Service', `
+    return reply.send(legalShell('Terms of Service', '/terms', `
     <h1>Terms of Service</h1>
     <p class="updated">Last updated: ${LAST_UPDATED}</p>
 
@@ -85,7 +88,7 @@ export async function legalRoute(app: FastifyInstance) {
 
   app.get('/privacy', publicRoute(), async (_, reply) => {
     reply.type('text/html')
-    return reply.send(legalShell('Privacy Policy', `
+    return reply.send(legalShell('Privacy Policy', '/privacy', `
     <h1>Privacy Policy</h1>
     <p class="updated">Last updated: ${LAST_UPDATED}</p>
 

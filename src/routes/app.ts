@@ -769,7 +769,9 @@ ${MARK_CSS}
 
 const HEAD = (title: string) => head({
   title: `${esc(title)} · AgentBill`,
-  extraHead: '  <meta name="robots" content="noindex" />',
+  // noindex comes from the registry (index: false), which is the same entry
+  // robots.txt reads, so the two cannot disagree about this page.
+  path: '/app',
   css: CSS,
 })
 

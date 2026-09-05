@@ -7,15 +7,10 @@ export async function docsRoute(app: FastifyInstance) {
     return reply.type('text/html').send(docsShell({
       title: 'AgentBill Docs · Preflight Billing for AI Agents',
       description: 'AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer.',
-      canonical: 'https://agentbill.dev/docs',
-      extraHead: `  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.dev/docs" />
-  <meta property="og:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
-  <meta property="og:description" content="Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK." />
-  <meta property="og:site_name" content="AgentBill" />
-  <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="AgentBill Docs · Preflight Billing for AI Agents" />
-  <meta name="twitter:description" content="Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend before compute starts." />`,
+      path: '/docs',
+      // This page used to carry og and twitter tags and no og:image at all, so
+      // every share of the docs was a card with no art.
+      og: { description: 'Add preflight billing to your AI agent in 3 lines. Block runaway spend before compute starts. Python and Node.js SDK.' },
       body: `
   <h1>Documentation</h1>
   <p class="lede">Everything you need to add preflight billing to your agents.</p>

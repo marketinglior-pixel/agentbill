@@ -22,7 +22,7 @@ gate "PUBLIC_PATHS stays deleted" 0 "$n"
 
 # One head builds every <head>. A page hand-writing these is how /docs ended up
 # with og tags and no og:image while six other pages had neither.
-for tag in 'rel="canonical"' 'rel="icon"' 'name="theme-color"' 'name="color-scheme"'; do
+for tag in 'rel="canonical"' 'rel="icon"' 'name="theme-color"' 'name="color-scheme"' 'property="og:' 'name="twitter:' 'application/ld+json' 'name="robots"'; do
   n=$(grep -rn -- "$tag" src --include=*.ts 2>/dev/null | grep -v 'src/ui/theme.ts' | wc -l | tr -d ' ')
   gate "only theme.ts emits $tag" 0 "$n" "$(grep -rn -- "$tag" src --include=*.ts 2>/dev/null | grep -v 'src/ui/theme.ts' | head -3)"
 done

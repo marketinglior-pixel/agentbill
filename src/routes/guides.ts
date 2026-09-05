@@ -1,16 +1,35 @@
 import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
+import { byPath } from '../ui/site.js'
 
 // Guides render through the shared content shell in src/ui/docs.ts: one copy
 // of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
 // The guide copy below is untouched. Two frame-level things changed inside the
 // bodies: the closing CTA is the site's .btn instead of a white .cta of its
 // own, and its label is short enough to stay on one line at 320px.
-function page(title: string, description: string, body: string) {
+function page(path: string, title: string, description: string, body: string) {
+  const meta = byPath.get(path)
   return docsShell({
     title: `${title} · AgentBill`,
     description,
+    path,
+    // A guide is a technical article. datePublished and dateModified come from
+    // the registry, which is also what the sitemap's lastmod reads, so the two
+    // cannot claim different things about the same page.
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'TechArticle',
+      headline: title,
+      description,
+      url: `https://agentbill.dev${path}`,
+      datePublished: meta?.updated,
+      dateModified: meta?.updated,
+      inLanguage: 'en-US',
+      author: { '@id': 'https://agentbill.dev/#organization' },
+      publisher: { '@id': 'https://agentbill.dev/#organization' },
+      isPartOf: { '@id': 'https://agentbill.dev/#website' },
+    },
     body: `${body}
   <div class="also">
     <p>Related guides</p>
@@ -26,6 +45,7 @@ export async function guidesRoute(app: FastifyInstance) {
 
   app.get('/docs/task-budgets', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
+      '/docs/task-budgets',
       'Task budgets, a hard cost ceiling per agent job',
       'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
       `
@@ -223,6 +243,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
 
   app.get('/docs/limit-cost-per-agent-run', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
+      '/docs/limit-cost-per-agent-run',
       'How to limit cost per agent run',
       'Set a per-request spend ceiling on any AI agent. Block the run before compute is consumed if the budget is exceeded.',
       `
@@ -304,6 +325,7 @@ await record({ agentId: 'my_agent', units: 10 })
 
   app.get('/docs/langchain-billing', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
+      '/docs/langchain-billing',
       'How to add billing to a LangChain agent',
       'Add preflight spend checks and usage billing to any LangChain agent in Python. Works with LCEL chains, AgentExecutor, RetrievalQA, and LangGraph.',
       `
@@ -435,6 +457,7 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
 
   app.get('/docs/openai-agent-spend-ceiling', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
+      '/docs/openai-agent-spend-ceiling',
       'How to add a spend ceiling to an OpenAI agent',
       'Block OpenAI agent runs before they start if the budget is exceeded. Per-request ceiling, not just a monthly cap.',
       `

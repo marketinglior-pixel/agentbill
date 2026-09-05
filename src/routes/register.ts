@@ -86,15 +86,9 @@ export async function registerRoute(app: FastifyInstance) {
     return reply.send(`${head({
       title: 'Get your API key · AgentBill',
       description: 'Free API key in 30 seconds. 1,000 preflight calls/month, hard per-task budget ceilings for AI agents. No credit card.',
-      canonical: 'https://agentbill.dev/register',
-      extraHead: `  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agentbill.dev/register" />
-  <meta property="og:title" content="Get your API key · AgentBill" />
-  <meta property="og:description" content="Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card." />
-  <meta property="og:image" content="https://agentbill.dev/og.png" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://agentbill.dev/og.png" />
-  ${pixelSnippet()}`,
+      path: '/register',
+      og: { description: 'Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card.' },
+      extraHead: pixelSnippet(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared

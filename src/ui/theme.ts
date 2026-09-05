@@ -1,3 +1,4 @@
+import { ORIGIN, abs, byPath } from './site.js'
 // The single source of truth for the site's design tokens and page shell.
 //
 // Before this file existed every route carried its own inline <style> with its
@@ -167,14 +168,64 @@ const FONTS = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
 
 type HeadOpts = {
-  /** Full <title>. Falls back to "<name> · AgentBill". */
+  /** Full <title>, including the " · AgentBill" suffix. */
   title: string
   description?: string
+  /**
+   * The page's path in the registry. Canonical, the share card and the robots
+   * directive are all derived from it, so a page that passes `path` cannot end
+   * up with a canonical that disagrees with its sitemap entry.
+   */
+  path?: string
+  /** Escape hatch for a page not in the registry. `path` wins if both are set. */
   canonical?: string
   /** Extra CSS for this page, appended after TOKENS and BASE. */
   css?: string
-  /** Extra tags (og:, robots, json-ld) dropped in before </head>. */
+  /** Genuinely page-specific tags. Not og, not canonical, not icons. */
   extraHead?: string
+  /** Overrides for the share card. Title and description default to the page's. */
+  og?: { type?: string; title?: string; description?: string }
+  /** JSON-LD for this page. The sitewide Organization and WebSite are automatic. */
+  jsonLd?: unknown | unknown[]
+  /** Emit robots noindex. Derived from the registry when `path` is given. */
+  noindex?: boolean
+}
+
+/**
+ * JSON-LD is injected into a <script> element, so a description containing
+ * "</script>" would close the block and drop the rest of the page's markup into
+ * the document as text. Escaping "<" is the whole fix and it must never be
+ * removed for tidiness.
+ */
+const ld = (o: unknown): string => JSON.stringify(o).replace(/</g, '\\u003c')
+
+/** Emitted on every indexable page. The publisher of everything else. */
+function sitewideLd(): unknown[] {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'Organization',
+      '@id': `${ORIGIN}/#organization`,
+      name: 'AgentBill',
+      url: ORIGIN,
+      logo: { '@type': 'ImageObject', url: `${ORIGIN}/apple-touch-icon.png`, width: 180, height: 180 },
+      sameAs: [
+        'https://github.com/marketinglior-pixel/agentbill',
+        'https://pypi.org/project/agentbill-sdk/',
+        'https://pypi.org/project/agentbill-mcp/',
+        'https://www.npmjs.com/package/agentbill',
+      ],
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      '@id': `${ORIGIN}/#website`,
+      url: ORIGIN,
+      name: 'AgentBill',
+      inLanguage: 'en-US',
+      publisher: { '@id': `${ORIGIN}/#organization` },
+    },
+  ]
 }
 
 /** Doctype through <body>. Every HTML route opens with this. */
@@ -193,7 +244,15 @@ const ICONS = `  <meta name="color-scheme" content="dark" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, canonical, css = '', extraHead = '' }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex }: HeadOpts): string {
+  const meta = path ? byPath.get(path) : undefined
+  const href = path ? abs(path) : canonical
+  const hidden = noindex ?? (meta ? !meta.index : false)
+  const card = meta && meta.og !== 'default' ? `${ORIGIN}/og/${meta.og}.png` : `${ORIGIN}/og.png`
+  const ogTitle = og?.title ?? title
+  const ogDesc = og?.description ?? description ?? ''
+  const blocks = hidden ? [] : [...sitewideLd(), ...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [])]
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -201,10 +260,24 @@ export function head({ title, description, canonical, css = '', extraHead = '' }
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 ${ICONS}
   <title>${title}</title>${description ? `
-  <meta name="description" content="${description}" />` : ''}${canonical ? `
-  <link rel="canonical" href="${canonical}" />` : ''}
+  <meta name="description" content="${description}" />` : ''}${href ? `
+  <link rel="canonical" href="${href}" />` : ''}${hidden ? `
+  <meta name="robots" content="noindex" />` : ''}
+  <meta property="og:type" content="${og?.type ?? 'website'}" />
+  <meta property="og:site_name" content="AgentBill" />
+  <meta property="og:locale" content="en_US" />${href ? `
+  <meta property="og:url" content="${href}" />` : ''}
+  <meta property="og:title" content="${ogTitle}" />${ogDesc ? `
+  <meta property="og:description" content="${ogDesc}" />` : ''}
+  <meta property="og:image" content="${card}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${ogTitle}" />${ogDesc ? `
+  <meta name="twitter:description" content="${ogDesc}" />` : ''}
+  <meta name="twitter:image" content="${card}" />
 ${FONTS}
   <style>${TOKENS}${BASE}${css}
-  </style>${extraHead ? `\n${extraHead}` : ''}
+  </style>${blocks.map((b) => `\n  <script type="application/ld+json">${ld(b)}</script>`).join('')}${extraHead ? `\n${extraHead}` : ''}
 </head>`
 }
