@@ -48,4 +48,30 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   });")
 gate "home.ts: one python sample, no phantom block" "1:1" "$n"
 
+
+# Every inline script the site emits must PARSE.
+#
+# This exists because /register's script did not, for one deploy. Lifting it
+# into a module for the CSP re-escaped backslashes that were already escaped:
+# \" became \\", which closes the JS string early. The page returned 200, the
+# CSP hash matched, the script tag was present, the handler was in the HTML,
+# and the button did nothing. Every check I had at the time passed.
+#
+# Needs a running server, so it is skipped when there is not one.
+B="${HYGIENE_BASE:-http://localhost:3000}"
+if curl -sf "$B/health" >/dev/null 2>&1; then
+  for path in / /register /pricing /docs /faq; do
+    curl -s "$B$path" | perl -0777 -ne 'while(/<script>(.*?)<\/script>/gs){print "$1\n"}' > /tmp/hygiene-inline.js
+    if [ -s /tmp/hygiene-inline.js ]; then
+      if node --check /tmp/hygiene-inline.js 2>/tmp/hygiene-inline.err; then
+        printf "  ok    %-46s inline script parses\n" "$path"
+      else
+        printf "  FAIL  %-46s %s\n" "$path" "$(tail -2 /tmp/hygiene-inline.err | head -1)"; fail=1
+      fi
+    fi
+  done
+else
+  printf "  skip  %-46s no server on %s\n" "inline script parse check" "$B"
+fi
+
 exit $fail

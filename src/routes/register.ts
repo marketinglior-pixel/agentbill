@@ -128,7 +128,7 @@ const reg = inlineScript(`  let apiKey = ''
       apiKey = data.api_key
       document.getElementById('key-display').textContent = apiKey
       const fc = document.getElementById('first-curl')
-      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\\\"Authorization: Bearer " + apiKey + "\\\\" -H \\\\"Content-Type: application/json\\\\" -d '{\\\\"agent_id\\\\":\\\\"first-run\\\\",\\\\"estimated_units\\\\":5,\\\\"ceiling\\\\":1}'"
+      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\"Authorization: Bearer " + apiKey + "\\" -H \\"Content-Type: application/json\\" -d '{\\"agent_id\\":\\"first-run\\",\\"estimated_units\\":5,\\"ceiling\\":1}'"
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
