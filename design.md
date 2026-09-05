@@ -68,7 +68,9 @@ Headings are roman. Never italic. Emphasis is weight or colour.
 
 ## Spacing and layout
 
-- `--shell` is the content width. Marketing and docs run 1080px, blog 780px.
+- `--shell` is the content width. Marketing, docs and blog run 1080px; legal
+  runs 720px. (Blog was 780px until `280f24e` moved it onto the docs shell,
+  which sets 1080. This file said 780 for a day after that stopped being true.)
   `.wrap` / `.container` own the inline axis (`padding-inline`); sections own
   the block axis (`padding-block`). Never the `padding` shorthand on either.
 - Uneven rhythm on purpose. Sections do not share one padding value.
@@ -152,8 +154,15 @@ break exists (marketing yes, content no).
 
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
-- No `--space-*` scale.
-- Blog shares none of the docs CSS yet.
+- No `--space-*` scale, and no `--radius-*` scale, so the 12/8 rule above is
+  a sentence rather than a token and three files break it.
+- `playground.ts` carries five raw hexes below its `:root` line
+  (`.pg-status.ok`, `.pg-status.no`, `.pg-throw`), which the colour rule
+  above forbids. All five have exact-intent twins in `theme.ts`.
+- `.pg` frames at 3px and `.pg-btn` at 2px, against the 12/8 rule.
+- `legal.ts` sets prose links to `--code`, which is syntax only.
+- No page has ever been checked by eye. Every "verified" in the log below
+  is grep and arithmetic. That is how a 230px empty panel shipped.
 
 ## Log
 

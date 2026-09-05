@@ -25,3 +25,6 @@ npm-debug.log*
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Design reference library, cloned not authored. See design.md.
+.reference/
