@@ -19,7 +19,14 @@ export type OgCard = 'default' | 'docs' | 'blog' | 'pricing' | 'register'
 export type PageMeta = {
   path: string
   section: 'marketing' | 'docs' | 'blog' | 'legal'
-  /** Ancestors, excluding the page itself. Drives the visible trail and BreadcrumbList. */
+  /**
+   * Ancestors, excluding the page itself. Drives the visible trail and the
+   * BreadcrumbList from one array, so the two cannot describe different paths.
+   *
+   * Only the content family renders them (docs, guides, blog). /pricing and
+   * /register carry a true hierarchy and deliberately do not draw it: a
+   * one-ancestor trail above a top-level page is furniture with nothing to do.
+   */
   crumbs: ReadonlyArray<readonly [label: string, href: string]>
   /** Short label for this page in a breadcrumb. Titles run long; trails should not. */
   crumb: string

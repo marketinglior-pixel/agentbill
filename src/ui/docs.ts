@@ -1,3 +1,4 @@
+import { byPath, abs } from './site.js'
 // The content-page shell: /docs and every /docs/* guide.
 //
 // Before this file, docs.ts, guides.ts and blog.ts each carried their own copy
@@ -20,6 +21,21 @@ export const DOCS_CSS = `${CHROME_CSS}
 
   .docs { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; padding-block: 48px 96px;
           display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
+
+  /* Breadcrumb.
+     A full-width first row of the grid rather than the first thing inside
+     <main>. At 960px and below the rail collapses to a horizontal strip and it
+     is first in DOM order, so a breadcrumb inside main would render BELOW "On
+     this page" on every phone.
+     Deliberately not --green: green is the brand and the primary action, and a
+     green trail competes with the page's real links. This is furniture. */
+  .crumbs { grid-column: 1 / -1; margin-bottom: 28px; }
+  .crumbs ol { list-style: none; display: flex; flex-wrap: wrap; align-items: baseline;
+               gap: 0 8px; row-gap: 4px; font-family: var(--mono); font-size: var(--fs-micro); }
+  .crumbs a { color: var(--dim); text-decoration: none; }
+  .crumbs a:hover { color: var(--text); text-decoration: underline; }
+  .crumbs .sep { color: var(--border2); }
+  .crumbs [aria-current="page"] { color: var(--muted); }
 
   /* The rail. Sticky beneath the nav, never over it. */
   .rail { position: sticky; top: calc(var(--banner-height) + 28px); z-index: 1; }
@@ -79,6 +95,7 @@ export const DOCS_CSS = `${CHROME_CSS}
 
   @media (max-width: 960px) {
     .docs { grid-template-columns: minmax(0, 1fr); gap: 0; padding-block: 32px 72px; }
+    .crumbs { margin-bottom: 20px; }
     .rail { position: static; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px;
             padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
     .rail-h { margin: 0; flex-basis: 100%; margin-bottom: 4px; }
@@ -165,7 +182,43 @@ type ShellOpts = {
 }
 
 /** Doctype through </html> for a content page: shared CSS, nav, rail, body, footer. */
+/**
+ * The visible trail and the BreadcrumbList render from ONE array, so the thing
+ * a reader sees and the thing a crawler reads cannot describe different paths.
+ *
+ * The <ol> is what makes this a breadcrumb to assistive technology, so it stays
+ * a list. The separator is a real element with aria-hidden rather than ::before
+ * content, because screen readers announce generated content inconsistently.
+ * The last entry is a span, not a link to the page you are on.
+ */
+function breadcrumb(path: string): { html: string; ld: unknown } | null {
+  const meta = byPath.get(path)
+  if (!meta || meta.crumbs.length === 0) return null
+  const trail = [...meta.crumbs.map(([label, href]) => ({ label, href })), { label: meta.crumb, href: path }]
+  const items = trail.map((t, i) =>
+    i === trail.length - 1
+      ? `<li><span aria-current="page">${t.label}</span></li>`
+      : `<li><a href="${t.href}">${t.label}</a></li><li class="sep" aria-hidden="true">/</li>`
+  ).join('')
+  return {
+    html: `  <nav class="crumbs" aria-label="Breadcrumb"><ol>${items}</ol></nav>`,
+    ld: {
+      '@context': 'https://schema.org',
+      '@type': 'BreadcrumbList',
+      itemListElement: trail.map((t, i) => ({
+        '@type': 'ListItem',
+        position: i + 1,
+        name: t.label,
+        // Google's documented form omits `item` on the current page.
+        ...(i === trail.length - 1 ? {} : { item: abs(t.href) }),
+      })),
+    },
+  }
+}
+
 export function docsShell({ title, description, path, extraHead, jsonLd, og, current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
+  const crumb = breadcrumb(path)
+  const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
   const rail = wantRail && toc.length
     ? `  <nav class="rail" aria-label="On this page">
@@ -173,10 +226,11 @@ export function docsShell({ title, description, path, extraHead, jsonLd, og, cur
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : '  <div></div>'
-  return `${head({ title, description, path, jsonLd, og, css: DOCS_CSS, extraHead })}
+  return `${head({ title, description, path, jsonLd: ld, og, css: DOCS_CSS, extraHead })}
 <body>
 ${siteNav(current)}
 <div class="docs">
+${crumb ? crumb.html : ''}
 ${rail}
   <main class="container">
 ${anchored}
