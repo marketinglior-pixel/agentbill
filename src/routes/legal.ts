@@ -29,7 +29,7 @@ function legalShell(title: string, path: string, body: string): string {
 `,
   })}
 <body>
-${siteNav()}
+${siteNav('', { sticky: false })}
   <div class="container">
     ${body}
   </div>

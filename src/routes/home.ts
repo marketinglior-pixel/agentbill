@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection, REFUSAL } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
@@ -147,7 +147,7 @@ export async function homeRoute(app: FastifyInstance) {
        The right half used to be empty at desktop; the code sample was too wide
        to sit there, so it got shorter, not the column wider. */
     .hero { padding-block: 64px 88px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            gap: 56px; align-items: center; }
+            gap: var(--gap); align-items: start; }
     h1, h2 { overflow-wrap: anywhere; min-width: 0; }
     h1 { color: var(--white); max-width: 14ch; }
     .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 46ch; }
@@ -157,9 +157,31 @@ export async function homeRoute(app: FastifyInstance) {
     .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
     .btn-ghost.btn-lg { padding: 13px 25px; }
     .chip-link:active { transform: translateY(1px); }
-    .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+    /* 1080 shell minus 48px of gutter minus the 56px gap, halved, is 488px per
+       column. This line is 66 characters of mono at 12.5px, about 495px at a
+       measured 0.6em advance: it overflowed by seven pixels, orphaned one word,
+       and the break moved as the webfont loaded. Four spans and a flex wrap put
+       the break where the content is instead. */
+    .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim);
+             display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
+    .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
     .trust b { color: var(--green); font-weight: 500; }
 
+    .code-head span { white-space: nowrap; }
+    /* The sample used to end on ">>> run 42 of the retry loop:" and nothing
+       after it, a dangling colon in the most looked-at element on the page.
+       This is the answer, and it sits OUTSIDE the code element on purpose: the
+       snippet harness executes every one of those against the SDKs, and an
+       interpolation inside one marks the whole block dynamic and silently drops
+       it from CI.
+       Never write that tag's name in a comment in this file. The extractor
+       scans for it and will run from the comment to the real closing tag,
+       swallowing the sample into a phantom block. The suite still passes, one
+       number lower. It happened once while writing this very comment. */
+    .code-out { border-top: 1px solid var(--border); padding: 14px 20px;
+                font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65;
+                color: var(--red); background: var(--fail-bg); }
+    .code-out b { font-weight: 700; }
     .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
                   overflow: hidden; min-width: 0; }
     .code-head { display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -178,7 +200,15 @@ export async function homeRoute(app: FastifyInstance) {
     .refusal { padding-block: 0;
                background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
                border-block: 1px solid var(--border2); box-shadow: var(--edge); }
-    .refusal .wrap { padding-block: 60px 56px; }
+    /* The note used to sit under the message at max-width 56ch with a
+       border-top that stopped at 56ch, leaving about 570px of empty ground and
+       a rule ending in the middle of nowhere. That truncated rule is what made
+       the band read as an accident. A gloss beside a statement is a real
+       typographic form; an orphan is not. */
+    .refusal .wrap { padding-block: 60px 56px; display: grid;
+                     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+                     gap: var(--gap); align-items: start; }
+    .refusal-head { min-width: 0; }
     .refusal-name, .refusal-msg { font-family: var(--mono); }
     /* One unbreakable 24-character token, so the floor of this clamp is not a
        taste call: at 0.585em of measured mono advance, 24 chars need 14.04em,
@@ -187,7 +217,7 @@ export async function homeRoute(app: FastifyInstance) {
                     letter-spacing: -0.015em; line-height: 1.1; }
     .refusal-msg { font-size: clamp(13px, 1.5vw, 17px); color: var(--muted); line-height: 1.6;
                    margin-top: 14px; max-width: 62ch; white-space: pre-wrap; }
-    .refusal-note { font-size: var(--fs-small); color: var(--dim); margin-top: 26px; max-width: 56ch;
+    .refusal-note { font-size: var(--fs-small); color: var(--dim); margin-top: 6px; max-width: none;
                     padding-top: 22px; border-top: 1px solid var(--border); }
     .refusal-note b { color: var(--muted); font-weight: 600; }
 
@@ -196,8 +226,14 @@ export async function homeRoute(app: FastifyInstance) {
        is uneven on purpose, generous above the first and tight between the rest,
        so the three read as a sequence rather than three stamped sections. */
     section { padding-block: 72px 0; }
-    .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center;
-           padding-block: 40px 0; }
+    /* align-items: center is WHY the three of these disagreed: it centred text
+       blocks of three, four and three lines against panels of three different
+       heights, so each landed at a different offset. One rule, visibly the same
+       rule three times: text top aligns with panel top. The nudge is optical,
+       putting the h2's cap-height on the panel's label bar. */
+    .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap);
+           align-items: start; padding-block: 40px 0; }
+    .dip-text { padding-top: 4px; }
     .dip + .dip { padding-block: 64px 0; }
     .dip.flip .dip-text { order: 2; }
     .dip h2 { color: var(--white); margin-bottom: 16px; max-width: 16ch; }
@@ -253,21 +289,38 @@ export async function homeRoute(app: FastifyInstance) {
 
     .not-for ul { list-style: none; max-width: 60ch; }
     .not-for li { color: var(--muted); font-size: var(--fs-small); margin-bottom: 12px; padding-left: 22px; position: relative; }
-    .not-for li::before { content: "x"; position: absolute; left: 0; color: var(--red);
-                          font-family: var(--mono); font-weight: 700; }
+    /* Was a typed lowercase "x" in mono, which at 13.5px is ambiguous with a
+       glyph that failed to load. A short rule reads as negation, needs no icon
+       set, and speaks the mark's own vocabulary: a line that stops something. */
+    .not-for li::before { content: ""; position: absolute; left: 0; top: 0.62em;
+                          width: 11px; height: 1.5px; background: var(--red); }
 
     .final { padding-block: 88px 24px; }
     .final h2 { color: var(--white); margin-bottom: 10px; }
     .final p { color: var(--muted); margin-bottom: 26px; max-width: 54ch; }
 
-    @media (max-width: 900px) {
-      .hero, .dip { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    @media (max-width: ${BP.lg}px) {
+      .hero, .dip, .refusal .wrap { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .refusal .wrap { gap: 26px; }
+      .refusal-note { border-top: 1px solid var(--border); padding-top: 22px; }
       .dip.flip .dip-text { order: 0; }
+      .dip-text { padding-top: 0; }
       .hero { padding-block: 48px 64px; }
       .sub { max-width: 54ch; }
       section { padding-block: 56px 0; }
     }
-    @media (max-width: 640px) {
+    @media (max-width: ${BP.sm}px) {
+      /* The subhead ran five lines and pushed the CTA to about 590px, below the
+         fold on a small phone. The rule above WIDENS it to 54ch, which is the
+         wrong direction once there is one column. Copy is untouched; this is
+         type size and block padding only. */
+      .sub { max-width: none; font-size: var(--fs-body); margin: 18px 0 26px; }
+      .hero { padding-block: 32px 48px; }
+      /* Two buttons at their content widths stack ragged, 176px above 162px.
+         Full width and centred: a left-aligned label in a full-width button
+         reads as broken. Sanctioned exception, recorded in design.md. */
+      .hero-cta { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
+      .hero-cta > a { text-align: center; }
       .code-body { padding: 18px 16px; }
       .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
       .tiers .amount { font-size: 19px; }
@@ -288,7 +341,7 @@ ${siteNav('/')}
         <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
         <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
       </div>
-      <p class="trust"><b>free tier</b> · 1,000 preflight calls/mo · no card · key in 30 seconds</p>
+      <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
     </div>
 
     <div class="code-block">
@@ -307,13 +360,16 @@ client.preflight(agent_id="researcher",
 
 <span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
       </div>
+      <div class="code-out"><b>${REFUSAL.name}:</b> ${REFUSAL.message}</div>
     </div>
   </header>
 
   <section class="refusal">
     <div class="wrap">
-      <div class="refusal-name">${REFUSAL.name}</div>
-      <div class="refusal-msg">${REFUSAL.message}</div>
+      <div class="refusal-head">
+        <div class="refusal-name">${REFUSAL.name}</div>
+        <div class="refusal-msg">${REFUSAL.message}</div>
+      </div>
       <p class="refusal-note">That is the exception your code catches, raised the moment the ceiling
       is checked and before the call goes out, not a log line written after the fact. <b>The call
       never ran.</b> The response body it was built from is below, and you can produce it yourself.</p>

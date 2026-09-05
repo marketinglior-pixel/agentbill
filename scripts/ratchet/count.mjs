@@ -37,9 +37,11 @@ export function count(root = 'src') {
       for (const line of src.split('\n')) {
         const entering = /:root\s*\{/.test(line)
         if (entering) { inRoot = true; depth = 0 }
-        if (!inRoot && /#[0-9a-fA-F]{3,8}\b/.test(line)) {
-          h += (line.match(/#[0-9a-fA-F]{3,8}\b/g) || []).length
-        }
+        // (?<!&) excludes HTML numeric entities: &#10005; is a multiplication
+        // sign, not a colour, and counting it made playground.ts read as one
+        // hex over its real zero.
+        const hex = line.match(/(?<!&)#[0-9a-fA-F]{3,8}\b/g) || []
+        if (!inRoot) h += hex.length
         if (inRoot) {
           depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
           if (depth <= 0 && !entering) inRoot = false

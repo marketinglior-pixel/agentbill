@@ -124,12 +124,28 @@ ${MARK_CSS}
     .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5) var(--s5); }
   }
 
-  @media (max-width: 720px) {
+  /* The mobile CTA MOVES, it is not added.
+     The nav is already sticky and already carries the primary action, so a
+     bottom bar beside it would put two copies of the same button on screen at
+     once. Below 720px the nav's button leaves and the bar takes it.
+     Always visible, never on scroll: design.md forbids scroll-triggered
+     behaviour, and a scroll handler for this would be motion for mood.
+     z-index 9 keeps it under the nav's disclosure menu at 11. */
+  .sticky-cta { display: none; }
+  @media (max-width: ${BP.md}px) {
     .nav-inner { grid-template-columns: auto 1fr; gap: 10px; }
     .nav-center, .nav-right .console { display: none; }
     .nav-right { gap: 10px; }
+    .nav-right .btn { display: none; }
     .nav-menu { display: block; }
     .logo { font-size: 15px; gap: 7px; }
+    .sticky-cta { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
+                  background: var(--surface); border-top: 1px solid var(--border);
+                  padding: var(--s3) var(--gutter);
+                  padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom)); }
+    .sticky-cta .btn { display: block; text-align: center; }
+    /* So the bar never covers the footer's last row. */
+    body:has(.sticky-cta) { padding-bottom: 76px; }
   }
   /* At 320px the wordmark, the Menu chip and the button want more than the
      272px between the gutters. The button's label shortens and the wordmark
@@ -149,7 +165,10 @@ ${MARK_CSS}
  * `cta: false` drops the "Get API key" button; /register uses it, because a
  * button that links to the page you are already on is noise beside the form.
  */
-export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): string {
+export function siteNav(
+  current = '',
+  { cta = true, sticky = true }: { cta?: boolean; sticky?: boolean } = {},
+): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
   const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
   const menu = [...LINKS, ['/app', 'Console'] as const]
@@ -171,7 +190,8 @@ export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): s
         <a class="btn" href="/register"><span class="long">Get API key</span><span class="short">Get key</span></a>` : ''}
       </div>
     </div>
-  </nav>`
+  </nav>${cta && sticky ? `
+  <div class="sticky-cta"><a class="btn" href="/register">Get your API key &rarr;</a></div>` : ''}`
 }
 
 // Only destinations that exist. Every external one was fetched before it was

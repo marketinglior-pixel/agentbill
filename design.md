@@ -161,6 +161,28 @@ break exists (marketing yes, content no).
 - No page has ever been checked by eye. Every "verified" in the log below
   is grep and arithmetic. That is how a 230px empty panel shipped.
 
+## Alignment
+
+Sibling sections obey one rule, visibly. Three diptychs on `/` used
+`align-items: center`, which centred text blocks of three, four and three lines
+against panels of three different heights, so each landed at a different
+offset and the set read as generated. They are `align-items: start` with a 4px
+optical nudge, and their measured offsets are 0, 0, 0.
+
+## CTA voice, mobile
+
+The primary action MOVES below `--md`, it is not duplicated. The nav is sticky
+and already carries it, so a bottom bar beside it would put two copies of the
+same button on one screen. The nav's button hides and `.sticky-cta` takes it.
+Always visible; never on scroll, which this file forbids elsewhere and which
+would need a scroll handler for mood.
+
+Centred label text is permitted inside a full-bleed control and nowhere else. A
+left-aligned label in a full-width button reads as broken.
+
+Not on `/app`, `/admin`, `/register`, `/terms` or `/privacy`: you are already
+there, or a sticky sales button on a privacy policy is the wrong register.
+
 ## Resting states
 
 The largest element on a page is never empty before interaction. A resting
