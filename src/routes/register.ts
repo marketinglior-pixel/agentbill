@@ -9,6 +9,7 @@ import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
+import { publicRoute } from '../middleware/auth.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -80,7 +81,7 @@ function generateApiKey(): string {
 export async function registerRoute(app: FastifyInstance) {
 
   // Registration page, GET
-  app.get('/register', async (_request, reply) => {
+  app.get('/register', publicRoute(), async (_request, reply) => {
     reply.type('text/html')
     return reply.send(`${head({
       title: 'Get your API key · AgentBill',
@@ -351,7 +352,7 @@ ${siteFooter()}
 
   // Register API, POST. New accounts get their key instantly (shown once);
   // existing emails get the key by email, never in the response.
-  app.post('/register', async (request, reply) => {
+  app.post('/register', publicRoute(), async (request, reply) => {
     // Validate first: a malformed body leaks nothing, so it must not burn a
     // rate-limit slot (bot probes and typos were draining the bucket).
     const parsed = RegisterBody.safeParse(request.body)

@@ -9,20 +9,34 @@ declare module 'fastify' {
   interface FastifyRequest {
     accountId: string
   }
+  interface FastifyContextConfig {
+    /**
+     * Declared at the route, beside its handler: this path serves the public
+     * web, not the API. See publicRoute() below.
+     */
+    public?: boolean
+    /** Set by the Polar webhook route so it can verify the signature. */
+    rawBody?: boolean
+  }
 }
 
-const PUBLIC_PATHS = new Set([
-  '/', '/docs', '/health', '/health/db', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
-  '/pulse',
-  '/pricing', '/terms', '/privacy', '/og.png',
-  '/admin', '/admin/accounts', '/admin/login',
-  '/app', '/app/', '/app/session', '/app/logout',
-  '/robots.txt', '/sitemap.xml', '/google816aee44e74d69c3.html',
-  '/docs/limit-cost-per-agent-run', '/docs/langchain-billing', '/docs/openai-agent-spend-ceiling',
-  '/docs/task-budgets',
-  '/blog/monthly-caps-wont-save-you',
-  '/blog/how-preflight-avoids-double-billing',
-])
+/**
+ * Route options that mark a path as public.
+ *
+ * This used to be a Set of path strings in this file. A new public page had to
+ * remember to join a list it had no reason to know about, and when one did not,
+ * the page answered the public with `401 {"error":"unauthorized"}`. /blog
+ * shipped that way and stayed that way: the index was redesigned in 280f24e and
+ * linked from two pages while nobody outside could load it.
+ *
+ * A function, not a shared constant, so each route gets its own object and
+ * nothing can be aliased into every other route's options.
+ *
+ * This is still forgettable, just forgettable next to the handler instead of a
+ * file away. What makes it safe is the crawl gate in CI, which walks every link
+ * on the site and fails the build on a 401.
+ */
+export const publicRoute = () => ({ config: { public: true } })
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -48,7 +62,27 @@ async function sendIpAlert(email: string, apiKey: string, oldIp: string, newIp: 
 
 export function registerAuth(app: FastifyInstance) {
   app.addHook('onRequest', async (request, reply) => {
-    if (PUBLIC_PATHS.has(request.url.split('?')[0])) return
+    // Routing already failed, so there is no route and nothing to authenticate.
+    //
+    // This has to be handled here rather than by ordering setNotFoundHandler
+    // around this hook. Fastify copies every root onRequest hook into the 404
+    // context at preReady (fastify/lib/fourOhFour.js), whichever order the two
+    // are registered in, so an unmatched URL runs this hook and answered every
+    // typo, every dead inbound link and every crawler probe with a JSON 401.
+    //
+    // It must also come first: the 404 context is built with
+    // `config: opts.config || {}`, so the routeOptions check below reads
+    // undefined there and would fall straight through to the bearer check.
+    //
+    // Consequence worth keeping deliberately: GET /preflight (a POST-only
+    // route) now answers 404 while GET /keys answers 401, so an unauthenticated
+    // prober can tell a real private route from noise. Nothing is learned that
+    // llms.txt, the public repository and both published SDKs do not already
+    // say out loud. Do not "fix" this by 401ing unmatched URLs again.
+    if (request.is404) return
+
+    // Declared public at the route itself. See publicRoute() above.
+    if (request.routeOptions.config?.public === true) return
 
     const auth = request.headers.authorization ?? ''
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''

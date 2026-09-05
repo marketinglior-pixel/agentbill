@@ -1,8 +1,9 @@
 import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
+import { publicRoute } from '../middleware/auth.js'
 
 export async function docsRoute(app: FastifyInstance) {
-  app.get('/docs', async (request, reply) => {
+  app.get('/docs', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(docsShell({
       title: 'AgentBill Docs · Preflight Billing for AI Agents',
       description: 'AgentBill documentation. Add preflight billing to your AI agent in 3 lines of Python. Block runaway spend, enforce per-request ceilings, meter usage per customer.',

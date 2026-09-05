@@ -4,6 +4,7 @@ import { sql } from '../db/index.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { clientIp } from '../lib/client-ip.js'
 import { head } from '../ui/theme.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // /app is the console: the only browser surface a registered user has. It
 // shows live task budgets burning down, every call AgentBill refused with the
@@ -35,7 +36,7 @@ type Viewer = {
 }
 
 export async function appRoute(app: FastifyInstance) {
-  app.get('/app', async (request, reply) => {
+  app.get('/app', publicRoute(), async (request, reply) => {
     // same-origin, not no-referrer: under no-referrer, browsers send `Origin: null`
     // on the page's own form POSTs (Fetch, "append a request Origin header"),
     // which is what made every real-browser login 403 while curl passed.
@@ -65,9 +66,9 @@ export async function appRoute(app: FastifyInstance) {
 
   // The canonical-host redirect preserves a trailing slash; without this the
   // 404 handler's Bearer hook would answer /app/ with a JSON 401.
-  app.get('/app/', async (_request, reply) => reply.redirect('/app', 301))
+  app.get('/app/', publicRoute(), async (_request, reply) => reply.redirect('/app', 301))
 
-  app.post('/app/session', async (request, reply) => {
+  app.post('/app/session', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     if (!allowLogin(clientIp(request))) return reply.redirect('/app?err=rate', 303)
     const secret = sessionSecret()
@@ -99,7 +100,7 @@ export async function appRoute(app: FastifyInstance) {
     return reply.redirect('/app', 303)
   })
 
-  app.post('/app/logout', async (request, reply) => {
+  app.post('/app/logout', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     reply.header('Set-Cookie', `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=0`)
     return reply.redirect('/app', 303)

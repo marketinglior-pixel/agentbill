@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // Guides render through the shared content shell in src/ui/docs.ts: one copy
 // of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
@@ -23,7 +24,7 @@ function page(title: string, description: string, body: string) {
 
 export async function guidesRoute(app: FastifyInstance) {
 
-  app.get('/docs/task-budgets', async (_, reply) => {
+  app.get('/docs/task-budgets', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       'Task budgets, a hard cost ceiling per agent job',
       'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
@@ -220,7 +221,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
     ))
   })
 
-  app.get('/docs/limit-cost-per-agent-run', async (_, reply) => {
+  app.get('/docs/limit-cost-per-agent-run', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       'How to limit cost per agent run',
       'Set a per-request spend ceiling on any AI agent. Block the run before compute is consumed if the budget is exceeded.',
@@ -301,7 +302,7 @@ await record({ agentId: 'my_agent', units: 10 })
     ))
   })
 
-  app.get('/docs/langchain-billing', async (_, reply) => {
+  app.get('/docs/langchain-billing', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       'How to add billing to a LangChain agent',
       'Add preflight spend checks and usage billing to any LangChain agent in Python. Works with LCEL chains, AgentExecutor, RetrievalQA, and LangGraph.',
@@ -432,7 +433,7 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
     ))
   })
 
-  app.get('/docs/openai-agent-spend-ceiling', async (_, reply) => {
+  app.get('/docs/openai-agent-spend-ceiling', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       'How to add a spend ceiling to an OpenAI agent',
       'Block OpenAI agent runs before they start if the budget is exceeded. Per-request ceiling, not just a monthly cap.',

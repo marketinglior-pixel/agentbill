@@ -4,6 +4,7 @@ import { pixelSnippet } from '../lib/pixel.js'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS } from '../ui/panels.js'
+import { publicRoute } from '../middleware/auth.js'
 
 const num = (n: number) => n.toLocaleString('en-US')
 const RECOMMENDED = 'team'
@@ -194,8 +195,8 @@ ${siteFooter()}
 </html>`)
   }
 
-  app.get('/upgrade', pricingPage)
-  app.get('/pricing', pricingPage)
+  app.get('/upgrade', publicRoute(), pricingPage)
+  app.get('/pricing', publicRoute(), pricingPage)
 
   // Authenticated helper for the pricing page's "already have a key?" box:
   // turns a bearer key into checkout links carrying the account metadata, so

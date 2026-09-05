@@ -6,6 +6,7 @@ import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
 // that shows the product doing the thing the claim describes. The panels are
@@ -93,7 +94,7 @@ function pricingStrip(): string {
 }
 
 export async function homeRoute(app: FastifyInstance) {
-  app.get('/', async (request, reply) => {
+  app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: 'AgentBill · Hard budget ceilings for AI agents',
       description: 'Hard budget ceilings for AI agents. One ceiling per task. Every call that shares the task ref draws it down, whatever the provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',

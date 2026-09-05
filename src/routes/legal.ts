@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
 // and Meta ad review checks destination pages for both. Plain, honest, short.
@@ -35,7 +36,7 @@ ${siteFooter()}
 }
 
 export async function legalRoute(app: FastifyInstance) {
-  app.get('/terms', async (_, reply) => {
+  app.get('/terms', publicRoute(), async (_, reply) => {
     reply.type('text/html')
     return reply.send(legalShell('Terms of Service', `
     <h1>Terms of Service</h1>
@@ -82,7 +83,7 @@ export async function legalRoute(app: FastifyInstance) {
     `))
   })
 
-  app.get('/privacy', async (_, reply) => {
+  app.get('/privacy', publicRoute(), async (_, reply) => {
     reply.type('text/html')
     return reply.send(legalShell('Privacy Policy', `
     <h1>Privacy Policy</h1>

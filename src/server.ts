@@ -9,7 +9,8 @@ import { homeRoute } from './routes/home.js'
 import { docsRoute } from './routes/docs.js'
 import { preflightRoute } from './routes/preflight.js'
 import { pulseRoute } from './routes/pulse.js'
-import { registerAuth } from './middleware/auth.js'
+import { registerAuth, publicRoute } from './middleware/auth.js'
+import { registerNotFound } from './routes/not-found.js'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
 import { blogRoute } from './routes/blog.js'
@@ -88,9 +89,15 @@ app.register(pulseRoute)
 app.register(webhooksRoute)
 app.register(legalRoute)
 registerAuth(app)
+// Registered next to registerAuth because they are two halves of one decision.
+// The placement itself is cosmetic: Fastify copies every root onRequest hook
+// into the 404 context at preReady whatever order these two run in, which is
+// why auth.ts has to return early on request.is404 rather than this being an
+// ordering problem. See the comment on that guard.
+registerNotFound(app)
 
 // Open Graph card for link previews and ads (1200x630, embedded at build time)
-app.get('/og.png', async (_, reply) => {
+app.get('/og.png', publicRoute(), async (_, reply) => {
   reply.type('image/png').header('Cache-Control', 'public, max-age=86400')
   return reply.send(OG_PNG)
 })
@@ -98,12 +105,12 @@ app.get('/og.png', async (_, reply) => {
 // Health check - useful for deploy verification.
 // Liveness only (Fly restarts machines on failure, a dead DB shouldn't
 // trigger a restart loop). DB truth lives at /health/db.
-app.get('/health', async () => ({ status: 'ok' }))
+app.get('/health', publicRoute(), async () => ({ status: 'ok' }))
 
 // Deep health: touches the database. Returns 503 when the DB is unreachable,
 // point external monitors here. The May-Aug 2026 outage hid behind the
 // DB-less /health for months; this endpoint exists so that can't recur.
-app.get('/health/db', async (_, reply) => {
+app.get('/health/db', publicRoute(), async (_, reply) => {
   const probe = await probeDb()
   if (!probe.ok) {
     return reply.code(503).send({ status: 'degraded', db: 'down', latency_ms: probe.latencyMs, error: probe.error })
@@ -112,13 +119,13 @@ app.get('/health/db', async (_, reply) => {
 })
 
 // Google Search Console verification
-app.get('/google816aee44e74d69c3.html', async (_, reply) => {
+app.get('/google816aee44e74d69c3.html', publicRoute(), async (_, reply) => {
   reply.type('text/html')
   return 'google-site-verification: google816aee44e74d69c3.html'
 })
 
 // robots.txt
-app.get('/robots.txt', async (_, reply) => {
+app.get('/robots.txt', publicRoute(), async (_, reply) => {
   reply.type('text/plain')
   return `User-agent: *
 Allow: /
@@ -132,7 +139,7 @@ Sitemap: https://agentbill.dev/sitemap.xml
 })
 
 // sitemap.xml
-app.get('/sitemap.xml', async (_, reply) => {
+app.get('/sitemap.xml', publicRoute(), async (_, reply) => {
   const base = 'https://agentbill.dev'
   const now = new Date().toISOString().split('T')[0]
   reply.type('application/xml')
@@ -148,7 +155,7 @@ app.get('/sitemap.xml', async (_, reply) => {
 </urlset>`
 })
 
-app.get('/llms.txt', async (_, reply) => {
+app.get('/llms.txt', publicRoute(), async (_, reply) => {
   reply.type('text/plain')
   return `# AgentBill
 

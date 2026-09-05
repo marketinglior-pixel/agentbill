@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // Posts render through the shared content shell in src/ui/docs.ts: one copy of
 // the content CSS, and an "On this page" rail built from each post's <h2>s.
@@ -9,7 +10,7 @@ const free = PLAN_LIMITS.free.toLocaleString('en-US')
 
 export async function blogRoute(app: FastifyInstance) {
 
-  app.get('/blog/how-preflight-avoids-double-billing', async (_, reply) => {
+  app.get('/blog/how-preflight-avoids-double-billing', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
       title: 'How preflight avoids double-billing under concurrent load · AgentBill',
       description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
@@ -217,7 +218,7 @@ record(units=7)
     }))
   })
 
-  app.get('/blog/monthly-caps-wont-save-you', async (_, reply) => {
+  app.get('/blog/monthly-caps-wont-save-you', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
       title: 'Why monthly caps don\'t protect you from one bad LLM run · AgentBill',
       description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',

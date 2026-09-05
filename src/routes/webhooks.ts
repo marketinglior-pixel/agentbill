@@ -6,7 +6,7 @@ const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
 export async function webhooksRoute(app: FastifyInstance) {
   app.post('/webhooks/polar', {
-    config: { rawBody: true },
+    config: { rawBody: true, public: true },
   }, async (request, reply) => {
     const rawBody = (request as any).rawBody as string | undefined
     const signature = request.headers['webhook-signature'] as string ?? ''

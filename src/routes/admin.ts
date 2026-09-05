@@ -4,6 +4,7 @@ import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from 
 import type { AccountSignals } from '../lib/conversion.js'
 import { getPlaygroundPulse } from '../lib/pulse.js'
 import type { PlaygroundPulse } from '../lib/pulse.js'
+import { publicRoute } from '../middleware/auth.js'
 
 const WARN_AT = 800
 const SESSION_COOKIE = 'agentbill_admin'
@@ -12,7 +13,7 @@ const SESSION_MAX_AGE = 7 * 24 * 3_600 // seconds
 export async function adminRoute(app: FastifyInstance) {
 
   // JSON, curl -H "Authorization: Bearer <ADMIN_SECRET>" /admin/accounts
-  app.get('/admin/accounts', async (request, reply) => {
+  app.get('/admin/accounts', publicRoute(), async (request, reply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send({ error: 'unauthorized' })
     }
@@ -21,7 +22,7 @@ export async function adminRoute(app: FastifyInstance) {
   })
 
   // Visual dashboard, session cookie set by POST /admin/login
-  app.get('/admin', async (request, reply) => {
+  app.get('/admin', publicRoute(), async (request, reply) => {
     if (!checkAuth(request)) {
       reply.type('text/html')
       return reply.send(loginPage())
@@ -34,7 +35,7 @@ export async function adminRoute(app: FastifyInstance) {
 
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
   // The secret never appears in a URL (query params leak into logs and browser history).
-  app.post('/admin/login', async (request, reply) => {
+  app.post('/admin/login', publicRoute(), async (request, reply) => {
     const body = request.body as Record<string, unknown>
     const secret = typeof body?.secret === 'string' ? body.secret : ''
     const expected = process.env.ADMIN_SECRET ?? ''

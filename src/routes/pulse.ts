@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { clientIp } from '../lib/client-ip.js'
+import { publicRoute } from '../middleware/auth.js'
 
 // POST /pulse. One public, unauthenticated, fire-and-forget write, so the
 // marketing pages can answer "did anyone actually use this" out of our own
@@ -67,7 +68,7 @@ function allowPulse(ip: string): boolean {
 }
 
 export async function pulseRoute(app: FastifyInstance) {
-  app.post('/pulse', async (request, reply) => {
+  app.post('/pulse', publicRoute(), async (request, reply) => {
     // 204 on every path this handler reaches, including rejection. A visitor's
     // browser has nothing to do with the answer. Failures are the server's
     // problem, never the page's.
