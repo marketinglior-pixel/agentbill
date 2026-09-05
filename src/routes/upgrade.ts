@@ -201,7 +201,8 @@ ${siteFooter()}
   // Authenticated helper for the pricing page's "already have a key?" box:
   // turns a bearer key into checkout links carrying the account metadata, so
   // existing users can upgrade before they hit a limit. (Auth middleware
-  // resolves the key, this path is deliberately NOT in PUBLIC_PATHS.)
+  // resolves the key. This route deliberately carries no publicRoute(), which
+  // is why it sits three lines below two routes that do.)
   app.get('/account/upgrade-url', async (request, reply) => {
     const accountId = (request as any).accountId
     return reply.send({

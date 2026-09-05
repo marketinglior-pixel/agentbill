@@ -19,6 +19,24 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  hygiene:
+    name: Design drift and copy rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # A one-way valve on the two kinds of drift design.md forbids: hardcoded
+      # font sizes outside the scale, and raw hexes below a :root block. It
+      # fails only when a count rises, so the existing ones can be retired by
+      # whatever commit next touches their block.
+      - name: Design drift ratchet
+        run: npm run check:ratchet
+      # design.md: no em dash on any rendered surface. Nothing enforced it.
+      - name: Copy and head rules
+        run: npm run check:hygiene
+
   python-sdk:
     name: Python SDK install and unit tests
     runs-on: ubuntu-latest

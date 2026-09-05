@@ -12,6 +12,20 @@
 // fixes the divergence, which is the actual defect, without touching CSP.
 
 /**
+ * Breakpoints.
+ *
+ * A CSS custom property cannot be used in a media query, so this is the one
+ * place a breakpoint is written and every file interpolates it. There were six
+ * ad hoc values across the codebase (960, 900, 820, 720, 640, 400), each picked
+ * per file. 900 folds into lg, which is where /docs already collapses.
+ *
+ * 820 is left alone for now: it is the playground's own content pressure, not
+ * a layout breakpoint, and it should be settled by looking at the page rather
+ * than by decree.
+ */
+export const BP = { lg: 960, md: 720, sm: 640, xs: 400 } as const
+
+/**
  * The three brand colours, as values rather than as CSS custom properties.
  *
  * This is not a second representation of a token: TOKENS below interpolates
@@ -74,6 +88,41 @@ export const TOKENS = `
     --fs-small: 13.5px;
     --fs-micro: 12px;
 
+    /* The two rungs below --fs-micro. About sixty of the hardcoded sizes in
+       this codebase live down here, and they were twelve distinct values
+       between 10 and 15.5px, half a pixel apart in places, which is the same
+       "nothing reads as a hierarchy" defect the scale above was created to fix,
+       one rung lower. The real vocabulary is two things: a tracked uppercase
+       label, and a chip. */
+    --fs-label: 11.5px;
+    --fs-chip: 11px;
+
+    /* The two h1 sizes that already existed implicitly. --fs-h1-sub was typed
+       identically into docs.ts and upgrade.ts, and register.ts had a third
+       value two pixels away that nobody chose. --fs-h1-app is the workbench
+       heading on /app and /admin, which should not inherit a marketing clamp. */
+    --fs-h1-sub: clamp(28px, 3.6vw, 40px);
+    --fs-h1-app: 28px;
+
+    /* Spacing. Deliberately not a geometric scale: this codebase uses 28
+       distinct values, and a 4px base would force rounding 7, 9, 11, 22 and 26
+       and move pixels on every page. These name what is already load bearing.
+       New CSS uses them; an existing odd value stays until its block is
+       rewritten for another reason. Never a find-and-replace pass. */
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+    --s6: 32px; --s7: 48px; --s8: 64px; --s9: 88px;
+    --gutter: 24px;   /* the inline padding of every .wrap and .container */
+    --gap: 56px;      /* the column gap of the hero and the diptychs */
+
+    /* Radius. design.md already states the 12/8 rule; as tokens a violation
+       becomes a named bug instead of an opinion. Known offenders, all
+       scheduled: .pg at 3px, .pg-btn and .pg-status at 2px, docs .code at 6px,
+       and every radius in admin.ts. */
+    --r-frame: 12px;    /* panels, cards, tables, anything that holds content */
+    --r-control: 8px;   /* buttons, inputs, selects */
+    --r-chip: 4px;      /* chips, tags, badges */
+    --r-pill: 999px;    /* progress tracks */
+
     /* Depth. A dark surface one shade off the ground reads flat and cheap; the
        thing that makes it read as a raised object is a single lit pixel along
        its top edge, the way real light falls on a bevel. --edge is that pixel
@@ -102,9 +151,20 @@ export const BASE = `
     * { transition: none !important; animation: none !important; }
   }`
 
+// Three families, nine weights, one render-blocking request.
+//
+// It was twelve. Archivo 500 and 600 and Inter 800 were requested on every page
+// load and used by nothing: measured by walking every rendered element on nine
+// surfaces (/, /docs, /pricing, /register, /terms, a guide, a post, the 404 and
+// /app?demo=1) and collecting the computed family and weight. Archivo resolves
+// only to 700 and 800, Inter to 400/500/600/700, JetBrains to 400/500/700.
+//
+// If a future rule sets a weight on a --display element that is not 700 or 800,
+// the browser will synthesise it and it will look subtly wrong rather than
+// break. Add the weight here rather than letting it synthesise.
 const FONTS = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
 
 type HeadOpts = {
   /** Full <title>. Falls back to "<name> · AgentBill". */
