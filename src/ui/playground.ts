@@ -1,9 +1,10 @@
 // The homepage playground: a preflight you can run yourself.
 //
-// The hero already states the outcome ("492/500 units used, 8 remaining is not
-// enough for this call"). A reader has to take that on faith. This section lets
-// them produce that exact line themselves in about five seconds, which is the
-// difference between reading a claim and watching it happen.
+// The refusal band above states the outcome, and it now renders from the run
+// defined in this file rather than restating it. A reader has to take that band
+// on faith; this section lets them produce the same line themselves in about
+// five seconds, which is the difference between reading a claim and watching it
+// happen.
 //
 // Why it matters here specifically: this product has had two external signups,
 // ever, and neither has made a call. The account table shows 13 rows and eleven
@@ -26,6 +27,61 @@
 // CSP. Unlike /app, the homepage sends no Content-Security-Policy, so the inline
 // <script> below runs. Adding a CSP to `/` means giving this script a nonce or a
 // hash, or the section goes silently dead.
+
+/* ---------------------------------------------------------------------------
+   The run, defined once.
+
+   design.md: "A value typed into a second file, even with a comment saying it
+   matches, is a copy that will drift." The refusal band in home.ts used to
+   hardcode "492/500 units used, 8 remaining" while the plan that produces those
+   numbers lived down here, and the default ceiling was typed four more times
+   into the markup. Six copies of two facts, held together by a comment.
+
+   Now the plan and the ceiling are the only inputs. The band, the slider, its
+   two labels and the browser script all render from them, so editing a single
+   line of PLAN moves every number on the page at once or breaks the build.
+   --------------------------------------------------------------------------- */
+
+const TASK_REF = 'job-142'
+const DEFAULT_CEILING = 500
+
+/** What the agent intends to spend, in order. Units are yours to define; here
+ *  1 unit = 1 cent. */
+const PLAN: ReadonlyArray<readonly [string, number]> = [
+  ['search.web', 12], ['fetch.page', 31], ['llm.summarize', 140], ['fetch.page', 28],
+  ['llm.extract', 160], ['llm.rerank', 121], ['llm.critique', 180], ['llm.replan', 210],
+  ['fetch.page', 26], ['llm.summarize', 150],
+]
+
+/** Walk the plan under a ceiling the way preflight() does, and stop where it
+ *  would refuse. Nothing is reserved after a refusal, so the walk ends there. */
+function firstRefusal(ceiling: number) {
+  let used = 0
+  for (const [, units] of PLAN) {
+    if (used + units > ceiling) return { used, ceiling, remaining: ceiling - used, asked: units }
+    used += units
+  }
+  return null
+}
+
+const REFUSED = firstRefusal(DEFAULT_CEILING)
+if (!REFUSED) {
+  // A plan that never hits the ceiling would leave the band with nothing true to
+  // say, so this is a build-time failure rather than a page that ships silent.
+  throw new Error(
+    `playground: PLAN never reaches the default ceiling of ${DEFAULT_CEILING}; the refusal band has no numbers to render`,
+  )
+}
+
+/** The exception the SDK raises, reproduced from the template it builds the
+ *  message with (sdk/python/agentbill/client.py). Rendered by the refusal band
+ *  in home.ts so the band and the playground cannot disagree. */
+export const REFUSAL = {
+  name: 'TaskCeilingExceededError',
+  message:
+    `Task '${TASK_REF}' blocked: ${REFUSED.used}/${REFUSED.ceiling} units used, `
+    + `${REFUSED.remaining} remaining is not enough for this call.`,
+} as const
 
 /** Playground CSS. Include once, after theme BASE and the page's .wrap rule. */
 export const PLAYGROUND_CSS = `
@@ -138,12 +194,12 @@ export function playgroundSection(): string {
 
     <div class="pg">
       <div class="pg-bar">
-        <div class="pg-field"><span class="pg-key">task</span><span class="pg-val">job-142</span></div>
+        <div class="pg-field"><span class="pg-key">task</span><span class="pg-val">${TASK_REF}</span></div>
         <div class="pg-field">
           <label class="pg-key" for="pg-ceil">ceiling</label>
-          <input id="pg-ceil" class="pg-sl" type="range" min="100" max="1500" step="50" value="500"
+          <input id="pg-ceil" class="pg-sl" type="range" min="100" max="1500" step="50" value="${DEFAULT_CEILING}"
                  aria-label="Task ceiling in units" />
-          <span class="pg-val" id="pg-ceilv">500</span><span class="pg-key">units</span>
+          <span class="pg-val" id="pg-ceilv">${DEFAULT_CEILING}</span><span class="pg-key">units</span>
         </div>
         <div class="pg-actions">
           <button id="pg-run" class="pg-btn pri" type="button">Run agent</button>
@@ -157,7 +213,7 @@ export function playgroundSection(): string {
           <div class="pg-budget">
             <div class="pg-nums">
               <span class="pg-used" id="pg-used">0</span>
-              <span class="pg-ceil">used of <b id="pg-ceil2">500</b> units</span>
+              <span class="pg-ceil">used of <b id="pg-ceil2">${DEFAULT_CEILING}</b> units</span>
             </div>
             <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
           </div>
@@ -183,14 +239,10 @@ export function playgroundSection(): string {
 /** The behaviour. Put it just before </body>. */
 export const PLAYGROUND_JS = `<script>
 (function(){
-  // What the agent intends to spend, in order. Units are yours to define; here
-  // 1 unit = 1 cent, matching the hero. At the default ceiling the first six
-  // calls land on 492 used and 8 remaining, which is the line the hero quotes.
-  var PLAN = [
-    ['search.web',12],['fetch.page',31],['llm.summarize',140],['fetch.page',28],
-    ['llm.extract',160],['llm.rerank',121],['llm.critique',180],['llm.replan',210],
-    ['fetch.page',26],['llm.summarize',150]
-  ];
+  // Serialised from PLAN in playground.ts. The refusal band renders from the
+  // same array, so the page cannot show two versions of this run.
+  var PLAN = ${JSON.stringify(PLAN.map(([n, u]) => [n, u]))};
+  var TASK_REF = ${JSON.stringify(TASK_REF)};
   var el = function(id){ return document.getElementById('pg-' + id) };
   if (!el('run')) return;
   var task = null, timer = null, running = false, idx = 0;
@@ -260,7 +312,7 @@ export const PLAYGROUND_JS = `<script>
   function step(){
     if (idx >= PLAN.length) { finish('done. the job stayed inside its budget.'); return }
     var name = PLAN[idx][0], units = PLAN[idx][1];
-    var res = preflight({ agentId:'researcher', taskRef:'job-142',
+    var res = preflight({ agentId:'researcher', taskRef:TASK_REF,
                           taskCeiling:task.ceiling, estimatedUnits:units });
 
     if (idx === 0) el('log').innerHTML = '';

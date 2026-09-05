@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
-import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection } from '../ui/playground.js'
+import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection, REFUSAL } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
@@ -302,8 +302,8 @@ client.preflight(agent_id="researcher",
 
   <section class="refusal">
     <div class="wrap">
-      <div class="refusal-name">TaskCeilingExceededError</div>
-      <div class="refusal-msg">Task 'job-142' blocked: 492/500 units used, 8 remaining is not enough for this call.</div>
+      <div class="refusal-name">${REFUSAL.name}</div>
+      <div class="refusal-msg">${REFUSAL.message}</div>
       <p class="refusal-note">That is the exception your code catches, raised the moment the ceiling
       is checked and before the call goes out, not a log line written after the fact. <b>The call
       never ran.</b> The response body it was built from is below, and you can produce it yourself.</p>

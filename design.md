@@ -100,6 +100,12 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
   maintained alongside it.
 - **Claims match the code.** Copy that describes a mechanism is checked against
   the source before it ships. The locked mechanism is in `voice-dna.md`.
+- **When a section moves, re-read what it now sits beside.** The refusal band
+  captioned `str(TaskCeilingExceededError)` as "the response body your code gets
+  back" while the playground rendered the actual body one scroll below it.
+  Neither was wrong when written; the contradiction was made by the layout.
+  A grep cannot find this one, and restructuring a page is exactly when it
+  appears.
 - **Never name a competitor.** Position against the gap.
 - **One representation per fact.** Every number a page shows is rendered from
   the one place that defines it: tier limits, prices and order from
