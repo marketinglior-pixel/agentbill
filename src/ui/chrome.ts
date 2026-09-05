@@ -8,8 +8,21 @@
 //
 // Both parts read `--shell` for their content width, so a 720px docs page and
 // a 960px marketing page share the markup without sharing a measurement.
+//
+// The nav is three sections: wordmark left, the destinations centred, and the
+// account pair right (Console, then the one primary action). Under 720px the
+// destinations and Console fold into a native <details> menu, no script, so
+// the same markup works on pages that ship no JS. The bar is solid rather than
+// frosted-on-scroll: a scroll handler on every page is motion for mood.
 
 const GITHUB = 'https://github.com/marketinglior-pixel/agentbill'
+
+/** The destinations, once. The centre cluster and the mobile menu both render from here. */
+const LINKS: ReadonlyArray<readonly [href: string, label: string]> = [
+  ['/docs', 'Docs'],
+  ['/pricing', 'Pricing'],
+  [GITHUB, 'GitHub'],
+]
 
 /** Header + footer CSS. Include once per page, after theme BASE. */
 export const CHROME_CSS = `
@@ -18,24 +31,32 @@ export const CHROME_CSS = `
      painting over it during scroll. Change .nav-inner's height and this together. */
   :root { --shell: 960px; --banner-height: 60px; }
 
-  .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.88);
+  .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.92);
               backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
-  .nav-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; height: 60px;
-               display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .logo { display: flex; align-items: center; gap: 9px; font-family: var(--mono);
-          font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
-  .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%;
-         box-shadow: 0 0 10px rgba(34,211,160,0.7); }
-  .nav-links { display: flex; align-items: center; gap: 22px; }
-  .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; }
-  .nav-links a:hover { color: var(--text); }
-  .nav-links a[aria-current="page"] { color: var(--text); }
-  .nav-links a.btn, .nav-links a.btn:hover, .nav-links a.btn:visited { color: var(--green-ink); }
-  /* nowrap is load-bearing: a wrapped label made the nav CTA 66px tall inside a
-     60px header and it broke out of the bar. Button labels are all short. */
-  /* 11px of block padding, not 10: it puts the button at 45px so the primary
-     CTA clears the 44px touch-target guideline on a tablet too, not only
-     inside the phone media query below. */
+  .nav-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; height: var(--banner-height);
+               display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
+  .logo { justify-self: start; display: flex; align-items: center; gap: 9px; font-family: var(--mono);
+          font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; white-space: nowrap; }
+  /* The mark is a mark. It used to glow, which is the shadow-glow tell and
+     implied a live status that nothing on the page measured. */
+  .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; flex: none; }
+
+  .nav-center { justify-self: center; display: flex; gap: 28px; }
+  .nav-center a { display: inline-flex; align-items: center; height: var(--banner-height); color: var(--muted);
+                  text-decoration: none; font-size: 14px; font-weight: 500; white-space: nowrap;
+                  border-bottom: 2px solid transparent; transition: color .15s; }
+  .nav-center a:hover { color: var(--text); }
+  /* The current page is a bar flush with the hairline, not a colour shift alone. */
+  .nav-center a[aria-current="page"] { color: var(--text); border-bottom-color: var(--green); }
+
+  .nav-right { justify-self: end; display: flex; align-items: center; gap: 18px; }
+  .nav-right .console { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
+                        white-space: nowrap; padding: 11px 0; transition: color .15s; }
+  .nav-right .console:hover { color: var(--text); }
+  /* BASE colours every <a> green; the filled button keeps its ink in every state. */
+  .nav-right a.btn, .nav-right a.btn:hover, .nav-right a.btn:visited { color: var(--green-ink); }
+  .nav-right .btn .short { display: none; }
+
   .btn { display: inline-block; background: var(--green); color: var(--green-ink); padding: 11px 18px;
          border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
          white-space: nowrap; transition: filter .15s, transform .12s; }
@@ -52,36 +73,50 @@ export const CHROME_CSS = `
   .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
   .btn-ghost:active { transform: translateY(1px); }
 
+  /* The mobile menu. A native disclosure: the summary is a ghost chip, the
+     list drops beneath the bar on the panel frame. It closes on a second tap,
+     not on an outside click; that is the price of shipping it without a
+     script, and it is paid knowingly. */
+  .nav-menu { display: none; position: relative; }
+  .nav-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 44px;
+                      padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--muted);
+                      font-size: 14px; font-weight: 600; white-space: nowrap; transition: color .15s, border-color .15s; }
+  .nav-menu summary::-webkit-details-marker { display: none; }
+  .nav-menu summary:hover { color: var(--text); border-color: var(--dim); }
+  .nav-menu[open] summary { color: var(--text); border-color: var(--text); }
+  .nav-menu ul { list-style: none; position: absolute; right: 0; top: calc(100% + 8px); min-width: 200px;
+                 background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 6px;
+                 box-shadow: var(--edge), var(--lift); z-index: 11; }
+  .nav-menu li a { display: block; padding: 12px 14px; color: var(--muted); text-decoration: none; font-size: 15px;
+                   border-radius: 8px; white-space: nowrap; }
+  .nav-menu li a:hover { color: var(--text); background: var(--surface2); }
+  .nav-menu li a[aria-current="page"] { color: var(--text); }
+
   .site-foot { border-top: 1px solid var(--border); padding: 28px 0 48px; margin-top: 80px; }
   .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px;
                 display: flex; justify-content: space-between; align-items: center;
                 flex-wrap: wrap; gap: 12px; }
   .foot-links { display: flex; flex-wrap: wrap; gap: 4px 22px; }
   .foot-links a { color: var(--dim); text-decoration: none; font-size: 13.5px;
-                  display: inline-block; padding: 11px 0; }
+                  display: inline-block; padding: 11px 0; white-space: nowrap; }
   .foot-links a:hover { color: var(--text); }
   .foot-brand { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
 
-  @media (max-width: 640px) {
-    /* Only GitHub drops on a phone. Pricing stays: it is a conversion page and
-       phones are where the paid traffic lands. Keeping both text links plus a
-       non-wrapping CTA is tight at 375px, so the row pays for it in gap and in
-       the button's inline padding rather than by dropping a link. */
-    .nav-links { gap: 14px; }
-    .nav-links a.hide-sm { display: none; }
-    .nav-links a:not(.btn) { padding: 11px 0; }
-    .nav-links a.btn { padding: 11px 14px; }
+  @media (max-width: 720px) {
+    .nav-inner { grid-template-columns: auto 1fr; gap: 10px; }
+    .nav-center, .nav-right .console { display: none; }
+    .nav-right { gap: 10px; }
+    .nav-menu { display: block; }
     .logo { font-size: 15px; gap: 7px; }
   }
-
-  /* Below ~400px the wordmark, two text links and a non-wrapping CTA want
-     326px of a 272px row, so something has to go. Docs goes, not Pricing:
-     Docs is also the hero's second button and a footer link, while Pricing is
-     the conversion page and has neither. */
+  /* At 320px the wordmark, the Menu chip and the button want more than the
+     272px between the gutters. The button's label shortens and the mark goes;
+     the button stays, because it is the one action every page exists for. */
   @media (max-width: 400px) {
-    .nav-links { gap: 12px; }
-    .nav-links a.hide-xs { display: none; }
-    .nav-links a.btn { padding: 11px 13px; }
+    .nav-right .btn { padding: 11px 12px; }
+    .nav-right .btn .long { display: none; }
+    .nav-right .btn .short { display: inline; }
+    .dot { display: none; }
   }`
 
 /**
@@ -91,14 +126,24 @@ export const CHROME_CSS = `
  */
 export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
+  const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
+  const menu = [...LINKS, ['/app', 'Console'] as const]
+    .map(([href, label]) => `<li><a href="${href}"${at(href)}>${label}</a></li>`).join('\n            ')
   return `  <nav class="site-nav">
     <div class="nav-inner">
       <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
-      <div class="nav-links">
-        <a class="hide-xs" href="/docs"${at('/docs')}>Docs</a>
-        <a href="/pricing"${at('/pricing')}>Pricing</a>
-        <a class="hide-sm" href="${GITHUB}">GitHub</a>${cta ? `
-        <a class="btn" href="/register">Get API key</a>` : ''}
+      <div class="nav-center">
+        ${center}
+      </div>
+      <div class="nav-right">
+        <a class="console" href="/app">Console</a>
+        <details class="nav-menu">
+          <summary>Menu</summary>
+          <ul>
+            ${menu}
+          </ul>
+        </details>${cta ? `
+        <a class="btn" href="/register"><span class="long">Get API key</span><span class="short">Get key</span></a>` : ''}
       </div>
     </div>
   </nav>`

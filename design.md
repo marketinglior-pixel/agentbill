@@ -123,7 +123,13 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
 
 ## What pages must share
 
-The nav and footer from `chrome.ts` on marketing and content pages. App pages
+The nav and footer from `chrome.ts` on marketing and content pages. The nav is
+N1b, three sections: wordmark left, destinations centred (Docs, Pricing,
+GitHub) with the current page marked by a bar flush with the hairline, and
+the account pair right (Console, then the primary action). Under 720px the
+destinations and Console fold into a native `<details>` menu, no script. The
+bar is solid, not frosted-on-scroll. Both link lists render from one array in
+`chrome.ts`. App pages
 (`/app`, `/admin`) keep their own account bar (`nav.top`: wordmark, who is
 signed in, sign out or the one CTA) and carry no marketing footer; their
 closing `.foot` is an in-page note. The three faces. `--green` as the only
@@ -138,8 +144,6 @@ break exists (marketing yes, content no).
 
 ## Known open gates (for the all-surfaces pass)
 
-- Nav is the default SaaS shape (wordmark, three links, button, hairline,
-  sticky). Shared chrome; not touched by page passes.
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
 - No `--space-*` scale.
