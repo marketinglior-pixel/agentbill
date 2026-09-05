@@ -144,20 +144,31 @@ const DOCS_SRC = `
     var el = document.getElementById(id);
     if (el) io.observe(el);
   });
+  // The observer only speaks when a heading crosses the band, so a page opened
+  // at the top had no current item until the reader scrolled. Start on the
+  // first section; the observer corrects it the moment anything else is seen.
+  var firstId = links[0] && links[0].getAttribute('href').slice(1);
+  if (!current && firstId) mark(firstId);
+  // At the top of the page no heading sits inside the band, so scrolling back
+  // up left the last section marked. Above the first heading, the first
+  // section is current by definition.
+  window.addEventListener('scroll', function () {
+    if (window.scrollY < 40 && firstId) mark(firstId);
+  }, { passive: true });
 })();
 
   // Mark code blocks that overflow, and un-mark them once scrolled to the end.
   var codes = document.querySelectorAll('.code');
-  function mark() {
+  function markOverflow() {
     for (var i = 0; i < codes.length; i++) {
       var c = codes[i];
       c.classList.toggle('overflows', c.scrollWidth > c.clientWidth + 2);
       c.classList.toggle('at-end', c.scrollLeft + c.clientWidth >= c.scrollWidth - 2);
     }
   }
-  for (var j = 0; j < codes.length; j++) codes[j].addEventListener('scroll', mark, { passive: true });
-  window.addEventListener('resize', mark);
-  mark();
+  for (var j = 0; j < codes.length; j++) codes[j].addEventListener('scroll', markOverflow, { passive: true });
+  window.addEventListener('resize', markOverflow);
+  markOverflow();
 `
 
 const dj = inlineScript(DOCS_SRC)
