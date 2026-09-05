@@ -38,6 +38,7 @@ import { startConversionDigest } from './lib/conversion-digest.js'
 import { OG_PNG } from './lib/og-image.js'
 import { FAVICON_ICO, APPLE_TOUCH_PNG } from './lib/icons.js'
 import { FAVICON_SVG } from './ui/mark.js'
+import { FOUNDER_JPG } from './lib/photo.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 
@@ -191,6 +192,12 @@ app.get('/site.webmanifest', publicRoute(), async (_, reply) => {
       { src: '/apple-touch-icon.png', type: 'image/png', sizes: '180x180' },
     ],
   })
+})
+
+// The founder photograph on /about. EXIF was stripped when the module was
+// generated, and scripts/photo/build.sh refuses to write it otherwise.
+app.get('/founder.jpg', publicRoute(), async (_, reply) => {
+  return reply.type('image/jpeg').header('Cache-Control', ICON_CACHE).send(FOUNDER_JPG)
 })
 
 // Open Graph card for link previews and ads (1200x630, embedded at build time)
