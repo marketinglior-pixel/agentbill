@@ -11,6 +11,9 @@ import { preflightRoute } from './routes/preflight.js'
 import { pulseRoute } from './routes/pulse.js'
 import { registerAuth, publicRoute } from './middleware/auth.js'
 import { registerNotFound } from './routes/not-found.js'
+import { registerHeaders } from './middleware/headers.js'
+import compress from '@fastify/compress'
+import { constants as zlibConstants } from 'node:zlib'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
 import { blogRoute } from './routes/blog.js'
@@ -90,6 +93,35 @@ app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string
   } catch (err) {
     done(err as Error)
   }
+})
+
+// Both of these must come BEFORE the route plugins below.
+//
+// registerHeaders uses app.addHook directly, which runs synchronously and is on
+// the root before avvio creates any child context, so it would work anywhere.
+// The compress plugin does not: avvio loads plugins in queue order, and a
+// plugin's hooks only reach contexts created after it loads. Registered after
+// the routes, it registered without error, logged nothing, and compressed
+// nothing. The headers were present and the bytes were unchanged, which is a
+// reminder that "the header is there" is not the same claim as "it worked".
+registerHeaders(app)
+
+// There was no compression anywhere: not in the app, not in the Dockerfile, and
+// Fly's proxy does not add it, so 28KB of inline CSS and 5KB of inline script
+// shipped raw on every homepage load. brotli first, gzip second, nothing under
+// 1KB. @fastify/compress rather than a zlib hook because it has to recompute
+// Content-Length, skip image/png (/og.png, the icons), and leave streams alone,
+// and getting any one of those wrong is a subtle bug rather than a loud one.
+// Pinned to 7.x: 9.x depends on fastify-plugin ^6, which is Fastify 5, and this
+// server is Fastify 4.29.
+// brotli quality 5, not the plugin's default of 4. Measured on the homepage:
+// at 4 brotli produced 16,290 bytes against gzip's 15,930, so it was listed
+// first and doing worse than the fallback. 5 costs a little more CPU per
+// response and is the usual sweet spot for dynamic HTML.
+app.register(compress, {
+  encodings: ['br', 'gzip'],
+  threshold: 1024,
+  brotliOptions: { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } },
 })
 
 app.register(sensible)

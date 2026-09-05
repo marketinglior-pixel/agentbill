@@ -249,7 +249,7 @@ ${siteNav('/register', { cta: false })}
         <div class="panel-h"><span>API key</span><span>shown once</span></div>
         <div class="key-value">
           <span id="key-display"></span>
-          <button class="btn-copy" onclick="copyKey()">Copy</button>
+          <button class="btn-copy" id="copy-key" type="button">Copy</button>
         </div>
       </div>
       <div class="panel">
@@ -341,6 +341,13 @@ ${siteFooter()}
       btn.textContent = 'Generate my API key →'
     }
   })
+
+  // Bound rather than inline. A Content-Security-Policy that allows scripts by
+  // hash does not cover an onclick attribute; that needs 'unsafe-hashes', which
+  // is poorly supported and gives back most of what the policy was for. Doing
+  // this first means the CSP can land without quietly breaking the one button
+  // on the page that matters.
+  document.getElementById('copy-key').addEventListener('click', copyKey)
 
   function copyKey() {
     navigator.clipboard.writeText(apiKey)
