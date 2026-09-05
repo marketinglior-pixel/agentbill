@@ -257,7 +257,7 @@ ${siteNav('/register', { cta: false })}
         <div class="steps">
           <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is blocked before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
           <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app">your console</a> and paste the key. That refusal is the first row on it.</p></div>
-          <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs">Docs</a>.</p></div>
+          <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div>
         </div>
       </div>
     </div>
@@ -316,6 +316,16 @@ ${siteFooter()}
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
+      // Give the success state a URL of its own and a title of its own, so Back
+      // does not silently re-show the empty form and this state is something a
+      // reader can tell they reached. replaceState, not a redirect to a route:
+      // a route would need the key in a query parameter, and a key in a query
+      // parameter lands in browser history, in the Referer header of every
+      // outbound click, and in the request log of every hop in between.
+      history.replaceState(null, '', '/register#done')
+      document.title = 'Your API key · AgentBill'
+      s.setAttribute('tabindex', '-1')
+      s.focus()
       // Meta Pixel conversion, new accounts only (201), not returning-key lookups
       if (res.status === 201 && typeof window.fbq === 'function') {
         window.fbq('track', 'CompleteRegistration')

@@ -1,3 +1,4 @@
+import { BP } from './theme.js'
 import { mark, MARK_CSS } from './mark.js'
 // The site header and footer, defined once.
 //
@@ -96,15 +97,32 @@ ${MARK_CSS}
   .nav-menu li a:hover { color: var(--text); background: var(--surface2); }
   .nav-menu li a[aria-current="page"] { color: var(--text); }
 
-  .site-foot { border-top: 1px solid var(--border); padding: 28px 0 48px; margin-top: 80px; }
-  .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px;
-                display: flex; justify-content: space-between; align-items: center;
-                flex-wrap: wrap; gap: 12px; }
-  .foot-links { display: flex; flex-wrap: wrap; gap: 4px 22px; }
-  .foot-links a { color: var(--dim); text-decoration: none; font-size: 13.5px;
-                  display: inline-block; padding: 11px 0; white-space: nowrap; }
-  .foot-links a:hover { color: var(--text); }
-  .foot-brand { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+  /* The footer was one row of five links and a tagline, which reads as a
+     project rather than a company. Four columns of things that actually exist:
+     no newsletter, no social row, no "Made with love", and no X link for an
+     account there isn't one of. An empty social row is worse than none. */
+  .site-foot { border-top: 1px solid var(--border); padding-block: var(--s7) var(--s7);
+               margin-top: var(--s9); }
+  .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
+  .foot-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+               gap: var(--s6) var(--s5); margin-bottom: var(--s7); }
+  .foot-col h4 { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500;
+                 letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
+                 margin-bottom: var(--s2); }
+  .foot-col a { display: block; color: var(--muted); text-decoration: none;
+                font-size: var(--fs-small); padding-block: 7px; }
+  .foot-col a:hover { color: var(--text); }
+  .foot-ext::after { content: " \\2197"; color: var(--dim); }
+  .foot-base { display: flex; justify-content: space-between; align-items: center;
+               flex-wrap: wrap; gap: var(--s3); padding-top: var(--s5);
+               border-top: 1px solid var(--border); }
+  .foot-brand { display: flex; align-items: center; gap: var(--s2);
+                font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+  .foot-brand .mark { width: 14px; height: 14px; }
+  .foot-copy { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+  @media (max-width: ${BP.md}px) {
+    .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5) var(--s5); }
+  }
 
   @media (max-width: 720px) {
     .nav-inner { grid-template-columns: auto 1fr; gap: 10px; }
@@ -156,13 +174,52 @@ export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): s
   </nav>`
 }
 
+// Only destinations that exist. Every external one was fetched before it was
+// written here: both PyPI projects and the GitHub repo return 200, and npm's
+// 403 to curl is bot protection, not a missing package (registry.npmjs.org
+// reports agentbill at 0.4.0).
+//
+// No "Status" link. /health returns JSON, and a JSON endpoint behind a link
+// labelled Status is the opposite of a trust signal. A real /status page is
+// the most valuable thing this footer still lacks.
+const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readonly [string, string, boolean]>]> = [
+  ['Product', [
+    ['/docs', 'Docs', false],
+    ['/pricing', 'Pricing', false],
+    ['/app', 'Console', false],
+    ['/register', 'Get an API key', false],
+  ]],
+  ['Developers', [
+    [GITHUB, 'GitHub', true],
+    ['https://pypi.org/project/agentbill-sdk/', 'Python SDK', true],
+    ['https://www.npmjs.com/package/agentbill', 'Node SDK', true],
+    ['https://pypi.org/project/agentbill-mcp/', 'MCP server', true],
+  ]],
+  ['Company', [
+    ['/about', 'About', false],
+    ['/blog', 'Blog', false],
+    ['/faq', 'Questions', false],
+    ['mailto:marketinglior@gmail.com', 'Contact', false],
+  ]],
+  ['Legal', [
+    ['/terms', 'Terms', false],
+    ['/privacy', 'Privacy', false],
+  ]],
+]
+
 export function siteFooter(): string {
   return `  <footer class="site-foot">
     <div class="foot-inner">
-      <div class="foot-links">
-        <a href="/docs">Docs</a><a href="/pricing">Pricing</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="${GITHUB}">GitHub</a>
+      <div class="foot-cols">
+${FOOT.map(([heading, links]) => `        <div class="foot-col">
+          <h4>${heading}</h4>
+${links.map(([href, label, ext]) => `          <a href="${href}"${ext ? ' class="foot-ext" rel="noopener"' : ''}>${label}</a>`).join('\n')}
+        </div>`).join('\n')}
       </div>
-      <div class="foot-brand">agentbill.dev · what counts, who pays, what's blocked.</div>
+      <div class="foot-base">
+        <div class="foot-brand">${mark(14)}agentbill.dev · what counts, who pays, what's blocked.</div>
+        <div class="foot-copy">&copy; 2026 AgentBill</div>
+      </div>
     </div>
   </footer>`
 }

@@ -53,6 +53,9 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
   { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
 
+  { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-05', priority: 0.7, changefreq: 'monthly' },
+  { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-05', priority: 0.4, changefreq: 'yearly' },
+
   { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-05', priority: 0.9, changefreq: 'weekly' },
   { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
   { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-05', priority: 0.7, changefreq: 'monthly' },
@@ -73,6 +76,9 @@ export const PAGES: readonly PageMeta[] = [
   // Not indexable, and here anyway: robots.txt's Disallow lines are generated
   // from this list, so a page cannot be forgotten in one place and remembered
   // in the other.
+  // A landing page after writing in. Not indexable: it is the end of an action,
+  // not a destination, and it says nothing a search result should promise.
+  { path: '/thanks', section: 'marketing', crumbs: [], crumb: 'Thanks', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'yearly' },
   { path: '/app', section: 'marketing', crumbs: [], crumb: 'Console', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
   { path: '/admin', section: 'marketing', crumbs: [], crumb: 'Admin', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
 ]
