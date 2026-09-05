@@ -36,7 +36,12 @@ type Viewer = {
 
 export async function appRoute(app: FastifyInstance) {
   app.get('/app', async (request, reply) => {
-    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer')
+    // same-origin, not no-referrer: under no-referrer, browsers send `Origin: null`
+    // on the page's own form POSTs (Fetch, "append a request Origin header"),
+    // which is what made every real-browser login 403 while curl passed.
+    // Nothing secret is ever in this page's URL, and same-origin still sends no
+    // referrer to anyone else.
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
     const q = request.query as Record<string, unknown>
@@ -187,9 +192,14 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
 // Login CSRF guard: a form POST from another site must not be able to log a
 // victim into the attacker's account. Modern browsers send Sec-Fetch-Site;
 // older ones send Origin on POST. Absent both, allow (curl, old clients).
+// CSRF guard for the two form POSTs. Sec-Fetch-Site is set by the browser
+// and cannot be forged by a page, so when it is present it decides: only
+// same-origin passes. Without it (old browsers, curl) fall back to the Origin
+// host. A literal `Origin: null` is what a browser sends for a POST under a
+// no-referrer policy, so it counts only when Sec-Fetch-Site already vouched.
 function sameOrigin(request: FastifyRequest): boolean {
   const sfs = request.headers['sec-fetch-site']
-  if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') return false
+  if (typeof sfs === 'string') return sfs === 'same-origin'
   const origin = request.headers.origin
   if (typeof origin === 'string') {
     try { return new URL(origin).host === request.hostname } catch { return false }
