@@ -8,6 +8,7 @@ import { registerRoute } from './routes/register.js'
 import { homeRoute } from './routes/home.js'
 import { docsRoute } from './routes/docs.js'
 import { preflightRoute } from './routes/preflight.js'
+import { pulseRoute } from './routes/pulse.js'
 import { registerAuth } from './middleware/auth.js'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
@@ -83,6 +84,7 @@ app.register(tasksRoute)
 app.register(decisionsRoute)
 app.register(appRoute)
 app.register(preflightRoute)
+app.register(pulseRoute)
 app.register(webhooksRoute)
 app.register(legalRoute)
 registerAuth(app)

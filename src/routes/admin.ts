@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from '../lib/conversion.js'
 import type { AccountSignals } from '../lib/conversion.js'
+import { getPlaygroundPulse } from '../lib/pulse.js'
+import type { PlaygroundPulse } from '../lib/pulse.js'
 
 const WARN_AT = 800
 const SESSION_COOKIE = 'agentbill_admin'
@@ -25,8 +27,9 @@ export async function adminRoute(app: FastifyInstance) {
       return reply.send(loginPage())
     }
     const accounts = await getAccountsWithSignals()
+    const pulse = await getPlaygroundPulse()
     reply.type('text/html')
-    return reply.send(adminPage(accounts))
+    return reply.send(adminPage(accounts, pulse))
   })
 
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
@@ -162,7 +165,7 @@ function loginPage(error = '') {
 </html>`
 }
 
-function adminPage(accounts: AccountSignals[]) {
+function adminPage(accounts: AccountSignals[], pulse: PlaygroundPulse) {
   const total = accounts.length
   const paid = accounts.filter(a => a.plan !== 'free').length
   const hot = accounts.filter(isHot).length
@@ -223,6 +226,33 @@ function adminPage(accounts: AccountSignals[]) {
 <body>
   <h1>AgentBill Admin</h1>
   <p class="sub">Conversion radar: hot accounts first, sorted by likelihood to pay. Refresh to update.</p>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Playground: page views that ran it (30d)</div>
+      <div class="stat-value ${pulse.views > 0 ? 'green' : ''}">${pulse.views}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Runs, including repeats</div>
+      <div class="stat-value">${pulse.runs}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Reached the block</div>
+      <div class="stat-value ${pulse.blocked > 0 ? 'yellow' : ''}">${pulse.blocked}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Moved the ceiling slider</div>
+      <div class="stat-value">${pulse.movedSlider}</div>
+    </div>
+  </div>
+  <p class="sub" style="margin-top:-8px">
+    A view is one page load, not one person: the token is minted per load and never stored, so
+    the same visitor returning counts twice. It is not a signup and it is not attributable to a
+    channel; no source column exists yet.
+    ${pulse.since
+      ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
+      : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}
+  </p>
 
   <div class="stats">
     <div class="stat">

@@ -13,6 +13,7 @@ declare module 'fastify' {
 
 const PUBLIC_PATHS = new Set([
   '/', '/docs', '/health', '/health/db', '/register', '/upgrade', '/webhooks/polar', '/llms.txt',
+  '/pulse',
   '/pricing', '/terms', '/privacy', '/og.png',
   '/admin', '/admin/accounts', '/admin/login',
   '/app', '/app/', '/app/session', '/app/logout',

@@ -245,6 +245,36 @@ export const PLAYGROUND_JS = `<script>
   var TASK_REF = ${JSON.stringify(TASK_REF)};
   var el = function(id){ return document.getElementById('pg-' + id) };
   if (!el('run')) return;
+
+  // A random token for THIS page view. Not a cookie, not localStorage, gone
+  // when the tab closes. It exists so the rows can tell ten visitors running
+  // once from one visitor running ten times, and it cannot follow anyone
+  // between visits.
+  var VIEW = (function(){
+    try {
+      var a = new Uint8Array(12);
+      window.crypto.getRandomValues(a);
+      var out = '';
+      for (var i = 0; i < a.length; i++) out += (a[i] % 36).toString(36);
+      return out;
+    } catch (e) { return String(Date.now()) + String(Math.random()).slice(2, 8) }
+  })();
+
+  // One direction, never blocking, never throwing. The page does not care
+  // whether this lands, so nothing here is awaited and nothing is retried.
+  function pulse(event, ceiling){
+    try {
+      var payload = { event: event, view_id: VIEW };
+      if (ceiling != null) payload.ceiling = ceiling;
+      var body = JSON.stringify(payload);
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/pulse', new Blob([body], { type: 'application/json' }));
+        return;
+      }
+      fetch('/pulse', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: body, keepalive: true }).catch(function(){});
+    } catch (e) {}
+  }
   var task = null, timer = null, running = false, idx = 0;
 
   // Ported from the task-budget branch of src/routes/preflight.ts. preflight()
@@ -340,6 +370,7 @@ export const PLAYGROUND_JS = `<script>
     el('log').appendChild(note);
     el('throw').innerHTML = '<div class="pg-throw"><b>throw TaskCeilingExceededError</b>'
       + '<span>the SDK throws here, so the expensive call never starts</span></div>';
+    pulse('playground_blocked', task.ceiling);
     finish(null);
   }
 
@@ -348,6 +379,7 @@ export const PLAYGROUND_JS = `<script>
     el('run').disabled = false; el('run').textContent = 'Run again';
     el('ceil').disabled = false;
     if (msg) {
+      pulse('playground_completed', task.ceiling);
       el('status').className = 'pg-status ok'; el('status').textContent = 'job complete';
       var d = document.createElement('div');
       d.className = 'pg-note calm'; d.textContent = msg;
@@ -364,6 +396,7 @@ export const PLAYGROUND_JS = `<script>
     if (running) return;
     reset(); running = true; this.disabled = true; this.textContent = 'Running';
     el('ceil').disabled = true;
+    pulse('playground_run', task.ceiling);
     timer = setTimeout(step, 220);
   });
   el('reset').addEventListener('click', reset);
