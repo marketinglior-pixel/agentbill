@@ -154,9 +154,16 @@ break exists (marketing yes, content no).
 
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
-- `admin.ts` is the last file off the system: it does not call `head()`, has no
-  viewport meta, and carries 44 raw hexes including a violet accent that
-  encodes nothing.
+- The `--space-*` and `--radius-*` scales exist and are not yet applied
+  everywhere: 137 hardcoded `font-size` literals remain, down from 152. The
+  ratchet in `scripts/ratchet` stops the count rising; a block retires its own
+  values when it is next rewritten. Raw hexes below `:root` are at **zero** and
+  the ratchet holds them there.
+- `app.ts` and `admin.ts` each render their own `nav.top` account bar. They
+  share the mark and the tokens; the four flex rules are still written twice.
+- No `/status` page, so the footer has no honest trust link. `/health` returns
+  JSON and must not be linked as one.
+- `.pg-fill` animates `width`, see above.
 - `legal.ts` sets prose links to `--code`, which is syntax only.
 - No page has ever been checked by eye. Every "verified" in the log below
   is grep and arithmetic. That is how a 230px empty panel shipped.

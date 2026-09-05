@@ -45,6 +45,10 @@ export const BRAND = {
 /** Colour, type and spacing tokens. Every route gets exactly these. */
 export const TOKENS = `
   :root {
+    /* Both the meta and the property. The meta tells the UA before CSS parses;
+       this is what actually drives native scrollbars, form controls and the
+       autofill background, and without it a dark page still gets light ones. */
+    color-scheme: dark;
     /* ground */
     --bg: ${BRAND.bg}; --surface: #111111; --surface2: #161616; --surface3: #1a1a1a;
     /* borders. --border is decorative; anything that carries an affordance
