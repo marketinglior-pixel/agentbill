@@ -29,6 +29,9 @@ import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
 import { startConversionDigest } from './lib/conversion-digest.js'
 import { OG_PNG } from './lib/og-image.js'
+import { FAVICON_ICO, APPLE_TOUCH_PNG } from './lib/icons.js'
+import { FAVICON_SVG } from './ui/mark.js'
+import { BRAND } from './ui/theme.js'
 
 const app = Fastify({ logger: true })
 
@@ -95,6 +98,44 @@ registerAuth(app)
 // why auth.ts has to return early on request.is404 rather than this being an
 // ordering problem. See the comment on that guard.
 registerNotFound(app)
+
+// Icons. Served from compiled Buffers rather than a public/ directory because
+// the Dockerfile's runtime stage copies dist/ and nothing else. Same reason
+// og.png below has always worked this way.
+//
+// max-age is a week, and deliberately NOT immutable: these paths carry no
+// version, so immutable would mean the mark could never be replaced.
+const ICON_CACHE = 'public, max-age=604800'
+
+app.get('/favicon.svg', publicRoute(), async (_, reply) => {
+  return reply.type('image/svg+xml').header('Cache-Control', ICON_CACHE).send(FAVICON_SVG)
+})
+
+// A bare /favicon.ico is probed by crawlers, feed readers and older Safari
+// whatever <link> tags the page carries. Until now that request answered 401.
+app.get('/favicon.ico', publicRoute(), async (_, reply) => {
+  return reply.type('image/x-icon').header('Cache-Control', ICON_CACHE).send(FAVICON_ICO)
+})
+
+app.get('/apple-touch-icon.png', publicRoute(), async (_, reply) => {
+  return reply.type('image/png').header('Cache-Control', ICON_CACHE).send(APPLE_TOUCH_PNG)
+})
+
+// A route, not a file. No crossorigin on the <link>: it is same-origin, and
+// the attribute would trigger a CORS preflight for nothing.
+app.get('/site.webmanifest', publicRoute(), async (_, reply) => {
+  return reply.type('application/manifest+json').header('Cache-Control', 'public, max-age=3600').send({
+    name: 'AgentBill',
+    short_name: 'AgentBill',
+    display: 'browser',
+    background_color: BRAND.bg,
+    theme_color: BRAND.bg,
+    icons: [
+      { src: '/favicon.svg', type: 'image/svg+xml', sizes: 'any', purpose: 'any' },
+      { src: '/apple-touch-icon.png', type: 'image/png', sizes: '180x180' },
+    ],
+  })
+})
 
 // Open Graph card for link previews and ads (1200x630, embedded at build time)
 app.get('/og.png', publicRoute(), async (_, reply) => {

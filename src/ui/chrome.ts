@@ -1,3 +1,4 @@
+import { mark, MARK_CSS } from './mark.js'
 // The site header and footer, defined once.
 //
 // Before this file there were five different header treatments across the
@@ -38,8 +39,11 @@ export const CHROME_CSS = `
   .logo { justify-self: start; display: flex; align-items: center; gap: 9px; font-family: var(--mono);
           font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; white-space: nowrap; }
   /* The mark is a mark. It used to glow, which is the shadow-glow tell and
-     implied a live status that nothing on the page measured. */
-  .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; flex: none; }
+     implied a live status that nothing on the page measured. It was also an
+     8px circle, which said nothing; it is now the drawing in src/ui/mark.ts,
+     a call stopped short of a ceiling, and it is the same drawing the favicon
+     is rendered from. */
+${MARK_CSS}
 
   .nav-center { justify-self: center; display: flex; gap: 28px; }
   .nav-center a { display: inline-flex; align-items: center; height: var(--banner-height); color: var(--muted);
@@ -110,13 +114,16 @@ export const CHROME_CSS = `
     .logo { font-size: 15px; gap: 7px; }
   }
   /* At 320px the wordmark, the Menu chip and the button want more than the
-     272px between the gutters. The button's label shortens and the mark goes;
-     the button stays, because it is the one action every page exists for. */
+     272px between the gutters. The button's label shortens and the wordmark
+     steps down. The mark itself stays: a brand that disappears on a phone is
+     not a brand, and it is the only identity the nav carries. The 14px it
+     costs is bought back by the shorter label. */
   @media (max-width: 400px) {
     .nav-right .btn { padding: 11px 12px; }
     .nav-right .btn .long { display: none; }
     .nav-right .btn .short { display: inline; }
-    .dot { display: none; }
+    .logo { font-size: 14px; gap: 6px; }
+    .mark { width: 15px; height: 15px; }
   }`
 
 /**
@@ -131,7 +138,7 @@ export function siteNav(current = '', { cta = true }: { cta?: boolean } = {}): s
     .map(([href, label]) => `<li><a href="${href}"${at(href)}>${label}</a></li>`).join('\n            ')
   return `  <nav class="site-nav">
     <div class="nav-inner">
-      <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
+      <a class="logo" href="/">${mark(18)}AgentBill</a>
       <div class="nav-center">
         ${center}
       </div>

@@ -5,6 +5,7 @@ import { PLAN_LIMITS } from '../integrations/polar.js'
 import { clientIp } from '../lib/client-ip.js'
 import { head } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
+import { mark, MARK_CSS } from '../ui/mark.js'
 
 // /app is the console: the only browser surface a registered user has. It
 // shows live task budgets burning down, every call AgentBill refused with the
@@ -522,7 +523,7 @@ const CSS = `
         justify-content: space-between; padding: 0 24px; gap: 16px; }
   .logo { display: flex; align-items: center; gap: 9px; font-family: var(--mono);
           font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
-  .dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; }
+${MARK_CSS}
   .who { display: flex; align-items: center; gap: 14px; font-family: var(--mono);
          font-size: 12px; color: var(--dim); white-space: nowrap; }
   .who b { color: var(--muted); font-weight: 500; }
@@ -783,7 +784,7 @@ const ERRORS: Record<string, string> = {
 function loginPage(err: string): string {
   return `${HEAD('Console')}
 <body>
-  <nav class="top"><a class="logo" href="/"><span class="dot"></span>AgentBill</a></nav>
+  <nav class="top"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
   <div class="login">
     <h1>Your console</h1>
     <p>Live task budgets, every call AgentBill refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
@@ -1042,7 +1043,7 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
   return `${HEAD('Console')}
 <body>
   <nav class="top">
-    <a class="logo" href="/"><span class="dot"></span>AgentBill</a>
+    <a class="logo" href="/">${mark(18)}AgentBill</a>
     <div class="who">${anon
       ? `<span class="dim mode">Sample console</span>
       <a class="btn-key" href="/register">Get your API key</a>`

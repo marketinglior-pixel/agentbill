@@ -11,11 +11,27 @@
 // header on the one page where it matters most. Inlining a shared constant
 // fixes the divergence, which is the actual defect, without touching CSP.
 
+/**
+ * The three brand colours, as values rather than as CSS custom properties.
+ *
+ * This is not a second representation of a token: TOKENS below interpolates
+ * these, so :root is rendered from them and there is still one definition.
+ * They exist because three surfaces cannot read a CSS variable at all. A
+ * <meta name="theme-color"> takes a colour, not a var(). So does the web app
+ * manifest, which is JSON. And the favicon is a standalone SVG document with
+ * no :root of the page to inherit from.
+ */
+export const BRAND = {
+  bg: '#0a0a0a',
+  green: '#22d3a0',
+  greenInk: '#05130e',
+} as const
+
 /** Colour, type and spacing tokens. Every route gets exactly these. */
 export const TOKENS = `
   :root {
     /* ground */
-    --bg: #0a0a0a; --surface: #111111; --surface2: #161616; --surface3: #1a1a1a;
+    --bg: ${BRAND.bg}; --surface: #111111; --surface2: #161616; --surface3: #1a1a1a;
     /* borders. --border is decorative; anything that carries an affordance
        must use --border-strong, which clears the 3:1 of WCAG 1.4.11. */
     --border: #232323; --border-soft: #1e1e1e; --border2: #2c2c2c; --border-strong: #5c645f;
@@ -23,7 +39,7 @@ export const TOKENS = `
     --text: #e8ebe9; --muted: #a0a8a3; --dim: #868e88; --white: #ffffff;
     /* signal. --green is the brand and the primary action; --code is syntax
        only; --red and --amber are states that need a human. */
-    --green: #22d3a0; --green-ink: #05130e; --code: #a8ff78;
+    --green: ${BRAND.green}; --green-ink: ${BRAND.greenInk}; --code: #a8ff78;
     --red: #ff5757; --amber: #f5b942;
     /* Console semantics, shared by every page that shows the console's rows
        (the console itself, the homepage panels). --flow is ordinary traffic,
@@ -102,12 +118,28 @@ type HeadOpts = {
 }
 
 /** Doctype through <body>. Every HTML route opens with this. */
+/**
+ * Emitted by every page. Until this existed the site had no favicon at all and
+ * /favicon.ico answered 401, so a tab showed the browser's default globe.
+ *
+ * color-scheme is here rather than in TOKENS because it also has to reach
+ * /admin, which does not go through the token block, and because without it a
+ * dark page still gets light native scrollbars, form controls and autofill.
+ */
+const ICONS = `  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="${BRAND.bg}" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/site.webmanifest" />`
+
 export function head({ title, description, canonical, css = '', extraHead = '' }: HeadOpts): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+${ICONS}
   <title>${title}</title>${description ? `
   <meta name="description" content="${description}" />` : ''}${canonical ? `
   <link rel="canonical" href="${canonical}" />` : ''}
