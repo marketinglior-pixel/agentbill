@@ -42,6 +42,22 @@ export type PageMeta = {
   published?: string
   priority: number
   changefreq: 'weekly' | 'monthly' | 'yearly'
+  /**
+   * Disallow in robots.txt. SEPARATE from `index`, and the separation is the
+   * whole point.
+   *
+   * `index: false` means noindex: the page sends the directive in its head and
+   * on its response, and a crawler reads it. `disallow` means the crawler may
+   * not fetch the page at all, which also means it never reads the noindex,
+   * which is how a Disallowed URL ends up indexed URL-only from an external
+   * link. Disallow plus noindex is a pair that defeats itself.
+   *
+   * So this is true only for a page with no inbound links that should be out of
+   * crawl entirely. /app is noindex and NOT disallowed, because it is where the
+   * homepage's own "See a live console" button points. /thanks is linked from
+   * the register success panel, so the same reasoning applies.
+   */
+  disallow?: boolean
 }
 
 const HOME = ['Home', '/'] as const
@@ -80,7 +96,7 @@ export const PAGES: readonly PageMeta[] = [
   // not a destination, and it says nothing a search result should promise.
   { path: '/thanks', section: 'marketing', crumbs: [], crumb: 'Thanks', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'yearly' },
   { path: '/app', section: 'marketing', crumbs: [], crumb: 'Console', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
-  { path: '/admin', section: 'marketing', crumbs: [], crumb: 'Admin', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
+  { path: '/admin', section: 'marketing', crumbs: [], crumb: 'Admin', og: 'default', index: false, disallow: true, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
 ]
 
 export const byPath: ReadonlyMap<string, PageMeta> = new Map(PAGES.map((p) => [p.path, p]))

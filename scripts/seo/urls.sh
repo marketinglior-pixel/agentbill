@@ -15,4 +15,26 @@ for u in $(curl -s "$B/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*
   elif [ "$canon" != "$u" ]; then printf '  FAIL %-46s canonical %s != %s\n' "$p" "$canon" "$u"; fail=1
   else printf '  ok   %-46s 200, self-canonical\n' "$p"; fi
 done
+
+# robots.txt must NOT disallow /app.
+#
+# A Disallowed URL can still be indexed URL-only from an external link, because
+# the crawler is forbidden from fetching it and therefore never reads the
+# noindex inside. Disallow plus noindex defeats itself, and /app is where the
+# homepage's own "See a live console" button points.
+#
+# This gate exists because the first version of the robots generator derived its
+# Disallow lines from `index: false` and so re-added `Disallow: /app`, the exact
+# line the change was written to remove. It shipped, and the commit message
+# claimed the opposite.
+robots=$(curl -s "$B/robots.txt")
+if printf '%s' "$robots" | grep -qE '^Disallow: /app'; then
+  printf '  FAIL %-46s robots.txt disallows the demo console\n' "/robots.txt"; fail=1
+else
+  printf '  ok   %-46s /app crawlable, /admin disallowed\n' "/robots.txt"
+fi
+if ! printf '%s' "$robots" | grep -qE '^Disallow: /admin'; then
+  printf '  FAIL %-46s /admin is not disallowed\n' "/robots.txt"; fail=1
+fi
+
 exit $fail

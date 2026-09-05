@@ -223,7 +223,7 @@ app.get('/google816aee44e74d69c3.html', publicRoute(), async (_, reply) => {
 // in one place cannot be forgotten in the other.
 app.get('/robots.txt', publicRoute(), async (_, reply) => {
   reply.type('text/plain')
-  const denied = PAGES.filter((pg) => !pg.index).map((pg) => pg.path)
+  const denied = PAGES.filter((pg) => pg.disallow).map((pg) => pg.path)
   return `# /app is crawlable on purpose, and this is the part that reads backwards.
 # A Disallowed URL can still be indexed URL-only from an external link, because
 # the crawler is forbidden from fetching it and therefore never reads the
