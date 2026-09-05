@@ -199,9 +199,9 @@ export function siteNav(
 // 403 to curl is bot protection, not a missing package (registry.npmjs.org
 // reports agentbill at 0.4.0).
 //
-// No "Status" link. /health returns JSON, and a JSON endpoint behind a link
-// labelled Status is the opposite of a trust signal. A real /status page is
-// the most valuable thing this footer still lacks.
+// The Status link points at /status, a page that runs its checks when it
+// loads. It is NOT /health: a JSON endpoint behind a link labelled Status is
+// the opposite of a trust signal to a person.
 const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readonly [string, string, boolean]>]> = [
   ['Product', [
     ['/docs', 'Docs', false],
@@ -219,6 +219,7 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
     ['/about', 'About', false],
     ['/blog', 'Blog', false],
     ['/faq', 'Questions', false],
+    ['/status', 'Status', false],
     ['mailto:marketinglior@gmail.com', 'Contact', false],
   ]],
   ['Legal', [

@@ -22,6 +22,10 @@ export const DOCS_CSS = `${CHROME_CSS}
 
   .docs { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; padding-block: 48px 96px;
           display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
+  /* Without a rail the 220px track was still reserved and rendered empty, so
+     /status, /blog and /thanks each opened with a column of nothing beside a
+     column of content. A hidden rail should take no space, not invisible space. */
+  .docs.no-rail { grid-template-columns: minmax(0, 1fr); }
 
   /* Breadcrumb.
      A full-width first row of the grid rather than the first thing inside
@@ -176,6 +180,8 @@ type ShellOpts = {
   jsonLd?: unknown | unknown[]
   /** Share-card overrides. Type and description only; the title is the page's. */
   og?: { type?: string; title?: string; description?: string }
+  /** Page-specific CSS, appended after DOCS_CSS. */
+  css?: string
   /** Which nav link is current. Docs and guides pass "/docs"; a blog post passes "" (none). */
   current?: string
   /**
@@ -222,7 +228,7 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, og, current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, og, css = '', current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
@@ -231,12 +237,12 @@ export function docsShell({ title, description, path, extraHead, jsonLd, og, cur
     <p class="rail-h">On this page</p>
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
-    : '  <div></div>'
-  return `${head({ title, description, path, jsonLd: ld, og, css: DOCS_CSS, extraHead,
+    : ''
+  return `${head({ title, description, path, jsonLd: ld, og, css: `${DOCS_CSS}${css}`, extraHead,
                     scriptHashes: [DOCS_HASH] })}
 <body>
 ${siteNav(current)}
-<div class="docs">
+<div class="docs${wantRail ? '' : ' no-rail'}">
 ${crumb ? crumb.html : ''}
 ${rail}
   <main class="container">

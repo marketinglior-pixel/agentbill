@@ -30,6 +30,7 @@ import { legalRoute } from './routes/legal.js'
 import { faqRoute } from './routes/faq.js'
 import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
+import { statusRoute } from './routes/status.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
@@ -145,6 +146,7 @@ app.register(legalRoute)
 app.register(faqRoute)
 app.register(aboutRoute)
 app.register(thanksRoute)
+app.register(statusRoute)
 registerAuth(app)
 // Registered next to registerAuth because they are two halves of one decision.
 // The placement itself is cosmetic: Fastify copies every root onRequest hook
