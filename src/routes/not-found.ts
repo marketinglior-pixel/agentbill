@@ -39,6 +39,7 @@ function notFoundPage(): string {
     description: 'That page is not on agentbill.dev.',
     // Not in the page registry, because it is not a page. noindex is explicit.
     noindex: true,
+    scriptHashes: [],
     css: CSS,
   })}
 <body>

@@ -5,6 +5,8 @@ import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS } from '../ui/panels.js'
 import { publicRoute } from '../middleware/auth.js'
+import { inlineScript } from '../lib/csp.js'
+import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
 
 const num = (n: number) => n.toLocaleString('en-US')
 const RECOMMENDED = 'team'
@@ -17,6 +19,31 @@ const SERVICE: Record<string, string> = {
   team: 'priority support',
   scale: 'direct line to the founder',
 }
+
+
+// Lifted out of the page template so its hash matches the string emitted.
+const upg = inlineScript(`    document.getElementById('keybtn').addEventListener('click', async function () {
+      var k = document.getElementById('keyin').value.trim()
+      var msg = document.getElementById('keymsg')
+      msg.style.display = 'block'
+      if (!k) { msg.style.color = 'var(--red)'; msg.textContent = 'Paste your API key first.'; return }
+      try {
+        var r = await fetch('/account/upgrade-url', { headers: { Authorization: 'Bearer ' + k } })
+        if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
+        var d = await r.json()
+        document.querySelectorAll('[data-tier]').forEach(function (a) {
+          var t = a.getAttribute('data-tier')
+          if (d.checkout && d.checkout[t]) a.setAttribute('href', d.checkout[t])
+        })
+        msg.style.color = 'var(--green)'
+        msg.textContent = 'Checkout unlocked for your account. Pick a plan above.'
+      } catch (e) {
+        msg.style.color = 'var(--red)'
+        msg.textContent = 'Network error. Try again.'
+      }
+    })`)
+const UPGRADE_JS = upg.html
+export const UPGRADE_HASH = upg.hash
 
 export async function upgradeRoute(app: FastifyInstance) {
   // Served at both /upgrade (in-product links) and /pricing (what ad clickers
@@ -72,6 +99,8 @@ export async function upgradeRoute(app: FastifyInstance) {
         })),
       },
       extraHead: pixelSnippet(),
+      scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
+      scriptOrigins: pixelScriptSrc(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, spec-sheet page (F3)
      * design-system: design.md · designed-as-app · nav: N1b shared · footer: Ft2 shared
@@ -180,28 +209,7 @@ ${siteNav('/pricing')}
       </div>
       <div class="msg-slot"><span class="msg" id="keymsg" aria-live="polite"></span></div>
     </div>
-    <script>
-    document.getElementById('keybtn').addEventListener('click', async function () {
-      var k = document.getElementById('keyin').value.trim()
-      var msg = document.getElementById('keymsg')
-      msg.style.display = 'block'
-      if (!k) { msg.style.color = 'var(--red)'; msg.textContent = 'Paste your API key first.'; return }
-      try {
-        var r = await fetch('/account/upgrade-url', { headers: { Authorization: 'Bearer ' + k } })
-        if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
-        var d = await r.json()
-        document.querySelectorAll('[data-tier]').forEach(function (a) {
-          var t = a.getAttribute('data-tier')
-          if (d.checkout && d.checkout[t]) a.setAttribute('href', d.checkout[t])
-        })
-        msg.style.color = 'var(--green)'
-        msg.textContent = 'Checkout unlocked for your account. Pick a plan above.'
-      } catch (e) {
-        msg.style.color = 'var(--red)'
-        msg.textContent = 'Network error. Try again.'
-      }
-    })
-    </script>`}
+${UPGRADE_JS}`}
     <p class="note">One runaway retry loop costs more than a year of Builder.
     No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
   </div>

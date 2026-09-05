@@ -1,3 +1,4 @@
+import { inlineScript } from '../lib/csp.js'
 // The homepage playground: a preflight you can run yourself.
 //
 // The refusal band above states the outcome, and it now renders from the run
@@ -301,7 +302,7 @@ ${plannedRows()}
 }
 
 /** The behaviour. Put it just before </body>. */
-export const PLAYGROUND_JS = `<script>
+const PLAYGROUND_SRC = `
 (function(){
   // Serialised from PLAN in playground.ts. The refusal band renders from the
   // same array, so the page cannot show two versions of this run.
@@ -484,4 +485,8 @@ export const PLAYGROUND_JS = `<script>
   el('reset').addEventListener('click', reset);
   reset();
 })();
-</script>`
+`
+
+const pg = inlineScript(PLAYGROUND_SRC)
+export const PLAYGROUND_JS = pg.html
+export const PLAYGROUND_HASH = pg.hash

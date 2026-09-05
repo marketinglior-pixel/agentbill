@@ -14,6 +14,7 @@ function legalShell(title: string, path: string, body: string): string {
     title: `${title} · AgentBill`,
     description: `${title} for AgentBill, budget ceilings for AI agents.`,
     path,
+    scriptHashes: [],
     css: `${CHROME_CSS}
     :root { --shell: 720px; }
     body { line-height: 1.7; }

@@ -1,4 +1,5 @@
 import { byPath, abs } from './site.js'
+import { inlineScript } from '../lib/csp.js'
 // The content-page shell: /docs and every /docs/* guide.
 //
 // Before this file, docs.ts, guides.ts and blog.ts each carried their own copy
@@ -112,7 +113,7 @@ export const DOCS_CSS = `${CHROME_CSS}
 `
 
 /** Marks the active section in the rail. Attribute toggles only, no motion. */
-export const DOCS_JS = `<script>
+const DOCS_SRC = `
 (function () {
   var links = [].slice.call(document.querySelectorAll('.rail a[href^="#"]'));
   if (!links.length || !('IntersectionObserver' in window)) return;
@@ -131,7 +132,12 @@ export const DOCS_JS = `<script>
     if (el) io.observe(el);
   });
 })();
-</script>`
+`
+
+const dj = inlineScript(DOCS_SRC)
+export const DOCS_JS = dj.html
+export const DOCS_HASH = dj.hash
+
 
 const slug = (s: string) =>
   s.replace(/<[^>]+>/g, '').replace(/&[a-z]+;|&#\d+;/g, '').toLowerCase()
@@ -226,7 +232,8 @@ export function docsShell({ title, description, path, extraHead, jsonLd, og, cur
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : '  <div></div>'
-  return `${head({ title, description, path, jsonLd: ld, og, css: DOCS_CSS, extraHead })}
+  return `${head({ title, description, path, jsonLd: ld, og, css: DOCS_CSS, extraHead,
+                    scriptHashes: [DOCS_HASH] })}
 <body>
 ${siteNav(current)}
 <div class="docs">

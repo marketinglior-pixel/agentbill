@@ -1,3 +1,4 @@
+import { inlineScript } from './csp.js'
 // Pixel base code for marketing pages (home, register, pricing).
 // Each snippet renders nothing until its env var is set, so the site
 // stays clean until the pixel exists in the ad platform. Conversion
@@ -37,4 +38,30 @@ function redditSnippet(): string {
 rdt('init','${id}');
 rdt('track','PageView');
 </script>`
+}
+
+/**
+ * What the CSP has to allow for whichever pixels are configured.
+ *
+ * Both return empty when no pixel env var is set, which is the current state:
+ * META_PIXEL_ID has never been set, and REDDIT_PIXEL_ID was unset once the
+ * channel it served was killed. If either is set again, the policy widens by
+ * exactly the origin that needs it and nothing else.
+ */
+export function pixelScriptSrc(): string[] {
+  const out: string[] = []
+  if (metaSnippet()) out.push('https://connect.facebook.net')
+  if (redditSnippet()) out.push('https://www.redditstatic.com')
+  return out
+}
+
+/** Hashes for the inline base code each pixel injects. */
+export function pixelHashes(): string[] {
+  const out: string[] = []
+  for (const snip of [metaSnippet(), redditSnippet()]) {
+    if (!snip) continue
+    const m = snip.match(/<script>([\s\S]*?)<\/script>/)
+    if (m) out.push(inlineScript(m[1]).hash)
+  }
+  return out
 }

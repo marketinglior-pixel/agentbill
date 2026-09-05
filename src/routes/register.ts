@@ -10,6 +10,8 @@ import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
+import { inlineScript } from '../lib/csp.js'
+import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -78,6 +80,101 @@ function generateApiKey(): string {
 }
 
 
+
+// Lifted out of the page template so its hash can be computed from the same
+// string that is emitted. See src/lib/csp.ts.
+const reg = inlineScript(`  let apiKey = ''
+
+  document.getElementById('reg-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const btn = document.getElementById('submit-btn')
+    const errEl = document.getElementById('err')
+    errEl.style.display = 'none'
+    btn.disabled = true
+    btn.textContent = 'Generating…'
+
+    try {
+      const res = await fetch('/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:    document.getElementById('email').value,
+          name:     document.getElementById('name').value || undefined,
+          use_case: document.getElementById('use_case').value || undefined,
+          stack:    document.getElementById('stack').value || undefined,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        errEl.textContent = data.message ?? 'Something went wrong. Try again.'
+        errEl.style.color = 'var(--red)'
+        errEl.style.display = 'block'
+        btn.disabled = false
+        btn.textContent = 'Generate my API key →'
+        return
+      }
+
+      // Existing account: the key went to their inbox, not to this response.
+      if (!data.api_key) {
+        errEl.textContent = data.message ?? 'This email already has an account. Check your inbox.'
+        errEl.style.color = 'var(--green)'
+        errEl.style.display = 'block'
+        btn.disabled = false
+        btn.textContent = 'Generate my API key →'
+        return
+      }
+
+      apiKey = data.api_key
+      document.getElementById('key-display').textContent = apiKey
+      const fc = document.getElementById('first-curl')
+      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\\\"Authorization: Bearer " + apiKey + "\\\\" -H \\\\"Content-Type: application/json\\\\" -d '{\\\\"agent_id\\\\":\\\\"first-run\\\\",\\\\"estimated_units\\\\":5,\\\\"ceiling\\\\":1}'"
+      document.getElementById('form-state').style.display = 'none'
+      const s = document.getElementById('success-state')
+      s.style.display = 'flex'
+      // Give the success state a URL of its own and a title of its own, so Back
+      // does not silently re-show the empty form and this state is something a
+      // reader can tell they reached. replaceState, not a redirect to a route:
+      // a route would need the key in a query parameter, and a key in a query
+      // parameter lands in browser history, in the Referer header of every
+      // outbound click, and in the request log of every hop in between.
+      history.replaceState(null, '', '/register#done')
+      document.title = 'Your API key · AgentBill'
+      s.setAttribute('tabindex', '-1')
+      s.focus()
+      // Meta Pixel conversion, new accounts only (201), not returning-key lookups
+      if (res.status === 201 && typeof window.fbq === 'function') {
+        window.fbq('track', 'CompleteRegistration')
+      }
+      // Reddit Pixel conversion, new accounts only (201)
+      if (res.status === 201 && typeof window.rdt === 'function') {
+        window.rdt('track', 'SignUp')
+      }
+    } catch {
+      errEl.textContent = 'Network error. Check your connection and try again.'
+      errEl.style.display = 'block'
+      btn.disabled = false
+      btn.textContent = 'Generate my API key →'
+    }
+  })
+
+  // Bound rather than inline. A Content-Security-Policy that allows scripts by
+  // hash does not cover an onclick attribute; that needs 'unsafe-hashes', which
+  // is poorly supported and gives back most of what the policy was for. Doing
+  // this first means the CSP can land without quietly breaking the one button
+  // on the page that matters.
+  document.getElementById('copy-key').addEventListener('click', copyKey)
+
+  function copyKey() {
+    navigator.clipboard.writeText(apiKey)
+    const btn = document.querySelector('.btn-copy')
+    btn.textContent = 'Copied'
+    btn.style.color = 'var(--green)'
+    setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
+  }`)
+const REGISTER_JS = reg.html
+export const REGISTER_HASH = reg.hash
+
 export async function registerRoute(app: FastifyInstance) {
 
   // Registration page, GET
@@ -89,6 +186,8 @@ export async function registerRoute(app: FastifyInstance) {
       path: '/register',
       og: { description: 'Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card.' },
       extraHead: pixelSnippet(),
+      scriptHashes: [REGISTER_HASH, ...pixelHashes()],
+      scriptOrigins: pixelScriptSrc(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
@@ -266,97 +365,7 @@ ${siteNav('/register', { cta: false })}
 
 ${siteFooter()}
 
-<script>
-  let apiKey = ''
-
-  document.getElementById('reg-form').addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const btn = document.getElementById('submit-btn')
-    const errEl = document.getElementById('err')
-    errEl.style.display = 'none'
-    btn.disabled = true
-    btn.textContent = 'Generating…'
-
-    try {
-      const res = await fetch('/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email:    document.getElementById('email').value,
-          name:     document.getElementById('name').value || undefined,
-          use_case: document.getElementById('use_case').value || undefined,
-          stack:    document.getElementById('stack').value || undefined,
-        }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) {
-        errEl.textContent = data.message ?? 'Something went wrong. Try again.'
-        errEl.style.color = 'var(--red)'
-        errEl.style.display = 'block'
-        btn.disabled = false
-        btn.textContent = 'Generate my API key →'
-        return
-      }
-
-      // Existing account: the key went to their inbox, not to this response.
-      if (!data.api_key) {
-        errEl.textContent = data.message ?? 'This email already has an account. Check your inbox.'
-        errEl.style.color = 'var(--green)'
-        errEl.style.display = 'block'
-        btn.disabled = false
-        btn.textContent = 'Generate my API key →'
-        return
-      }
-
-      apiKey = data.api_key
-      document.getElementById('key-display').textContent = apiKey
-      const fc = document.getElementById('first-curl')
-      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\"Authorization: Bearer " + apiKey + "\\" -H \\"Content-Type: application/json\\" -d '{\\"agent_id\\":\\"first-run\\",\\"estimated_units\\":5,\\"ceiling\\":1}'"
-      document.getElementById('form-state').style.display = 'none'
-      const s = document.getElementById('success-state')
-      s.style.display = 'flex'
-      // Give the success state a URL of its own and a title of its own, so Back
-      // does not silently re-show the empty form and this state is something a
-      // reader can tell they reached. replaceState, not a redirect to a route:
-      // a route would need the key in a query parameter, and a key in a query
-      // parameter lands in browser history, in the Referer header of every
-      // outbound click, and in the request log of every hop in between.
-      history.replaceState(null, '', '/register#done')
-      document.title = 'Your API key · AgentBill'
-      s.setAttribute('tabindex', '-1')
-      s.focus()
-      // Meta Pixel conversion, new accounts only (201), not returning-key lookups
-      if (res.status === 201 && typeof window.fbq === 'function') {
-        window.fbq('track', 'CompleteRegistration')
-      }
-      // Reddit Pixel conversion, new accounts only (201)
-      if (res.status === 201 && typeof window.rdt === 'function') {
-        window.rdt('track', 'SignUp')
-      }
-    } catch {
-      errEl.textContent = 'Network error. Check your connection and try again.'
-      errEl.style.display = 'block'
-      btn.disabled = false
-      btn.textContent = 'Generate my API key →'
-    }
-  })
-
-  // Bound rather than inline. A Content-Security-Policy that allows scripts by
-  // hash does not cover an onclick attribute; that needs 'unsafe-hashes', which
-  // is poorly supported and gives back most of what the policy was for. Doing
-  // this first means the CSP can land without quietly breaking the one button
-  // on the page that matters.
-  document.getElementById('copy-key').addEventListener('click', copyKey)
-
-  function copyKey() {
-    navigator.clipboard.writeText(apiKey)
-    const btn = document.querySelector('.btn-copy')
-    btn.textContent = 'Copied'
-    btn.style.color = 'var(--green)'
-    setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
-  }
-</script>
+${REGISTER_JS}
 </body>
 </html>`)
   })

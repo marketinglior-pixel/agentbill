@@ -1,4 +1,5 @@
 import { ORIGIN, abs, byPath } from './site.js'
+import { policy } from '../lib/csp.js'
 // The single source of truth for the site's design tokens and page shell.
 //
 // Before this file existed every route carried its own inline <style> with its
@@ -193,6 +194,15 @@ type HeadOpts = {
   jsonLd?: unknown | unknown[]
   /** Emit robots noindex. Derived from the registry when `path` is given. */
   noindex?: boolean
+  /**
+   * Hashes of the inline scripts this page emits. Passing them turns the CSP
+   * on for the page; omitting them leaves the page without one, which is the
+   * safe default for anything not yet wired. Pass [] for a page with no script
+   * at all and it gets script-src 'none'.
+   */
+  scriptHashes?: readonly string[]
+  /** Extra script origins, for a configured pixel. Normally empty. */
+  scriptOrigins?: readonly string[]
 }
 
 /**
@@ -248,7 +258,7 @@ const ICONS = `  <meta name="color-scheme" content="dark" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = [] }: HeadOpts): string {
   const meta = path ? byPath.get(path) : undefined
   const href = path ? abs(path) : canonical
   const hidden = noindex ?? (meta ? !meta.index : false)
@@ -256,13 +266,21 @@ export function head({ title, description, path, canonical, css = '', extraHead 
   const ogTitle = og?.title ?? title
   const ogDesc = og?.description ?? description ?? ''
   const blocks = hidden ? [] : [...sitewideLd(), ...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [])]
+  // Delivered as a meta rather than a header so it lives beside the head it
+  // describes, and because the one directive a meta cannot carry,
+  // frame-ancestors, is already covered by X-Frame-Options: DENY in
+  // middleware/headers.ts. It is emitted FIRST so it governs every resource
+  // reference below it.
+  const csp = scriptHashes
+    ? `  <meta http-equiv="Content-Security-Policy" content="${policy(scriptHashes, scriptOrigins)}" />\n`
+    : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-${ICONS}
+${csp}${ICONS}
   <title>${title}</title>${description ? `
   <meta name="description" content="${description}" />` : ''}${href ? `
   <link rel="canonical" href="${href}" />` : ''}${hidden ? `

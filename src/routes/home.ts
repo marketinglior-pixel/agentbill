@@ -1,12 +1,13 @@
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
-import { PLAYGROUND_CSS, PLAYGROUND_JS, playgroundSection, REFUSAL } from '../ui/playground.js'
+import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 import { publicRoute } from '../middleware/auth.js'
+import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
 // that shows the product doing the thing the claim describes. The panels are
@@ -126,6 +127,8 @@ export async function homeRoute(app: FastifyInstance) {
       // meta keywords has been ignored by every major engine since 2009. It was
       // 300 bytes on the most-fetched page of the site.
       extraHead: pixelSnippet(),
+      scriptHashes: [PLAYGROUND_HASH, ...pixelHashes()],
+      scriptOrigins: pixelScriptSrc(),
       css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
