@@ -48,7 +48,7 @@ client.record(agent_id="researcher", customer_id="user_123", units=10)
   <p>Checks budget before compute is consumed. If the customer is out of units, the run is blocked immediately, before any tokens are spent.</p>
 
   <h3>Record</h3>
-  <p>Logs actual usage after a successful run. Idempotent, safe to call from retried or parallel workflows.</p>
+  <p>Logs actual usage after a successful run. Idempotent per <code class="inline">idempotency_key</code>: /events dedupes on it. Both SDKs generate a fresh key for each call, so calling record() again on a retry is a second event; to dedupe a retried job, pass your own key to the endpoint.</p>
 
   <h3>Per-request ceiling</h3>
   <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts and <span class="inline">CeilingExceededError</span> is raised.</p>
@@ -146,9 +146,11 @@ WHERE account_id = :account
   <div class="code"><pre>
 {
   "approved": false,
-  "reason": "free_tier_exceeded",  <span class="comment"># or budget_exhausted / ceiling_exceeded (no upgrade_url for those)</span>
-  "remaining_units": 0,
-  "upgrade_url": "https://agentbill.dev/upgrade"
+  "reason": "free_tier_exceeded",  <span class="comment"># plan_limit_exceeded on a paid plan; budget_exhausted and ceiling refusals carry no upgrade_url</span>
+  "plan": "free",
+  "monthly_calls": 1000,
+  "plan_limit": 1000,
+  "upgrade_url": "https://agentbill.dev/pricing?account_id=acc_..."
 }
   </pre></div>
 

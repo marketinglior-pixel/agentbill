@@ -295,7 +295,7 @@ ${plannedRows()}
         <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
         <div class="pg-disc">The plan above is what the agent will send. Pressing Run
         executes it in your browser, against no account.<br />
-        Same rule and same response body as <a href="/docs">POST /preflight</a>.</div>
+        Same rule and same response body as <a href="/docs#api-reference">POST /preflight</a>.</div>
       </div>
     </div>
   </section>`

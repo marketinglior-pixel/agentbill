@@ -48,6 +48,14 @@ rdt('track','PageView');
  * channel it served was killed. If either is set again, the policy widens by
  * exactly the origin that needs it and nothing else.
  */
+/** Image and connect origins each configured pixel beacons to. */
+export function pixelExtra(): { script: string[]; img: string[]; connect: string[] } {
+  const out = { script: [] as string[], img: [] as string[], connect: [] as string[] }
+  if (metaSnippet()) { out.script.push('https://connect.facebook.net'); out.img.push('https://www.facebook.com'); out.connect.push('https://www.facebook.com') }
+  if (redditSnippet()) { out.script.push('https://www.redditstatic.com'); out.img.push('https://alb.reddit.com', 'https://www.redditstatic.com'); out.connect.push('https://alb.reddit.com') }
+  return out
+}
+
 export function pixelScriptSrc(): string[] {
   const out: string[] = []
   if (metaSnippet()) out.push('https://connect.facebook.net')

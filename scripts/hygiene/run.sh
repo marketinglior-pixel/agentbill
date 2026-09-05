@@ -61,15 +61,23 @@ gate "home.ts: one python sample, no phantom block" "1:1" "$n"
 B="${HYGIENE_BASE:-http://localhost:3000}"
 if curl -sf "$B/health" >/dev/null 2>&1; then
   for path in / /register /pricing /docs /faq; do
-    curl -s "$B$path" | perl -0777 -ne 'while(/<script>(.*?)<\/script>/gs){print "$1\n"}' > /tmp/hygiene-inline.js
+    # Any <script> tag, with or without attributes, except JSON-LD data blocks.
+    curl -s "$B$path" | perl -0777 -ne 'while(/<script(\s[^>]*)?>(.*?)<\/script>/gs){ next if defined $1 && $1 =~ /ld\+json/; print "$2\n" }' > /tmp/hygiene-inline.js
     if [ -s /tmp/hygiene-inline.js ]; then
       if node --check /tmp/hygiene-inline.js 2>/tmp/hygiene-inline.err; then
         printf "  ok    %-46s inline script parses\n" "$path"
       else
         printf "  FAIL  %-46s %s\n" "$path" "$(tail -2 /tmp/hygiene-inline.err | head -1)"; fail=1
       fi
+    else
+      # Every page in this list carries one inline script. None found means the
+      # extractor missed it or the page lost it, and both are failures.
+      printf "  FAIL  %-46s no inline script found\n" "$path"; fail=1
     fi
   done
+elif [ -n "${HYGIENE_BASE:-}" ]; then
+  # A base was named and is not answering: in CI that is a broken job, not a skip.
+  printf "  FAIL  %-46s no server on %s\n" "inline script parse check" "$B"; fail=1
 else
   printf "  skip  %-46s no server on %s\n" "inline script parse check" "$B"
 fi

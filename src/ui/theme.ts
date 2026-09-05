@@ -201,8 +201,8 @@ type HeadOpts = {
    * at all and it gets script-src 'none'.
    */
   scriptHashes?: readonly string[]
-  /** Extra script origins, for a configured pixel. Normally empty. */
-  scriptOrigins?: readonly string[]
+  /** Extra origins for a configured pixel (script, img, connect). Normally empty. */
+  scriptOrigins?: readonly string[] | { script?: readonly string[]; img?: readonly string[]; connect?: readonly string[] }
 }
 
 /**
@@ -258,10 +258,11 @@ const ICONS = `  <meta name="color-scheme" content="dark" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = [] }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = {} }: HeadOpts): string {
   const meta = path ? byPath.get(path) : undefined
-  const href = path ? abs(path) : canonical
   const hidden = noindex ?? (meta ? !meta.index : false)
+  // A canonical on a noindex page is two contradictory signals about one URL.
+  const href = hidden ? undefined : (path ? abs(path) : canonical)
   // One card for every page, for now. head() used to point non-default sections
   // at /og/<section>.png, and those routes were never built, so every share of
   // /docs, /pricing, /register and /blog carried a broken image for a day. The

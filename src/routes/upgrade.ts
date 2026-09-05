@@ -6,7 +6,7 @@ import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS } from '../ui/panels.js'
 import { publicRoute } from '../middleware/auth.js'
 import { inlineScript } from '../lib/csp.js'
-import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
+import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 const num = (n: number) => n.toLocaleString('en-US')
 const RECOMMENDED = 'team'
@@ -64,7 +64,7 @@ export async function upgradeRoute(app: FastifyInstance) {
         : `<a class="btn" data-tier="${tier}" href="${cta(tier)}">Get ${tier[0].toUpperCase()}${tier.slice(1)}</a>`
       return `
         <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
-          <td class="tier">${tier}${SERVICE[tier] ? `<span class="svc">${SERVICE[tier]}</span>` : ''}</td>
+          <th scope="row" class="tier">${tier}${SERVICE[tier] ? `<span class="svc">${SERVICE[tier]}</span>` : ''}</th>
           <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
           <td class="amount">$${PLAN_PRICES[tier]}${free ? '' : '<span class="dimtxt"> / mo</span>'}</td>
           <td class="act">${button}</td>
@@ -100,7 +100,7 @@ export async function upgradeRoute(app: FastifyInstance) {
       },
       extraHead: pixelSnippet(),
       scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
-      scriptOrigins: pixelScriptSrc(),
+      scriptOrigins: pixelExtra(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, spec-sheet page (F3)
      * design-system: design.md · designed-as-app · nav: N1b shared · footer: Ft2 shared
@@ -118,7 +118,8 @@ export async function upgradeRoute(app: FastifyInstance) {
        up because they are a table. The recommended tier carries weight through
        type, not through a tinted border and a floating badge. */
     .tiers { width: 100%; border-collapse: collapse; margin-top: 44px; font-variant-numeric: tabular-nums; }
-    .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px;
+    .tiers th { font-weight: inherit; text-align: left; }
+    .tiers th, .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px;
                 vertical-align: middle; }
     .tiers tr:first-child td { border-top: 1px solid var(--border); }
     .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
@@ -174,6 +175,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     })}
 <body>
 ${siteNav('/pricing')}
+<main>
   <div class="wrap">
 
     <h1>Your agents get a hard budget. Per task. One ceiling, any provider.</h1>
@@ -213,6 +215,7 @@ ${UPGRADE_JS}`}
     <p class="note">One runaway retry loop costs more than a year of Builder.
     No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
   </div>
+</main>
 ${siteFooter()}
 </body>
 </html>`)
@@ -227,7 +230,13 @@ ${siteFooter()}
   // This must ship with the polar.ts change in the same commit: getCheckoutUrl
   // returned https://agentbill.dev/upgrade as its fallback, and a redirect here
   // without that edit turns the buy button into a 301 back to the current page.
-  app.get('/upgrade', publicRoute(), async (_, reply) => reply.redirect('/pricing', 301))
+  // Forward the query. Until 2026-09-06 this dropped it, and preflight's
+  // quota refusals hand agents /upgrade?account_id=<id>: the redirect landed
+  // them on the anonymous /pricing, where every paid button says /register.
+  app.get('/upgrade', publicRoute(), async (request, reply) => {
+    const q = request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''
+    return reply.redirect(`/pricing${q}`, 301)
+  })
 
   // Authenticated helper for the pricing page's "already have a key?" box:
   // turns a bearer key into checkout links carrying the account metadata, so

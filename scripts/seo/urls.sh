@@ -16,6 +16,24 @@ for u in $(curl -s "$B/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*
   else printf '  ok   %-46s 200, self-canonical\n' "$p"; fi
 done
 
+# Every same-origin link on those pages must resolve. Depth one, which is what
+# a reader actually clicks; /blog answered 401 for months while being linked
+# from two of these pages, and nothing fetched the link.
+seen=""
+for u in $(curl -s "$B/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*>//g'); do
+  p="${u#https://agentbill.dev}"; [ -z "$p" ] && p=/
+  for h in $(curl -s "$B$p" | grep -o 'href="/[^"#]*"' | sed 's/href="//;s/"$//' | sort -u); do
+    case " $seen " in *" $h "*) continue;; esac
+    seen="$seen $h"
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$B$h")
+    case "$code" in
+      200|301|302) ;;
+      *) printf '  FAIL %-46s linked from %s -> %s\n' "$h" "$p" "$code"; fail=1;;
+    esac
+  done
+done
+printf '  ok   %-46s %s same-origin links resolve\n' "links on sitemap pages" "$(echo $seen | wc -w | tr -d ' ')"
+
 # robots.txt must NOT disallow /app.
 #
 # A Disallowed URL can still be indexed URL-only from an external link, because

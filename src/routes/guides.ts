@@ -23,7 +23,7 @@ function page(path: string, title: string, description: string, body: string) {
       headline: title,
       description,
       url: `https://agentbill.dev${path}`,
-      datePublished: meta?.updated,
+      datePublished: meta?.published ?? meta?.updated,
       dateModified: meta?.updated,
       inLanguage: 'en-US',
       author: { '@id': 'https://agentbill.dev/#organization' },

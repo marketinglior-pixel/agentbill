@@ -59,6 +59,12 @@ jobs:
           node dist/server.js &
           for i in $(seq 1 40); do curl -sf http://localhost:3998/health >/dev/null && break; sleep 0.5; done
           ./scripts/seo/urls.sh http://localhost:3998
+      # The inline-script parse check inside check:hygiene needs a server, and
+      # the hygiene job has none, so it skipped there silently. Here it runs.
+      - name: Inline scripts parse (against the booted server)
+        env:
+          HYGIENE_BASE: http://localhost:3998
+        run: npm run check:hygiene
 
   python-sdk:
     name: Python SDK install and unit tests

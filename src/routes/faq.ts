@@ -42,7 +42,7 @@ const FAQ: readonly QA[] = [
   {
     // src/routes/preflight.ts:26,128-158. plan_limit_exceeded is a rejection.
     q: `What happens when I reach the free tier's ${free} calls?`,
-    a: `Preflight starts returning plan_limit_exceeded and stops approving calls. It is the same shape of refusal as a task ceiling, so your code catches it the same way. Nothing is billed, nothing is silently allowed through, and the counter is checked and incremented in one statement so calls arriving together cannot all read the same number and all pass.`,
+    a: `Preflight starts returning free_tier_exceeded (plan_limit_exceeded on a paid plan) and stops approving calls. It is the same shape of refusal as a task ceiling, so your code catches it the same way. Nothing is billed, nothing is silently allowed through, and the counter is checked and incremented in one statement so calls arriving together cannot all read the same number and all pass.`,
   },
   {
     // Verified: nothing in src/ branches on plan except quota, display and the

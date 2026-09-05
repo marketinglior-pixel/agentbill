@@ -44,7 +44,10 @@ export function count(root = 'src') {
         if (!inRoot) h += hex.length
         if (inRoot) {
           depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
-          if (depth <= 0 && !entering) inRoot = false
+          // No `!entering` guard: a :root { } that opens and closes on one line
+          // reaches depth 0 on that line, and the guard kept inRoot true for
+          // the line after it, exempting whatever hex followed.
+          if (depth <= 0) inRoot = false
         }
       }
     }

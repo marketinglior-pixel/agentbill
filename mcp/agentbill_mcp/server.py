@@ -199,7 +199,7 @@ def _blocked_message(reason: str, data: dict) -> str:
     if reason == "budget_exhausted":
         return "Run blocked: customer budget is exhausted."
     if reason == "free_tier_exceeded":
-        url = data.get("upgrade_url", "https://agentbill.dev/upgrade")
+        url = data.get("upgrade_url", "https://agentbill.dev/pricing")
         return f"Run blocked: free tier limit reached. Upgrade at {url}"
     return f"Run blocked: {reason}"
 

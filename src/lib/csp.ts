@@ -49,16 +49,20 @@ export function inlineScript(js: string): { html: string; hash: string } {
  * frame-ancestors is absent on purpose: it is ignored in a meta-delivered
  * policy, and X-Frame-Options: DENY from middleware/headers.ts already covers it.
  */
-export function policy(scriptHashes: readonly string[], extraScriptSrc: readonly string[] = []): string {
-  const script = [...scriptHashes, ...extraScriptSrc].join(' ')
+export type Extra = { script?: readonly string[]; img?: readonly string[]; connect?: readonly string[] }
+export function policy(scriptHashes: readonly string[], extra: Extra | readonly string[] = {}): string {
+  const ex: Extra = Array.isArray(extra) ? { script: extra as readonly string[] } : (extra as Extra)
+  const script = [...scriptHashes, ...(ex.script ?? [])].join(' ')
+  const img = ["'self'", 'data:', ...(ex.img ?? [])].join(' ')
+  const connect = ["'self'", ...(ex.connect ?? [])].join(' ')
   return [
     "default-src 'none'",
     `script-src ${script || "'none'"}`,
     "style-src 'unsafe-inline' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
-    "img-src 'self' data:",
+    `img-src ${img}`,
     "manifest-src 'self'",
-    "connect-src 'self'",
+    `connect-src ${connect}`,
     "form-action 'self'",
     "base-uri 'none'",
   ].join('; ')

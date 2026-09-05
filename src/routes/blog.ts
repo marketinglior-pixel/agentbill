@@ -68,6 +68,7 @@ export async function blogRoute(app: FastifyInstance) {
       title: `${post('/blog/how-preflight-avoids-double-billing').title} · AgentBill`,
       description: post('/blog/how-preflight-avoids-double-billing').description,
       jsonLd: postLd('/blog/how-preflight-avoids-double-billing'),
+      og: { type: 'article' },
       current: '',
       body: `
 
@@ -278,6 +279,7 @@ record(units=7)
       title: `${post('/blog/monthly-caps-wont-save-you').title} · AgentBill`,
       description: post('/blog/monthly-caps-wont-save-you').description,
       jsonLd: postLd('/blog/monthly-caps-wont-save-you'),
+      og: { type: 'article' },
       current: '',
       body: `
 

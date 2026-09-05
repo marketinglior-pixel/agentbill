@@ -46,7 +46,7 @@ cat > src/lib/icons.ts <<EOF
 // .dockerignore review while a compiled Buffer arrives for free. Same pattern
 // as src/lib/og-image.ts.
 
-/** 16 + 32 + 48. Crawlers and older Safari probe /favicon.ico whatever the <link> tags say. */
+/** 16 + 32. Crawlers and older Safari probe /favicon.ico whatever the <link> tags say. */
 export const FAVICON_ICO: Buffer = Buffer.from('${ICO}', 'base64')
 
 /** 180x180, opaque. Doubles as Organization.logo, which Google will not accept as SVG. */

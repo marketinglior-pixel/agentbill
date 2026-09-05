@@ -25,7 +25,7 @@ $ python run_agent.py
 
 [AgentBill] preflight check... BLOCKED
   reason: free_tier_exceeded (1000/1000 calls used)
-  upgrade: https://agentbill.dev/upgrade
+  upgrade: https://agentbill.dev/pricing
 
 Agent did not run. $0 spent.
 ```

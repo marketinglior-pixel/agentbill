@@ -7,7 +7,7 @@ import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 import { publicRoute } from '../middleware/auth.js'
-import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
+import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
 // that shows the product doing the thing the claim describes. The panels are
@@ -84,7 +84,7 @@ function refusalPanel(): string {
 function pricingStrip(): string {
   const rows = PLAN_ORDER.map((tier) => `
         <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
-          <td class="tier">${tier}</td>
+          <th scope="row" class="tier">${tier}</th>
           <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
           <td class="amount">$${PLAN_PRICES[tier]}${tier === 'free' ? '' : '<span class="dimtxt"> / mo</span>'}</td>
         </tr>`).join('')
@@ -128,7 +128,7 @@ export async function homeRoute(app: FastifyInstance) {
       // 300 bytes on the most-fetched page of the site.
       extraHead: pixelSnippet(),
       scriptHashes: [PLAYGROUND_HASH, ...pixelHashes()],
-      scriptOrigins: pixelScriptSrc(),
+      scriptOrigins: pixelExtra(),
       css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
@@ -280,7 +280,8 @@ export async function homeRoute(app: FastifyInstance) {
     /* Pricing: a spec sheet, not four cards. The recommended tier carries weight
        through type, and the numbers line up because they are a table. */
     .tiers { width: 100%; border-collapse: collapse; margin-top: 28px; font-variant-numeric: tabular-nums; }
-    .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px; }
+    .tiers th { font-weight: inherit; text-align: left; }
+    .tiers th, .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px; }
     .tiers tr:first-child td { border-top: 1px solid var(--border); }
     .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
                    color: var(--dim); width: 18%; }
@@ -333,6 +334,7 @@ export async function homeRoute(app: FastifyInstance) {
     })}
 <body>
 ${siteNav('/')}
+<main>
 
   <header class="hero wrap">
     <div>
@@ -444,6 +446,7 @@ ${playgroundSection()}
     <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
   </div>
 
+</main>
 ${siteFooter()}
 ${PLAYGROUND_JS}
 </body>

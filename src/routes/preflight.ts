@@ -303,7 +303,7 @@ export async function preflightRoute(app: FastifyInstance) {
                 plan: account.plan,
                 monthly_calls: err.detail.monthly_calls,
                 plan_limit: planLimit,
-                upgrade_url: `https://agentbill.dev/upgrade?account_id=${accountId}`,
+                upgrade_url: `https://agentbill.dev/pricing?account_id=${accountId}`,
               }
             : err.reason === 'budget_exhausted'
               ? {

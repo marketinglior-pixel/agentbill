@@ -77,7 +77,7 @@ export async function appRoute(app: FastifyInstance) {
 
   // The canonical-host redirect preserves a trailing slash; without this the
   // 404 handler's Bearer hook would answer /app/ with a JSON 401.
-  app.get('/app/', publicRoute(), async (_request, reply) => reply.redirect('/app', 301))
+  app.get('/app/', publicRoute(), async (_request, reply) => reply.redirect('/app' + (_request.url.includes('?') ? _request.url.slice(_request.url.indexOf('?')) : ''), 301))
 
   app.post('/app/session', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
@@ -779,6 +779,7 @@ ${MARK_CSS}
 
 const HEAD = (title: string) => head({
   title: `${esc(title)} · AgentBill`,
+  description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
   // robots.txt reads, so the two cannot disagree about this page.
   path: '/app',
@@ -796,7 +797,7 @@ const ERRORS: Record<string, string> = {
 function loginPage(err: string): string {
   return `${HEAD('Console')}
 <body>
-  <nav class="top"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
+  <nav class="top" aria-label="Account"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
   <div class="login">
     <h1>Your console</h1>
     <p>Live task budgets, every call AgentBill refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
@@ -1054,7 +1055,7 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
 
   return `${HEAD('Console')}
 <body>
-  <nav class="top">
+  <nav class="top" aria-label="Account">
     <a class="logo" href="/">${mark(18)}AgentBill</a>
     <div class="who">${anon
       ? `<span class="dim mode">Sample console</span>

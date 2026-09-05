@@ -1,6 +1,9 @@
 import { Resend } from 'resend'
 import { getAccountsWithSignals, conversionScore, isHot } from './conversion.js'
 
+// Visitor-supplied fields go into an email body; escape them.
+const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
 // Daily owner email: yesterday's signups + the hot-accounts leaderboard.
 // Same run-inside-the-app pattern as the DB watchdog: hourly tick, fires once
 // per UTC day at SEND_HOUR_UTC. No-op when Resend or the owner email is unset.
@@ -21,14 +24,14 @@ async function sendDigest(): Promise<void> {
   const hot = accounts.filter(isHot).sort((a, b) => conversionScore(b) - conversionScore(a))
 
   const signupRows = newSignups
-    .map((a) => `<li><code>${a.email}</code> (${a.stack ?? '?'}, ${a.useCase ?? '?'})</li>`)
+    .map((a) => `<li><code>${esc(a.email)}</code> (${esc(a.stack ?? '?')}, ${esc(a.useCase ?? '?')})</li>`)
     .join('') || '<li>none</li>'
 
   const hotRows = hot
     .slice(0, 10)
     .map((a) => {
       const pct = Math.round(((a.monthlyCalls ?? 0) / 1_000) * 100)
-      return `<tr><td><code>${a.email}</code></td><td>${conversionScore(a)}</td><td>${a.monthlyCalls} (${pct}%)</td><td>${a.taskCount} tasks</td></tr>`
+      return `<tr><td><code>${esc(a.email)}</code></td><td>${conversionScore(a)}</td><td>${a.monthlyCalls} (${pct}%)</td><td>${a.taskCount} tasks</td></tr>`
     })
     .join('') || '<tr><td colspan="4">none yet</td></tr>'
 

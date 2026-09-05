@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@fastify/compress": "^7.0.3",
+    "@fastify/etag": "^4.2.0",
     "@fastify/sensible": "^5.6.0",
     "dotenv": "^17.4.2",
     "fastify": "^4.28.0",

@@ -43,7 +43,7 @@ export async function adminRoute(app: FastifyInstance) {
     const expected = process.env.ADMIN_SECRET ?? ''
     if (!expected || !safeEqual(secret, expected)) {
       reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
-      return reply.send(loginPage('Wrong secret.'))
+      return reply.code(401).send(loginPage('Wrong secret.'))
     }
     reply.header(
       'Set-Cookie',
@@ -205,16 +205,24 @@ const CSS = `${MARK_CSS}
   }
 `
 
+// Anything a visitor typed into /register is escaped before it lands in this
+// page. name, use_case and stack were interpolated raw into an attribute and two
+// cells, on the one page that lists every customer, with no CSP to blunt it.
+const esc = (v: unknown) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
 const SHELL = (title: string) => head({
   // Through head() now, which is where the viewport meta, the icons, the fonts
   // and the tokens come from. This page had none of them: it rendered at
   // desktop width and zoomed out on a phone, and loaded no webfont at all.
   title: `${title} · AgentBill`,
   path: '/admin',
+  // No inline scripts here, so script-src 'none'.
+  scriptHashes: [],
   css: CSS,
 })
 
-const topBar = (who = '') => `  <nav class="top">
+const topBar = (who = '') => `  <nav class="top" aria-label="Account">
     <a class="logo" href="/">${mark(18)}AgentBill</a>
     <span class="who">${who}</span>
   </nav>`
@@ -271,10 +279,10 @@ function adminPage(accounts: AccountSignals[], pulse: PlaygroundPulse) {
       ? `<span class="chip near">${calls} / ${FREE_TIER_LIMIT}</span>`
       : `${calls}`
 
-    return `<tr class="${hotRow ? 'near-row' : ''}" title="${a.name ?? ''}">
+    return `<tr class="${hotRow ? 'near-row' : ''}" title="${esc(a.name)}">
       <td>${hotRow ? `<span class="chip near">${score}</span>` : `<span class="muted">${score}</span>`}</td>
-      <td class="mono">${a.email ?? '<span class="none">no email</span>'}</td>
-      <td><span class="chip ${a.plan === 'free' ? 'flow' : 'held'}">${a.plan}</span></td>
+      <td class="mono">${a.email ? esc(a.email) : '<span class="none">no email</span>'}</td>
+      <td><span class="chip ${a.plan === 'free' ? 'flow' : 'held'}">${esc(a.plan)}</span></td>
       <td>
         <span class="track"><i class="${barClass}" style="width:${pct}%"></i></span>
         ${callBadge}
@@ -282,8 +290,8 @@ function adminPage(accounts: AccountSignals[], pulse: PlaygroundPulse) {
       <td class="muted">${a.taskCount}</td>
       <td class="muted">${rel(a.lastActivityAt)}</td>
       <td class="muted">${a.customerCount}</td>
-      <td>${a.stack ?? '<span class="muted">-</span>'}</td>
-      <td>${a.useCase ?? '<span class="muted">-</span>'}</td>
+      <td>${a.stack ? esc(a.stack) : '<span class="muted">-</span>'}</td>
+      <td>${a.useCase ? esc(a.useCase) : '<span class="muted">-</span>'}</td>
       <td class="muted">${new Date(a.createdAt).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'})}</td>
     </tr>`
   }).join('')

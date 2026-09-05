@@ -106,7 +106,7 @@ ${MARK_CSS}
   .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
   .foot-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
                gap: var(--s6) var(--s5); margin-bottom: var(--s7); }
-  .foot-col h4 { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500;
+  .foot-col .foot-h { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500;
                  letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
                  margin-bottom: var(--s2); }
   .foot-col a { display: block; color: var(--muted); text-decoration: none;
@@ -173,7 +173,7 @@ export function siteNav(
   const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
   const menu = [...LINKS, ['/app', 'Console'] as const]
     .map(([href, label]) => `<li><a href="${href}"${at(href)}>${label}</a></li>`).join('\n            ')
-  return `  <nav class="site-nav">
+  return `  <nav class="site-nav" aria-label="Primary">
     <div class="nav-inner">
       <a class="logo" href="/">${mark(18)}AgentBill</a>
       <div class="nav-center">
@@ -233,7 +233,7 @@ export function siteFooter(): string {
     <div class="foot-inner">
       <div class="foot-cols">
 ${FOOT.map(([heading, links]) => `        <div class="foot-col">
-          <h4>${heading}</h4>
+          <p class="foot-h">${heading}</p>
 ${links.map(([href, label, ext]) => `          <a href="${href}"${ext ? ' class="foot-ext" rel="noopener"' : ''}>${label}</a>`).join('\n')}
         </div>`).join('\n')}
       </div>

@@ -48,7 +48,8 @@ ${checks.map((c) => `    <div class="st-row ${c.ok ? 'ok' : 'down'}">
       <span class="st-ms">${c.ms === null ? '' : `${c.ms} ms`}</span>
     </div>`).join('\n')}
   </div>
-  <p class="st-when">Checked ${checkedAt} UTC.</p>
+  <p class="st-when">Checked ${checkedAt} UTC. Latency is one round trip from this server, including
+     connection setup when the pool is cold.</p>
 
   <h2>What this page does not know</h2>
   <p>It has no history. Nothing here records past availability, so there is no

@@ -33,8 +33,9 @@ declare module 'fastify' {
  * nothing can be aliased into every other route's options.
  *
  * This is still forgettable, just forgettable next to the handler instead of a
- * file away. What makes it safe is the crawl gate in CI, which walks every link
- * on the site and fails the build on a 401.
+ * file away. What makes it safe is scripts/seo/urls.sh in CI, which fetches
+ * every sitemap URL and every same-origin link on those pages and fails the
+ * build on anything but 200.
  */
 export const publicRoute = () => ({ config: { public: true } })
 
@@ -85,7 +86,7 @@ export function registerAuth(app: FastifyInstance) {
     if (request.routeOptions.config?.public === true) return
 
     const auth = request.headers.authorization ?? ''
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+    const token = /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : ''
 
     if (!token) {
       return reply.code(401).send({

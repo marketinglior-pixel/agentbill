@@ -83,7 +83,7 @@ export async function keysRoute(app: FastifyInstance) {
   // Rotate the current key: new key issued, old key gets 24h grace period
   app.post('/keys/rotate', async (request, reply) => {
     const auth = request.headers.authorization ?? ''
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+    const token = /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : ''
     const accountId = (request as any).accountId
 
     const graceUntil = new Date(Date.now() + 24 * 3_600_000)
@@ -126,7 +126,7 @@ export async function keysRoute(app: FastifyInstance) {
 
     const accountId = (request as any).accountId
     const auth = request.headers.authorization ?? ''
-    const currentToken = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+    const currentToken = /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : ''
 
     let result
 

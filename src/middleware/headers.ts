@@ -38,8 +38,17 @@ export function registerHeaders(app: FastifyInstance) {
     set('Cross-Origin-Opener-Policy', 'same-origin')
 
     const path = request.url.split('?')[0]
-    const type = String(reply.getHeader('content-type') ?? '')
+    let type = String(reply.getHeader('content-type') ?? '')
+    // reply.type('text/html') on a string sends no charset. Say utf-8.
+    if (/^text\/(html|plain)$/.test(type)) {
+      type = `${type}; charset=utf-8`
+      reply.header('Content-Type', type)
+    }
     if (type.startsWith('text/html')) {
+      // The compressor sets Vary only when it compresses; an identity response
+      // to a cacheable page needs it too, or a cache can serve br to a client
+      // that asked for none.
+      set('Vary', 'Accept-Encoding')
       const match = HTML_CACHE.find(([test]) => test(path))
       // Anything not named above holds a key, a session or a form: no-store.
       set('Cache-Control', match ? match[1] : 'no-store')

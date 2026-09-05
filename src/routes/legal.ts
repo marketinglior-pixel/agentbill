@@ -31,9 +31,9 @@ function legalShell(title: string, path: string, body: string): string {
   })}
 <body>
 ${siteNav('', { sticky: false })}
-  <div class="container">
+  <main class="container">
     ${body}
-  </div>
+  </main>
 ${siteFooter()}
 </body>
 </html>`

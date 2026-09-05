@@ -74,10 +74,10 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-05', priority: 0.4, changefreq: 'yearly' },
 
   { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-05', priority: 0.9, changefreq: 'weekly' },
-  { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
-  { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-05', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-05', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/openai-agent-spend-ceiling', section: 'docs', crumbs: [HOME, DOCS], crumb: 'OpenAI', og: 'docs', index: true, updated: '2026-09-05', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-05', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
+  { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs/openai-agent-spend-ceiling', section: 'docs', crumbs: [HOME, DOCS], crumb: 'OpenAI', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
 
   { path: '/blog', section: 'blog', crumbs: [HOME], crumb: 'Blog', og: 'blog', index: true, updated: '2026-09-05', priority: 0.6, changefreq: 'monthly' },
   { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },

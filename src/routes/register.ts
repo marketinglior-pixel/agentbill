@@ -11,7 +11,7 @@ import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../l
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { inlineScript } from '../lib/csp.js'
-import { pixelHashes, pixelScriptSrc } from '../lib/pixel.js'
+import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -69,7 +69,8 @@ async function existingAccountReply(reply: any, email: string, apiKey: string) {
 }
 
 const RegisterBody = z.object({
-  email:    z.string().email(),
+  // trim + lowercase: the same address in two capitalisations was two free tiers.
+  email:    z.string().trim().toLowerCase().email(),
   name:     z.string().min(1).max(128).optional(),
   use_case: z.string().max(64).optional(),
   stack:    z.string().max(32).optional(),
@@ -187,7 +188,7 @@ export async function registerRoute(app: FastifyInstance) {
       og: { description: 'Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card.' },
       extraHead: pixelSnippet(),
       scriptHashes: [REGISTER_HASH, ...pixelHashes()],
-      scriptOrigins: pixelScriptSrc(),
+      scriptOrigins: pixelExtra(),
       css: `${CHROME_CSS}${PANEL_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
@@ -285,6 +286,7 @@ export async function registerRoute(app: FastifyInstance) {
     })}
 <body>
 ${siteNav('/register', { cta: false })}
+<main>
 
 <div class="reg wrap">
   <div class="pitch">
@@ -312,15 +314,15 @@ ${siteNav('/register', { cta: false })}
           -d '{"email":"you@company.com"}'</code></p></noscript>
         <div class="field">
           <label for="email">Work email</label>
-          <input type="email" id="email" placeholder="you@company.com" required autocomplete="email" />
+          <input type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" />
         </div>
         <div class="field">
           <label for="name">Your name <span class="opt">(optional)</span></label>
-          <input type="text" id="name" placeholder="Ada Lovelace" autocomplete="name" />
+          <input type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
         </div>
         <div class="field">
           <label for="use_case">What are you building?</label>
-          <select id="use_case">
+          <select id="use_case" name="use_case">
             <option value="">Select one&hellip;</option>
             <option value="ai_saas">AI SaaS product</option>
             <option value="internal_agents">Internal agent workflows</option>
@@ -331,7 +333,7 @@ ${siteNav('/register', { cta: false })}
         </div>
         <div class="field">
           <label for="stack">Primary language</label>
-          <select id="stack">
+          <select id="stack" name="stack">
             <option value="">Select one&hellip;</option>
             <option value="python">Python</option>
             <option value="nodejs">Node.js</option>
@@ -366,6 +368,7 @@ ${siteNav('/register', { cta: false })}
   </div>
 </div>
 
+</main>
 ${siteFooter()}
 
 ${REGISTER_JS}
@@ -382,7 +385,7 @@ ${REGISTER_JS}
     if (!parsed.success) {
       return reply.code(422).send({
         error: 'validation_error',
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        message: [parsed.error.issues[0]?.path?.join('.'), parsed.error.issues[0]?.message].filter(Boolean).join(': ') ?? 'Invalid request body',
       })
     }
 

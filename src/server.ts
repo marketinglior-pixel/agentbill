@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import Fastify from 'fastify'
+import Fastify, { type FastifyReply } from 'fastify'
 import sensible from '@fastify/sensible'
 import { eventsRoute } from './routes/events.js'
 import { budgetRoute } from './routes/budget.js'
@@ -10,9 +10,10 @@ import { docsRoute } from './routes/docs.js'
 import { preflightRoute } from './routes/preflight.js'
 import { pulseRoute } from './routes/pulse.js'
 import { registerAuth, publicRoute } from './middleware/auth.js'
-import { registerNotFound } from './routes/not-found.js'
+import { registerNotFound, sendNotFoundPage } from './routes/not-found.js'
 import { registerHeaders } from './middleware/headers.js'
 import compress from '@fastify/compress'
+import etag from '@fastify/etag'
 import { constants as zlibConstants } from 'node:zlib'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
@@ -42,7 +43,22 @@ import { FOUNDER_JPG } from './lib/photo.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 
-const app = Fastify({ logger: true })
+const app = Fastify({
+  logger: true,
+  // A malformed percent-encoding in the path (/%) fails inside the router,
+  // before any hook or setErrorHandler this app registers can see it, and
+  // Fastify's default answer is a JSON body that echoes the URL back to the
+  // client. frameworkErrors is the one seam that runs for it. Same page as the
+  // 404, status 400, nothing reflected.
+  // Typed loosely on purpose: the constructor infers a reply generic here that
+  // rejects code()/send() on a plain string. This is an ordinary reply.
+  frameworkErrors: (_error, request, reply: FastifyReply) => {
+    reply.header('X-Robots-Tag', 'noindex').header('Cache-Control', 'no-store')
+    const accept = request.headers.accept ?? ''
+    if (accept.includes('text/html')) return sendNotFoundPage(request, reply, 400)
+    return reply.code(400).send({ error: 'bad_request', message: 'Malformed URL.' })
+  },
+})
 
 // Canonical-host redirect. Off until CANONICAL_HOST is set (fly secrets set
 // CANONICAL_HOST=agentbill.dev once DNS validates), so nothing breaks while
@@ -120,7 +136,16 @@ registerHeaders(app)
 // at 4 brotli produced 16,290 bytes against gzip's 15,930, so it was listed
 // first and doing worse than the fallback. 5 costs a little more CPU per
 // response and is the usual sweet spot for dynamic HTML.
-app.register(compress, {
+// Awaited: app.get() on the root runs synchronously at script time, and a
+// plugin only exists once avvio loads it. Without the await every root route
+// below (og.png, favicon, robots, sitemap, llms.txt) and the 404 page shipped
+// uncompressed while the route plugins were fine, which is invisible unless you
+// measure llms.txt with Accept-Encoding: br.
+//
+// ETag first, before compress, so the validator hashes the body clients cache
+// and must-revalidate on / and /pricing has something to revalidate against.
+await app.register(etag)
+await app.register(compress, {
   encodings: ['br', 'gzip'],
   threshold: 1024,
   brotliOptions: { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } },
@@ -326,12 +351,11 @@ Configure in ~/.claude/settings.json:
 }
 
 ## Links
-
-Docs: https://agentbill.dev/docs
-API: https://agentbill.fly.dev
-GitHub: https://github.com/marketinglior-pixel/agentbill
-PyPI: https://pypi.org/project/agentbill-sdk/
-MCP: https://pypi.org/project/agentbill-mcp/
+${indexable().map((pg) => `- ${abs(pg.path)}`).join('\n')}
+- API base: https://agentbill.dev
+- GitHub: https://github.com/marketinglior-pixel/agentbill
+- PyPI: https://pypi.org/project/agentbill-sdk/
+- MCP: https://pypi.org/project/agentbill-mcp/
 `
 })
 
