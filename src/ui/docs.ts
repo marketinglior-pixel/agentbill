@@ -77,6 +77,13 @@ export const DOCS_CSS = `${CHROME_CSS}
   p.ok { color: var(--green); }
   li { color: var(--muted); line-height: 1.7; }
   a { color: var(--green); }
+  /* A link at display size is a title, not an action. The blog index renders each
+     post as <h2><a>, so both headings inherited full-strength green plus the prose
+     underline and became the entire chromatic content of the page: 2.02% on a page
+     with almost no ink. Linear, Polar and Stripe all set index links in text and
+     leave the accent for the meta line or a hover. */
+  h1 a, h2 a { color: var(--text); text-decoration: none; }
+  h1 a:hover, h2 a:hover { color: var(--green); }
 
   /* The frame does not scroll and is never masked; the pre inside it does both.
      When overflow and the fade sat on this element, the mask ate the 1px border,
@@ -86,7 +93,7 @@ export const DOCS_CSS = `${CHROME_CSS}
      container's own padding collapses at the scroll origin. */
   .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px;
           padding: 20px; margin: 16px 0; }
-  .code pre { font-family: var(--mono); font-size: 13px; color: var(--code); line-height: 1.7;
+  .code pre { font-family: var(--mono); font-size: 13px; color: var(--code-ink); line-height: 1.7;
               overflow-x: auto; }
   /* A block that scrolls sideways used to look exactly like one that does not,
      so a reader saw a sentence end mid-word and had no way to know there was
@@ -107,7 +114,7 @@ export const DOCS_CSS = `${CHROME_CSS}
        border-bottom: 1px solid var(--border2); font-family: var(--mono); font-size: 11.5px;
        letter-spacing: .1em; text-transform: uppercase; }
   td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); color: var(--muted); vertical-align: top; }
-  td:first-child { font-family: var(--mono); font-size: 13px; color: var(--code); white-space: nowrap; }
+  td:first-child { font-family: var(--mono); font-size: 13px; color: var(--text); white-space: nowrap; }
   .tag { display: inline-block; font-family: var(--mono); background: var(--surface3); color: var(--dim);
          font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
   .badge { display: inline-block; font-family: var(--mono); background: var(--surface3);

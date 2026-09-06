@@ -192,7 +192,7 @@ export async function homeRoute(app: FastifyInstance) {
                  font-family: var(--mono); font-size: 11.5px; letter-spacing: 1.1px; color: var(--dim); }
     .code-head b { color: var(--muted); font-weight: 500; }
     .code-body { padding: 22px 24px; overflow-x: auto; }
-    .code-body pre { font-family: var(--mono); font-size: 13.5px; color: var(--code); line-height: 1.75; }
+    .code-body pre { font-family: var(--mono); font-size: 13.5px; color: var(--code-ink); line-height: 1.75; }
     .cmt { color: var(--cmt); }
     .out-dim { color: var(--dim); }
 

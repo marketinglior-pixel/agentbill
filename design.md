@@ -51,6 +51,22 @@ Headings are roman. Never italic. Emphasis is weight or colour.
 - Paper `--bg`, surfaces `--surface` / `--surface2` / `--surface3`, elevation by
   lightness not by shadow, plus `--edge` (one lit pixel on a raised surface) and
   `--lift` (the shadow under it). Use them together or not at all.
+- **The lit edge goes on whatever is actually the top of the object.** An inset
+  shadow paints on the padding box, so a panel that opens with an opaque
+  `.panel-h` covers its own `--edge`; the strip carries its own. Measured before
+  this was fixed, a panel's top border and its left border were both 35, meaning
+  the bevel did not exist on any marketing panel.
+- **A shadow has about ten levels of headroom on this ground; the frame has 245.**
+  `--lift` is one close shadow only. Direction is said with
+  `border-top-color: var(--border2)`, which is the mechanism the references use.
+  The old outer `0 8px 24px` half moved the ground from 10 to 8 across three
+  pixels and cost a paint on six call sites.
+- `--code` is syntax. **`--code-ink` is the base ink inside a code frame**, and it
+  is what a block gets; `--code` is for string literals and the token spans. Six
+  declarations used to put `--code` on a whole block, which is how the docs SQL
+  block came to measure 99% one hue against 63% achromatic on the reference set.
+- A link at display size is a title, not an action: `h1 a` and `h2 a` are `--text`
+  on the docs shell, with the accent left for the hover.
 - `--green` is the brand and the primary action. Links are `--green`.
 - `--code` is **syntax only**. Not links, not emphasis, not prose.
 - `--red` and `--amber` are states that need a human. Red means exactly one

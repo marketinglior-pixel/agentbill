@@ -224,7 +224,7 @@ export async function registerRoute(app: FastifyInstance) {
     .field { display: grid; gap: 6px; }
     label { font-size: 13.5px; font-weight: 600; color: var(--text); }
     label .opt { color: var(--dim); font-weight: 400; margin-left: 4px; }
-    input, select { min-height: 44px; width: 100%; background: var(--surface); color: var(--text);
+    input, select { min-height: 44px; width: 100%; background: var(--bg); color: var(--text);
                     border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 14px;
                     font-family: var(--sans); font-size: 15px;
                     outline: 2px solid transparent; outline-offset: 1px;
@@ -271,7 +271,7 @@ export async function registerRoute(app: FastifyInstance) {
     .ns-num { font-family: var(--mono); font-size: 12px; color: var(--green); padding-top: 2px; }
     .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
     .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
-              padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code);
+              padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code-ink);
               white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
     .ns code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
                padding: 1px 5px; border-radius: 3px; }

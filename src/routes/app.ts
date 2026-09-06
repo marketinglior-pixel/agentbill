@@ -727,7 +727,7 @@ ${MARK_CSS}
   details summary::before { content: '\\25B8  '; } details[open] summary::before { content: '\\25BE  '; }
   pre { background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
         font-family: var(--mono); font-size: 12.5px; line-height: 1.55; overflow-x: auto;
-        color: var(--code); margin-top: 10px; }
+        color: var(--code-ink); margin-top: 10px; }
 
   /* empty + banners */
   .empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: 12px; padding: 26px; margin-top: 16px; }

@@ -46,7 +46,7 @@ export const CHROME_CSS = `
      painting over it during scroll. Change .nav-inner's height and this together. */
   :root { --shell: 960px; --banner-height: 60px; }
 
-  .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,0.92);
+  .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(5,5,5,0.92);
               backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
   .nav-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; height: var(--banner-height);
                display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
@@ -65,6 +65,11 @@ ${MARK_CSS}
                   border-bottom: 2px solid transparent; transition: color .15s; }
   .nav-center a:hover { color: var(--text); }
   /* The current page is a bar flush with the hairline, not a colour shift alone. */
+  /* Tried at the dim end of the brand hue, to stop the active bar and the primary
+     CTA both shouting inside one 44px strip. Rendered and looked: a 2px rule at
+     that value on the page ground is invisible, so wayfinding fell back to the
+     text colour alone, which is weaker than what was there. Reverted. Separating
+     those two marks needs a mid step in the ramp, which is its own pass. */
   .nav-center a[aria-current="page"] { color: var(--text); border-bottom-color: var(--green); }
 
   .nav-right { justify-self: end; display: flex; align-items: center; gap: 18px; }

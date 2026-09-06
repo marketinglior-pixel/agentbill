@@ -38,7 +38,11 @@ export const BP = { lg: 960, md: 720, sm: 640, xs: 400 } as const
  * no :root of the page to inherit from.
  */
 export const BRAND = {
-  bg: '#0a0a0a',
+  // #0a0a0a put --surface only 7 levels up and the step did not read. Every dark
+  // reference either drops the ground or lifts the surface: Neon 0, Resend 0,
+  // Polar 9, Linear 8. At 5 the same --surface #111111 reads +12, which is
+  // Linear's own ratio. Read literally by the theme-color meta and the manifest.
+  bg: '#050505',
   green: '#22d3a0',
   greenInk: '#05130e',
 } as const
@@ -60,6 +64,13 @@ export const TOKENS = `
     /* signal. --green is the brand and the primary action; --code is syntax
        only; --red and --amber are states that need a human. */
     --green: ${BRAND.green}; --green-ink: ${BRAND.greenInk}; --code: #a8ff78;
+    /* The base ink inside a code frame. --code is syntax, and design.md has said
+       so all along, but six declarations set it on a whole block, so the docs SQL
+       block measured 99% one hue and the register JSON block 90%, against 63%
+       achromatic on Modal and 80% on Upstash. A page of solid lime reads as a
+       terminal screenshot, not as a document. Slightly green-leaning rather than
+       pure grey, so the frame still belongs to this palette. */
+    --code-ink: #cfd6d2;
     --red: #ff5757; --amber: #f5b942;
     /* Console semantics, shared by every page that shows the console's rows
        (the console itself, the homepage panels). --flow is ordinary traffic,
@@ -138,8 +149,19 @@ export const TOKENS = `
        its top edge, the way real light falls on a bevel. --edge is that pixel
        and --lift is the shadow under it. Use them together on anything that is
        supposed to sit ON the page rather than be cut out of it. */
-    --edge: inset 0 1px 0 rgba(255,255,255,0.055);
-    --lift: 0 1px 2px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.28);
+    /* 0.055 computed to 30.1 over --surface, which is exactly --border-soft,
+       and 34.8 over --surface2, which is exactly --border. The highlight was
+       set to the border's own value, so a panel's top edge and its left edge
+       measured identically at 35 and the bevel did not exist. 0.17 lands at
+       57.5 and 61.6, which is +23 and +27 over the border, between Linear's
+       measured +17 and Modal's +34. */
+    --edge: inset 0 1px 0 rgba(255,255,255,0.17);
+    /* The 0 8px 24px rgba(0,0,0,0.28) half moved the ground from 10 to 8 over
+       three pixels and then paid for a blur on six call sites. A shadow has
+       about ten levels of headroom on a near-black ground; a border has 245,
+       which is why Linear and Modal say which way the light falls with the
+       frame instead. See .panel's border-top-color. */
+    --lift: 0 1px 2px rgba(0,0,0,0.5);
   }`
 
 /** Reset plus the element defaults every page shares. */
