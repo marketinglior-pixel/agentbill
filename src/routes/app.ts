@@ -444,7 +444,9 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     keys: keys as unknown as KeyRow[],
     decisions: decisions as unknown as DecisionRow[],
     decisionMatched: Number(matched?.n ?? 0),
-    truncated: decisions.length === 100,
+    // From the count, not the page length: exactly 100 matching rows is a
+    // complete list, and the page length alone called it "100 of 100".
+    truncated: Number(matched?.n ?? 0) > decisions.length,
   }
 }
 
@@ -870,6 +872,9 @@ ${MARK_CSS}
                 border: 1px solid var(--border2); border-radius: var(--r-chip); padding: 5px 9px;
                 font-family: var(--mono); font-size: var(--fs-chip); white-space: nowrap; box-shadow: var(--lift); }
   .col:hover::after { display: block; }
+  /* On the tallest bars the readout above the column pokes past the frame's
+     top edge; those anchor it just inside the plot instead. */
+  .col.tall::after { bottom: auto; top: 6px; }
   .col:hover i { filter: brightness(1.25); }
   .col.l::after { left: 0; transform: none; } .col.r::after { left: auto; right: 0; transform: none; }
   .cx { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--s4); margin-top: 6px; }
@@ -1017,7 +1022,7 @@ ${MARK_CSS}
   .empty ol li { margin-bottom: 6px; }
   .empty pre { margin: var(--s2) 0 var(--s3); white-space: pre-wrap; word-break: break-all; }
   .empty details { margin-top: var(--s2); }
-  .empty .out { font-family: var(--mono); font-size: var(--fs-micro); color: var(--code); }
+  .empty .out { font-family: var(--mono); font-size: var(--fs-micro); color: var(--code); overflow-wrap: anywhere; }
   .nothing { padding: var(--s5) var(--s4); color: var(--dim); }
   .foot { margin-top: var(--s7); padding-top: var(--s4); border-top: 1px solid var(--border); color: var(--dim);
           line-height: 1.7; }
@@ -1082,13 +1087,14 @@ ${MARK_CSS}
     /* The leak row: the link takes its own line instead of squeezing the
        sentence into an 84px column beside it. */
     .leak { flex-wrap: wrap; }
-    .leak-t { flex: 1 1 200px; }
+    .leak-t { flex: 1 1 160px; }
     .leak a { flex-basis: 100%; }
     /* The hover readout is wider than a phone's plot and there is no hover on
        a phone; the day-by-day table on the activity view carries the values. */
     .col:hover::after { display: none; }
-    /* Seven daily labels overlap at 320px; every other one steps back. */
-    .cx div.x1 span:nth-child(even) { visibility: hidden; }
+    /* Seven daily labels, or six ninety-day ones, overlap at 320px; every
+       other one steps back. */
+    .cx div.x1 .alt, .cx div.dense .alt { visibility: hidden; }
     /* The refusals table on a phone: the same rows, laid out as cards. Six
        columns in a sideways scroller hid the sentence that explains the row
        behind two swipes. One DOM, no second copy for the small screen. */
@@ -1334,7 +1340,7 @@ function chartBlock(series: Series[]): string {
   const dense = n > 31 ? ' dense' : ''
   const cols = series.map((s, i) => {
     const h = s.units > 0 ? Math.max(2, Math.round((s.units / top) * 100)) : 0
-    return `<div class="col${edge(i)}${i === peakI ? ' peak' : ''}" data-t="${esc(tip(s))}" data-v="${num(s.units)}">${h ? `<i style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
+    return `<div class="col${edge(i)}${i === peakI ? ' peak' : ''}${h >= 80 ? ' tall' : ''}" data-t="${esc(tip(s))}" data-v="${num(s.units)}">${h ? `<i style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
   }).join('')
   const bcols = series.map((s, i) => {
     const h = s.blocks > 0 ? Math.max(4, Math.round((s.blocks / Math.max(1, blockMax)) * 100)) : 0
@@ -1342,7 +1348,14 @@ function chartBlock(series: Series[]): string {
   }).join('')
   // The last day is always labelled and the rest step back from it.
   const stride = n <= 7 ? 1 : n <= 31 ? 7 : 15
-  const xs = series.map((s, i) => `<span>${(n - 1 - i) % stride === 0 ? esc(fmtDay(s.day)) : ''}</span>`).join('')
+  let nth = 0
+  const xs = series.map((s, i) => {
+    const on = (n - 1 - i) % stride === 0
+    // Every other labelled column is .alt, so a phone can hide half the labels
+    // of a daily or ninety-day axis without hiding two neighbours.
+    const alt = on && nth++ % 2 === 1 ? ' class="alt"' : ''
+    return `<span${alt}>${on ? esc(fmtDay(s.day)) : ''}</span>`
+  }).join('')
   return `<div class="chart frame">
       <div class="crow">
         <div class="clab"><b>Units metered</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
