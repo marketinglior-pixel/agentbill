@@ -98,11 +98,11 @@ function pricingStrip(): string {
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
-      title: 'AgentBill · Hard budget ceilings for AI agents',
-      description: 'Hard budget ceilings for AI agents. One ceiling per task. Every call that shares the task ref draws it down, whatever the provider, on units you define. Blocked before the first token. Free tier, API key in 30 seconds.',
+      title: 'AgentBill · A spend ceiling bound to the task, not the month',
+      description: 'Provider spend caps are bound to a project, an organization and a calendar month. This ceiling is bound to a task_ref: every call that passes the same one is checked before it runs, on units you define. Free tier, API key in 30 seconds.',
       path: '/',
       og: {
-        description: 'Block runaway agent spend before compute starts. One hard ceiling per task, consulted by every call in the job. Not a tracker. A guardrail.',
+        description: 'Provider caps are bound to an account and a month. A job is neither. One ceiling on a task_ref, checked before each call, on units you define.',
       },
       // Offers render from PLAN_ORDER / PLAN_PRICES / PLAN_LIMITS rather than
       // being typed here. A price written twice is a price that will disagree
@@ -114,7 +114,7 @@ export async function homeRoute(app: FastifyInstance) {
         name: 'AgentBill',
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'Any',
-        description: 'Hard per-task budget ceilings for AI agents. Block runaway spend before compute starts.',
+        description: 'A per-task spend ceiling for AI agents, bound to a task_ref and checked before each call, on units the developer defines.',
         url: 'https://agentbill.dev',
         provider: { '@id': 'https://agentbill.dev/#organization' },
         offers: PLAN_ORDER.map((tier) => ({

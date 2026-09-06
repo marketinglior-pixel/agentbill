@@ -86,7 +86,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     reply.type('text/html')
     return reply.send(`${head({
       title: 'AgentBill · Pricing',
-      description: `Hard budget ceilings for AI agents. Free tier with ${num(PLAN_LIMITS.free)} preflight calls/month, paid plans from $${PLAN_PRICES.builder}/month. No credit card to start.`,
+      description: `A spend ceiling bound to the task, not the month. Free tier with ${num(PLAN_LIMITS.free)} preflight calls/month, paid plans from $${PLAN_PRICES.builder}/month. No credit card to start.`,
       // Both /pricing and /upgrade render this, and both canonicalise to
       // /pricing, which is the registry's only entry for the page.
       path: '/pricing',

@@ -185,7 +185,7 @@ export async function registerRoute(app: FastifyInstance) {
       title: 'Get your API key · AgentBill',
       description: 'Free API key in 30 seconds. 1,000 preflight calls/month, hard per-task budget ceilings for AI agents. No credit card.',
       path: '/register',
-      og: { description: 'Hard budget ceilings for AI agents. Free tier, key in 30 seconds, no credit card.' },
+      og: { description: 'A spend ceiling bound to the task, not the month. Free tier, key in 30 seconds, no credit card.' },
       extraHead: pixelSnippet(),
       scriptHashes: [REGISTER_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
