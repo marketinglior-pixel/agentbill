@@ -1,6 +1,13 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), on a branch, not deployed.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `6649f40`, Fly v100.**
+>
+> Before the merge an adversarial review of the diff (four lenses, three refuters per
+> finding) confirmed six defects and raised eleven lower ones. The worst: array lengths
+> of the 20-row pages were rendered as account totals in the rail, the Live tasks tile,
+> the limits ladder and the "All N" headings, beside a refusals count that was a real
+> count(*). Whole-account counts now come from SQL. Twelve findings were fixed and each
+> fix was reproduced against the local server by its own agent before the merge.
 >
 > The console was audited by eye against production at 1440 and 390 and against
 > the code that feeds it, then rebuilt as a workbench shell. What the audit found,
