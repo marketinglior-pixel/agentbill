@@ -500,7 +500,7 @@ ${playgroundSection()}
         <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
         unit is worth. The ceiling is consulted before each call, and the total across the whole
         job cannot pass it.</p>
-        <a class="chip-link" href="/app?demo=1#tasks">Watch budgets burn down &rarr;</a>
+        <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch budgets burn down &rarr;</a>
       </div>
       ${taskPanel()}
     </div>
@@ -514,7 +514,7 @@ ${playgroundSection()}
         fan-out spread across four processes and two machines draws down one number, and a later
         call passing a different ceiling for the same task does not move it. You pass what each call
         is worth. We never look at your provider bill.</p>
-        <a class="chip-link" href="/app?demo=1#refusals">See the refusals &rarr;</a>
+        <a class="chip-link" href="/app?demo=1&amp;view=refusals">See the refusals &rarr;</a>
       </div>
       ${refusalPanel()}
     </div>

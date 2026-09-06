@@ -253,7 +253,7 @@ const VIEWS = {
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
   activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
-  refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, newest first, with the literal body the agent got.' },
+  refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, and every one that ran past a ceiling, newest first, with the literal body the agent got.' },
   customers: { title: 'Customers',    lede: 'One balance per customer_id. Balances are lifetime, not a period.' },
   keys:      { title: 'API keys',     lede: 'Every key on this account, its state, and where it was last used from.' },
   limits:    { title: 'Limits',       lede: 'What refuses a call on this account, in the order preflight checks it.' },
@@ -275,7 +275,9 @@ type Filter = { task?: string; agent?: string; only?: 'leaks' }
 
 function readFilter(q: Record<string, unknown>): Filter {
   const f: Filter = {}
-  const id = (v: unknown) => (typeof v === 'string' && v.length > 0 && v.length <= 128 ? v : undefined)
+  // Postgres rejects a NUL in a text parameter, so a control character in an
+  // id would turn a filtered view into a 500. Ids are opaque, not binary.
+  const id = (v: unknown) => (typeof v === 'string' && /^[^\u0000-\u001f\u007f]{1,128}$/.test(v) ? v : undefined)
   const task = id(q?.task)
   const agent = id(q?.agent)
   if (task) f.task = task
@@ -309,10 +311,19 @@ type Console = {
   series: Series[]
   byReason: Record<string, number>
   tasks: TaskRow[]
+  /** Whole-account counts. The row arrays above are pages of 20; a number a
+   *  page shows as a total has to come from here, never from an array length. */
+  taskCount: number
+  taskLive: number
+  taskNear: number
   customers: CustomerRow[]
+  customerCount: number
+  customerWithLimit: number
   customerTotal: number
   keys: KeyRow[]
   decisions: DecisionRow[]
+  /** Rows matching the current filter, across the whole account. */
+  decisionMatched: number
   truncated: boolean
 }
 
@@ -374,7 +385,27 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     LIMIT 20
   `
   const [ctotal] = await sql`
-    SELECT coalesce(sum(used_units), 0) AS total FROM customers WHERE account_id = ${accountId}
+    SELECT count(*)                                         AS n,
+           count(*) FILTER (WHERE limit_units IS NOT NULL)  AS with_limit,
+           coalesce(sum(used_units), 0)                     AS total
+    FROM customers WHERE account_id = ${accountId}
+  `
+  // near = live and at four fifths of the ceiling or more, settled plus in
+  // flight: the same test taskRow() applies, in integers so it is exact.
+  const [ttotal] = await sql`
+    SELECT count(*)                                                        AS n,
+           count(*) FILTER (WHERE used_units < ceiling_units)             AS live,
+           count(*) FILTER (WHERE used_units < ceiling_units
+                              AND (used_units + reserved_units) * 5 >= ceiling_units * 4) AS near
+    FROM task_budgets WHERE account_id = ${accountId}
+  `
+  const [matched] = await sql`
+    SELECT count(*) AS n
+    FROM preflight_decisions
+    WHERE account_id = ${accountId}
+      ${f.task ? sql`AND task_ref = ${f.task}` : sql``}
+      ${f.agent ? sql`AND agent_id = ${f.agent}` : sql``}
+      ${f.only === 'leaks' ? sql`AND NOT blocked` : sql``}
   `
   const keys = await sql`
     SELECT api_key, label, created_at, revoked_at, expires_at, last_seen_ip
@@ -403,10 +434,16 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     series: (series as unknown as Series[]).map((s) => ({ day: s.day, blocks: Number(s.blocks), units: Number(s.units), refused: Number(s.refused) })),
     byReason,
     tasks: tasks as unknown as TaskRow[],
+    taskCount: Number(ttotal?.n ?? 0),
+    taskLive: Number(ttotal?.live ?? 0),
+    taskNear: Number(ttotal?.near ?? 0),
     customers: customers as unknown as CustomerRow[],
+    customerCount: Number(ctotal?.n ?? 0),
+    customerWithLimit: Number(ctotal?.withLimit ?? 0),
     customerTotal: Number(ctotal?.total ?? 0),
     keys: keys as unknown as KeyRow[],
     decisions: decisions as unknown as DecisionRow[],
+    decisionMatched: Number(matched?.n ?? 0),
     truncated: decisions.length === 100,
   }
 }
@@ -510,6 +547,13 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
     { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
     { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
   ]
+  const tasks: TaskRow[] = [
+      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
+      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
+      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
+      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
+      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1000, reservedUnits: 0, updatedAt: day(2) },
+  ]
   return {
     decisionTotal: all.length,
     overruns: 2,
@@ -518,23 +562,24 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
     prevBlocked: Math.round(blockedTotal * 0.78),
     series,
     byReason,
-    tasks: [
-      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
-      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
-      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
-      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
-      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1000, reservedUnits: 0, updatedAt: day(2) },
-    ],
+    tasks,
+    taskCount: tasks.length,
+    taskLive: tasks.filter((t) => t.usedUnits < t.ceilingUnits).length,
+    taskNear: tasks.filter((t) => t.usedUnits < t.ceilingUnits && (t.usedUnits + t.reservedUnits) * 5 >= t.ceilingUnits * 4).length,
     customers,
+    customerCount: customers.length,
+    customerWithLimit: customers.filter((c) => c.limitUnits != null).length,
     customerTotal: customers.reduce((a, c) => a + c.usedUnits, 0),
     keys: [
       { apiKey: DEMO_KEY, label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
       { apiKey: DEMO_KEY_CI, label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
     ],
     decisions,
+    decisionMatched: decisions.length,
     truncated: false,
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // HTML helpers
@@ -758,7 +803,7 @@ ${MARK_CSS}
   .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
   .tile { padding: var(--s4) var(--s4) var(--s3); display: flex; flex-direction: column; gap: 6px; }
   .tv { font-family: var(--mono); font-size: var(--fs-figure); font-weight: 700; line-height: 1.1;
-        letter-spacing: -.02em; color: var(--text); }
+        letter-spacing: -.02em; color: var(--text); overflow-wrap: anywhere; }
   .tv.held { color: var(--held); }
   .tf { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
   .tf.now { color: var(--muted); }
@@ -803,6 +848,9 @@ ${MARK_CSS}
                        font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
                        font-variant-numeric: tabular-nums; white-space: nowrap; }
   .cbars { display: flex; align-items: flex-end; gap: 3px; height: 180px; position: relative; }
+  /* Ninety columns at a 3px gap spent 267px on gaps, which is more than a
+     phone's whole plot; the bars measured 0px. Dense windows use 1px. */
+  .cbars.dense, .cx div.dense { gap: 1px; }
   .cbars.strip { height: 40px; }
   .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center;
          position: relative; }
@@ -890,7 +938,8 @@ ${MARK_CSS}
                              font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); font-style: italic; }
   details summary { cursor: pointer; color: var(--green); font-family: var(--mono); font-size: var(--fs-micro);
-                    list-style: none; padding: 2px 0; white-space: nowrap; }
+                    list-style: none; padding: 2px 0; }
+  td details summary { white-space: nowrap; }
   details summary::-webkit-details-marker { display: none; }
   details summary::before { content: '\\25B8  '; } details[open] summary::before { content: '\\25BE  '; }
   pre { background: var(--bg-deep); border: 1px solid var(--border); border-radius: var(--r-control); padding: var(--s3) var(--s4);
@@ -928,24 +977,27 @@ ${MARK_CSS}
   .filters { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin: -8px 0 var(--s3);
              font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
   .filters .chip-f { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong);
-                     border-radius: var(--r-control); padding: 0 10px; min-height: 32px; color: var(--muted); }
-  .filters .chip-f b { color: var(--text); font-weight: 500; }
+                     border-radius: var(--r-control); padding: 0 10px; min-height: 32px; color: var(--muted);
+                     max-width: 100%; min-width: 0; }
+  .filters .chip-f b { color: var(--text); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; }
   .filters a { color: var(--green); }
 
-  /* The limits ladder. Four rules in evaluation order. */
-  .rule { display: grid; grid-template-columns: 34px minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4); padding: var(--s4);
-          border-bottom: 1px solid var(--border); }
-  .rule:last-child { border-bottom: none; }
-  .rule .n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); padding-top: 3px; }
-  .rule h3 { font-family: var(--display); font-size: var(--fs-body); font-weight: 600; letter-spacing: -.01em; color: var(--text);
-             margin-bottom: 2px; }
-  .rule .param { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); margin-bottom: 6px; }
-  .rule p { color: var(--dim); max-width: 60ch; }
-  .rule .live { display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: var(--fs-micro);
-                color: var(--muted); font-variant-numeric: tabular-nums; }
-  .rule .live b { color: var(--text); font-weight: 700; }
-  .rule .live .held { color: var(--held); } .rule .live .fail { color: var(--fail); }
-  .rule .live a { color: var(--green); }
+  /* The limits ladder. Four rules in evaluation order. Named .lim, not .rule:
+     the refusals table has a td.rule and a shared name gave that cell a grid. */
+  .lim { display: grid; grid-template-columns: 34px minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4); padding: var(--s4);
+         border-bottom: 1px solid var(--border); }
+  .lim:last-child { border-bottom: none; }
+  .lim .n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); padding-top: 3px; }
+  .lim h3 { font-family: var(--display); font-size: var(--fs-body); font-weight: 600; letter-spacing: -.01em; color: var(--text);
+            margin-bottom: 2px; }
+  .lim .param { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); margin-bottom: 6px; }
+  .lim p { color: var(--dim); max-width: 60ch; }
+  .lim .live { display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: var(--fs-micro);
+               color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lim .live b { color: var(--text); font-weight: 700; }
+  .lim .live .held { color: var(--held); } .lim .live .fail { color: var(--fail); }
+  .lim .live a { color: var(--green); }
   .note { margin-top: var(--s3); color: var(--dim); max-width: 78ch; }
 
   /* Commands, as display, not as a code sample: a div, never a pre, because
@@ -1018,11 +1070,25 @@ ${MARK_CSS}
     .duo { grid-template-columns: minmax(0, 1fr); }
     .crow, .cx { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
     .clab { flex-direction: row; align-items: baseline; gap: var(--s3); }
+    /* The row title sits above the plot here, where the peak's direct label
+       used to land on it; the title already names the peak. */
+    .col.peak::before { display: none; }
+    h2 { flex-wrap: wrap; }
     .cbars { height: 140px; }
-    .rule { grid-template-columns: 28px minmax(0, 1fr); }
-    .rule .live { grid-column: 2; }
+    .lim { grid-template-columns: 28px minmax(0, 1fr); }
+    .lim .live { grid-column: 2; }
   }
   @media (max-width: ${BP.sm}px) {
+    /* The leak row: the link takes its own line instead of squeezing the
+       sentence into an 84px column beside it. */
+    .leak { flex-wrap: wrap; }
+    .leak-t { flex: 1 1 200px; }
+    .leak a { flex-basis: 100%; }
+    /* The hover readout is wider than a phone's plot and there is no hover on
+       a phone; the day-by-day table on the activity view carries the values. */
+    .col:hover::after { display: none; }
+    /* Seven daily labels overlap at 320px; every other one steps back. */
+    .cx div.x1 span:nth-child(even) { visibility: hidden; }
     /* The refusals table on a phone: the same rows, laid out as cards. Six
        columns in a sideways scroller hid the sentence that explains the row
        behind two swipes. One DOM, no second copy for the small screen. */
@@ -1046,6 +1112,9 @@ ${MARK_CSS}
     .cmd { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
   @media (max-width: ${BP.xs}px) {
+    /* A seven-digit figure needs 140px of the 116px a half-width tile has at
+       320px; one column keeps the number inside its frame. */
+    .kpis { grid-template-columns: minmax(0, 1fr); }
     .btn-key { padding: 0 var(--s3); }
     .btn-key .long { display: none; }
     .btn-key .short { display: inline; }
@@ -1156,12 +1225,11 @@ function accountCard(p: Page): string {
 
 function rail(p: Page): string {
   const d = p.d
-  const live = d.tasks.filter((t) => Number(t.usedUnits) < Number(t.ceilingUnits)).length
   const activeKeys = d.keys.filter((k) => !(k.revokedAt && new Date(k.revokedAt).getTime() <= Date.now()) && !(k.expiresAt && new Date(k.expiresAt).getTime() <= Date.now())).length
   const counts: Partial<Record<ViewKey, string>> = {
-    tasks: live ? num(live) : '',
+    tasks: d.taskLive ? num(d.taskLive) : '',
     refusals: d.decisionTotal ? num(d.decisionTotal) : '',
-    customers: d.customers.length ? num(d.customers.length) : '',
+    customers: d.customerCount ? num(d.customerCount) : '',
     keys: activeKeys ? num(activeKeys) : '',
   }
   const items = (Object.keys(VIEWS) as ViewKey[]).map((k) =>
@@ -1206,8 +1274,8 @@ function kpis(p: Page, rangeLabel: string): string {
   const blocked = d.series.reduce((a, x) => a + x.blocks, 0)
   const refused = d.series.reduce((a, x) => a + x.refused, 0)
   const metered = d.series.reduce((a, x) => a + x.units, 0)
-  const live = d.tasks.filter((t) => Number(t.usedUnits) < Number(t.ceilingUnits))
-  const near = live.filter((t) => (Number(t.usedUnits) + Number(t.reservedUnits)) / Number(t.ceilingUnits) >= 0.8).length
+  const live = d.taskLive
+  const near = d.taskNear
   const avgAsk = blocked ? Math.round(refused / blocked) : 0
   // "30d", not "last 30 days": the long form wrapped every label at 1440px and
   // the tiles stopped lining up. The period control in the header says the rest.
@@ -1232,8 +1300,8 @@ function kpis(p: Page, rangeLabel: string): string {
       </div>
       <div class="tile frame">
         <div class="lbl">Live tasks · now</div>
-        <div class="tv">${num(live.length)}</div>
-        <div class="tf now">${live.length === 0 ? 'none under a ceiling' : near ? `${num(near)} within a fifth of the ceiling` : 'all comfortably under their ceilings'}</div>
+        <div class="tv">${num(live)}</div>
+        <div class="tf now">${live === 0 ? 'none under a ceiling' : near ? `${num(near)} within a fifth of the ceiling` : 'all comfortably under their ceilings'}</div>
       </div>
     </div>`
 }
@@ -1263,6 +1331,7 @@ function chartBlock(series: Series[]): string {
   const peakB = blockMax > 0 ? series.findIndex((s) => s.blocks === blockMax) : -1
   const edge = (i: number) => (i < 3 ? ' l' : i >= n - 3 ? ' r' : '')
   const tip = (s: Series) => `${fmtDay(s.day)} · ${num(s.units)} units metered · ${num(s.blocks)} refused`
+  const dense = n > 31 ? ' dense' : ''
   const cols = series.map((s, i) => {
     const h = s.units > 0 ? Math.max(2, Math.round((s.units / top) * 100)) : 0
     return `<div class="col${edge(i)}${i === peakI ? ' peak' : ''}" data-t="${esc(tip(s))}" data-v="${num(s.units)}">${h ? `<i style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
@@ -1278,15 +1347,15 @@ function chartBlock(series: Series[]): string {
       <div class="crow">
         <div class="clab"><b>Units metered</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
         <div class="cplot">
-          <div class="cgrid"><span data-y="${num(top)}"></span><span data-y="${num(top / 2)}"></span><span data-y="0"></span></div>
-          <div class="cbars">${cols}</div>
+          <div class="cgrid"><span data-y="${num(top)}"></span>${Number.isInteger(top / 2) ? `<span data-y="${num(top / 2)}"></span>` : ''}<span data-y="0"></span></div>
+          <div class="cbars${dense}">${cols}</div>
         </div>
       </div>
       <div class="crow">
         <div class="clab held"><b>Refused</b><span>${blockMax > 0 ? `peak ${num(blockMax)} a day` : 'none in this window'}</span></div>
-        <div class="cplot"><div class="cbars strip">${bcols}</div></div>
+        <div class="cplot"><div class="cbars strip${dense}">${bcols}</div></div>
       </div>
-      <div class="cx"><span></span><div>${xs}</div></div>
+      <div class="cx"><span></span><div class="${dense.trim()}${stride === 1 ? ' x1' : ''}">${xs}</div></div>
     </div>`
 }
 
@@ -1366,7 +1435,7 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
   if (rows.length === 0) {
     const filtered = p.filter.task || p.filter.agent || p.filter.only
     return `<div class="frame"><p class="nothing">${filtered
-      ? 'Nothing matches this filter in the latest 100.'
+      ? 'Nothing on this account matches this filter.'
       : 'Nothing refused yet. Every call AgentBill refuses lands here with the literal JSON your agent received.'}</p></div>`
   }
   const body = rows.map((r) => {
@@ -1387,7 +1456,7 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
     <thead><tr><th>When</th><th>Rule</th><th>Agent</th><th>Task</th><th>What happened</th><th>What the agent got</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>
-  ${truncated ? `<p class="note">Showing the latest 100 of ${num(p.d.decisionTotal)}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
+  ${truncated ? `<p class="note">The latest 100 of ${num(p.d.decisionMatched)}${p.filter.task || p.filter.agent || p.filter.only ? ' that match' : ''}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
 }
 
 function customersTable(p: Page, rows: CustomerRow[], total: number, compact = false): string {
@@ -1421,10 +1490,11 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
   </table></div>`
 }
 
-function keysTable(rows: KeyRow[]): string {
+function keysTable(rows: KeyRow[], viewerKey: string): string {
   if (rows.length === 0) return `<div class="frame"><p class="nothing">No keys on this account.</p></div>`
   const now = Date.now()
   const body = rows.map((k) => {
+    const mine = k.apiKey === viewerKey
     const mask = k.apiKey.slice(0, 8) + '…' + k.apiKey.slice(-4)
     const revoked = k.revokedAt ? new Date(k.revokedAt).getTime() : null
     const expires = k.expiresAt ? new Date(k.expiresAt).getTime() : null
@@ -1437,7 +1507,7 @@ function keysTable(rows: KeyRow[]): string {
     else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip near">expiring</span>'
     return `<tr>
       <td class="id">${esc(mask)}</td>
-      <td>${k.label ? esc(k.label) : '<span class="none">no label</span>'}</td>
+      <td>${k.label ? esc(k.label) : '<span class="none">no label</span>'}${mine ? ' <span class="chip flow" title="The key that opened this console">this session</span>' : ''}</td>
       <td>${chip}</td>
       <td class="when">${rel(k.createdAt)}</td>
       <td class="when">${k.expiresAt ? rel(k.expiresAt) : '<span class="none">never</span>'}</td>
@@ -1459,16 +1529,16 @@ function limitsBlock(p: Page, rangeLabel: string): string {
   const { limit, pct } = planOf(v)
   const by = (k: string) => d.byReason[k] ?? 0
   const planRefused = by('free_tier_exceeded') + by('plan_limit_exceeded')
-  const withLimit = d.customers.filter((c) => c.limitUnits != null).length
-  const unlimited = d.customers.length - withLimit
-  const live = d.tasks.filter((t) => Number(t.usedUnits) < Number(t.ceilingUnits)).length
+  const withLimit = d.customerWithLimit
+  const unlimited = d.customerCount - withLimit
+  const live = d.taskLive
   const inWin = ` · last ${esc(rangeLabel)}`
   const refusedLine = (n: number) => `<span><b class="${n ? 'held' : ''}">${num(n)}</b> refused${inWin}</span>`
   const born = v.defaultBudgetUnits == null
     ? 'with no limit, because this account has no default balance set'
     : `with <b>${num(v.defaultBudgetUnits)} units</b>, the account default`
   return `<div class="frame">
-      <div class="rule">
+      <div class="lim">
         <div class="n">01</div>
         <div>
           <h3>Per request</h3>
@@ -1477,7 +1547,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         </div>
         <div class="live">${refusedLine(by('ceiling_exceeded'))}</div>
       </div>
-      <div class="rule">
+      <div class="lim">
         <div class="n">02</div>
         <div>
           <h3>Plan quota</h3>
@@ -1492,7 +1562,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
           ${limit !== null && pct >= 75 ? `<a href="/pricing?account_id=${encodeURIComponent(v.accountId)}">Raise the ceiling &rarr;</a>` : ''}
         </div>
       </div>
-      <div class="rule">
+      <div class="lim">
         <div class="n">03</div>
         <div>
           <h3>Per customer</h3>
@@ -1502,10 +1572,10 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         <div class="live">
           <span><b>${num(withLimit)}</b> ${withLimit === 1 ? 'customer' : 'customers'} with a limit${unlimited ? ` · <b>${num(unlimited)}</b> without` : ''}</span>
           ${refusedLine(by('budget_exhausted'))}
-          ${d.customers.length ? `<a href="${href(p, 'customers')}">Balances &rarr;</a>` : ''}
+          ${d.customerCount ? `<a href="${href(p, 'customers')}">Balances &rarr;</a>` : ''}
         </div>
       </div>
-      <div class="rule">
+      <div class="lim">
         <div class="n">04</div>
         <div>
           <h3>Per task</h3>
@@ -1516,7 +1586,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
           <span><b>${num(live)}</b> ${live === 1 ? 'task' : 'tasks'} under a ceiling now</span>
           ${refusedLine(by('task_ceiling_exceeded'))}
           <span><b class="${d.overruns ? 'fail' : ''}">${num(d.overruns)}</b> leaked · all time</span>
-          ${d.tasks.length ? `<a href="${href(p, 'tasks')}">Burn-down &rarr;</a>` : ''}
+          ${d.taskCount ? `<a href="${href(p, 'tasks')}">Burn-down &rarr;</a>` : ''}
         </div>
       </div>
     </div>
@@ -1571,7 +1641,7 @@ function overviewView(p: Page, rangeLabel: string): string {
 
     <div class="duo" style="margin-top:var(--s7)">
       <div>
-        <h2>Recent tasks <a href="${href(p, 'tasks')}">All ${d.tasks.length ? num(d.tasks.length) + ' ' : ''}&rarr;</a></h2>
+        <h2>Recent tasks <a href="${href(p, 'tasks')}">All ${d.taskCount ? num(d.taskCount) + ' ' : ''}&rarr;</a></h2>
         ${tasksBlock(p, d.tasks.slice(0, 4))}
       </div>
       <div>
@@ -1580,7 +1650,7 @@ function overviewView(p: Page, rangeLabel: string): string {
       </div>
     </div>
 
-    <h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customers.length ? num(d.customers.length) + ' ' : ''}&rarr;</a></h2>
+    <h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customerCount ? num(d.customerCount) + ' ' : ''}&rarr;</a></h2>
     ${customersTable(p, topCustomers, d.customerTotal, true)}`
 }
 
@@ -1593,7 +1663,7 @@ function activityView(p: Page, rangeLabel: string): string {
 function tasksView(p: Page): string {
   return `${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
-    <p class="note">Up to 20 tasks, most recently touched first. The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
+    <p class="note">${p.d.taskCount > p.d.tasks.length ? `The ${num(p.d.tasks.length)} most recently touched of ${num(p.d.taskCount)} tasks.` : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, most recently touched first.`} The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
 }
 
 function refusalsView(p: Page): string {
@@ -1611,18 +1681,18 @@ function refusalsView(p: Page): string {
 
 function customersView(p: Page): string {
   return `${customersTable(p, p.d.customers, p.d.customerTotal)}
-    <p class="note">Up to 20 customers, heaviest first. Share is of every customer's lifetime spend on this account, including any not listed. The full list is on <code>GET /customers</code>.</p>`
+    <p class="note">${p.d.customerCount > p.d.customers.length ? `The ${num(p.d.customers.length)} heaviest of ${num(p.d.customerCount)} customers.` : `${num(p.d.customerCount)} ${p.d.customerCount === 1 ? 'customer' : 'customers'}, heaviest first.`} Share is of every customer's lifetime spend on this account, including any not listed. The full list is on <code>GET /customers</code>.</p>`
 }
 
 function keysView(p: Page): string {
-  return `${keysTable(p.d.keys)}
+  return `${keysTable(p.d.keys, p.v.apiKey)}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
     <div class="frame cmds">
       <div class="cmd"><b>POST /keys/generate</b><span>A new key, with an optional label and expiry in days.</span></div>
       <div class="cmd"><b>POST /keys/rotate</b><span>A new key now; the old one keeps working for 24 hours, then revokes itself.</span></div>
       <div class="cmd"><b>POST /keys/revoke</b><span>Kills the calling key immediately, or another by its prefix. A revoked key ends this session on its next request.</span></div>
     </div>
-    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : 'The key that opened this console is the one shown first.'}</p>`
+    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : 'Oldest first. The key that opened this console is marked.'}</p>`
 }
 
 // ---------------------------------------------------------------------------
