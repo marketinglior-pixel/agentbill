@@ -139,6 +139,18 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
 
 ## CTA voice
 
+A code frame that cannot be copied undercuts a page whose argument is "three
+lines of code". `copyPill()` in `src/ui/copy.ts` is the control; one delegated
+listener covers every instance, so one CSP hash does too. The label changes to
+"Copied" and back, which is a state change rather than motion for mood.
+
+The hero's install line is also the honest answer to the proof the references put
+beside their primary action. Fourteen of fourteen show a logo wall or a customer
+count within one screen of the CTA. This product has two external signups, so a
+logo wall is unavailable and a fabricated one would break the claims rules. The
+install line is what is true and actionable now: a step that needs no account.
+
+
 One label for one action: `KEY_CTA` in `chrome.ts`, with `KEY_CTA_SHORT` for the
 nav at its narrowest. The site carried seven wordings of this button, two of
 which differed only by whether they had an arrow. Two labels stay outside the

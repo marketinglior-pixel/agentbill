@@ -6,6 +6,7 @@ import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { publicRoute } from '../middleware/auth.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
@@ -127,9 +128,9 @@ export async function homeRoute(app: FastifyInstance) {
       // meta keywords has been ignored by every major engine since 2009. It was
       // 300 bytes on the most-fetched page of the site.
       extraHead: pixelSnippet(),
-      scriptHashes: [PLAYGROUND_HASH, ...pixelHashes()],
+      scriptHashes: [PLAYGROUND_HASH, COPY_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}
+      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}${COPY_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
@@ -310,6 +311,7 @@ export async function homeRoute(app: FastifyInstance) {
                      color: var(--text); letter-spacing: -0.02em; }
     .tiers tr.rec .tier { color: var(--green); }
     .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
+    .hero-install { margin-top: var(--s5); }
     .price-links { margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
     .not-for ul { list-style: none; max-width: 60ch; }
@@ -346,6 +348,7 @@ export async function homeRoute(app: FastifyInstance) {
          reads as broken. Sanctioned exception, recorded in design.md. */
       .hero-cta { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
       .hero-cta > a { text-align: center; }
+      .cp { max-width: none; }
       .code-body { padding: 18px 16px; }
       /* No pre-wrap. It preserved the deep source indent on some lines and broke
          others flush to the gutter, so the panel captioned "the whole integration"
@@ -379,6 +382,14 @@ ${siteNav('/')}
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
+      </div>
+      <!-- The step that needs no account. The references all put proof beside the
+           primary action; this product has two external signups, so a logo wall is
+           unavailable and inventing one would break the claims rules. The install
+           line is the honest equivalent: something the reader can act on now. -->
+      <div class="hero-install">
+        ${copyPill('install-cmd', 'pip install agentbill-sdk')}
+        <p class="cp-note">or read the <a href="/docs">two-minute quickstart</a></p>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
     </div>
@@ -484,7 +495,7 @@ ${playgroundSection()}
 
 </main>
 ${siteFooter()}
-${PLAYGROUND_JS}
+${PLAYGROUND_JS}${COPY_JS}
 </body>
 </html>
     `)
