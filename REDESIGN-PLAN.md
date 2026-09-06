@@ -1,5 +1,44 @@
 # Redesign plan: from competent to premium
 
+> **STATUS 2026-09-06: all five waves are implemented on `wave-1-rendering-defects`,
+> six commits, `d2a9c32` through `e135e34`. Not merged and not deployed.**
+>
+> Every change was verified against a LOCAL server whose page heights matched
+> production exactly on all 18 captures. What moved, measured:
+>
+> | | before | after |
+> |---|---|---|
+> | /docs API table on a phone | 420px in a 342px box, cells unreachable | 342px, 0 cells past the viewport |
+> | Console chart tallest bar | 55% of a plot labelled 960 | 100%, touches its own label |
+> | /pricing mobile row rules | stubs ending at 3 different x | full-width rules only |
+> | Title to section head | 1.06x | 1.47x desktop, 1.33x phone |
+> | Diptych panel widths | 569 / 408 / 569 | 569 / 569 / 569 |
+> | Panel top edge vs left border | both 35, no bevel | 61 vs 35 |
+> | Ground to surface step | +7 | +12 |
+> | /register column rag | 410px | 1px |
+> | Visible primaries on a phone | 2 on six pages | 1 |
+> | Chromatic pixels, /blog | 118,477 | 29,175 |
+> | Chromatic pixels, /docs | 221,239 | 128,920 |
+> | Docs prose measure | 86 characters | 54 to 67 |
+>
+> Repo checks all green throughout: tsc 0, hygiene, snippets, and the drift
+> ratchet, whose font-size baseline this work LOWERED from 137 to 135.
+>
+> **One prescription was applied, measured, and reverted:** moving the nav's
+> active-page bar to the dim end of the brand hue. A 2px rule at that value is
+> invisible on this ground, so wayfinding fell back to the text colour alone.
+> The reason is in `chrome.ts` and the two tokens it needed were removed rather
+> than left inert.
+>
+> **One was declined and recorded in design.md:** a product panel on /pricing.
+> That page's own stamp says the table is the product surface.
+>
+> **Still open, deliberately:** positioning and copy, which `current-state.md`
+> holds for phase 2, and the contact address in `legal.ts`, which is a legal
+> document rather than a render. `/about` is the one page whose absolute green
+> rose, by 14%, because unifying the CTA label made its two buttons wider.
+
+
 Written 2026-09-06. Companion to `design.md`, which stays the authority on the system.
 This file is the work order that closes the gap between the system and what actually renders.
 
