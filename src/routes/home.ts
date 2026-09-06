@@ -166,6 +166,28 @@ export async function homeRoute(app: FastifyInstance) {
        measured 0.6em advance: it overflowed by seven pixels, orphaned one word,
        and the break moved as the webfont loaded. Four spans and a flex wrap put
        the break where the content is instead. */
+
+    /* An identifier inside prose. The mono face is the third register in the
+       system and it is what makes task_ref read as a thing in the code rather
+       than as a word in a sentence. No chip ground: this is body copy. */
+    .mono-in { font-family: var(--mono); font-size: .92em; color: var(--text); }
+
+    /* The proof line beside the primary action. Every premium reference fills
+       this slot with a logo wall; we have nobody who has agreed to be named, so
+       it holds one sourced incident. It is set at the trust line's register, not
+       the body's, because it is evidence rather than argument. */
+    .proof { font-size: var(--fs-small); color: var(--dim); line-height: 1.65;
+             max-width: 52ch; margin-top: var(--s4);
+             padding-top: var(--s4); border-top: 1px solid var(--border); }
+    .proof b { color: var(--muted); font-weight: 600; }
+    .proof a { color: var(--muted); text-decoration: underline;
+               text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
+    .proof a:hover { color: var(--text); text-decoration-color: var(--text); }
+
+    /* The citation row under a claim. Dim on purpose: the claim carries the
+       page, the links carry the claim, and a reader who wants them finds them. */
+    .lead-p.src { font-size: var(--fs-small); color: var(--dim); line-height: 1.7; max-width: 78ch; }
+    .lead-p.src a { color: var(--muted); }
     .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
     .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
@@ -375,10 +397,13 @@ ${siteNav('/')}
 
   <header class="hero wrap">
     <div>
-      <h1>Your loop won't stop itself.</h1>
-      <p class="sub">One hard ceiling per task. Every call in that job checks it before it runs,
-      whatever the provider, and you pass what each call is worth. Blocked before the call goes out,
-      not after the bill shows up.</p>
+      <h1>Your job is not an account, and it does not last a month.</h1>
+      <p class="sub">Provider spend caps are real and they fire. What they are bound to is a project,
+      an organization over a calendar month, or a single session on one vendor's own agent harness.
+      This ceiling is bound to a <span class="mono-in">task_ref</span>: every call that passes the
+      same one checks the same number before it runs, in whatever process it runs in, and the check
+      and the reservation are one conditional update. You pass what each call is worth. We never
+      read your provider bill.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
@@ -392,6 +417,15 @@ ${siteNav('/')}
         <p class="cp-note">or read the <a href="/docs">two-minute quickstart</a></p>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
+      <!-- The slot every premium reference fills with a logo wall. We have nobody who
+           has agreed to be named, so it holds a sourced incident with a link instead.
+           The number belongs to the reporter, in his own issue, and the point is made
+           by the two units disagreeing: the limit is a month, the incident was a weekend. -->
+      <p class="proof">One reporter, one issue, on an <b>Enterprise plan ($3,000/month limit)</b>:
+      <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener">
+      &ldquo;~$300 of unintended API usage over a single weekend with no way to detect or stop it
+      from the CLI&rdquo;</a>, on a loop that ran ~864 iterations. The limit is stated per month.
+      The incident was a weekend.</p>
     </div>
 
     <div class="code-block">
@@ -409,6 +443,14 @@ client.preflight(agent_id="researcher",
                  task_ref="job-142",
                  task_ceiling=500,
                  estimated_units=12)
+
+<span class="cmt"># your provider call goes here</span>
+
+<span class="cmt"># settle, or the units stay held</span>
+<span class="cmt"># until the reservation expires.</span>
+client.record(agent_id="researcher",
+              task_ref="job-142",
+              units=12)
 
 <span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
       </div>
@@ -431,9 +473,21 @@ client.preflight(agent_id="researcher",
 ${playgroundSection()}
 
   <section class="wrap">
-    <h2 class="lead-h2">Monthly caps don't stop tonight's loop.</h2>
-    <p class="lead-p">Provider spend caps stop at monthly org totals. These three things stop the run
-    that is burning money right now.</p>
+    <h2 class="lead-h2">The cap is real. It is bound to an account and a month.</h2>
+    <p class="lead-p">Turn them on and keep them on. They fire, and they are documented. What they
+    are bound to is a project, an organization, or one session on one vendor's own harness, measured
+    over a calendar month. Two things follow from where that line is drawn. A run too small to move
+    a monthly number never crosses it. And a monthly number low enough to catch that run takes every
+    agent in the organization down with it when it fires, until the month turns.</p>
+    <p class="lead-p src">Their own documentation, read at source on 2026-09-06:
+    <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">a
+    hard limit returns <span class="mono-in">429 project_spend_limit_exceeded</span> and enforcement
+    &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount&rdquo;</a>
+    &middot; <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">a
+    tier cap pauses usage &ldquo;until 00:00 UTC on the first day of the next month&rdquo;</a>
+    &middot; <a href="https://ai.google.dev/gemini-api/docs/billing" rel="nofollow noopener">&ldquo;Long-running
+    tasks like batch mode completions and agent sessions may incur overages beyond your project
+    spend cap.&rdquo;</a></p>
 
     <div class="dip row-close">
       <div class="dip-text">
@@ -448,10 +502,13 @@ ${playgroundSection()}
 
     <div class="dip flip row-close">
       <div class="dip-text">
-        <h3>One ceiling, any provider</h3>
-        <p>OpenAI, Anthropic, your own GPU, a tool call. Whatever it is, if it passes the same
-        task_ref it draws down the same ceiling, and you decide what it costs in units. We never
-        look at your provider bill. Per job, with per-agent attribution.</p>
+        <h3>One ceiling, one task, across processes</h3>
+        <p>Something draws down this ceiling <b>only if it calls preflight with the same
+        <span class="mono-in">task_ref</span></b>. That is why anything can, and why nothing does on
+        its own. The row is unique on <span class="mono-in">(account_id, task_ref)</span>, so a
+        fan-out spread across four processes and two machines draws down one number, and a later
+        call passing a different ceiling for the same task does not move it. You pass what each call
+        is worth. We never look at your provider bill.</p>
         <a class="chip-link" href="/app?demo=1#refusals">See the refusals &rarr;</a>
       </div>
       ${refusalPanel()}
@@ -460,9 +517,11 @@ ${playgroundSection()}
     <div class="dip row-close">
       <div class="dip-text">
         <h3>No proxy in your request path</h3>
-        <p>An SDK call, not a gateway. Nothing to route your traffic through, nothing to deploy,
-        nothing to compromise. The ceiling is something your tools consult, and the reservation
-        it takes is atomic.</p>
+        <p>No base URL to change, none of your traffic routed through us, no third party holding
+        your provider keys. What you do add is one blocking HTTP call before your own: the SDK posts
+        to <span class="mono-in">/preflight</span> with a five second timeout and no fail-open, so
+        if we are unreachable that raises inside your process and your except block decides whether
+        to run anyway. A gateway would have made that decision for you.</p>
         <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
       </div>
       ${requestPanel()}
@@ -481,9 +540,31 @@ ${playgroundSection()}
   <section class="wrap not-for">
     <h2 class="lead-h2">What AgentBill does NOT do</h2>
     <ul>
-      <li>Undo a multi-step workflow. We stop calls, we don't unwind them.</li>
-      <li>Replace your payment processor. We sit in front of it.</li>
-      <li>Give your ops team a no-code dashboard. This is an SDK.</li>
+      <li><b>Stop your run.</b> Preflight answers <span class="mono-in">approved: false</span> and
+      the SDK raises. Your code decides what happens next. Nothing here can terminate a process.</li>
+      <li><b>Read your provider bill.</b> No access to your provider account, no reconciliation
+      against an invoice, no estimate of what a call costs.</li>
+      <li><b>Invent a dollar number.</b> You decide what a unit is worth. Units refused is what was
+      asked for and denied; it is not a dollar figure.</li>
+      <li><b>See a call that never asks.</b> An uninstrumented tool, a subprocess someone added last
+      week, a retry buried in a library: invisible to the ceiling, because there is no proxy to see
+      it.</li>
+      <li><b>Unwind a multi-step workflow.</b> Calls are refused, not reversed. Refusing the next
+      call does not undo the nine that already ran.</li>
+      <li><b>Guarantee the TTL fits your job.</b> A reservation not settled inside the TTL, 60
+      minutes by default, is reclaimed by a sweeper that runs every five minutes, while your call
+      may still be running. Set it longer than your longest call.</li>
+      <li><b>Publish a latency SLO.</b> We do not have one. The free tier is
+      ${num(PLAN_LIMITS.free)} calls with no card, which is enough to measure the added latency on
+      your own workload instead of taking a number off this page.</li>
+      <li><b>Replace observability.</b> It does not trace, sample or explain a run after it
+      finished. If you want to know what last night cost, that is a different tool. Keep it.</li>
+      <li><b>Replace your payment processor.</b> It sits in front of it.</li>
+      <li><b>Give your ops team a no-code dashboard.</b> There is a console. The product is an SDK
+      and one endpoint.</li>
+      <li><b>Show you a logo wall, a customer count or a testimonial.</b> There is nobody yet who
+      has agreed to be named. The install line, the free tier and the response bodies above are what
+      is checkable instead.</li>
     </ul>
   </section>
 
