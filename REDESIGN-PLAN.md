@@ -1,5 +1,38 @@
 # Redesign plan: from competent to premium
 
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), on a branch, not deployed.**
+>
+> The console was audited by eye against production at 1440 and 390 and against
+> the code that feeds it, then rebuilt as a workbench shell. What the audit found,
+> and what moved:
+>
+> | Finding | Before | After |
+> |---|---|---|
+> | Wayfinding | a one-shot "Jump to" anchor list, gone after the first scroll; section heads 12px mono, smaller than table cells | sticky side rail with seven server-rendered views, counts, `aria-current` decided by the server; a top bar plus view strip under 960px |
+> | Clocks | five numbers on four clocks (range, all time, this month, now) with defensive footnotes | one period control per view, scoping every windowed figure; each tile names its window; the plan meter moves to the account card |
+> | Sample data | a signed-in user in `?demo=1` saw their REAL plan quota above invented tiles; 7d/90d showed a 30-day chart | account card shows the sample plan under demo; the sample series is cut or tiled to the window (7 / 30 / 90 columns, verified) |
+> | Chart | dashed grid, ticks at 960/480, three ISO dates, y labels under bars, legend as prose | solid hairlines, nice ticks (1,000 / 500 / 0) in a left gutter, weekly `Aug 9` labels, one direct peak label, CSS hover readout with every series, day-by-day table twin on the activity view |
+> | Leaks | a task at 13 of 5 wore a green "ceiling hit" chip | used above ceiling is `--fail` on the console and the homepage panel; "N past the ceiling" replaces "0 left" |
+> | Guardrails | no surface at all; `default_budget_units` shown nowhere; ceilings scattered across three sections | a Limits view: the four rules in `preflight.ts` evaluation order, where each is set, what refuses it, live counts in the window, and the sentence that nothing here edits one |
+> | Cost per client | usage vs limit only | customers ranked by lifetime spend with share of all customers' spend, on the overview and the customers view |
+> | Refusals | a slashed `40 / 500 / 492` cell and a closed details | a composed sentence per row (`Asked 40 units with the task at 492 of 500.`), agent and task as filter links, `?task=` `?agent=` `?only=leaks` filters in SQL, cards instead of a six-column scroller on a phone |
+> | Empty account | zero tiles, a zero leak row, then the onboarding box, then five "nothing yet" sections | the onboarding frame first, then the limits ladder, which is true at zero |
+> | Type and labels | 49 font-size literals, seven mono-uppercase label styles | 0 literals in the file (ratchet 135 to 86), one `.lbl`, one `.chip`, headings on the display face |
+>
+> Verified on a local server against the local Postgres brought up to the full
+> migration chain: 12 headless captures (sample, signed-in with real refusals and
+> one real leak, empty account, login) at 1440 and 390, all 200, no sideways
+> scroll, zero `<script>` tags, clean console; `npm run shots` green; DOM
+> measurements at 320 and 414 (wordmark right 125 < account chip left 153, every
+> control 44px). tsc, hygiene against the running server, snippets 43 blocks 0
+> failures, ratchet down. Still zero JavaScript under `default-src 'none'`.
+>
+> Two things read against the code before they were written: the limits copy
+> against `preflight.ts` (evaluation order, `default_budget_units` from
+> `register.ts:440`, `task_ceiling_required` on an unknown task), and the leak
+> rule against `tasks.ts` (`exceeded: used > ceiling`) and `events.ts`.
+
+
 > **STATUS 2026-09-06: all five waves are implemented on `wave-1-rendering-defects`,
 > six commits, `d2a9c32` through `e135e34`. Not merged and not deployed.**
 >

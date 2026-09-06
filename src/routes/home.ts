@@ -31,11 +31,14 @@ function taskPanel(): string {
     // Same two tests the console applies in app.ts: the chip reads the settled
     // number, the bar colour reads settled plus in-flight. Keep them identical.
     const ratio = (t.usedUnits + t.reservedUnits) / t.ceilingUnits
+    const leaked = t.usedUnits > t.ceilingUnits
     const held = t.usedUnits >= t.ceilingUnits
-    const chip = held
-      ? '<span class="chip held">ceiling hit</span>'
-      : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
-    const barCls = ratio >= 1 ? ' held' : ratio >= 0.8 ? ' near' : ''
+    const chip = leaked
+      ? '<span class="chip fail">leaked</span>'
+      : held
+        ? '<span class="chip held">ceiling hit</span>'
+        : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
+    const barCls = leaked ? ' fail' : ratio >= 1 ? ' held' : ratio >= 0.8 ? ' near' : ''
     const usedPct = Math.min(100, (t.usedUnits / t.ceilingUnits) * 100)
     const resPct = Math.min(100 - usedPct, (t.reservedUnits / t.ceilingUnits) * 100)
     return `
@@ -307,10 +310,12 @@ export async function homeRoute(app: FastifyInstance) {
     .track i.used { background: var(--flow); }
     .track i.used.near { background: var(--amber); }
     .track i.used.held { background: var(--green); }
+    .track i.used.fail { background: var(--red); }
     .track i.res { background: var(--res); }
     .chip { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
             padding: 3px 9px; border-radius: 4px; border: 1px solid; margin-left: auto; }
     .chip.held { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
+    .chip.fail { color: var(--fail-ink); border-color: var(--fail-line); background: var(--fail-bg); }
     .chip.near { color: var(--amber); border-color: var(--near-line); background: var(--near-bg); }
     .chip.flow { color: var(--muted); border-color: var(--border2); background: var(--surface3); }
     .ask { font-family: var(--mono); font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }

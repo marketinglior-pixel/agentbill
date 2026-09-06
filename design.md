@@ -28,6 +28,41 @@ trusts the reader, hates decoration.
   enrichment. The console's colour semantics are law: one token, one job
   (`--flow` ordinary traffic, `--held` AgentBill stopped something, `--near`
   approaching a limit, `--fail` needs a human).
+
+  The console (`/app`, redesigned 2026-09-07) is an app shell: a sticky side
+  rail (wordmark, account card with the plan meter, the views with their
+  counts, the sample-data toggle, Docs, sign out or the one CTA) and a main
+  column on the 1080 shell. Under `--lg` the same markup is a top bar and a
+  horizontally scrolling view strip. The views are server-rendered by
+  `?view=` (overview, activity, tasks, refusals, customers, keys, limits), so
+  the rail's `aria-current` is a fact the server decided; the old "Jump to"
+  rail could never carry a current state because every section rendered
+  regardless. Rules that bind every view:
+  - **One clock per view.** The period control in the view header scopes every
+    figure that carries a window, and each such tile names the window in its
+    own label (`Refused · 30d`). A figure with no window says what it is
+    instead (`Live tasks · now`, `Leaked · all time`). The plan meter is about
+    the billing month and lives in the account card, not among the tiles.
+  - **Sums, not siblings.** Blocked, units refused and units metered are sums
+    over the same `series` the chart draws, so a tile and the chart beside it
+    cannot disagree. Under sample data the series is cut or tiled to the
+    chosen window, so the period control means the same thing in both modes.
+  - **The chart is two single-series rows sharing one x-axis**, each with its
+    own scale and its own row label as its legend. Never a dual axis. Y ticks
+    are nice numbers in a left gutter; one direct label, the peak; the hover
+    readout is CSS (`attr(data-t)`) and lists every series at that day; the
+    activity view carries the day-by-day table twin.
+  - **Above the ceiling is a leak, not a trophy.** A task whose used units
+    exceed its ceiling wears `--fail`, on the console and on the homepage
+    panel alike; at the ceiling it is `--held`.
+  - **Limits is a read-only ladder** of the four rules in the order
+    `preflight.ts` evaluates them, each with where it is set, what refuses it,
+    and the live counts. Nothing on the console edits a ceiling, and the page
+    says so. A form for a setting the API does not have would be a lie.
+  - The sample-data banner sits at the top of the main column, inside the
+    frame a screenshot would carry; the account card under sample data shows
+    the sample plan, because a real quota above invented tiles was the one
+    number the banner's promise did not cover.
 - **Content (`/docs`, `/docs/*`, `/blog/*`):** Long Document with a sticky
   "On this page" rail (S3) docked beneath the nav. Typography only. Code blocks
   are the panels.
@@ -173,10 +208,10 @@ GitHub) with the current page marked by a bar flush with the hairline, and
 the account pair right (Console, then the primary action). Under 720px the
 destinations and Console fold into a native `<details>` menu, no script. The
 bar is solid, not frosted-on-scroll. Both link lists render from one array in
-`chrome.ts`. App pages
-(`/app`, `/admin`) keep their own account bar (`nav.top`: wordmark, who is
-signed in, sign out or the one CTA) and carry no marketing footer; their
-closing `.foot` is an in-page note. The three faces. `--green` as the only
+`chrome.ts`. App pages carry no marketing footer; their closing `.foot` is an
+in-page note. `/app` is the rail shell described under the App family;
+`/admin` still keeps the older account bar (`nav.top`: wordmark, who is signed
+in, sign out) and the console's login page uses the same bar. The three faces. `--green` as the only
 chromatic accent for actions. A 44px floor on every button and input. Frames
 at 12px radius, controls at 8px. The code-block frame: a typographic label
 bar ("python · the whole integration"), never window chrome.
@@ -198,12 +233,15 @@ pass that wants to revisit it should change the stamp first.
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
 - The `--space-*` and `--radius-*` scales exist and are not yet applied
-  everywhere: 135 hardcoded `font-size` literals remain, down from 152. The
+  everywhere: 86 hardcoded `font-size` literals remain, down from 152 (the
+  console rewrite retired its 49, and `--fs-figure` joined the scale for the
+  tile number). The
   ratchet in `scripts/ratchet` stops the count rising; a block retires its own
   values when it is next rewritten. Raw hexes below `:root` are at **zero** and
   the ratchet holds them there.
-- `app.ts` and `admin.ts` each render their own `nav.top` account bar. They
-  share the mark and the tokens; the four flex rules are still written twice.
+- `admin.ts` renders its own `nav.top` account bar and `app.ts`'s login page
+  another. They share the mark and the tokens; the flex rules are written
+  twice. The signed-in console no longer uses one.
 - No `/status` page, so the footer has no honest trust link. `/health` returns
   JSON and must not be linked as one.
 - `.pg-fill` animates `width`, see above.

@@ -124,6 +124,10 @@ export const TOKENS = `
        heading on /app and /admin, which should not inherit a marketing clamp. */
     --fs-h1-sub: clamp(32px, 5vw, 50px);
     --fs-h1-app: 28px;
+    /* The figure in a workbench tile: the one number a view leads with. One rung
+       above the app heading so a count outranks its own title, one rung below
+       --fs-h2 so it never competes with a marketing headline. */
+    --fs-figure: 34px;
 
     /* Spacing. Deliberately not a geometric scale: this codebase uses 28
        distinct values, and a 4px base would force rounding 7, 9, 11, 22 and 26
