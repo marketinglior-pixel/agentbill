@@ -214,6 +214,15 @@ type HeadOpts = {
   css?: string
   /** Genuinely page-specific tags. Not og, not canonical, not icons. */
   extraHead?: string
+  /**
+   * Document language and direction. Defaults to the site's English LTR.
+   * A Hebrew page passes { lang: 'he', dir: 'rtl' }; nothing else in the system
+   * needs to know, because every layout rule in this codebase already uses
+   * logical properties (padding-inline, margin-inline, border-inline-start),
+   * which is what makes an RTL flip survive without a second stylesheet.
+   */
+  lang?: string
+  dir?: 'ltr' | 'rtl'
   /** Overrides for the share card. Title and description default to the page's. */
   og?: { type?: string; title?: string; description?: string }
   /** JSON-LD for this page. The sitewide Organization and WebSite are automatic. */
@@ -284,7 +293,7 @@ const ICONS = `  <meta name="color-scheme" content="dark" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = {} }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir }: HeadOpts): string {
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
   // A canonical on a noindex page is two contradictory signals about one URL.
@@ -308,7 +317,7 @@ export function head({ title, description, path, canonical, css = '', extraHead 
     : ''
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}"${dir ? ` dir="${dir}"` : ''}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />

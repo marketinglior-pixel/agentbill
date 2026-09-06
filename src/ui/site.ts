@@ -73,6 +73,13 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/status', section: 'marketing', crumbs: [HOME], crumb: 'Status', og: 'default', index: true, updated: '2026-09-05', priority: 0.3, changefreq: 'weekly' },
   { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-05', priority: 0.4, changefreq: 'yearly' },
 
+  // The Hebrew lead magnet for the n8n/Make vertical. Indexed on purpose: it is
+  // written to be forwarded and to be found, and it is the only surface here
+  // addressed to the operator rather than to the developer. Its crumb is not
+  // rendered (the page carries no breadcrumb), but the registry entry is what
+  // gives it a canonical and a sitemap row instead of a bare 200.
+  { path: '/he/cost-per-client', section: 'marketing', crumbs: [HOME], crumb: 'כמה כל לקוח עולה לך', og: 'default', index: true, updated: '2026-09-06', priority: 0.6, changefreq: 'monthly' },
+
   { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-05', priority: 0.9, changefreq: 'weekly' },
   { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-05', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
   { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },

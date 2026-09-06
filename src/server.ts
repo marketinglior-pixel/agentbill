@@ -28,6 +28,7 @@ import { tasksRoute } from './routes/tasks.js'
 import { decisionsRoute } from './routes/decisions.js'
 import { appRoute } from './routes/app.js'
 import { legalRoute } from './routes/legal.js'
+import { heCostPerClientRoute } from './routes/he-cost-per-client.js'
 import { faqRoute } from './routes/faq.js'
 import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
@@ -173,6 +174,7 @@ app.register(faqRoute)
 app.register(aboutRoute)
 app.register(thanksRoute)
 app.register(statusRoute)
+app.register(heCostPerClientRoute)
 registerAuth(app)
 // Registered next to registerAuth because they are two halves of one decision.
 // The placement itself is cosmetic: Fastify copies every root onRequest hook
