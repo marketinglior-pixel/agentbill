@@ -12,7 +12,8 @@
     "check:snippets:published": "./scripts/snippets/run.sh published",
     "check:ratchet": "node scripts/ratchet/run.mjs",
     "check:hygiene": "./scripts/hygiene/run.sh",
-    "check:urls": "./scripts/seo/urls.sh"
+    "check:urls": "./scripts/seo/urls.sh",
+    "shots": "node scripts/shots.mjs"
   },
   "dependencies": {
     "@fastify/compress": "^7.0.3",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "playwright-core": "^1.63.0",
     "tsx": "^4.15.0",
     "typescript": "^5.4.5"
   }

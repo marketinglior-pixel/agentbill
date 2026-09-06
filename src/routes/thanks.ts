@@ -16,7 +16,7 @@ import { docsShell } from '../ui/docs.js'
  * one business day, change it here rather than hoping nobody checks.
  */
 const REPLY_WITHIN = 'one business day'
-const CONTACT = 'marketinglior@gmail.com'
+const CONTACT = 'hello@agentbill.dev'
 
 export async function thanksRoute(app: FastifyInstance) {
   app.get('/thanks', publicRoute(), async (_, reply) => {

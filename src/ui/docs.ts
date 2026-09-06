@@ -71,18 +71,25 @@ export const DOCS_CSS = `${CHROME_CSS}
   li { color: var(--muted); line-height: 1.7; }
   a { color: var(--green); }
 
+  /* The frame does not scroll and is never masked; the pre inside it does both.
+     When overflow and the fade sat on this element, the mask ate the 1px border,
+     both right corners and the last 48px of the top and bottom hairlines along
+     with the text, so four blocks on /docs read as a failed render. Keeping the
+     scroller inside also preserves the 20px right gutter, which a scroll
+     container's own padding collapses at the scroll origin. */
   .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px;
-          padding: 20px; margin: 16px 0; overflow-x: auto; }
-  .code pre { font-family: var(--mono); font-size: 13px; color: var(--code); line-height: 1.7; }
+          padding: 20px; margin: 16px 0; }
+  .code pre { font-family: var(--mono); font-size: 13px; color: var(--code); line-height: 1.7;
+              overflow-x: auto; }
   /* A block that scrolls sideways used to look exactly like one that does not,
      so a reader saw a sentence end mid-word and had no way to know there was
      more. Four of eight blocks on /docs did this at 1280px. The script below
      marks the ones that overflow, and only those get a fade on the right edge,
      which lifts once they are scrolled to the end. Keywords, not hexes: the
      drift ratchet counts hexes below :root. */
-  .code.overflows:not(.at-end) { mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent);
-                                 -webkit-mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent); }
-  .code.overflows { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  .code.overflows:not(.at-end) pre { mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent);
+                                     -webkit-mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent); }
+  .code.overflows pre { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .comment { color: var(--dim); }
   .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 8px; border-radius: 4px;
             font-size: 13px; color: var(--code); }
@@ -117,11 +124,32 @@ export const DOCS_CSS = `${CHROME_CSS}
     .rail a[aria-current="true"] { border-left: 0; }
     h2 { margin-top: 56px; }
   }
+  /* Below --md the rail items wrap instead of being amputated. With nowrap and
+     \`html, body { overflow-x: clip }\`, any item wider than the content box was
+     silently cut at the viewport edge with no ellipsis and no way to scroll to
+     it: on /faq at 390px one question overshot by 27px and lost its "?". Between
+     720 and 960 nowrap is correct and measured clean, so only the small end moves. */
+  @media (max-width: 720px) {
+    .rail a { white-space: normal; max-width: 100%; }
+  }
   @media (max-width: 640px) {
     .code { padding: 16px; }
     .code pre { font-size: 12.5px; }
     table { font-size: 13.5px; }
     th, td { padding: 8px 8px; }
+    /* The parameter tables are 420px inside a 342px box, and html/body clip the
+       overflow, so half of every description was unreachable rather than merely
+       cut. Stack each row instead: name and type on one line, description under
+       it, full width. The header row carries no meaning once stacked. */
+    table, tbody { display: block; }
+    tr { display: block; border-bottom: 1px solid var(--border-soft); padding: 10px 0; }
+    tr:has(th) { display: none; }
+    td { display: inline; border-bottom: 0; padding: 0; }
+    /* Inline cells have no cell padding, so the name ran into its own type and
+       rendered as "agent_idstring". The gap has to be a margin, not padding,
+       because these are inline boxes. */
+    td:first-child { white-space: normal; margin-inline-end: 10px; }
+    td:last-child { display: block; margin-top: 6px; }
   }
 `
 
@@ -158,15 +186,19 @@ const DOCS_SRC = `
 })();
 
   // Mark code blocks that overflow, and un-mark them once scrolled to the end.
-  var codes = document.querySelectorAll('.code');
+  // The pre is the scroller now, so measure and listen there; the classes stay
+  // on .code because the fade is expressed as ".code.overflows ... pre".
+  var codes = [].slice.call(document.querySelectorAll('.code')).filter(function (c) {
+    return c.querySelector('pre');
+  });
   function markOverflow() {
     for (var i = 0; i < codes.length; i++) {
-      var c = codes[i];
-      c.classList.toggle('overflows', c.scrollWidth > c.clientWidth + 2);
-      c.classList.toggle('at-end', c.scrollLeft + c.clientWidth >= c.scrollWidth - 2);
+      var c = codes[i], p = c.querySelector('pre');
+      c.classList.toggle('overflows', p.scrollWidth > p.clientWidth + 2);
+      c.classList.toggle('at-end', p.scrollLeft + p.clientWidth >= p.scrollWidth - 2);
     }
   }
-  for (var j = 0; j < codes.length; j++) codes[j].addEventListener('scroll', markOverflow, { passive: true });
+  for (var j = 0; j < codes.length; j++) codes[j].querySelector('pre').addEventListener('scroll', markOverflow, { passive: true });
   window.addEventListener('resize', markOverflow);
   markOverflow();
 `

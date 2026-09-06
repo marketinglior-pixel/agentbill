@@ -220,7 +220,7 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
     ['/blog', 'Blog', false],
     ['/faq', 'Questions', false],
     ['/status', 'Status', false],
-    ['mailto:marketinglior@gmail.com', 'Contact', false],
+    ['mailto:hello@agentbill.dev', 'Contact', false],
   ]],
   ['Legal', [
     ['/terms', 'Terms', false],

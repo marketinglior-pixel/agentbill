@@ -74,11 +74,16 @@ ${checks.map((c) => `    <div class="st-row ${c.ok ? 'ok' : 'down'}">
      <code class="inline">approved: false</code>, the ceiling did its job and
      <a href="/faq">the questions page</a> covers the reasons. If this page says
      something is down, it is ours: mail
-     <a href="mailto:marketinglior@gmail.com">marketinglior@gmail.com</a>.</p>
+     <a href="mailto:hello@agentbill.dev">hello@agentbill.dev</a>.</p>
 `
 }
 
 const STATUS_CSS = `
+    /* One token, one chip. \`GET /health/db\` was breaking across a line and
+       rendering as two pills, so the page showed two endpoints where it has one.
+       Scoped here rather than to .inline in docs.ts, where a longer token on a
+       guide could then overflow the mobile column. */
+    .inline { white-space: nowrap; }
     .st-head { display: flex; align-items: center; gap: var(--s3); margin-block: var(--s5) var(--s4);
                font-family: var(--display); font-size: var(--fs-h3); font-weight: 600; }
     .st-head.ok { color: var(--green); }

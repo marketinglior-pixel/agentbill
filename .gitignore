@@ -28,3 +28,4 @@ __pycache__/
 
 # Design reference library, cloned not authored. See design.md.
 .reference/
+scripts/shots-out/

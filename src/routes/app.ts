@@ -646,7 +646,7 @@ ${MARK_CSS}
   .grid { position: absolute; inset: 0 0 0 46px; display: flex; flex-direction: column;
           justify-content: space-between; pointer-events: none; }
   .grid span { border-top: 1px dashed var(--border-soft); height: 0; }
-  .ylab { position: absolute; left: 0; top: -7px; width: 40px; text-align: right;
+  .ylab, .blab { position: absolute; left: 0; top: -7px; width: 40px; text-align: right;
           font-family: var(--mono); font-size: 10px; color: var(--dim);
           font-variant-numeric: tabular-nums; }
   .ylab.mid { top: calc(50% - 7px); } .ylab.low { top: auto; bottom: -7px; }
@@ -663,6 +663,13 @@ ${MARK_CSS}
   .col i.zero { background: var(--surface3); height: 2px; }
   .xaxis { display: flex; justify-content: space-between; margin: 9px 0 0 46px;
            font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  /* Blocks on their own strip, same left offset and same gap as the plot above
+     so a column still lines up with its day. Its own maximum is labelled at the
+     left, because this strip does not obey the axis above it. */
+  .bstrip { position: relative; padding-left: 46px; margin-top: 10px;
+            border-top: 1px solid var(--border-soft); padding-top: 8px; }
+  .blab { top: calc(50% - 1px); }
+  .bbars { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
   .legend { display: flex; gap: 16px; margin-top: 12px; font-family: var(--mono);
             font-size: 11px; color: var(--dim); flex-wrap: wrap; }
   .legend span { display: flex; align-items: center; gap: 6px; }
@@ -858,17 +865,25 @@ function quotaBlock(v: Viewer): string {
 function chartBlock(series: Series[]): string {
   const unitMax = Math.max(1, ...series.map((s) => Number(s.units)))
   const blockMax = Math.max(1, ...series.map((s) => Number(s.blocks)))
-  // Blocks are rarer than units by orders of magnitude; give them their own
-  // scale capped at 45% of the column so a single block is still visible.
+  // Blocks are rarer than units by orders of magnitude, so the two cannot share
+  // one axis. They used to be stacked in the same column on two different
+  // scales, while the units segment was capped at 55% of a plot whose top
+  // gridline was labelled unitMax: reading any bar against the axis gave a
+  // number roughly half the truth. Units now use the full plot, so the labelled
+  // axis is true for exactly one series, and blocks get their own strip below
+  // the x-axis carrying its own maximum.
   const cols = series.map((s) => {
     const units = Number(s.units)
+    const uh = units > 0 ? Math.max(2, Math.round((units / unitMax) * 100)) : 0
+    const label = `${s.day}: ${num(units)} units metered`
+    const inner = uh === 0 ? '<i class="zero"></i>' : `<i class="met" style="height:${uh}%"></i>`
+    return `<div class="col" title="${esc(label)}">${inner}</div>`
+  }).join('')
+  const bcols = series.map((s) => {
     const blocks = Number(s.blocks)
-    const uh = units > 0 ? Math.max(3, Math.round((units / unitMax) * 55)) : 0
-    const bh = blocks > 0 ? Math.max(3, Math.round((blocks / blockMax) * 32)) : 0
-    const label = `${s.day}: ${num(units)} units metered, ${num(blocks)} blocked`
-    const inner = uh + bh === 0
-      ? '<i class="zero"></i>'
-      : `${bh ? `<i class="held" style="height:${bh}%"></i>` : ''}${uh ? `<i class="met" style="height:${uh}%"></i>` : ''}`
+    const bh = blocks > 0 ? Math.max(3, Math.round((blocks / blockMax) * 100)) : 0
+    const label = `${s.day}: ${num(blocks)} blocked before they ran`
+    const inner = bh === 0 ? '<i class="zero"></i>' : `<i class="held" style="height:${bh}%"></i>`
     return `<div class="col" title="${esc(label)}">${inner}</div>`
   }).join('')
   const first = series[0]?.day ?? ''
@@ -883,9 +898,13 @@ function chartBlock(series: Series[]): string {
       <div class="bars">${cols}</div>
     </div>
     <div class="xaxis"><span>${esc(first)}</span><span>${esc(mid)}</span><span>${esc(last)}</span></div>
+    <div class="bstrip">
+      <div class="blab">${num(blockMax)}</div>
+      <div class="bbars">${bcols}</div>
+    </div>
     <div class="legend">
-      <span><i class="sw met"></i> units metered</span>
-      <span><i class="sw held"></i> blocked before they ran, on their own scale</span>
+      <span><i class="sw met"></i> units metered, against the axis above</span>
+      <span><i class="sw held"></i> blocked before they ran, own strip, peak ${num(blockMax)}</span>
       <span class="dim">hover a column for that day</span>
     </div>
   </div>`

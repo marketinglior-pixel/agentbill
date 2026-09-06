@@ -121,7 +121,10 @@ export async function upgradeRoute(app: FastifyInstance) {
     .tiers th { font-weight: inherit; text-align: left; }
     .tiers th, .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px;
                 vertical-align: middle; }
-    .tiers tr:first-child td { border-top: 1px solid var(--border); }
+    /* \`> *\`, not \`td\`: the row's first cell is a th, so a td-only selector drew
+       the table's opening rule from the second column on and left FREE with no
+       rule above it while its four siblings had one. */
+    .tiers tr:first-child > * { border-top: 1px solid var(--border); }
     .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
                    color: var(--dim); width: 22%; }
     .tiers .svc { display: block; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--dim);
@@ -164,7 +167,15 @@ export async function upgradeRoute(app: FastifyInstance) {
       .tiers tr { padding: 16px 0; border-bottom: 1px solid var(--border);
                   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; }
       .tiers tr:first-child { border-top: 1px solid var(--border); }
-      .tiers td { display: block; padding: 0; border: 0; }
+      /* th as well as td. \`.tier\` is a th, so a td-only reset left it carrying the
+         base rule's 18px padding and bottom border. Because it is grid-column 1
+         that border spanned only the 1fr track, whose width changes with the
+         price string, so every row was cut in half by a stub ending at a
+         different x. The second FREE-row stub was \`.tiers tr:first-child td\`
+         (0-2-2) outranking this reset (0-1-2); it is zeroed explicitly below.
+         The full-width opening rule is drawn by \`.tiers tr:first-child\`. */
+      .tiers th, .tiers td { display: block; padding: 0; border: 0; }
+      .tiers tr:first-child th, .tiers tr:first-child td { border-top: 0; }
       .tiers .tier { width: auto; grid-column: 1; }
       .tiers .amount { grid-column: 2; grid-row: 1; text-align: right; }
       .tiers .calls { grid-column: 1; }

@@ -282,7 +282,9 @@ export async function homeRoute(app: FastifyInstance) {
     .tiers { width: 100%; border-collapse: collapse; margin-top: 28px; font-variant-numeric: tabular-nums; }
     .tiers th { font-weight: inherit; text-align: left; }
     .tiers th, .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px; }
-    .tiers tr:first-child td { border-top: 1px solid var(--border); }
+    /* \`> *\`, not \`td\`: the first cell of each row is a th, so a td-only selector
+       left the opening rule short of the FREE label. */
+    .tiers tr:first-child > * { border-top: 1px solid var(--border); }
     .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
                    color: var(--dim); width: 18%; }
     .tiers .amount { text-align: right; font-family: var(--display); font-size: 22px; font-weight: 700;
@@ -326,9 +328,22 @@ export async function homeRoute(app: FastifyInstance) {
       .hero-cta { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
       .hero-cta > a { text-align: center; }
       .code-body { padding: 18px 16px; }
-      .code-body pre { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+      /* No pre-wrap. It preserved the deep source indent on some lines and broke
+         others flush to the gutter, so the panel captioned "the whole integration"
+         showed code that read as a paste that failed. \`.code-body\` already scrolls
+         (overflow-x: auto), which is what design.md specifies for a code frame. */
+      .code-body pre { font-size: 12px; }
+      /* The label bar is typographic, and at 390px both nowrap spans overflowed a
+         space-between flex, so \`overflow: hidden\` guillotined the second one mid
+         glyph. The meaning is carried by "python · the whole integration"; the
+         package name repeats the \`from agentbill import\` line right beneath it. */
+      .code-head span:last-child { display: none; }
       .tiers .amount { font-size: 19px; }
       .tiers td { font-size: 14.5px; }
+      /* 18% of a 342px table is 61.6px; BUILDER at 12.5px mono with .12em tracking
+         needs ~63px, and the neighbouring cell has no inline padding to absorb it,
+         so one row of four rendered as "BUILDER50,000". */
+      .tiers .tier { width: auto; padding-right: var(--s4); letter-spacing: .06em; }
     }
 `,
     })}
@@ -354,10 +369,12 @@ ${siteNav('/')}
       <div class="code-body">
         <pre>from agentbill import AgentBillClient
 
-client = AgentBillClient(api_key="agb_your_key")
+client = AgentBillClient(
+    api_key="agb_your_key")
 
-<span class="cmt"># 1 unit = 1 cent here. job-142 dies at 500 units,</span>
-<span class="cmt"># across every call that passes the same task_ref.</span>
+<span class="cmt"># 1 unit = 1 cent here. job-142 dies</span>
+<span class="cmt"># at 500 units, across every call</span>
+<span class="cmt"># that passes the same task_ref.</span>
 client.preflight(agent_id="researcher",
                  task_ref="job-142",
                  task_ceiling=500,

@@ -15,7 +15,7 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
-const SUPPORT_EMAIL = 'marketinglior@gmail.com'
+const SUPPORT_EMAIL = 'hello@agentbill.dev'
 
 // Best-effort: mail the existing key to the account owner. Returns true only
 // when Resend accepted the send. (With the sandbox sender this fails for
