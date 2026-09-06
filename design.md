@@ -207,9 +207,22 @@ pass that wants to revisit it should change the stamp first.
 - No `/status` page, so the footer has no honest trust link. `/health` returns
   JSON and must not be linked as one.
 - `.pg-fill` animates `width`, see above.
-- `legal.ts` sets prose links to `--code`, which is syntax only.
-- No page has ever been checked by eye. Every "verified" in the log below
-  is grep and arithmetic. That is how a 230px empty panel shipped.
+- `legal.ts` sets prose links to `--code`, which is syntax only. Its contact
+  address is still a personal gmail; that is a legal document, so it is a
+  decision rather than a render fix.
+- ~~No page has ever been checked by eye.~~ **Corrected 2026-09-06.** All nine
+  surfaces were captured at 1440x1000 and 390x844 against production and read
+  against sixteen premium references. 92 findings were raised, 29 were refuted
+  because this file already argued the point, and 63 stood. They are fixed and
+  deployed. The line was true for months and is the reason three of the findings
+  were critical and invisible at 1440px.
+
+  What replaces it is a habit, not a claim: **`npm run shots` renders every
+  surface at both widths and fails on a non-200, a sideways scroll, a console
+  error, or template source leaking into the body.** It found none of the 63.
+  That is the point of keeping it: those four conditions were green throughout,
+  and the page was still broken. The PNGs are the check; the exit code only
+  catches what a machine can see.
 
 ## Closing a row
 
