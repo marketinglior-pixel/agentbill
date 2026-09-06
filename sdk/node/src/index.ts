@@ -248,7 +248,7 @@ export interface PreflightResult {
 /**
  * Check every budget BEFORE the call runs, so the expensive call never happens.
  *
- * Throws when YOUR spend rule stopped the run — CeilingExceededError,
+ * Throws when YOUR spend rule stopped the run: CeilingExceededError,
  * TaskCeilingExceededError, BudgetExhaustedError.
  *
  * Returns `approved: false` with `upgradeUrl` set when AGENTBILL'S OWN BILLING

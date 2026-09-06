@@ -110,7 +110,7 @@ if not check.approved:
 
 > **Changed in 0.6.0.** `free_tier_exceeded` and `plan_limit_exceeded` used to raise
 > `FreeTierExceededError` / `PlanLimitExceededError`. They now return a result. Both classes are
-> still exported so your imports keep working, but nothing raises them any more — if you were
+> still exported so your imports keep working, but nothing raises them any more. If you were
 > catching them, check `result.approved` instead. The other three are unchanged.
 
 ### 4. Watch your dashboard

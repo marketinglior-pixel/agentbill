@@ -191,7 +191,7 @@ class AgentBillClient:
         # free_tier_exceeded and plan_limit_exceeded mean our quota ran out,
         # not that your budget did. Raising on those would let an AgentBill
         # billing state crash your production agent, which would make us a
-        # single point of failure in your critical path — the opposite of what
+        # single point of failure in your critical path, the opposite of what
         # "no proxy in your request path" is supposed to mean. They come back
         # as approved=False with .upgrade_url set, so you can degrade, alert,
         # or route a human to upgrade, and keep running.
