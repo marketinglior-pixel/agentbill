@@ -209,6 +209,9 @@ export async function registerRoute(app: FastifyInstance) {
     h1 { color: var(--white); font-size: clamp(30px, 3.2vw, 40px); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
     .lede { font-size: var(--fs-lede); color: var(--muted); margin: 20px 0 28px; max-width: 44ch; line-height: 1.6; }
     .facts { list-style: none; display: grid; gap: 14px; max-width: 50ch; }
+    /* Under the form the list follows the legal note directly, and two blocks of
+       small muted type with nothing between them read as one paragraph. */
+    .form-col .facts { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border-soft); }
     .facts li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; align-items: baseline;
                 color: var(--muted); font-size: var(--fs-small); line-height: 1.6; }
     .facts b { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
@@ -230,6 +233,12 @@ export async function registerRoute(app: FastifyInstance) {
                     outline: 2px solid transparent; outline-offset: 1px;
                     transition: border-color .15s, background-color .15s; }
     input::placeholder { color: var(--dim); }
+    /* One form, one convention for "nothing here yet". The inputs greyed their
+       placeholder and the selects rendered their empty option at full --text,
+       identical to a real choice, so the bottom half of the form read as already
+       answered and the top half as blank. No script and no extra class. */
+    select:has(option[value=""]:checked) { color: var(--dim); }
+    select option { color: var(--text); }
     @media (hover: hover) { input:hover, select:hover { border-color: var(--dim); } }
     input:focus-visible, select:focus-visible { outline-color: var(--green); }
     input[aria-invalid="true"] { border-color: var(--red); }
@@ -292,11 +301,6 @@ ${siteNav('/register', { cta: false })}
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
     <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>
-    <ul class="facts">
-      <li><b>free tier</b><span>1,000 preflight calls a month, per account. No card, no expiry.</span></li>
-      <li><b>blocked</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
-      <li><b>any provider</b><span>One ceiling per task. You pass what each call is worth; we never look at your provider bill.</span></li>
-    </ul>
     <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
   </div>
 
@@ -321,7 +325,7 @@ ${siteNav('/register', { cta: false })}
           <input type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
         </div>
         <div class="field">
-          <label for="use_case">What are you building?</label>
+          <label for="use_case">What are you building? <span class="opt">(optional)</span></label>
           <select id="use_case" name="use_case">
             <option value="">Select one&hellip;</option>
             <option value="ai_saas">AI SaaS product</option>
@@ -332,7 +336,7 @@ ${siteNav('/register', { cta: false })}
           </select>
         </div>
         <div class="field">
-          <label for="stack">Primary language</label>
+          <label for="stack">Primary language <span class="opt">(optional)</span></label>
           <select id="stack" name="stack">
             <option value="">Select one&hellip;</option>
             <option value="python">Python</option>
@@ -344,6 +348,16 @@ ${siteNav('/register', { cta: false })}
         <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
         <p class="form-note">By registering you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email. Just a key.</p>
       </form>
+
+      <!-- Under the button, not beside it. The right column stopped 410px above
+           the left and the page terminated ragged on the one surface that has to
+           convert; moving the reassurance here balances the columns and puts it
+           where the reader is deciding rather than where they have already been. -->
+    <ul class="facts">
+      <li><b>free tier</b><span>1,000 preflight calls a month, per account. No card, no expiry.</span></li>
+      <li><b>blocked</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
+      <li><b>any provider</b><span>One ceiling per task. You pass what each call is worth; we never look at your provider bill.</span></li>
+    </ul>
     </div>
 
     <div class="success" id="success-state">

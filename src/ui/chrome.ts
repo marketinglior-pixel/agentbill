@@ -19,6 +19,17 @@ import { mark, MARK_CSS } from './mark.js'
 
 const GITHUB = 'https://github.com/marketinglior-pixel/agentbill'
 
+/** One label for one action.
+ *  The site shipped seven wordings of the same button: "Get API key", "Get your
+ *  API key" with and without the arrow, "Get an API key" and "Create a free API
+ *  key". Two `.btn` elements that differ only by whether they carry an arrow is
+ *  the tell to kill first. Two labels stay outside this constant on purpose,
+ *  because they are different actions: "Start free" on the price tables, and
+ *  "Generate my API key" on the register submit, which says what the button
+ *  does rather than where it goes. */
+export const KEY_CTA = 'Get your API key &rarr;'
+export const KEY_CTA_SHORT = 'Get key'
+
 /** The destinations, once. The centre cluster and the mobile menu both render from here. */
 const LINKS: ReadonlyArray<readonly [href: string, label: string]> = [
   ['/docs', 'Docs'],
@@ -164,6 +175,14 @@ ${MARK_CSS}
     .sticky-cta .btn { display: block; text-align: center; }
     /* So the bar never covers the footer's last row. */
     body:has(.sticky-cta) { padding-bottom: 76px; }
+    /* The rule above was written about the NAV's button and never extended to
+       the in-page one, so every page on the docs shell ended with a left-aligned
+       green pill and a full-width green bar about 160px apart, same words, same
+       href. The closing button stands down where the bar is present; the sticky
+       bar is the primary on a phone. Keyed off the bar itself rather than the
+       breakpoint, so a page that opts out of the bar keeps its own closing CTA. */
+    body:has(.sticky-cta) .end .btn { display: none; }
+    body:has(.sticky-cta) .end { margin-top: 0; }
   }
   /* At 320px the wordmark, the Menu chip and the button want more than the
      272px between the gutters. The button's label shortens and the wordmark
@@ -205,11 +224,11 @@ export function siteNav(
             ${menu}
           </ul>
         </details>${cta ? `
-        <a class="btn" href="/register"><span class="long">Get API key</span><span class="short">Get key</span></a>` : ''}
+        <a class="btn" href="/register"><span class="long">${KEY_CTA}</span><span class="short">${KEY_CTA_SHORT}</span></a>` : ''}
       </div>
     </div>
   </nav>${cta && sticky ? `
-  <div class="sticky-cta"><a class="btn" href="/register">Get your API key &rarr;</a></div>` : ''}`
+  <div class="sticky-cta"><a class="btn" href="/register">${KEY_CTA}</a></div>` : ''}`
 }
 
 // Only destinations that exist. Every external one was fetched before it was

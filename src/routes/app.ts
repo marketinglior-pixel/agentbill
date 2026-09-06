@@ -6,6 +6,7 @@ import { clientIp } from '../lib/client-ip.js'
 import { head } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 // /app is the console: the only browser surface a registered user has. It
 // shows live task budgets burning down, every call AgentBill refused with the
@@ -1078,7 +1079,7 @@ function consolePage(v: Viewer, d: Console, demo: boolean, range: string, anon =
     <a class="logo" href="/">${mark(18)}AgentBill</a>
     <div class="who">${anon
       ? `<span class="dim mode">Sample console</span>
-      <a class="btn-key" href="/register">Get your API key</a>`
+      <a class="btn-key" href="/register">${KEY_CTA}</a>`
       : `<span class="email">${esc(v.email ?? 'no email')}</span>
       <span>key <b>${esc(keyTail)}</b>${v.keyLabel ? ` <span class="dim lbl">(${esc(v.keyLabel)})</span>` : ''}</span>
       <form method="POST" action="/app/logout"><button class="btn-out" type="submit">Sign out</button></form>`}

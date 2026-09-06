@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 export async function docsRoute(app: FastifyInstance) {
   app.get('/docs', publicRoute(), async (request, reply) => {
@@ -195,7 +196,7 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   <p><a href="/docs/langchain-billing">How to add billing to a LangChain agent</a></p>
   <p><a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a></p>
 
-  <div class="end"><a href="/register" class="btn">Get your API key</a></div>
+  <div class="end"><a href="/register" class="btn">${KEY_CTA}</a></div>
 `,
     }))
   })

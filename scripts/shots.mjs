@@ -90,9 +90,16 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       const m = await page.evaluate(() => ({
         h: document.documentElement.scrollHeight,
         overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+        // An escaped `\${` inside a template literal emits the expression as
+        // TEXT. It renders as a paragraph of source at the top of the page, it
+        // returns 200, it logs nothing, and typecheck is happy. One shipped to
+        // /pricing on 2026-09-06 and only a human looking at the render caught
+        // it, which is exactly the gap this script exists to close.
+        leak: (document.body.innerText.match(/\$\{|\bsiteNav\(|\bsiteFooter\(/) || [])[0] || null,
       }))
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)
       if (m.overflowX) failures.push(`${vp} ${name}: scrolls sideways`)
+      if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
       rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} ${status} ${String(m.h).padStart(6)}px${m.overflowX ? '  OVERFLOW-X' : ''}${errs.length ? `  ERRS:${errs.length}` : ''}`)
     } catch (e) {

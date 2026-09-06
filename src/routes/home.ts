@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
-import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
+import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
@@ -371,7 +371,7 @@ ${siteNav('/')}
       whatever the provider, and you pass what each call is worth. Blocked before the call goes out,
       not after the bill shows up.</p>
       <div class="hero-cta">
-        <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
+        <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
@@ -473,7 +473,7 @@ ${playgroundSection()}
   <div class="final wrap">
     <h2>Give one job a ceiling.</h2>
     <p>Free tier. No card. If this page took you longer to read than the integration takes, we did our job.</p>
-    <a class="btn btn-lg" href="/register">Get your API key &rarr;</a>
+    <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
   </div>
 
 </main>

@@ -139,6 +139,14 @@ From `C-core/voice-dna.md`, enforced on every rendered surface:
 
 ## CTA voice
 
+One label for one action: `KEY_CTA` in `chrome.ts`, with `KEY_CTA_SHORT` for the
+nav at its narrowest. The site carried seven wordings of this button, two of
+which differed only by whether they had an arrow. Two labels stay outside the
+constant because they are different actions: "Start free" on the price tables,
+and "Generate my API key" on the register submit, which says what the button does
+rather than where it goes.
+
+
 - Primary: `.btn` from `chrome.ts`. Green fill, `--green-ink` text, 8px radius,
   `nowrap`, clears 44px.
 - Secondary: outlined chip (`.btn-ghost`, `.chip-link`). `--border-strong`
@@ -221,8 +229,17 @@ would need a scroll handler for mood.
 Centred label text is permitted inside a full-bleed control and nowhere else. A
 left-aligned label in a full-width button reads as broken.
 
-Not on `/app`, `/admin`, `/register`, `/terms` or `/privacy`: you are already
-there, or a sticky sales button on a privacy policy is the wrong register.
+Not on `/app`, `/admin`, `/register`, `/terms`, `/privacy` or `/pricing`: you are
+already there, or a sticky sales button on a privacy policy is the wrong register.
+`/pricing` joined that list on 2026-09-06: its whole purpose is the tier buttons,
+so the bar put a second green fill on screen beside the one the reader came to
+press, which is the duplication this rule exists to prevent.
+
+The rule was written about the NAV's button and originally stopped there, so
+every page on the docs shell still ended with an in-page green pill about 160px
+above the full-width bar, same words and same href. A closing `.end` button now
+stands down wherever the bar is present, keyed off `body:has(.sticky-cta)` rather
+than off the breakpoint, so a page that opts out of the bar keeps its own.
 
 ## Resting states
 

@@ -59,9 +59,17 @@ export async function upgradeRoute(app: FastifyInstance) {
 
     const rows = PLAN_ORDER.map((tier) => {
       const free = tier === 'free'
+      // One primary per fold, which design.md already requires and this table
+      // broke: three filled greens stacked in a 215px column, for three tiers a
+      // stranger cannot buy yet, while the tier they CAN act on got the outlined
+      // chip. It also contradicted the homepage, where the identical "Start free"
+      // label is the green one. On mobile the fixed .sticky-cta was on screen
+      // beside those three fills, which is the exact duplication the sticky-CTA
+      // rule exists to prevent. Team is still marked, by the type and the service
+      // line it already carries, not by a second green button.
       const button = free
-        ? `<a class="btn-ghost" href="/register">Start free</a>`
-        : `<a class="btn" data-tier="${tier}" href="${cta(tier)}">Get ${tier[0].toUpperCase()}${tier.slice(1)}</a>`
+        ? `<a class="btn" href="/register">Start free</a>`
+        : `<a class="btn-ghost" data-tier="${tier}" href="${cta(tier)}">Get ${tier[0].toUpperCase()}${tier.slice(1)}</a>`
       return `
         <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
           <th scope="row" class="tier">${tier}${SERVICE[tier] ? `<span class="svc">${SERVICE[tier]}</span>` : ''}</th>
@@ -71,6 +79,10 @@ export async function upgradeRoute(app: FastifyInstance) {
         </tr>`
     }).join('')
 
+    // sticky: false. design.md says the mobile primary MOVES rather than being
+    // duplicated, and on every other page the bar IS the only primary on a phone.
+    // Here the page's whole purpose is the tier buttons, so the bar put a second
+    // green fill on screen beside the one the reader came to press.
     reply.type('text/html')
     return reply.send(`${head({
       title: 'AgentBill · Pricing',
@@ -190,7 +202,7 @@ export async function upgradeRoute(app: FastifyInstance) {
 `,
     })}
 <body>
-${siteNav('/pricing')}
+${siteNav('/pricing', { sticky: false })}
 <main>
   <div class="wrap">
 

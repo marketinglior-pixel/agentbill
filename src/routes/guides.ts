@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 // Guides render through the shared content shell in src/ui/docs.ts: one copy
 // of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
@@ -236,7 +237,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <p>Per-agent cost attribution: every job's ceiling, spend, live reservations and overage flag.
   Filter with <span class="inline">?agent_id=</span>.</p>
 
-  <p class="end"><a class="btn" href="/register">Get your API key &rarr;</a></p>
+  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
 `
     ))
   })
@@ -318,7 +319,7 @@ const result = await runAgent()
 await record({ agentId: 'my_agent', units: 10 })
       </pre></div>
 
-      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
+      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -450,7 +451,7 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
       <h2>LangGraph support</h2>
       <p>For LangGraph workflows, call <span class="inline">preflight()</span> before entering the graph and <span class="inline">record()</span> after the final node completes. Use <span class="inline">checkpoint()</span> inside nodes to enforce ceilings mid-graph.</p>
 
-      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
+      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -553,7 +554,7 @@ async function runAgent(customerId: string, task: string): Promise&lt;string&gt;
 }
       </pre></div>
 
-      <p class="end"><a href="/register" class="btn">Get your API key &rarr;</a></p>
+      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
       `
     ))
   })

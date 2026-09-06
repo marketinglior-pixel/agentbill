@@ -3,6 +3,7 @@ import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath, monthYear } from '../ui/site.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 // Posts render through the shared content shell in src/ui/docs.ts: one copy of
 // the content CSS, and an "On this page" rail built from each post's <h2>s.
@@ -261,7 +262,7 @@ record(units=7)
 
   <h2>Add preflight to your agents</h2>
   <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
-  <p class="end"><a href="/register" class="btn">Get your API key</a></p>
+  <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
 
   <div class="also">
     <p>Related</p>
@@ -412,7 +413,7 @@ async function runAgentSafely(customerId: string, task: string) {
 
   <h2>Add preflight to your agents</h2>
   <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
-  <p class="end"><a href="/register" class="btn">Get your API key</a></p>
+  <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
 
   <div class="also">
     <p>Related guides</p>

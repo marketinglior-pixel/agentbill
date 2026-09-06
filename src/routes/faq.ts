@@ -3,6 +3,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 // Questions the docs answer indirectly or not at all, and every answer checked
 // against the source before it was written. The file each claim was read from
@@ -86,7 +87,7 @@ ${FAQ.map((x) => `
   <h2>${x.q}</h2>
   <p>${x.a}</p>`).join('')}
 
-  <p class="end"><a class="btn" href="/register">Get your API key</a></p>
+  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
 `,
     }))
   })

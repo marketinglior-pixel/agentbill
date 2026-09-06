@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { FOUNDER_W, FOUNDER_H } from '../lib/photo.js'
+import { KEY_CTA } from '../ui/chrome.js'
 
 // The honest version of "photos of me and the team".
 //
@@ -91,7 +92,7 @@ export async function aboutRoute(app: FastifyInstance) {
      mechanism this page describes is a few hundred lines of it, and you can
      read the ones that matter rather than take the description on trust.</p>
 
-  <p class="end"><a class="btn" href="/register">Get your API key</a></p>
+  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
 `,
     }))
   })
