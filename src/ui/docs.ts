@@ -73,9 +73,14 @@ export const DOCS_CSS = `${CHROME_CSS}
      .14em tracking is tuned for 12px and runs long at 22px. */
   h3 { font-family: var(--mono); font-size: var(--fs-h3); font-weight: 500; color: var(--text);
        margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .07em; }
-  p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; max-width: 68ch; }
+  /* 68ch measured 86 real characters, because ch is the width of a zero and not
+     of an average character, so five stacked paragraphs read as one grey slab.
+     54ch lands at 66 to 70. Code, tables and the headings keep the full column,
+     and the difference between a narrow prose column and a wide panel becomes
+     rhythm instead of one flat block. */
+  p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; max-width: 54ch; }
   p.ok { color: var(--green); }
-  li { color: var(--muted); line-height: 1.7; }
+  li { color: var(--muted); line-height: 1.7; max-width: 54ch; }
   a { color: var(--green); }
   /* A link at display size is a title, not an action. The blog index renders each
      post as <h2><a>, so both headings inherited full-strength green plus the prose

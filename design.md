@@ -174,6 +174,13 @@ bar ("python · the whole integration"), never window chrome.
 Macrostructure within their family. Shell width per family. Whether a grid
 break exists (marketing yes, content no).
 
+`/pricing` is the spec-sheet variant of the marketing family, and its own stamp
+records it: `enrichment: none, the table is the product surface`. The 2026-09-06
+audit asked for a product panel there on the grounds that Split Studio pages put
+one beside every claim. Declined: the table IS the panel on that page, and the
+rule this file states is that macrostructure may differ within a family. A future
+pass that wants to revisit it should change the stamp first.
+
 ## Known open gates (for the all-surfaces pass)
 
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`

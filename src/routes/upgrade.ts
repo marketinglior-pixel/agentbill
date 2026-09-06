@@ -163,7 +163,12 @@ export async function upgradeRoute(app: FastifyInstance) {
     .incl li b { color: var(--text); font-weight: 600; }
 
     /* Already have a key: the same frame as every other product panel. */
-    .havekey { margin-top: 48px; max-width: 640px; }
+    /* No width cap. At 640px in a 1080 shell this left about 390px of empty
+       ground to its right, and it is the last object on the page, so the final
+       impression was a truncated card floating in black. The panel is a label
+       bar, an input and a button, which is a shape that has no short side at
+       full width: the input grows and the button stays right-aligned. */
+    .havekey { margin-top: 48px; }
     .hk-row { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 18px; align-items: center; }
     .hk-row input { flex: 1; min-width: 200px; min-height: 44px; background: var(--bg); color: var(--text);
                     border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 14px;

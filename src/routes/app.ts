@@ -736,13 +736,18 @@ ${MARK_CSS}
   .empty p { color: var(--muted); margin-bottom: 14px; max-width: 70ch; }
   .empty pre { margin: 0 0 14px; white-space: pre-wrap; word-break: break-all; }
   .empty details { margin-top: 6px; }
+  /* Neutral, not amber. This was the largest amber object on the page and it
+     meant "this data is invented", while every other amber here means
+     "approaching a limit", so the page's loudest colour signal was the one that
+     is not a signal. The frame and the label stay, so design.md's rule that
+     sample data says so inside its own frame still holds. */
   .banner { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-            background: var(--near-bg); border: 1px solid var(--near-line); border-radius: 12px;
+            background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 12px;
             padding: 12px 16px; margin-bottom: 18px; }
   .banner b { font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
-              text-transform: uppercase; color: var(--amber); }
-  .banner p { font-size: 13px; color: var(--near-ink); margin: 0; }
-  .banner a { color: var(--amber); }
+              text-transform: uppercase; color: var(--dim); }
+  .banner p { font-size: 13px; color: var(--muted); margin: 0; }
+  .banner a { color: var(--green); }
   .nothing { padding: 22px 18px; color: var(--dim); font-size: 13.5px; }
   .foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--dim);
           font-size: 13px; line-height: 1.7; }

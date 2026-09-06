@@ -248,6 +248,12 @@ export async function homeRoute(app: FastifyInstance) {
     .dip-text { padding-top: 4px; }
     .dip + .dip { padding-block: 48px 40px; }
     .dip:last-of-type { border-bottom: 0; }
+    /* order: 2 reorders the DOM item but not the track, so on the flipped row the
+       panel landed in the 5fr column and rendered 161px narrower than its two
+       siblings. design.md's Alignment section asks siblings to obey one rule
+       VISIBLY; the rule held on the vertical axis and broke on the horizontal
+       one, so the set read as generated. Mirror the tracks with the order. */
+    .dip.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
     .dip.flip .dip-text { order: 2; }
     /* A sub-claim is not a section. These three measured the identical 22px of
        ink as the section head that governs all three, so the page had no fourth

@@ -29,6 +29,11 @@ export async function aboutRoute(app: FastifyInstance) {
   app.get('/about', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(docsShell({
       path: '/about',
+      // Four sections and about 450 words. A table of contents there announces
+      // that the docs template was reused without judgment, and on a phone it
+      // put 312px of navigation furniture above the H1. /status, /blog and
+      // /thanks already opt out for the same reason.
+      rail: false,
       title: 'About · AgentBill',
       description: 'Who builds AgentBill, why a per-task ceiling exists, and what the product deliberately does not do.',
       current: '',
