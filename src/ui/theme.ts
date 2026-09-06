@@ -86,9 +86,13 @@ export const TOKENS = `
     /* A five-step scale with large intervals. The old set ran
        46 / 26 / 15.5 / 15, so a card title and its body text were half a pixel
        apart and nothing read as a hierarchy. Weight and colour carry the rest. */
-    --fs-display: clamp(34px, 5.4vw, 58px);
-    --fs-h2: clamp(26px, 3.4vw, 34px);
-    --fs-h3: 19px;
+    --fs-display: clamp(40px, 5.4vw, 58px);
+    --fs-h2: clamp(24px, 3.4vw, 34px);
+    /* Clamped, not fixed. At a flat 22px the mobile ladder read 32 / 24 / 22,
+       so h2 to h3 was 1.09x: the same flattening this scale exists to prevent,
+       one rung down. The clamp gives 24 / 19 on a phone (1.26x) and 34 / 22 on
+       a laptop (1.55x). */
+    --fs-h3: clamp(19px, 2.2vw, 22px);
     --fs-lede: 18px;
     --fs-body: 16px;
     --fs-small: 13.5px;
@@ -107,7 +111,7 @@ export const TOKENS = `
        identically into docs.ts and upgrade.ts, and register.ts had a third
        value two pixels away that nobody chose. --fs-h1-app is the workbench
        heading on /app and /admin, which should not inherit a marketing clamp. */
-    --fs-h1-sub: clamp(28px, 3.6vw, 40px);
+    --fs-h1-sub: clamp(32px, 5vw, 50px);
     --fs-h1-app: 28px;
 
     /* Spacing. Deliberately not a geometric scale: this codebase uses 28

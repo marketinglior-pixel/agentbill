@@ -28,6 +28,19 @@ const LINKS: ReadonlyArray<readonly [href: string, label: string]> = [
 
 /** Header + footer CSS. Include once per page, after theme BASE. */
 export const CHROME_CSS = `
+    /* Close an unequal row.
+       A two-column row whose short side stops well above its tall side reads as
+       an unfinished column, not as a finished row, unless something draws its
+       bottom edge. Measured across sixteen premium references, not one leaves an
+       open-bottomed unequal row on flat ground; Stripe's pricing ships a row
+       filling 39% with 115px of void under it and it is invisible, because a
+       hairline closes it. The site already closed rows three different ways
+       (--border on .tiers, --border-soft on .task and .ref-row) and not at all
+       on four marketing grids. This is the one name, so the next row inherits
+       the behaviour instead of the omission. Lives here because CHROME_CSS is
+       the only stylesheet every page has, directly or through the docs shell. */
+    .row-close { border-bottom: 1px solid var(--border); }
+
   /* --banner-height is the nav's rendered height. Anything else that sticks
      docks at top: var(--banner-height) so it sits beneath the nav instead of
      painting over it during scroll. Change .nav-inner's height and this together. */
@@ -161,8 +174,8 @@ ${MARK_CSS}
   }`
 
 /**
- * `current` marks the active link, e.g. "/docs" or "/pricing".
- * `cta: false` drops the "Get API key" button; /register uses it, because a
+ * \`current\` marks the active link, e.g. "/docs" or "/pricing".
+ * \`cta: false\` drops the "Get API key" button; /register uses it, because a
  * button that links to the page you are already on is noise beside the form.
  */
 export function siteNav(

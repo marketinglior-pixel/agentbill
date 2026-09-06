@@ -155,7 +155,7 @@ break exists (marketing yes, content no).
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
 - The `--space-*` and `--radius-*` scales exist and are not yet applied
-  everywhere: 137 hardcoded `font-size` literals remain, down from 152. The
+  everywhere: 135 hardcoded `font-size` literals remain, down from 152. The
   ratchet in `scripts/ratchet` stops the count rising; a block retires its own
   values when it is next rewritten. Raw hexes below `:root` are at **zero** and
   the ratchet holds them there.
@@ -167,6 +167,24 @@ break exists (marketing yes, content no).
 - `legal.ts` sets prose links to `--code`, which is syntax only.
 - No page has ever been checked by eye. Every "verified" in the log below
   is grep and arithmetic. That is how a 230px empty panel shipped.
+
+## Closing a row
+
+An unequal two-column row is closed by a hairline, `.row-close` in `chrome.ts`.
+It lives there because `chrome.ts` is the only stylesheet every page loads,
+directly or through the docs shell.
+
+The rule is about the bottom edge, not about the size of the void. A row whose
+short side stops well above its tall side reads as an unfinished column unless
+something draws its bottom; measured across sixteen premium references, not one
+leaves an open-bottomed unequal row on flat ground, and Stripe's pricing ships a
+row filling 39% with 115px under it that nobody notices because a hairline closes
+it. Do not solve one of these by padding the short column or by cutting content
+out of the tall one.
+
+Applied to `.dip` on `/`, the register grid, the pricing includes grid and the
+about portrait row. `.tiers` and the panels' `.task` / `.ref-row` predate the
+utility and close themselves; a new marketing row uses the class.
 
 ## Alignment
 

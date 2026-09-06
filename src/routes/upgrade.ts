@@ -111,7 +111,7 @@ export async function upgradeRoute(app: FastifyInstance) {
 
     /* A two-sentence headline on a secondary page is not a hero: it steps down
        a rung rather than inheriting the display clamp's hero maximum. */
-    h1 { font-size: clamp(28px, 3.6vw, 40px); color: var(--white); max-width: 30ch; overflow-wrap: anywhere; min-width: 0; }
+    h1 { font-size: var(--fs-h1-sub); color: var(--white); max-width: 30ch; overflow-wrap: anywhere; min-width: 0; }
     .sub { color: var(--muted); font-size: var(--fs-lede); margin-top: 16px; max-width: 58ch; line-height: 1.6; }
 
     /* The tiers as a spec sheet: one row each, the numbers in columns that line
@@ -119,14 +119,19 @@ export async function upgradeRoute(app: FastifyInstance) {
        type, not through a tinted border and a floating badge. */
     .tiers { width: 100%; border-collapse: collapse; margin-top: 44px; font-variant-numeric: tabular-nums; }
     .tiers th { font-weight: inherit; text-align: left; }
-    .tiers th, .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px;
+    .tiers th, .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-body);
                 vertical-align: middle; }
     /* \`> *\`, not \`td\`: the row's first cell is a th, so a td-only selector drew
        the table's opening rule from the second column on and left FREE with no
        rule above it while its four siblings had one. */
     .tiers tr:first-child > * { border-top: 1px solid var(--border); }
-    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
-                   color: var(--dim); width: 22%; }
+    /* The plan name was the second-smallest text in its own row: 12.5px against
+       a 15.5px call count and a 24px price, so the thing the row is named after
+       was caption-sized. Both reference pricing pages do the opposite. The mono
+       family stays, which design.md wants for labels over numbers; the rung and
+       the ink change, and .12em tracking is tuned for 12.5px. */
+    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; font-size: var(--fs-h3);
+                   color: var(--white); width: 22%; }
     .tiers .svc { display: block; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--dim);
                   margin-top: 4px; }
     .tiers .amount { font-family: var(--display); font-size: 24px; font-weight: 700; color: var(--text);
@@ -202,7 +207,7 @@ ${siteNav('/pricing')}
     they include, and in who answers when you write in.</p>
 
     <h2>Every plan includes</h2>
-    <ul class="incl">
+    <ul class="incl row-close">
       <li><b>Preflight budget checks.</b> The ceiling is consulted before the call goes out, not after the bill.</li>
       <li><b>Per-task hard ceilings.</b> One budget across every call that passes the same task_ref, reserved atomically.</li>
       <li><b>Per-agent attribution.</b> Every task and every refusal carries the agent that asked.</li>

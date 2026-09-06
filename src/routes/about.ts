@@ -72,7 +72,7 @@ export async function aboutRoute(app: FastifyInstance) {
      number you gave it.</p>
 
   <h2>Who is behind it</h2>
-  <div class="who-is">
+  <div class="who-is row-close">
     <img class="who-photo" src="${FOUNDER_PHOTO.src}" alt="${FOUNDER_PHOTO.alt}"
          width="${FOUNDER_PHOTO.w}" height="${FOUNDER_PHOTO.h}" loading="lazy" decoding="async" />
     <div>

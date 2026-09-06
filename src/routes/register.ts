@@ -288,7 +288,7 @@ export async function registerRoute(app: FastifyInstance) {
 ${siteNav('/register', { cta: false })}
 <main>
 
-<div class="reg wrap">
+<div class="reg wrap row-close">
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
     <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>

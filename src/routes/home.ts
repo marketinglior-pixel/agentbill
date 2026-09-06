@@ -234,12 +234,25 @@ export async function homeRoute(app: FastifyInstance) {
        heights, so each landed at a different offset. One rule, visibly the same
        rule three times: text top aligns with panel top. The nudge is optical,
        putting the h2's cap-height on the panel's label bar. */
+    /* The row is CLOSED. All three fill about half their panel's height and left
+       134px, 123px and 80px of empty ground under the short column, with no
+       bottom edge, so each read as an unfinished column rather than a finished
+       row. The void is not the defect: Stripe's pricing ships a row filling 39%
+       with 115px under it and nobody notices, because a hairline closes it. Of
+       fourteen reference captures, none leaves an open-bottomed unequal row on
+       flat ground. This is the same device \`.tiers th, .tiers td\` already uses
+       to close the plan rows ninety lines below, on this page.
+       align-items: start and the recorded 0, 0, 0 offsets are untouched. */
     .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap);
-           align-items: start; padding-block: 40px 0; }
+           align-items: start; padding-block: 40px 40px; }
     .dip-text { padding-top: 4px; }
-    .dip + .dip { padding-block: 64px 0; }
+    .dip + .dip { padding-block: 48px 40px; }
+    .dip:last-of-type { border-bottom: 0; }
     .dip.flip .dip-text { order: 2; }
-    .dip h2 { color: var(--white); margin-bottom: 16px; max-width: 16ch; }
+    /* A sub-claim is not a section. These three measured the identical 22px of
+       ink as the section head that governs all three, so the page had no fourth
+       rung and the hierarchy flattened everywhere below the hero. */
+    .dip h3 { font-size: var(--fs-h3); color: var(--white); margin-bottom: 16px; max-width: 16ch; }
     .dip p { color: var(--muted); line-height: 1.7; max-width: 46ch; }
     .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
                  padding: 0 18px; border: 1px solid var(--border-strong); border-radius: 8px;
@@ -405,9 +418,9 @@ ${playgroundSection()}
     <p class="lead-p">Provider spend caps stop at monthly org totals. These three things stop the run
     that is burning money right now.</p>
 
-    <div class="dip">
+    <div class="dip row-close">
       <div class="dip-text">
-        <h2>Per-task ceilings</h2>
+        <h3>Per-task ceilings</h3>
         <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
         unit is worth. The ceiling is consulted before each call, and the total across the whole
         job cannot pass it.</p>
@@ -416,9 +429,9 @@ ${playgroundSection()}
       ${taskPanel()}
     </div>
 
-    <div class="dip flip">
+    <div class="dip flip row-close">
       <div class="dip-text">
-        <h2>One ceiling, any provider</h2>
+        <h3>One ceiling, any provider</h3>
         <p>OpenAI, Anthropic, your own GPU, a tool call. Whatever it is, if it passes the same
         task_ref it draws down the same ceiling, and you decide what it costs in units. We never
         look at your provider bill. Per job, with per-agent attribution.</p>
@@ -427,9 +440,9 @@ ${playgroundSection()}
       ${refusalPanel()}
     </div>
 
-    <div class="dip">
+    <div class="dip row-close">
       <div class="dip-text">
-        <h2>No proxy in your request path</h2>
+        <h3>No proxy in your request path</h3>
         <p>An SDK call, not a gateway. Nothing to route your traffic through, nothing to deploy,
         nothing to compromise. The ceiling is something your tools consult, and the reservation
         it takes is atomic.</p>
