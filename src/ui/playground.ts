@@ -243,6 +243,12 @@ export const PLAYGROUND_CSS = `
     .pg-left { border-right: none; border-bottom: 1px solid var(--border); }
     .pg-actions { margin-left: 0; }
     .pg-disc { margin-left: 0; text-align: left; }
+  }
+  /* At 320px the ceiling row (label, 150px slider, value, unit) wants more
+     than the 288px between the bar's gutters, and the frame clipped the value
+     mid-digit. The slider gives up the width; the value is the point. */
+  @media (max-width: 400px) {
+    .pg-sl { width: 100px; }
   }`
 
 /** The section markup. Drop it straight after the hero. */
