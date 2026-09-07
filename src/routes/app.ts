@@ -737,6 +737,7 @@ ${MARK_CSS}
   .views .mode { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border);
                  border-radius: 0; }
   .views .mode span::before { content: '\\2194  '; color: var(--dim); }
+  .vmenu { display: none; }
   .rail-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--s2); }
   .rail-foot .docs { display: flex; align-items: center; min-height: 40px; padding: 0 var(--s3);
                      border-radius: var(--r-control); color: var(--muted); font-weight: 500; }
@@ -812,7 +813,7 @@ ${MARK_CSS}
   .spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 4px; }
   .spark i { flex: 1 1 0; min-width: 0; background: var(--flow); border-radius: 1px 1px 0 0; }
   .spark i.held { background: var(--held); }
-  .spark i.zero { background: var(--surface3); height: 1px; }
+  .spark i.zero { background: var(--surface2); height: 1px; }
 
   /* Leaked spend is not a peer of the four tiles above it. It is the only
      number here whose good value is zero, so it has its own row with its
@@ -858,9 +859,10 @@ ${MARK_CSS}
          position: relative; }
   .col i { display: block; width: 100%; max-width: 28px; border-radius: 3px 3px 0 0; background: var(--flow); }
   .col i.held { background: var(--held); }
-  .col i.zero { background: var(--surface3); height: 2px; }
+  .col i.zero { display: none; }
   /* The one direct label: the peak. Everything else is on the axis, the hover
      or the day-by-day table on the activity view. */
+  .strip .col.peak::before { display: none; }
   .col.peak::before { content: attr(data-v); position: absolute; left: 50%; transform: translateX(-50%);
                       top: -18px; font-family: var(--mono); font-size: var(--fs-chip); color: var(--muted);
                       font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -879,9 +881,13 @@ ${MARK_CSS}
   .col.l::after { left: 0; transform: none; } .col.r::after { left: auto; right: 0; transform: none; }
   .cx { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--s4); margin-top: 6px; }
   .cx div { display: flex; gap: 3px; padding-left: 44px; }
+  /* Each label is centred on its column, and may overflow its slot on both
+     sides equally, which is what a flex container with justify-content:
+     center does with a child wider than itself. The last label of a dense
+     axis ends flush with its column instead, so it never leaves the frame. */
   .cx span { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
-             white-space: nowrap; overflow: visible; }
-  .cx span:last-child { text-align: right; }
+             white-space: nowrap; overflow: visible; display: flex; justify-content: center; }
+  .cx div:not(.x1) span:last-child { justify-content: flex-end; }
 
   /* Burn-down rows. */
   .brow { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
@@ -1062,14 +1068,26 @@ ${MARK_CSS}
     .rail-foot { grid-area: foot; margin: 0; flex-direction: row; }
     .rail-foot .docs { display: none; }
     .btn-out, .btn-key { width: auto; }
-    .views { grid-area: views; flex-direction: row; gap: 0; overflow-x: auto; scrollbar-width: none;
-             margin: 0 calc(-1 * var(--s3)); padding: 0 var(--s3); }
-    .views::-webkit-scrollbar { display: none; }
-    .views a { min-height: 44px; padding: 0 var(--s3); border-radius: 0; border-bottom: 2px solid transparent; gap: 6px; }
-    .views a:hover, .views a[aria-current="page"] { background: none; }
-    .views a[aria-current="page"] { border-bottom-color: var(--green); }
-    .views a[aria-current="page"]::before { display: none; }
-    .views .mode { margin: 0 0 0 auto; padding-top: 0; border-top: none; }
+    .views { display: none; }
+    .vmenu { display: block; grid-area: views; position: relative; margin: 0 calc(-1 * var(--s3)); }
+    .vmenu summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: var(--s2);
+                     min-height: 44px; padding: 0 var(--s4); color: var(--text); font-weight: 600; }
+    .vmenu summary::-webkit-details-marker { display: none; }
+    .vmenu summary::before, .vmenu[open] summary::before { content: none; }
+    .vmenu summary .lbl { font-size: var(--fs-chip); }
+    .vmenu summary i { margin-left: auto; width: 8px; height: 8px; border-right: 1.5px solid var(--dim);
+                       border-bottom: 1.5px solid var(--dim); transform: translateY(-2px) rotate(45deg); }
+    .vmenu[open] summary i { transform: translateY(2px) rotate(-135deg); }
+    .vlist { position: absolute; left: var(--s3); right: var(--s3); top: 100%; z-index: 11; display: flex; flex-direction: column;
+             gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r-frame);
+             box-shadow: var(--edge), var(--lift); }
+    .vlist a { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 44px;
+               padding: 0 var(--s3); border-radius: var(--r-control); color: var(--muted); font-weight: 500; white-space: nowrap; }
+    .vlist a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
+    .vlist a[aria-current="page"] { color: var(--text); background: var(--surface2); }
+    .vlist a b { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500; color: var(--dim); }
+    .vlist .mode { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 4px; }
+    .vlist .mode span::before { content: '\\2194  '; color: var(--dim); }
     .wrap { padding: var(--s5) var(--s4) var(--s7); }
     .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .duo { grid-template-columns: minmax(0, 1fr); }
@@ -1108,6 +1126,26 @@ ${MARK_CSS}
     .refusals td.id::before { content: attr(data-l) ' '; color: var(--dim); }
     .refusals td.msg, .refusals td.body { grid-column: 1 / -1; }
     .refusals td.msg { margin-top: 2px; }
+    /* Customers and keys as cards too: the identifier and its state on the
+       first line, the wide cell (share bar, label) on the second, then the
+       numbers as label-value pairs. No column is hidden off the edge. */
+    .cards thead { display: none; }
+    .cards tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--s3);
+                padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); align-items: center; }
+    .cards tr:last-child { border-bottom: none; }
+    .cards td { display: block; padding: 0; border: none; }
+    .cards td.lead { max-width: none; }
+    .cards td.state { grid-column: 2; grid-row: 1; justify-self: end; }
+    .cards td.wide { grid-column: 1 / -1; }
+    .cards td.num, .cards td.when { grid-column: 1 / -1; text-align: left; font-size: var(--fs-micro); white-space: normal; }
+    .cards td[data-l]::before { content: attr(data-l) '  '; color: var(--dim); font-family: var(--mono); font-size: var(--fs-chip);
+                                text-transform: uppercase; letter-spacing: .06em; }
+    .cards .share .sbar { flex: 1 1 60px; width: auto; }
+    .cards .share > span:last-child { flex: none; white-space: nowrap; }
+    /* A table that still scrolls sideways says so with a fade at its edge. */
+    .tw:not(.cards):not(.refusals) { mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+                                     -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent); }
+    th, td { padding-inline: 10px; }
     /* The key tail and the wordmark wanted the same 80px at 375px; the tail is
        the one that can go, the banner and the rail say which mode this is. */
     .acct-row span:last-child { display: none; }
@@ -1115,6 +1153,12 @@ ${MARK_CSS}
     .tile { padding: var(--s3); }
     .tile .lbl { font-size: var(--fs-chip); letter-spacing: .06em; }
     .rrow { grid-template-columns: 56px minmax(0, 1fr); }
+    /* The chip wraps under the ids instead of squeezing them to fragments,
+       and the sentence gets two lines instead of one. */
+    .rtop { flex-wrap: wrap; gap: 4px 10px; }
+    .rrow .who { flex: 1 1 100%; }
+    .rrow .what { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .bhead { flex-direction: column; align-items: flex-start; gap: 4px; }
     .cmd { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
   @media (max-width: ${BP.xs}px) {
@@ -1233,13 +1277,26 @@ function rail(p: Page): string {
   const d = p.d
   const activeKeys = d.keys.filter((k) => !(k.revokedAt && new Date(k.revokedAt).getTime() <= Date.now()) && !(k.expiresAt && new Date(k.expiresAt).getTime() <= Date.now())).length
   const counts: Partial<Record<ViewKey, string>> = {
-    tasks: d.taskLive ? num(d.taskLive) : '',
+    tasks: d.taskCount ? num(d.taskCount) : '',
     refusals: d.decisionTotal ? num(d.decisionTotal) : '',
     customers: d.customerCount ? num(d.customerCount) : '',
     keys: activeKeys ? num(activeKeys) : '',
   }
   const items = (Object.keys(VIEWS) as ViewKey[]).map((k) =>
     `<a href="${href(p, k)}"${k === p.view ? ' aria-current="page"' : ''}><span>${VIEWS[k].title}</span>${counts[k] ? `<b>${counts[k]}</b>` : ''}</a>`).join('\n        ')
+  // The phone's copy of the same list, inside a native disclosure whose
+  // summary names the current view. A horizontal strip put the current item
+  // off screen on the last three views, with no highlight and no hint that
+  // it scrolled; a summary that reads "Limits" cannot hide which page this is.
+  const menu = `<details class="vmenu">
+        <summary><span class="lbl">View</span><b>${VIEWS[p.view].title}</b><i aria-hidden="true"></i></summary>
+        <div class="vlist">
+        ${items}
+        ${p.anon ? '' : p.demo
+          ? `<a class="mode" href="${href(p, p.view, { demo: false })}"><span>Your data</span></a>`
+          : `<a class="mode" href="${href(p, p.view, { demo: true })}"><span>Sample data</span></a>`}
+        </div>
+      </details>`
   const mode = p.anon
     ? ''
     : p.demo
@@ -1255,6 +1312,7 @@ function rail(p: Page): string {
         ${items}
         ${mode}
       </nav>
+      ${menu}
       <div class="rail-foot">
         <a class="docs" href="/docs">Docs</a>
         ${action}
@@ -1380,7 +1438,7 @@ function activityTable(series: Series[]): string {
       <td class="num">${num(s.refused)}</td>
     </tr>`).join('')
   return `<div class="frame tw"><table>
-    <thead><tr><th>Day</th><th class="num">Units metered</th><th class="num">Refused</th><th class="num">Units refused</th></tr></thead>
+    <thead><tr><th>Day</th><th class="num">Metered</th><th class="num">Refused</th><th class="num">Refused units</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`
 }
@@ -1489,15 +1547,15 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
       ? '<span class="chip held">at limit</span>'
       : '<span class="chip flow">ok</span>'
     return `<tr>
-      <td class="id" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
-      <td><div class="share"><span class="sbar"><i class="${cls}" style="width:${Math.max(2, fill)}%"></i></span><span>${share}%</span></div></td>
-      <td class="num">${num(used)}</td>
-      <td class="num">${limit == null ? '<span class="dim">no limit</span>' : num(limit)}</td>
-      <td class="num">${limit == null ? '<span class="dim">no limit</span>' : num(Math.max(0, limit - used))}</td>
-      <td>${status}</td>
+      <td class="id lead" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
+      <td class="wide"><div class="share"><span class="sbar"><i class="${cls}" style="width:${Math.max(2, fill)}%"></i></span><span>${share}% of spend</span></div></td>
+      <td class="num" data-l="used">${num(used)}</td>
+      <td class="num" data-l="limit">${limit == null ? '<span class="dim">no limit</span>' : num(limit)}</td>
+      <td class="num" data-l="left">${limit == null ? '<span class="dim">no limit</span>' : num(Math.max(0, limit - used))}</td>
+      <td class="state">${status}</td>
     </tr>`
   }).join('')
-  return `<div class="frame tw"><table>
+  return `<div class="frame tw cards"><table>
     <thead><tr><th>Customer</th><th>Share of spend${compact ? '' : ' · all customers'}</th><th class="num">Used</th><th class="num">Limit</th><th class="num">Left</th><th>State</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`
@@ -1519,15 +1577,15 @@ function keysTable(rows: KeyRow[], viewerKey: string): string {
     else if (expires !== null && expires <= now) chip = '<span class="chip dead">expired</span>'
     else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip near">expiring</span>'
     return `<tr>
-      <td class="id">${esc(mask)}</td>
-      <td>${k.label ? esc(k.label) : '<span class="none">no label</span>'}${mine ? ' <span class="chip flow" title="The key that opened this console">this session</span>' : ''}</td>
-      <td>${chip}</td>
-      <td class="when">${rel(k.createdAt)}</td>
-      <td class="when">${k.expiresAt ? rel(k.expiresAt) : '<span class="none">never</span>'}</td>
-      <td class="when">${k.lastSeenIp ? esc(k.lastSeenIp) : '<span class="none">unused</span>'}</td>
+      <td class="id lead">${esc(mask)}</td>
+      <td class="wide">${k.label ? esc(k.label) : '<span class="none">no label</span>'}${mine ? ' <span class="chip flow" title="The key that opened this console">this session</span>' : ''}</td>
+      <td class="state">${chip}</td>
+      <td class="when" data-l="created">${rel(k.createdAt)}</td>
+      <td class="when" data-l="expires">${k.expiresAt ? rel(k.expiresAt) : '<span class="none">never</span>'}</td>
+      <td class="when" data-l="last seen from">${k.lastSeenIp ? esc(k.lastSeenIp) : '<span class="none">unused</span>'}</td>
     </tr>`
   }).join('')
-  return `<div class="frame tw"><table>
+  return `<div class="frame tw cards"><table>
     <thead><tr><th>Key</th><th>Label</th><th>State</th><th>Created</th><th>Expires</th><th>Last seen from</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`
