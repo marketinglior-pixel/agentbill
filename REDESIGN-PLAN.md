@@ -1,6 +1,6 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `f60f673`, Fly v101.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `fa8d4a1`, Fly v102.**
 >
 > After the first deploy (v100) a by-eye verification of production found one high defect the
 > local captures had missed: on a phone the view strip scrolled sideways, so on three of the
@@ -9,6 +9,11 @@
 > uses. The same pass moved the x labels under their bars, turned the customers and keys
 > tables into cards on a phone, and dropped the refused strip's peak label, which sat on the
 > units chart's zero tick. Captured and looked at on every view at 390px this time.
+>
+> A second production pass (v101) found the scroll-edge fade dimming digits on tables that no
+> longer scroll, the JSON body scrolling inside a phone card, the login card without a
+> gutter, Docs unreachable from a phone, and the sample data claiming two leaks while listing
+> one. All fixed in `fa8d4a1`; the sample's one leak is now derived from its rows.
 >
 > Before the merge an adversarial review of the diff (four lenses, three refuters per
 > finding) confirmed six defects and raised eleven lower ones. The worst: array lengths
