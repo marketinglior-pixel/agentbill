@@ -391,12 +391,14 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     FROM customers WHERE account_id = ${accountId}
   `
   // near = live and at four fifths of the ceiling or more, settled plus in
-  // flight: the same test taskRow() applies, in integers so it is exact.
+  // flight: the same test taskRow() applies, in integers so it is exact, and
+  // in bigint because the API accepts any positive int4 ceiling and int4 * 4
+  // overflows above 536,870,911, which would turn this page into a 500.
   const [ttotal] = await sql`
     SELECT count(*)                                                        AS n,
            count(*) FILTER (WHERE used_units < ceiling_units)             AS live,
            count(*) FILTER (WHERE used_units < ceiling_units
-                              AND (used_units + reserved_units) * 5 >= ceiling_units * 4) AS near
+                              AND (used_units + reserved_units)::bigint * 5 >= ceiling_units::bigint * 4) AS near
     FROM task_budgets WHERE account_id = ${accountId}
   `
   const [matched] = await sql`
@@ -1149,6 +1151,11 @@ ${MARK_CSS}
     .cards .share .sbar { flex: 1 1 60px; width: auto; }
     .cards .share > span:last-child { flex: none; white-space: nowrap; }
     th, td { padding-inline: 10px; }
+    /* The day-by-day table at 375px: the weekday steps back, the heads may
+       wrap, and the cells tighten, so four columns fit a 341px card. */
+    .days th { white-space: normal; }
+    .days th, .days td { padding-inline: 8px; }
+    .days td.when .dim { display: none; }
     /* The JSON body wraps instead of scrolling inside a 322px card. */
     td pre { white-space: pre-wrap; word-break: break-word; }
     /* The login card keeps a gutter like every other card on a phone. */
@@ -1446,7 +1453,7 @@ function activityTable(series: Series[]): string {
       <td class="num">${num(s.blocks)}</td>
       <td class="num">${num(s.refused)}</td>
     </tr>`).join('')
-  return `<div class="frame tw"><table>
+  return `<div class="frame tw days"><table>
     <thead><tr><th>Day</th><th class="num">Metered</th><th class="num">Refused</th><th class="num">Refused units</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`
