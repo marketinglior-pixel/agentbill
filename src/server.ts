@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { STATUS_CODES } from 'node:http'
 import Fastify, { type FastifyReply } from 'fastify'
 import sensible from '@fastify/sensible'
 import { eventsRoute } from './routes/events.js'
@@ -59,6 +60,33 @@ const app = Fastify({
     if (accept.includes('text/html')) return sendNotFoundPage(request, reply, 400)
     return reply.code(400).send({ error: 'bad_request', message: 'Malformed URL.' })
   },
+})
+
+// Nothing that reaches a client carries a database message.
+//
+// There was no error handler at all, so an exception inside a route fell to
+// Fastify's default, which serialises error.message into the response body.
+// Postgres answers a NUL byte in a text parameter with 22021, "invalid byte
+// sequence for encoding UTF8: 0x00", and that sentence WAS the body of the 500
+// on GET /decisions?task_ref=%00. Every id is validated now, but validation is
+// a promise each route makes one at a time, and this is the single place that
+// can keep it for all of them, including the routes nobody has written yet: a
+// 5xx says nothing about the database, the query, or the schema.
+//
+// An error that carries its own status below 500 is the framework's own (404,
+// 415, a body over the limit). Those pass through in the shape Fastify would
+// have sent, because the smoke tests and the SDKs already read that shape.
+app.setErrorHandler((error, request, reply) => {
+  const status = (error as { statusCode?: number }).statusCode ?? 500
+  if (status < 500) {
+    return reply.code(status).send({
+      statusCode: status,
+      error: STATUS_CODES[status] ?? 'Error',
+      message: error.message,
+    })
+  }
+  request.log.error({ err: error, url: request.url }, 'unhandled error')
+  return reply.code(500).send({ error: 'internal_error', message: 'Unexpected server error' })
 })
 
 // Canonical-host redirect. Off until CANONICAL_HOST is set (fly secrets set

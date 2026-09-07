@@ -7,6 +7,7 @@ import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
+import { isId } from '../lib/ids.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 
 // /app is the console: the only browser surface a registered user has. It is
@@ -278,7 +279,8 @@ function readFilter(q: Record<string, unknown>): Filter {
   const f: Filter = {}
   // Postgres rejects a NUL in a text parameter, so a control character in an
   // id would turn a filtered view into a 500. Ids are opaque, not binary.
-  const id = (v: unknown) => (typeof v === 'string' && /^[^\u0000-\u001f\u007f]{1,128}$/.test(v) ? v : undefined)
+  // One predicate, in src/lib/ids.ts, shared with every route that takes an id.
+  const id = (v: unknown) => (isId(v) ? v : undefined)
   const task = id(q?.task)
   const agent = id(q?.agent)
   if (task) f.task = task

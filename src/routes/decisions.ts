@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 
 const ListQuery = z.object({
-  agent_id: z.string().min(1).optional(),
-  task_ref: z.string().min(1).max(128).optional(),
+  agent_id: zId().optional(),
+  task_ref: zId().optional(),
   limit: z.coerce.number().int().positive().max(200).default(50),
 })
 

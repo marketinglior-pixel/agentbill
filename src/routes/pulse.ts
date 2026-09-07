@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { plain } from '../lib/ids.js'
 import { sql } from '../db/index.js'
 import { clientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
@@ -32,7 +33,7 @@ const PulseBody = z.object({
   // The random per-page-view token from the page. Never a cookie, never
   // localStorage, gone when the tab closes. It exists to separate ten visitors
   // running once from one visitor running ten times.
-  view_id: z.string().min(8).max(40).optional(),
+  view_id: plain(z.string().min(8).max(40)).optional(),
   // The ceiling the visitor chose. Bounded to the slider's own range so the
   // column cannot be used as free storage.
   ceiling: z.number().int().min(0).max(100_000).optional(),

@@ -1,16 +1,17 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 
 const ANOMALY_MULTIPLIER = 2.0  // flag if units > baseline * 2
 const BASELINE_MIN_SAMPLES = 5  // need at least 5 samples before flagging
 const BASELINE_WINDOW = 30      // use last 30 steps for baseline
 
 const StepBody = z.object({
-  agent_id:    z.string().min(1),
-  step_name:   z.string().min(1),
+  agent_id:    zId(),
+  step_name:   zId(),
   units:       z.number().int().min(1),
-  customer_id: z.string().optional(),
+  customer_id: zId().optional(),
 })
 
 export async function stepRoute(app: FastifyInstance) {

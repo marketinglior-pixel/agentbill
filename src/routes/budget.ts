@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 
 const BudgetQuery = z.object({
-  customer_id: z.string().min(1),
+  customer_id: zId(),
 })
 
 export async function budgetRoute(app: FastifyInstance) {

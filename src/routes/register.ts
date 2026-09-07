@@ -5,6 +5,7 @@ import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS, requestPanel } from '../ui/panels.js'
 import { sql } from '../db/index.js'
+import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
@@ -71,9 +72,9 @@ async function existingAccountReply(reply: any, email: string, apiKey: string) {
 const RegisterBody = z.object({
   // trim + lowercase: the same address in two capitalisations was two free tiers.
   email:    z.string().trim().toLowerCase().email(),
-  name:     z.string().min(1).max(128).optional(),
-  use_case: z.string().max(64).optional(),
-  stack:    z.string().max(32).optional(),
+  name:     plain(z.string().min(1).max(128)).optional(),
+  use_case: plain(z.string().max(64)).optional(),
+  stack:    plain(z.string().max(32)).optional(),
 })
 
 function generateApiKey(): string {

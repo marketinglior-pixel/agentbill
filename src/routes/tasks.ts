@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
+
+const TaskParams = z.object({ task_ref: zId() })
 
 const ListQuery = z.object({
-  agent_id: z.string().min(1).optional(),
+  agent_id: zId().optional(),
   limit: z.coerce.number().int().positive().max(200).default(50),
 })
 
@@ -60,7 +63,14 @@ export async function tasksRoute(app: FastifyInstance) {
 
   // Single task status, poll this to watch a job burn down its budget.
   app.get('/tasks/:task_ref', async (request, reply) => {
-    const taskRef = (request.params as { task_ref: string }).task_ref
+    // The one caller string on this API that arrives as a path segment
+    // rather than a query or a body, and the only one that reached SQL with
+    // no schema at all: /tasks/%00 was a 500.
+    const params = TaskParams.safeParse(request.params)
+    if (!params.success) {
+      return reply.code(422).send({ error: 'validation_error', details: params.error.issues })
+    }
+    const taskRef = params.data.task_ref
     const accountId = (request as any).accountId
 
     const [row] = await sql`

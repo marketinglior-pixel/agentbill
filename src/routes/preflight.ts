@@ -1,18 +1,19 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 
 const PreflightBody = z.object({
-  agent_id: z.string().min(1),
-  customer_id: z.string().optional(),
+  agent_id: zId(),
+  customer_id: zId().optional(),
   estimated_units: z.number().int().positive().optional(),
   ceiling: z.number().int().positive().optional(),
-  task_ref: z.string().min(1).max(128).optional(),
+  task_ref: zId().optional(),
   task_ceiling: z.number().int().positive().optional(),
-  idempotency_key: z.string().min(1).max(128).optional(),
+  idempotency_key: zId().optional(),
 })
 
 // Every rejection inside the reserve transaction is thrown, never returned.

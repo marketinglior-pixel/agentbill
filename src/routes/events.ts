@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 import { Resend } from 'resend'
 import { recordDecision } from '../lib/decisions.js'
 import { consumeReservations } from '../lib/reservations.js'
@@ -26,13 +27,13 @@ async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, p
 }
 
 const EventBody = z.object({
-  customer_id:      z.string().min(1),
-  event_type:       z.string().min(1),
-  idempotency_key:  z.string().min(1).max(128),
+  customer_id:      zId(),
+  event_type:       zId(),
+  idempotency_key:  zId(),
   units:            z.number().int().min(0).default(1),
   metadata:         z.record(z.unknown()).optional(),
   success:          z.boolean().default(true),
-  task_ref:         z.string().min(1).max(128).optional(),
+  task_ref:         zId().optional(),
 })
 
 export async function eventsRoute(app: FastifyInstance) {

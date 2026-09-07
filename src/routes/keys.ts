@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
+import { ID_MAX, plain } from '../lib/ids.js'
 
 function generateApiKey(): string {
   return 'agb_' + randomBytes(24).toString('hex')
@@ -20,12 +21,12 @@ function keyStatus(k: { revokedAt: Date | null; expiresAt: Date | null }): strin
 }
 
 const GenerateBody = z.object({
-  label: z.string().min(1).max(64).optional(),
+  label: plain(z.string().min(1).max(64)).optional(),
   expires_in_days: z.number().int().positive().max(3650).optional(),
 })
 
 const RevokeBody = z.object({
-  key_prefix: z.string().min(4).optional(),
+  key_prefix: plain(z.string().min(4).max(ID_MAX)).optional(),
 })
 
 export async function keysRoute(app: FastifyInstance) {
@@ -146,7 +147,12 @@ export async function keysRoute(app: FastifyInstance) {
         UPDATE developer_api_keys
         SET revoked_at = NOW()
         WHERE account_id = ${accountId}
-          AND api_key LIKE ${parse.data.key_prefix + '%'}
+          -- starts_with, not LIKE. The caller's prefix WAS the pattern: every
+          -- key contains the underscore of "agb_", which LIKE reads as a
+          -- single-character wildcard, and a prefix of "%" matched every key
+          -- on the account, so one request revoked all of them. starts_with
+          -- has no pattern language, so there is nothing left to escape.
+          AND starts_with(api_key, ${parse.data.key_prefix})
           AND (revoked_at IS NULL OR revoked_at > NOW())
         RETURNING revoked_at, api_key
       `
@@ -170,7 +176,7 @@ export async function keysRoute(app: FastifyInstance) {
         ? await sql`
             SELECT revoked_at FROM developer_api_keys
             WHERE account_id = ${accountId}
-              AND api_key LIKE ${parse.data.key_prefix + '%'}
+              AND starts_with(api_key, ${parse.data.key_prefix})
             LIMIT 1
           `
         : await sql`

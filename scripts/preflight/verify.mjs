@@ -209,6 +209,56 @@ ok('an unknown prefix reports key_not_found, not already_revoked',
 
 ok('the replacement key from the rotation is untouched', await alive(rot.body.api_key) === 200)
 
+// ---------------------------------------------------------------------------
+// Opaque ids. Every one of these was a 500 on 2026-09-07, and eleven of them
+// answered with the raw Postgres sentence "invalid byte sequence for encoding
+// UTF8: 0x00" in the response body, because a caller string reached a text
+// parameter unvalidated and Fastify's default error handler serialises
+// error.message. The ids are checked by one predicate now (src/lib/ids.ts) and
+// no 5xx may carry a database message.
+// ---------------------------------------------------------------------------
+const NUL = String.fromCharCode(0)
+const get = (path, key = KEY) => fetch(`${API}${path}`, { headers: { 'Authorization': `Bearer ${key}` } })
+  .then(async r => ({ status: r.status, text: await r.text() }))
+
+const idCases = [
+  ['GET /decisions?task_ref', () => get('/decisions?task_ref=%00')],
+  ['GET /decisions?agent_id', () => get('/decisions?agent_id=%00')],
+  ['GET /tasks?agent_id', () => get('/tasks?agent_id=%00')],
+  ['GET /tasks/:task_ref', () => get('/tasks/%00')],
+  ['GET /budget?customer_id', () => get('/budget?customer_id=%00')],
+  ['POST /preflight task_ref', () => pre({ agent_id: 'ctrl', task_ref: `t${NUL}`, task_ceiling: 5, estimated_units: 1 })],
+  ['POST /preflight idempotency_key', () => pre({ agent_id: 'ctrl', idempotency_key: `k${NUL}`, estimated_units: 1 })],
+  ['POST /events customer_id', () => rec({ customer_id: `c${NUL}`, event_type: 'run', idempotency_key: 'ctrl-1', units: 1 })],
+  ['POST /events event_type', () => rec({ customer_id: 'ctrl', event_type: `e${NUL}`, idempotency_key: 'ctrl-2', units: 1 })],
+  ['POST /keys/generate label', () => post('/keys/generate', { label: `l${NUL}` })],
+]
+
+for (const [name, run] of idCases) {
+  const r = await run()
+  const body = r.text ?? JSON.stringify(r.body)
+  ok(`${name}: a control character is 422, not 500`, r.status === 422, `got ${r.status} ${body.slice(0, 120)}`)
+  ok(`${name}: no database message in the body`, !/invalid byte sequence|encoding "UTF8"|22021/i.test(body), body.slice(0, 160))
+}
+
+// The rule rejects control characters, not ids: anything printable still works.
+const okUnicode = await get(`/decisions?task_ref=${encodeURIComponent('one two')}`)
+ok('a printable task_ref with a space is still accepted', okUnicode.status === 200, `got ${okUnicode.status}`)
+const okLong = await get(`/decisions?task_ref=${'a'.repeat(128)}`)
+ok('a task_ref at the 128 limit is accepted', okLong.status === 200, `got ${okLong.status}`)
+const tooLong = await get(`/decisions?task_ref=${'a'.repeat(129)}`)
+ok('a task_ref past the limit is 422', tooLong.status === 422, `got ${tooLong.status}`)
+
+// The prefix on /keys/revoke was the LIKE pattern itself. Every key contains
+// the underscore of "agb_", a single-character wildcard, so "agb_%" matched
+// every key on the account and one request revoked all of them. Measured on
+// 2026-09-07: revoked_count 2 of 2. This assertion fails loudly if it returns,
+// because the key it would revoke is the one this harness authenticates with.
+const wildcard = await post('/keys/revoke', { key_prefix: 'agb_%' })
+ok('a prefix is a prefix, not a LIKE pattern',
+   wildcard.status === 400 && wildcard.body.error === 'key_not_found', JSON.stringify(wildcard.body))
+ok('the harness key survived the wildcard prefix', await alive(KEY) === 200, `got ${await alive(KEY)}`)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

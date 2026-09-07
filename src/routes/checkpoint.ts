@@ -1,10 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { zId } from '../lib/ids.js'
 
 const CheckpointBody = z.object({
-  agent_id:     z.string().min(1),
-  customer_id:  z.string().optional(),
+  agent_id:     zId(),
+  customer_id:  zId().optional(),
   units_so_far: z.number().int().min(0),
   ceiling:      z.number().int().positive().optional(),
 })
