@@ -273,10 +273,54 @@ ok('an ordinary https URL is still accepted', goodUrl.status === 200, JSON.strin
 // The Polar metadata comes back signed, but it started in a checkout URL the
 // customer could edit. accounts.id is a uuid column, so any other shape was
 // 22P02 and a 500, which Polar then retries for hours.
-const badHook = await fetch(`${API}/webhooks/polar`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ type: 'subscription.active', data: { customer_id: 'polar_1', metadata: { agentbill_account_id: 'not-a-uuid' } } }),
-}).then(async r => ({ status: r.status, body: await r.text() }))
+// Polar signs with v1,<hex hmac-sha256 of the raw body>. The harness signs the
+// same way, because the route refuses an unsigned webhook outright: a check
+// that turns itself off when the secret is missing is not a check, and this
+// handler writes accounts.plan.
+const { createHmac } = await import('node:crypto')
+const SECRET = process.env.WEBHOOK_SECRET ?? ''
+const hook = (payload, { sign = true } = {}) => {
+  const body = JSON.stringify(payload)
+  const headers = { 'Content-Type': 'application/json' }
+  if (sign) headers['webhook-signature'] = `v1,${createHmac('sha256', SECRET).update(body).digest('hex')}`
+  return fetch(`${API}/webhooks/polar`, { method: 'POST', headers, body })
+    .then(async r => ({ status: r.status, body: await r.text() }))
+}
+
+const unsigned = await hook({ type: 'subscription.active', data: {} }, { sign: false })
+ok('an unsigned webhook is refused', unsigned.status === 401, `${unsigned.status} ${unsigned.body.slice(0, 120)}`)
+const forged = await fetch(`${API}/webhooks/polar`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'webhook-signature': 'v1,deadbeef' },
+  body: JSON.stringify({ type: 'subscription.active', data: {} }),
+}).then(async r => ({ status: r.status }))
+ok('a forged signature is refused', forged.status === 401, `got ${forged.status}`)
+
+// The check used to hash the empty string, because nothing populated
+// request.rawBody: a signature over the real body was refused and a signature
+// over '' was accepted, so every genuine webhook 401ed and no payment ever
+// moved an account off the free plan. These two say the body is covered.
+const emptySig = await fetch(`${API}/webhooks/polar`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'webhook-signature': `v1,${createHmac('sha256', SECRET).update('').digest('hex')}` },
+  body: JSON.stringify({ type: 'subscription.active', data: {} }),
+}).then(async r => ({ status: r.status }))
+ok('a signature over the empty string is refused', emptySig.status === 401, `got ${emptySig.status}`)
+
+const swapped = await fetch(`${API}/webhooks/polar`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'webhook-signature': `v1,${createHmac('sha256', SECRET).update(JSON.stringify({ type: 'a', data: {} })).digest('hex')}` },
+  body: JSON.stringify({ type: 'subscription.active', data: { metadata: { agentbill_account_id: ACCT } } }),
+}).then(async r => ({ status: r.status }))
+ok('a valid signature over a different body is refused', swapped.status === 401, `got ${swapped.status}`)
+
+// The path a paying customer actually takes, which has never worked.
+const upgraded = await hook({ type: 'subscription.active', data: { customer_id: 'cus_verify', product_id: 'unknown-product', metadata: { agentbill_account_id: ACCT } } })
+ok('a correctly signed upgrade is accepted', upgraded.status === 200, `${upgraded.status} ${upgraded.body.slice(0, 120)}`)
+const planRow = (await sql`SELECT plan, polar_customer_id FROM accounts WHERE id = ${ACCT}`)[0]
+ok('and it actually moved the account off free', planRow.plan !== 'free' && planRow.polarCustomerId === 'cus_verify', JSON.stringify(planRow))
+await sql`UPDATE accounts SET plan = 'free', polar_customer_id = NULL, monthly_calls = 0 WHERE id = ${ACCT}`
+
+const badHook = await hook({ type: 'subscription.active', data: { customer_id: 'polar_1', metadata: { agentbill_account_id: 'not-a-uuid' } } })
 ok('a malformed account id in a Polar webhook is 200, not 500',
    badHook.status === 200 && !/invalid input syntax|22P02/i.test(badHook.body), `${badHook.status} ${badHook.body.slice(0, 140)}`)
 
@@ -314,10 +358,7 @@ ok('the key prefix every key shares is too short to accept', shortPrefix.status 
 ok('the harness key survived that too', await alive(KEY) === 200, `got ${await alive(KEY)}`)
 
 // The Polar customer id is caller input as much as the account id is.
-const hookCtrl = await fetch(`${API}/webhooks/polar`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ type: 'subscription.active', data: { customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } }),
-}).then(async r => ({ status: r.status, body: await r.text() }))
+const hookCtrl = await hook({ type: 'subscription.active', data: { customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } })
 ok('a control character in the Polar customer id is 200, not 500',
    hookCtrl.status === 200 && !/invalid byte sequence|22021/i.test(hookCtrl.body), `${hookCtrl.status} ${hookCtrl.body.slice(0, 120)}`)
 

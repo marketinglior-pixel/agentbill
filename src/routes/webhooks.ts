@@ -6,17 +6,52 @@ import { isUuid, isId } from '../lib/ids.js'
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
 export async function webhooksRoute(app: FastifyInstance) {
+  // The signature was verified against an empty string.
+  //
+  // Fastify parses JSON and discards the text it parsed, and nothing in this
+  // codebase ever set request.rawBody: `config: { rawBody: true }` below is
+  // read by no plugin. So verifyWebhookSignature has been hashing '' since it
+  // was written. Measured 2026-09-07 on a local server: a signature computed
+  // over the real body, which is what Polar sends, was refused with 401, and a
+  // signature computed over the empty string was accepted. Both halves are
+  // bad. Every genuine webhook has been rejected, so no payment has ever moved
+  // an account off the free plan; and the check proved only that the sender
+  // knew the secret, never that this body was the body it signed.
+  //
+  // This parser is registered inside this plugin's own scope, so it changes the
+  // body handling of exactly one route and leaves every other POST on
+  // Fastify's default parser.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    ;(request as unknown as { rawBody: string }).rawBody = body as string
+    if (!body) return done(null, {})
+    try {
+      done(null, JSON.parse(body as string))
+    } catch (err) {
+      ;(err as { statusCode?: number }).statusCode = 400
+      done(err as Error, undefined)
+    }
+  })
+
   app.post('/webhooks/polar', {
     config: { rawBody: true, public: true },
   }, async (request, reply) => {
     const rawBody = (request as any).rawBody as string | undefined
     const signature = request.headers['webhook-signature'] as string ?? ''
 
-    if (POLAR_WEBHOOK_SECRET) {
-      const valid = await verifyWebhookSignature(rawBody ?? '', signature, POLAR_WEBHOOK_SECRET)
-      if (!valid) {
-        return reply.code(401).send({ error: 'invalid_signature' })
-      }
+    // A signature check that switches itself off when the secret is missing is
+    // not a check. This route is public by necessity, and the handler below
+    // writes accounts.plan and zeroes monthly_calls, so any request that
+    // reaches it unverified is a free upgrade to any tier for whoever knows an
+    // account id, and account ids travel in the /upgrade link we hand people.
+    // Production has the secret set, verified, so this changes nothing there;
+    // it closes the case where a rotation or a new environment leaves it unset.
+    if (!POLAR_WEBHOOK_SECRET) {
+      request.log.error('POLAR_WEBHOOK_SECRET is not set, refusing a webhook this server cannot verify')
+      return reply.code(503).send({ error: 'webhook_not_configured' })
+    }
+    const valid = await verifyWebhookSignature(rawBody ?? '', signature, POLAR_WEBHOOK_SECRET)
+    if (!valid) {
+      return reply.code(401).send({ error: 'invalid_signature' })
     }
 
     const event = request.body as any

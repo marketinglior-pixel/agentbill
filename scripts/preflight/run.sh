@@ -10,6 +10,7 @@ MODE="${1:-docker}"
 PORT="${PORT:-3999}"
 ACCOUNT_ID="00000000-0000-0000-0000-0000000000aa"
 API_KEY="agb_testkey_local_verification_0001"
+WEBHOOK_SECRET="preflight-verify-webhook-secret"
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
@@ -60,7 +61,7 @@ SQL
 
 (cd "$ROOT" && npm run build --silent)
 
-DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break
@@ -68,4 +69,5 @@ for _ in $(seq 1 30); do
 done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" \
   node "$ROOT/scripts/preflight/verify.mjs"
