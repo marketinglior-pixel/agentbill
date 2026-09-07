@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { verifyWebhookSignature, planFromProductId } from '../integrations/polar.js'
+import { isUuid } from '../lib/ids.js'
 
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
@@ -29,8 +30,14 @@ export async function webhooksRoute(app: FastifyInstance) {
         event?.data?.checkoutMetadata?.agentbill_account_id ??
         ''
 
-      if (!accountId) {
-        request.log.warn({ eventType, polarCustomerId }, 'Polar webhook missing agentbill_account_id')
+      // The metadata comes back from Polar, but it started life in a checkout
+      // URL the customer could edit, so it is caller input by the time it
+      // lands here. accounts.id is a uuid column: any other shape is 22P02, a
+      // 500, and a webhook Polar then retries for hours. 200 with a warning
+      // instead, because no retry will ever make this payload valid.
+      if (!isUuid(accountId)) {
+        request.log.warn({ eventType, polarCustomerId, malformed: Boolean(accountId) },
+          accountId ? 'Polar webhook carried a malformed agentbill_account_id' : 'Polar webhook missing agentbill_account_id')
         return reply.send({ received: true })
       }
 
@@ -63,7 +70,8 @@ export async function webhooksRoute(app: FastifyInstance) {
         event?.data?.checkoutMetadata?.agentbill_account_id ??
         ''
 
-      if (accountId) {
+      // Same rule as the upgrade branch: a uuid, or nothing happens.
+      if (isUuid(accountId)) {
         await sql`
           UPDATE accounts
           SET

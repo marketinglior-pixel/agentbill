@@ -1,9 +1,12 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { plain } from '../lib/ids.js'
 
 const WebhookConfigBody = z.object({
-  url: z.string().url().startsWith('https://'),
+  // .url() is not a filter: the WHATWG parser tolerates a control character
+  // and zod returns the ORIGINAL string, NUL included, so this was a 500.
+  url: plain(z.string().url().startsWith('https://').max(2048)),
 })
 
 export async function webhookConfigRoute(app: FastifyInstance) {

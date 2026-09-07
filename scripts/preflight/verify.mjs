@@ -259,6 +259,24 @@ ok('a prefix is a prefix, not a LIKE pattern',
    wildcard.status === 400 && wildcard.body.error === 'key_not_found', JSON.stringify(wildcard.body))
 ok('the harness key survived the wildcard prefix', await alive(KEY) === 200, `got ${await alive(KEY)}`)
 
+// zod's .url() is a validator, not a filter: the WHATWG parser tolerates a
+// control character and zod hands back the ORIGINAL string, so a webhook URL
+// carrying a NUL reached the UPDATE and 500ed.
+const badUrl = await post('/webhook-config', { url: `https://example.com/a${NUL}b` })
+ok('a control character inside a valid https URL is 422', badUrl.status === 422, JSON.stringify(badUrl.body).slice(0, 140))
+const goodUrl = await post('/webhook-config', { url: 'https://example.com/hook' })
+ok('an ordinary https URL is still accepted', goodUrl.status === 200, JSON.stringify(goodUrl.body).slice(0, 140))
+
+// The Polar metadata comes back signed, but it started in a checkout URL the
+// customer could edit. accounts.id is a uuid column, so any other shape was
+// 22P02 and a 500, which Polar then retries for hours.
+const badHook = await fetch(`${API}/webhooks/polar`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ type: 'subscription.active', data: { customer_id: 'polar_1', metadata: { agentbill_account_id: 'not-a-uuid' } } }),
+}).then(async r => ({ status: r.status, body: await r.text() }))
+ok('a malformed account id in a Polar webhook is 200, not 500',
+   badHook.status === 200 && !/invalid input syntax|22P02/i.test(badHook.body), `${badHook.status} ${badHook.body.slice(0, 140)}`)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)
