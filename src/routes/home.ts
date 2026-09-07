@@ -297,7 +297,11 @@ export async function homeRoute(app: FastifyInstance) {
     .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
     .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
-    .trust b { color: var(--green); font-weight: 500; }
+    /* --muted, not the accent and not --text. The .trust run is --dim mono
+       micro, and the house rung for a bold term on a --dim ground is --muted:
+       .proof b twelve lines above does exactly this on the same ground. The
+       accent said "link" on a word that is not one. */
+    .trust b { color: var(--muted); font-weight: 500; }
     .hero-install { margin-top: var(--s5); }
 
     /* The code frame. Its label bar now carries the language tabs on the left
@@ -477,7 +481,10 @@ export async function homeRoute(app: FastifyInstance) {
                    color: var(--dim); width: 18%; }
     .tiers .amount { text-align: right; font-family: var(--display); font-size: var(--fs-h3); font-weight: 700;
                      color: var(--text); letter-spacing: -0.02em; }
-    .tiers tr.rec .tier { color: var(--green); }
+    /* --white, joining .calls and .amount on the line below. The base .tier
+       here is --dim, so this is still a two-rung lift; the accent only made the
+       one word in the row you cannot click the greenest thing in it. */
+    .tiers tr.rec .tier { color: var(--white); }
     .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
     .price-links { margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 

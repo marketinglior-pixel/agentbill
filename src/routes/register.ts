@@ -217,10 +217,17 @@ export async function registerRoute(app: FastifyInstance) {
     .form-col .facts { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border-soft); }
     .facts li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; align-items: baseline;
                 color: var(--muted); font-size: var(--fs-small); line-height: 1.6; }
+    /* Two grounds, two rungs. .facts li is --muted, so its term goes to
+       --text; .trust is --dim, so its term goes to --muted. Both were the
+       accent, which reads as a link: "Terms of Service" and "Privacy Policy"
+       are green AND underlined about ninety pixels above "free tier" in the
+       same column. One of these terms is the word "blocked", which on the
+       homepage is a green console chip, so the accent was carrying two
+       different meanings on one word. */
     .facts b { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
-               color: var(--green); font-weight: 500; }
+               color: var(--text); font-weight: 500; }
     .trust { margin-top: 28px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
-    .trust b { color: var(--green); font-weight: 500; }
+    .trust b { color: var(--muted); font-weight: 500; }
 
     /* Form. Inputs and the button share one 44px floor; state changes move
        colour, outline and background, never border width, so nothing shifts. */
@@ -267,7 +274,12 @@ export async function registerRoute(app: FastifyInstance) {
     .success { display: none; flex-direction: column; gap: 20px; max-width: 440px; }
     .success h2 { color: var(--white); }
     .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
-    .key-value { padding: 14px 18px; font-family: var(--mono); font-size: 13px; color: var(--green);
+    /* --code-ink: design.md calls it "the base ink inside a code frame", and
+       this is one. .panel carries the ground and border (panels.ts:14) and
+       .panel-h the label bar, and the sibling .ns-pre below already uses this
+       ink for the same reason. A long green mono string sitting beside a
+       bordered Copy button read like a link. */
+    .key-value { padding: 14px 18px; font-family: var(--mono); font-size: 13px; color: var(--code-ink);
                  display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .key-value span { overflow-wrap: anywhere; min-width: 0; }
     .btn-copy { min-height: 36px; padding: 0 12px; background: transparent; color: var(--text);
@@ -280,7 +292,10 @@ export async function registerRoute(app: FastifyInstance) {
     .ns { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0;
           border-bottom: 1px solid var(--border-soft); align-items: start; }
     .ns:last-child { border-bottom: 0; }
-    .ns-num { font-family: var(--mono); font-size: 12px; color: var(--green); padding-top: 2px; }
+    /* A list ordinal is a marker, not an action, and these sit two words from
+       real green links inside .ns p (/app, /docs, /faq). --dim is this site's
+       floor for 12px mono: .ask, .tile-f and .st-ms already use it. */
+    .ns-num { font-family: var(--mono); font-size: 12px; color: var(--dim); padding-top: 2px; }
     .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
     .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
               padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code-ink);

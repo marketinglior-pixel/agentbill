@@ -149,7 +149,15 @@ export async function upgradeRoute(app: FastifyInstance) {
     .tiers .amount { font-family: var(--display); font-size: 24px; font-weight: 700; color: var(--text);
                      letter-spacing: -0.02em; white-space: nowrap; }
     .tiers .act { text-align: right; white-space: nowrap; padding-left: 16px; }
-    .tiers tr.rec .tier { color: var(--green); }
+    /* Weight, not colour, and deliberately not --white either: the base .tier
+       above is ALREADY --white on this page, so recolouring would silently
+       unmark the recommended row and leave .calls carrying it alone. Weight is
+       what this table always claimed marked it, and design.md L105 allows
+       either. The accent mattered more than it looked here: the only green in
+       the Team row was the tier name, which is not clickable, while the green
+       filled button sits in the FREE row. The one green word in the row
+       pointed away from the tier being sold. */
+    .tiers tr.rec .tier { font-weight: 700; }
     .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
     .dimtxt { color: var(--dim); }
     .same { margin-top: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); max-width: 70ch; line-height: 1.6; }

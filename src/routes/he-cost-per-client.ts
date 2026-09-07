@@ -58,7 +58,7 @@ function statementRows(): string {
           <td class="n">${num(c.units)}</td>
           <td class="n money">${ils(cost)}</td>
           <td class="n">${ils(c.charged)}</td>
-          <td class="n money${left < 0 ? ' neg' : ''}">${leftTxt}</td>
+          <td class="n bal${left < 0 ? ' neg' : ''}">${leftTxt}</td>
         </tr>`
   }).join('')
 }
@@ -98,7 +98,16 @@ const CSS = `
     code, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
     .kick { padding-block: var(--s7) 0; font-size: var(--fs-small); }
-    .kick b { color: var(--green); display: block; font-weight: 600; }
+    /* --text. This page renders no nav and no wordmark, so this bold line is
+       the topmost element on it, sitting where a masthead would be and leading
+       with the product name. A green brand name in the nav slot is the one
+       thing on this site a reader would genuinely try to click. The two .lat
+       runs are inside this <b> and inherit, so they move with it.
+       Worth a separate decision, not a silent consequence: dropping the accent
+       leaves the page with no brand green above the fold. The honest fix for
+       that is to render the mark, which is green by definition, rather than to
+       tint a sentence. */
+    .kick b { color: var(--text); display: block; font-weight: 600; }
     /* Direct child ONLY. A bare \`.kick span\` also matches the inline .lat runs
        inside the <b>, turns each into a block, and breaks one line into four.
        This is the same defect as the th-that-kept-its-border on /pricing and the
@@ -123,13 +132,25 @@ const CSS = `
              margin-top: var(--s5); }
     .step { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
             border-radius: 12px; padding: var(--s5); box-shadow: var(--edge), var(--lift); }
-    .step b { font-family: var(--mono); font-size: var(--fs-small); color: var(--green);
+    /* --white, and NOT --text, which was the obvious choice and the wrong one:
+       .step p on the next line is already --text at the same font-size, so
+       --text here would leave the card title and its first body line identical
+       in size and ink, collapsing a three-rung card (title / --text body /
+       --dim footnote) to two. --white is this page's heading ink and these
+       <b>s are headings. An elevated card whose title is set in the accent is
+       the textbook clickable-card affordance. */
+    .step b { font-family: var(--mono); font-size: var(--fs-small); color: var(--white);
               display: block; margin-bottom: var(--s3); }
     .step p { margin: 0 0 var(--s2); font-size: var(--fs-small); color: var(--text); }
     .step p:last-child { margin: 0; color: var(--dim); }
 
     .stepnum { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s4); }
-    .stepnum span { font-family: var(--mono); font-size: var(--fs-h3); font-weight: 700; color: var(--green); }
+    /* --muted. Not --dim, which at this size and weight reads as a broken
+       heading rather than a quiet marker, and not --text, which is seven parts
+       in 255 away from the --white h2 beside it and would merge the ordinal
+       into the title. --muted is the rung that still reads as subordinate at
+       display size. */
+    .stepnum span { font-family: var(--mono); font-size: var(--fs-h3); font-weight: 700; color: var(--muted); }
     .stepnum h2 { margin: 0; }
 
     /* Every table scrolls itself; the document never scrolls sideways. */
@@ -143,8 +164,15 @@ const CSS = `
                font-size: var(--fs-micro); white-space: nowrap; }
     tbody tr:last-child td { border-bottom: 0; }
     td.n, th.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    td.money { color: var(--green); }
-    td.neg { color: var(--red); }
+    /* .money was on two different columns doing two different jobs: the cost
+       cell, where green was decoration on an ordinary figure, and the remainder
+       cell, where green/red is the whole point ("סוגריים הם מינוס", and the
+       copy tells the reader to look down that column). Splitting them keeps the
+       signal and drops the decoration. .bal.neg rather than a bare .neg so the
+       red does not depend on source order. */
+    td.money { color: var(--text); }
+    td.bal { color: var(--green); }
+    td.bal.neg { color: var(--red); }
     .blank td { height: 30px; }
     .cap { font-size: var(--fs-micro); color: var(--dim); margin-top: calc(var(--s4) * -1);
            margin-bottom: var(--s5); max-width: 64ch; }
