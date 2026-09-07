@@ -11,9 +11,12 @@ export async function budgetRoute(app: FastifyInstance) {
   app.get('/budget', async (request, reply) => {
     const parsed = BudgetQuery.safeParse(request.query)
     if (!parsed.success) {
+      // The old message said "is required" for a parameter that was supplied
+      // and rejected on content, which sent the caller looking for the wrong bug.
       return reply.code(422).send({
         error: 'validation_error',
-        message: 'Query parameter customer_id is required',
+        message: 'Query parameter customer_id is required, 1 to 128 characters, no control characters',
+        details: parsed.error.issues,
       })
     }
 
@@ -60,8 +63,9 @@ export async function budgetRoute(app: FastifyInstance) {
 
     } catch (err) {
       request.log.error(err)
-      const msg = err instanceof Error ? err.message : String(err)
-      return reply.code(500).send({ error: 'internal_error', message: msg })
+      // Never err.message: this route's own catch is why a database sentence
+      // still reached the client after server.ts stopped every other one.
+      return reply.code(500).send({ error: 'internal_error', message: 'Unexpected server error' })
     }
   })
 }

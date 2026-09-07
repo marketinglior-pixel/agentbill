@@ -1,13 +1,13 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
-import { zId } from '../lib/ids.js'
+import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
 
 const CheckpointBody = z.object({
   agent_id:     zId(),
-  customer_id:  zId().optional(),
-  units_so_far: z.number().int().min(0),
-  ceiling:      z.number().int().positive().optional(),
+  customer_id:  zIdOrBlank().optional(),
+  units_so_far: z.number().int().min(0).max(INT4_MAX),
+  ceiling:      z.number().int().positive().max(INT4_MAX).optional(),
 })
 
 export async function checkpointRoute(app: FastifyInstance) {

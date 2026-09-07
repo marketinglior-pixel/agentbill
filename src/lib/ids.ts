@@ -55,3 +55,24 @@ export const plain = <T extends z.ZodString>(schema: T) => schema.refine((v) => 
 
 /** An opaque identifier: 1 to `max` characters, no control characters. */
 export const zId = (max: number = ID_MAX) => plain(z.string().min(1).max(max))
+
+/**
+ * An id on a route that reads "" as "not given".
+ *
+ * preflight, checkpoint and step all write `customer_id || 'default'`, so an
+ * empty string was a documented way to say "the default customer" and zId's
+ * min(1) turned it into a 422. Accepting it here keeps that contract instead
+ * of quietly changing an API while fixing a different bug.
+ */
+export const zIdOrBlank = (max: number = ID_MAX) => z.union([z.literal(''), zId(max)])
+
+/**
+ * The largest value an INTEGER column holds.
+ *
+ * The string rules above exist because a value the schema accepts must be a
+ * value the column accepts. Numbers had the same gap in the other direction:
+ * every units and ceiling column is INTEGER, every schema said
+ * `z.number().int()` with no ceiling, and 3_000_000_000 was Postgres 22003 and
+ * a 500 on /events and /preflight.
+ */
+export const INT4_MAX = 2_147_483_647

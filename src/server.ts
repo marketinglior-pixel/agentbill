@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { STATUS_CODES } from 'node:http'
+import { ID_MAX } from './lib/ids.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import sensible from '@fastify/sensible'
 import { eventsRoute } from './routes/events.js'
@@ -54,6 +55,10 @@ const app = Fastify({
   // 404, status 400, nothing reflected.
   // Typed loosely on purpose: the constructor infers a reply generic here that
   // rejects code()/send() on a plain string. This is an ordinary reply.
+  // A task_ref may be 128 characters (src/lib/ids.ts) and Fastify's default
+  // ceiling on a path segment is 100, so GET /tasks/:task_ref answered 404 for
+  // a task that exists and that POST /preflight was happy to create.
+  maxParamLength: ID_MAX,
   frameworkErrors: (_error, request, reply: FastifyReply) => {
     reply.header('X-Robots-Tag', 'noindex').header('Cache-Control', 'no-store')
     const accept = request.headers.accept ?? ''
@@ -79,10 +84,16 @@ const app = Fastify({
 app.setErrorHandler((error, request, reply) => {
   const status = (error as { statusCode?: number }).statusCode ?? 500
   if (status < 500) {
+    // Fastify's own 4xx bodies carry a `code` (FST_ERR_CTP_INVALID_MEDIA_TYPE
+    // and friends) and its default handler logs them. Dropping either would
+    // make the comment above this function false.
+    const code = (error as { code?: string }).code
+    request.log.warn({ err: error, url: request.url }, 'request error')
     return reply.code(status).send({
       statusCode: status,
       error: STATUS_CODES[status] ?? 'Error',
       message: error.message,
+      ...(code ? { code } : {}),
     })
   }
   request.log.error({ err: error, url: request.url }, 'unhandled error')

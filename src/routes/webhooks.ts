@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { verifyWebhookSignature, planFromProductId } from '../integrations/polar.js'
-import { isUuid } from '../lib/ids.js'
+import { isUuid, isId } from '../lib/ids.js'
 
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
@@ -24,7 +24,10 @@ export async function webhooksRoute(app: FastifyInstance) {
 
     // Subscription activated, upgrade account to paid
     if (eventType === 'subscription.active' || eventType === 'order.created') {
-      const polarCustomerId: string = event?.data?.customer_id ?? event?.data?.customerId ?? ''
+      // Caller input, same as the account id: it lands in polar_customer_id,
+      // and a control character there was a 500 the webhook sender retries.
+      const rawCustomerId: string = event?.data?.customer_id ?? event?.data?.customerId ?? ''
+      const polarCustomerId: string = isId(rawCustomerId) ? rawCustomerId : ''
       const accountId: string =
         event?.data?.metadata?.agentbill_account_id ??
         event?.data?.checkoutMetadata?.agentbill_account_id ??

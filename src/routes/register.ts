@@ -71,7 +71,9 @@ async function existingAccountReply(reply: any, email: string, apiKey: string) {
 
 const RegisterBody = z.object({
   // trim + lowercase: the same address in two capitalisations was two free tiers.
-  email:    z.string().trim().toLowerCase().email(),
+  // 254 is the longest address SMTP allows. Without it this was an unbounded
+  // write: a 3,000-character address created an account.
+  email:    z.string().trim().toLowerCase().max(254).email(),
   name:     plain(z.string().min(1).max(128)).optional(),
   use_case: plain(z.string().max(64)).optional(),
   stack:    plain(z.string().max(32)).optional(),

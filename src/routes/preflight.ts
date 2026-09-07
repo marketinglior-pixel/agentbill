@@ -1,18 +1,18 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
-import { zId } from '../lib/ids.js'
+import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
 import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 
 const PreflightBody = z.object({
   agent_id: zId(),
-  customer_id: zId().optional(),
-  estimated_units: z.number().int().positive().optional(),
-  ceiling: z.number().int().positive().optional(),
+  customer_id: zIdOrBlank().optional(),
+  estimated_units: z.number().int().positive().max(INT4_MAX).optional(),
+  ceiling: z.number().int().positive().max(INT4_MAX).optional(),
   task_ref: zId().optional(),
-  task_ceiling: z.number().int().positive().optional(),
+  task_ceiling: z.number().int().positive().max(INT4_MAX).optional(),
   idempotency_key: zId().optional(),
 })
 
@@ -43,7 +43,7 @@ export async function preflightRoute(app: FastifyInstance) {
   app.post('/preflight', async (request, reply) => {
     const parse = PreflightBody.safeParse(request.body)
     if (!parse.success) {
-      return reply.status(422).send({ error: 'Validation error', details: parse.error.issues })
+      return reply.status(422).send({ error: 'validation_error', details: parse.error.issues })
     }
 
     const {

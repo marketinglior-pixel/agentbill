@@ -254,7 +254,10 @@ ok('a task_ref past the limit is 422', tooLong.status === 422, `got ${tooLong.st
 // every key on the account and one request revoked all of them. Measured on
 // 2026-09-07: revoked_count 2 of 2. This assertion fails loudly if it returns,
 // because the key it would revoke is the one this harness authenticates with.
-const wildcard = await post('/keys/revoke', { key_prefix: 'agb_%' })
+// The prefix is long enough to pass the length rule and still carries a
+// wildcard: under LIKE this matched the harness's own key (the % swallowing
+// the rest of it), under starts_with it matches nothing.
+const wildcard = await post('/keys/revoke', { key_prefix: `${KEY.slice(0, 15)}%` })
 ok('a prefix is a prefix, not a LIKE pattern',
    wildcard.status === 400 && wildcard.body.error === 'key_not_found', JSON.stringify(wildcard.body))
 ok('the harness key survived the wildcard prefix', await alive(KEY) === 200, `got ${await alive(KEY)}`)
@@ -276,6 +279,47 @@ const badHook = await fetch(`${API}/webhooks/polar`, {
 }).then(async r => ({ status: r.status, body: await r.text() }))
 ok('a malformed account id in a Polar webhook is 200, not 500',
    badHook.status === 200 && !/invalid input syntax|22P02/i.test(badHook.body), `${badHook.status} ${badHook.body.slice(0, 140)}`)
+
+// A value the schema accepts must be a value the column accepts. That is the
+// same rule as the id rules above, in the other direction: every units and
+// ceiling column is INTEGER and every schema said z.number().int() with no
+// ceiling, so 3_000_000_000 was Postgres 22003 and a 500.
+const bigUnits = await rec({ customer_id: 'intmax', event_type: 'run', idempotency_key: `im-${Date.now()}`, units: 3_000_000_000 })
+ok('a number past INTEGER is 422, not 500', bigUnits.status === 422, `${bigUnits.status} ${JSON.stringify(bigUnits.body).slice(0, 120)}`)
+const bigEst = await pre({ agent_id: 'intmax', estimated_units: 3_000_000_000 })
+ok('estimated_units past INTEGER is 422, not 500', bigEst.status === 422, `${bigEst.status} ${JSON.stringify(bigEst.body).slice(0, 120)}`)
+
+// events.units had min(0) while the table has CHECK (units >= 1), so a value
+// the route accepted was one the database refused.
+const zeroUnits = await rec({ customer_id: 'zero', event_type: 'run', idempotency_key: `z-${Date.now()}`, units: 0 })
+ok('units 0 is 422, not the 500 the CHECK produced', zeroUnits.status === 422, `${zeroUnits.status} ${JSON.stringify(zeroUnits.body).slice(0, 120)}`)
+
+// preflight, checkpoint and step all read "" as "the default customer", so the
+// id rule must keep accepting it: this regressed to 422 when zId landed.
+const blankCustomer = await pre({ agent_id: 'blank', customer_id: '', estimated_units: 1 })
+ok('an empty customer_id still means the default customer', blankCustomer.status === 200, `${blankCustomer.status} ${JSON.stringify(blankCustomer.body).slice(0, 120)}`)
+
+// A task_ref may be 128 characters, and Fastify's default ceiling on a path
+// segment is 100, so this route answered the router's 404 for a task the API
+// was happy to create.
+const longRef = 'r'.repeat(110)
+const longLookup = await get(`/tasks/${longRef}`)
+ok('a 110-character task_ref reaches the handler', longLookup.status === 404 && /task_not_found/.test(longLookup.text),
+   `${longLookup.status} ${longLookup.text.slice(0, 120)}`)
+
+// "agb_" is the prefix every key shares, and it was the shortest this schema
+// allowed, so the minimum value was the accidental catch-all.
+const shortPrefix = await post('/keys/revoke', { key_prefix: 'agb_' })
+ok('the key prefix every key shares is too short to accept', shortPrefix.status === 422, JSON.stringify(shortPrefix.body).slice(0, 120))
+ok('the harness key survived that too', await alive(KEY) === 200, `got ${await alive(KEY)}`)
+
+// The Polar customer id is caller input as much as the account id is.
+const hookCtrl = await fetch(`${API}/webhooks/polar`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ type: 'subscription.active', data: { customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } }),
+}).then(async r => ({ status: r.status, body: await r.text() }))
+ok('a control character in the Polar customer id is 200, not 500',
+   hookCtrl.status === 200 && !/invalid byte sequence|22021/i.test(hookCtrl.body), `${hookCtrl.status} ${hookCtrl.body.slice(0, 120)}`)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()

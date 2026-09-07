@@ -26,7 +26,11 @@ const GenerateBody = z.object({
 })
 
 const RevokeBody = z.object({
-  key_prefix: plain(z.string().min(4).max(ID_MAX)).optional(),
+  // 8, not 4. Every key begins with "agb_", so a 4-character prefix was the
+  // one value that matches every key on the account, and it was the minimum
+  // this schema allowed. 8 is what the console shows (agb_5d23...), so the
+  // visible prefix is still usable and the accidental catch-all is not.
+  key_prefix: plain(z.string().min(8).max(ID_MAX)).optional(),
 })
 
 export async function keysRoute(app: FastifyInstance) {
