@@ -32,7 +32,7 @@ client = AgentBillClient(api_key="agb_your_key")
 
 <span class="comment"># Before the run: check if the customer has budget</span>
 check = client.preflight(agent_id="researcher", customer_id="user_123", estimated_units=10)
-<span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+<span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># ... run your agent here ...</span>
 result = run_my_agent()
@@ -46,13 +46,13 @@ client.record(agent_id="researcher", customer_id="user_123", units=10)
   <h2>Core Concepts</h2>
 
   <h3>Preflight</h3>
-  <p>Checks budget before compute is consumed. If the customer is out of units, the run is blocked immediately, before any tokens are spent.</p>
+  <p>Consulted before your provider call goes out. If the units already used plus this call's estimate would cross the ceiling, preflight answers <code class="inline">approved: false</code> and the SDK raises. It answers on units you define; it does not read your provider bill and cannot know what the refused call would have cost.</p>
 
   <h3>Record</h3>
   <p>Logs actual usage after a successful run. Idempotent per <code class="inline">idempotency_key</code>: /events dedupes on it. Both SDKs generate a fresh key for each call, so calling record() again on a retry is a second event; to dedupe a retried job, pass your own key to the endpoint.</p>
 
   <h3>Per-request ceiling</h3>
-  <p>Block any single run that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the run is blocked before it starts and <span class="inline">CeilingExceededError</span> is raised.</p>
+  <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised.</p>
 
   <div class="code"><pre>
 client = AgentBillClient(api_key="agb_your_key", ceiling=20)  <span class="comment"># no single run may cost more than 20 units</span>
@@ -129,7 +129,7 @@ WHERE account_id = :account
     <tr><td>agent_id</td><td>string</td><td>Identifier for this agent. Appears in the dashboard.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
-    <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is blocked if estimated_units exceeds it.</td></tr>
+    <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is refused if estimated_units exceeds it.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets">task budgets</a>.</td></tr>
     <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Required on the first preflight of a new task_ref, ignored on later calls.</td></tr>
   </table>
@@ -145,7 +145,7 @@ WHERE account_id = :account
 }
   </pre></div>
 
-  <p>When blocked:</p>
+  <p>When refused:</p>
   <div class="code"><pre>
 {
   "approved": false,
@@ -179,8 +179,9 @@ WHERE account_id = :account
 <span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to define; here 1 unit = 1 cent.</span>
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-<span class="comment">// Before each call: this job dies at $5 across every call that shares job-142.</span>
-<span class="comment">// A blocked call throws TaskCeilingExceededError, so the expensive work never starts.</span>
+<span class="comment">// Before each call: 1 unit = 1 cent here, so this job dies at $5 across</span>
+<span class="comment">// every call that shares job-142.</span>
+<span class="comment">// A refused call throws TaskCeilingExceededError, so the expensive work never starts.</span>
 await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
 
 <span class="comment">// ... your LLM or tool call ...</span>

@@ -63,7 +63,7 @@ export function requestPanel(): string {
   "task_ref": "job-142",
   "task_remaining_units": 488 }
 
-<span class="k">blocked</span>
+<span class="k">refused</span>
 { "approved": <span class="f">false</span>,
   "reason": "task_ceiling_exceeded",
   "task_ref": "job-142",

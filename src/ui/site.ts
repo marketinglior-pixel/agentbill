@@ -16,8 +16,24 @@ export const ORIGIN = 'https://agentbill.dev'
 /** The one sentence the site leads with. The homepage <title>, its h1 and the
  *  share card all render from here, so the head, the body and the PNG cannot
  *  disagree about it again: until 2026-09-07 the PNG carried a headline the
- *  other two had retired, because a grep cannot see an image. */
-export const HEADLINE = 'A spend ceiling bound to the task, not the month'
+ *  other two had retired, because a grep cannot see an image.
+ *
+ *  Changed 2026-09-07. The old line, "A spend ceiling bound to the task, not
+ *  the month", named a category rather than a mechanism, and any budget tool
+ *  could have signed it unchanged. This one names our own field and then states
+ *  the two bindings it is NOT, both of which we read at source. It asserts
+ *  nothing about anyone else's product, so no provider release can turn it.
+ *
+ *  It is deliberately plain text with no markup, even though `task_ref` would
+ *  read better in mono. The <title> and the PNG cannot carry a span, and a
+ *  second hand-kept copy of the headline is exactly the drift this constant
+ *  exists to prevent.
+ *
+ *  Known cost, accepted: with the "AgentBill · " prefix the title runs past the
+ *  ~60 characters a search result shows. The clause that carries the
+ *  differentiator is first, so the half that survives truncation is the half
+ *  that matters. */
+export const HEADLINE = 'One ceiling per task_ref. Not per project, not per calendar month'
 
 /** The install line beside the primary action, and on the share card. */
 export const INSTALL_PY = 'pip install agentbill-sdk'

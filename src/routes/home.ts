@@ -83,7 +83,7 @@ function refusalPanel(): string {
           <div class="ref-top">
             <span class="agent">${esc(d.agentId ?? '')}</span>
             <span class="ref">${esc(d.taskRef ?? '')}</span>
-            <span class="chip held">blocked</span>
+            <span class="chip held">refused</span>
             <span class="ask">asked ${num(d.estimatedUnits ?? 0)}</span>
           </div>
           <div class="ref-msg">${esc(body.message ?? d.reason)}</div>
@@ -209,10 +209,10 @@ export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: `AgentBill · ${HEADLINE}`,
-      description: 'Provider spend caps are bound to a project, an organization and a calendar month. This ceiling is bound to a task_ref: every call that passes the same one is checked before it runs, on units you define. Free tier, API key in 30 seconds.',
+      description: 'Your provider cap is bound to a project, to an org over a calendar month, or to one session on the vendor’s own harness. This one is bound to a task_ref: every call carrying the same one consults it before it runs, on units you define. Free tier, API key in 30 seconds.',
       path: '/',
       og: {
-        description: 'Provider caps are bound to an account and a month. A job is neither. One ceiling on a task_ref, checked before each call, on units you define.',
+        description: 'One ceiling per task_ref, consulted before each call, on units you define. Not per project, not per calendar month.',
       },
       // Offers render from PLAN_ORDER / PLAN_PRICES / PLAN_LIMITS rather than
       // being typed here. A price written twice is a price that will disagree
@@ -557,11 +557,12 @@ ${siteNav('/')}
   <header class="hero wrap">
     <div>
       <h1>${HEADLINE}.</h1>
-      <p class="sub">Provider caps are real. They fire at a project, an organization over a calendar month,
-      or one session on one vendor's own harness. AgentBill's ceiling is bound to a
-      <span class="mono-in">task_ref</span>: every call that shares it checks the same number before it runs,
-      in whatever process it runs in. You pass what each call is worth, in units you define, and a call the
-      ceiling cannot cover never goes out.</p>
+      <p class="sub">Your provider cap is bound to a project, to an org over a calendar month, or to
+      one session on the vendor's own harness. This one is bound to <span class="mono-in">job-142</span>.
+      You pass two numbers: the ceiling for the task, and what this call is worth, both in units you
+      define. Every call carrying the same <span class="mono-in">task_ref</span> consults that ceiling
+      before it runs, and the reservation is atomic, so two calls cannot both be approved for the last
+      8 units.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="btn-ghost btn-lg" href="#playground">Run it in your browser</a>
@@ -661,15 +662,15 @@ ${playgroundSection()}
     a calendar month. Two things follow from where that line is drawn. A run too small to move a monthly
     number never crosses it. And a monthly number low enough to catch that run takes every agent in the
     organization down with it when it fires, until the month turns.</p>
-    <p class="lead-p src">Their own documentation, read at source on 2026-09-06:
+    <p class="lead-p src">Their own documentation, read at source on 2026-09-07:
     <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">a
     hard limit returns <span class="mono-in">429 project_spend_limit_exceeded</span> and enforcement
     &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount&rdquo;</a>
     &middot; <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">a
     tier cap pauses usage &ldquo;until 00:00 UTC on the first day of the next month&rdquo;</a>
     &middot; <a href="https://ai.google.dev/gemini-api/docs/billing" rel="nofollow noopener">&ldquo;Long-running
-    tasks like batch mode completions and agent sessions may incur overages beyond your project
-    spend cap.&rdquo;</a></p>
+    tasks like batch mode and agents may continue to consume credits beyond your balance before
+    the system can process and halt usage.&rdquo;</a></p>
 
     <div class="dip row-close">
       <div class="dip-text">
@@ -700,7 +701,7 @@ ${playgroundSection()}
       <div class="dip-text">
         <h3>No proxy in your request path</h3>
         <p>No base URL to change, none of your traffic routed through us, no third party holding
-        your provider keys. What you do add is one blocking HTTP call before your own: the SDK posts
+        your provider keys. What you do add is one synchronous HTTP call before your own: the SDK posts
         to <span class="mono-in">/preflight</span> with a five second timeout and no fail-open, so
         if we are unreachable that raises inside your process and your except block decides whether
         to run anyway. A gateway would have made that decision for you.</p>
@@ -767,8 +768,12 @@ ${playgroundSection()}
       <li><b>See a call that never asks.</b> An uninstrumented tool, a subprocess someone added last
       week, a retry buried in a library: invisible to the ceiling, because there is no proxy to see
       it.</li>
+      <li><b>Bind a caller.</b> The ceiling is keyed on
+      <span class="mono-in">(account_id, task_ref)</span>, so a loop that opens a new
+      <span class="mono-in">task_ref</span> gets a new ceiling. It binds the task you named, not
+      whoever is running it.</li>
       <li><b>Unwind a multi-step workflow.</b> Calls are refused, not reversed. Refusing the next
-      call does not undo the nine that already ran.</li>
+      call does not undo the calls that already ran.</li>
       <li><b>Guarantee the TTL fits your job.</b> A reservation not settled inside the TTL, 60
       minutes by default, is reclaimed by a sweeper that runs every five minutes, while your call
       may still be running. Set it longer than your longest call.</li>

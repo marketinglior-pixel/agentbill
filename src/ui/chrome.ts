@@ -275,7 +275,7 @@ ${links.map(([href, label, ext]) => `          <a href="${href}"${ext ? ' class=
         </div>`).join('\n')}
       </div>
       <div class="foot-base">
-        <div class="foot-brand">${mark(14)}agentbill.dev · what counts, who pays, what's blocked.</div>
+        <div class="foot-brand">${mark(14)}agentbill.dev · what counts, who pays, what's refused.</div>
         <div class="foot-copy">&copy; 2026 AgentBill</div>
       </div>
     </div>

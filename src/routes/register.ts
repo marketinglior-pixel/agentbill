@@ -221,9 +221,12 @@ export async function registerRoute(app: FastifyInstance) {
        --text; .trust is --dim, so its term goes to --muted. Both were the
        accent, which reads as a link: "Terms of Service" and "Privacy Policy"
        are green AND underlined about ninety pixels above "free tier" in the
-       same column. One of these terms is the word "blocked", which on the
+       same column. One of these terms is the word "refused", which on the
        homepage is a green console chip, so the accent was carrying two
-       different meanings on one word. */
+       different meanings on one word. (Both read "blocked" until 2026-09-07;
+       "blocked" is now reserved for the SDK's own exception text, which still
+       says it, so our prose and the artifact cannot be mistaken for each
+       other.) */
     .facts b { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
                color: var(--text); font-weight: 500; }
     .trust { margin-top: 28px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
@@ -318,7 +321,7 @@ ${siteNav('/register', { cta: false })}
 <div class="reg wrap row-close">
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
-    <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs blocked. Ship.</p>
+    <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs refused. Ship.</p>
     <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
   </div>
 
@@ -373,7 +376,7 @@ ${siteNav('/register', { cta: false })}
            where the reader is deciding rather than where they have already been. -->
     <ul class="facts">
       <li><b>free tier</b><span>1,000 preflight calls a month, per account. No card, no expiry.</span></li>
-      <li><b>blocked</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
+      <li><b>refused</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
       <li><b>any provider</b><span>One ceiling per task. You pass what each call is worth; we never look at your provider bill.</span></li>
     </ul>
     </div>
@@ -391,7 +394,7 @@ ${siteNav('/register', { cta: false })}
       <div class="panel">
         <div class="panel-h"><span>Next</span><span>see it refuse a call, right now</span></div>
         <div class="steps">
-          <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is blocked before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
+          <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is refused before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
           <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app">your console</a> and paste the key. That refusal is the first row on it.</p></div>
           <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div>
         </div>

@@ -70,7 +70,7 @@ export async function guidesRoute(app: FastifyInstance) {
   <p>1, The first preflight that names a <span class="inline">task_ref</span> creates the task
   and fixes its <span class="inline">task_ceiling</span>.<br>
   2, Every later preflight atomically reserves against the same budget; the call that would
-  cross the ceiling is <b>blocked before it runs</b>.<br>
+  cross the ceiling is <b>refused before it runs</b>.<br>
   3, Records report reality: a failed run releases its reservation, and spend that lands past
   the ceiling is still recorded and flagged <span class="inline">task_exceeded</span>, never
   silently dropped.</p>
@@ -224,9 +224,9 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   which is not a block and reserves nothing.<br>
   Approved responses include <span class="inline">task_remaining_units</span> and
   <span class="inline">reservation_expires_at</span>, the point after which the sweeper reclaims
-  the reservation. A blocked run returns
+  the reservation. A refused call returns
   <span class="inline">reason: "task_ceiling_exceeded"</span>; a new task_ref without a ceiling
-  returns <span class="inline">422 task_ceiling_required</span>. A blocked run reserves nothing
+  returns <span class="inline">422 task_ceiling_required</span>. A refused call reserves nothing
   and burns no plan quota: every rejection rolls the whole transaction back.</p>
   <h3>POST /events, extra field</h3>
   <p><span class="inline">task_ref</span>, attributes the spend to the task.
@@ -250,20 +250,20 @@ with ThreadPoolExecutor(max_workers=2) as pool:
       `
       <h1>How to limit cost per agent run</h1>
       <span class="badge">Python</span><span class="badge">Node.js</span>
-      <p>Monthly caps don't protect you from a single bad run. One 3-hour research loop can exhaust your budget before the cap triggers. AgentBill enforces a ceiling at the invocation level, before any tokens are consumed.</p>
+      <p>A provider spend cap is bound to a project, or to an organization over a calendar month. A single 3-hour research loop is neither. AgentBill's ceiling is bound to a <span class="inline">task_ref</span>, consulted before each call, on units you define.</p>
 
-      <h2>The problem with monthly caps</h2>
-      <p>A monthly cap fires after the damage is done. By the time you get the alert, the run already happened. AgentBill checks the budget <em>before</em> the run starts. If the estimated units exceed your ceiling, the call is blocked immediately, no compute, no cost.</p>
+      <h2>What a monthly cap is bound to</h2>
+      <p>Provider spend caps are real and they fire. What they are bound to is a project, or an organization over a calendar month. So either the run is too small to move a monthly number, or the number low enough to catch it takes every agent in the organization down with it until the 1st. AgentBill's ceiling is bound to one task instead: if the units already used plus this call's estimate would cross it, preflight answers <span class="inline">approved: false</span> and the SDK raises before your provider call goes out.</p>
 
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
       <h2>Set a ceiling at client initialization</h2>
-      <p>Pass <span class="inline">ceiling</span> when creating the client. Every <span class="inline">preflight()</span> call will be blocked if <span class="inline">estimated_units</span> exceeds this value.</p>
+      <p>Pass <span class="inline">ceiling</span> when creating the client. Any <span class="inline">preflight()</span> whose <span class="inline">estimated_units</span> exceeds this value is refused.</p>
       <div class="code"><pre>
 from agentbill import AgentBillClient
 
-<span class="comment"># Block any run estimated at more than 50 units</span>
+<span class="comment"># Refuse any call estimated at more than 50 units</span>
 client = AgentBillClient(api_key="agb_your_key", ceiling=50)
       </pre></div>
 
@@ -275,7 +275,7 @@ check = client.preflight(
     customer_id="user_123"     <span class="comment"># optional: per-customer enforcement</span>
 )
 
-<span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+<span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># Your agent runs here, budget is confirmed</span>
 result = run_agent()
@@ -310,8 +310,8 @@ except BudgetExhaustedError:
       <div class="code"><pre>
 import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
-<span class="comment">// ceiling is per call: block any single run expected to cost more than 50 units.</span>
-<span class="comment">// A blocked run throws, so nothing expensive can happen by forgetting a check.</span>
+<span class="comment">// ceiling is per call: refuse any single call expected to cost more than 50 units.</span>
+<span class="comment">// A refused call throws, so nothing expensive can happen by forgetting a check.</span>
 await preflight({ agentId: 'my_agent', estimatedUnits: 10, ceiling: 50 })
 
 const result = await runAgent()
@@ -348,13 +348,13 @@ from agentbill import AgentBillClient
 client = AgentBillClient(api_key="agb_your_key", ceiling=50)
 
 def run_research_agent(customer_id: str, topic: str) -> str:
-    <span class="comment"># 1. Preflight, block before any tokens are consumed</span>
+    <span class="comment"># 1. Preflight, consulted before the provider call goes out</span>
     check = client.preflight(
         agent_id="research_chain",
         estimated_units=10,
         customer_id=customer_id
     )
-    <span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
     <span class="comment"># 2. Run the LangChain chain normally (LCEL syntax)</span>
     llm = ChatOpenAI(model="gpt-4o")
@@ -388,7 +388,7 @@ result = run_research_agent("quantum computing")
       </pre></div>
 
       <h2>Pattern 3, Mid-run checkpoint for long chains</h2>
-      <p>For agents that run many steps, use <span class="inline">checkpoint()</span> to enforce a ceiling mid-run. The agent is blocked if it has already consumed too many units.</p>
+      <p>For agents that run many steps, use <span class="inline">checkpoint()</span> to enforce a ceiling mid-run. The call is refused if the task has already recorded too many units.</p>
       <div class="code"><pre>
 from agentbill import AgentBillClient
 
@@ -460,14 +460,14 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
     return reply.type('text/html').send(page(
       '/docs/openai-agent-spend-ceiling',
       'How to add a spend ceiling to an OpenAI agent',
-      'Block OpenAI agent runs before they start if the budget is exceeded. Per-request ceiling, not just a monthly cap.',
+      'A spend ceiling bound to one OpenAI agent task, consulted before each call, on units you define. Not a project and not a calendar month.',
       `
       <h1>How to add a spend ceiling to an OpenAI agent</h1>
       <span class="badge">Python</span><span class="badge">Node.js</span><span class="badge">OpenAI</span>
-      <p>OpenAI's usage limits fire after the fact. AgentBill adds a preflight check, the run is blocked before the first API call if the budget says so.</p>
+      <p>OpenAI ships hard spend limits, and they fire: past one, the API returns <span class="inline">429 project_spend_limit_exceeded</span>. What they are bound to is a project or the organization. AgentBill adds a ceiling bound to one task, consulted before each call.</p>
 
-      <h2>Why not just use OpenAI's spend limits?</h2>
-      <p>OpenAI's account-level limits are monthly caps, they don't protect you from a single expensive run. AgentBill enforces a ceiling <em>per invocation, per customer</em>, before the run starts. If the estimated units exceed your ceiling, the call is blocked with no tokens consumed.</p>
+      <h2>Use OpenAI's spend limits. This is a different scope.</h2>
+      <p>Turn them on and keep them on. Their enforcement boundary is the project or the organization, and their own documentation notes that enforcement &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount&rdquo;. AgentBill's ceiling is bound to a <span class="inline">task_ref</span>, consulted before each call, on units you define. It never reads your provider bill and it cannot tell you what a refused call would have cost.</p>
 
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk openai</pre></div>
@@ -488,7 +488,7 @@ def run_agent(customer_id: str, task: str) -> str:
         estimated_units=10,
         customer_id=customer_id
     )
-    <span class="comment"># a blocked run raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
 
     response = openai_client.chat.completions.create(
         model="gpt-4o",
@@ -541,7 +541,7 @@ import { preflight, record } from 'agentbill'  <span class="comment">// reads AG
 const openai = new OpenAI()
 
 async function runAgent(customerId: string, task: string): Promise&lt;string&gt; {
-  <span class="comment">// A blocked run throws before this line returns, so no OpenAI call is made.</span>
+  <span class="comment">// A refused call throws before this line returns, so no OpenAI call is made.</span>
   await preflight({ agentId: 'openai_assistant', estimatedUnits: 10, ceiling: 100, customerId })
 
   const res = await openai.chat.completions.create({
