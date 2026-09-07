@@ -18,3 +18,17 @@
 **/*.log
 **/npm-debug.log*
 fly.toml
+
+# Ignored by git and, until now, not by Docker: 17MB of screenshots, reference
+# material and tool state that was uploaded to the remote builder on every
+# deploy. None of it reaches the running image, because the runtime stage takes
+# only /app/dist, but all of it was in the build context. Keeping the two
+# ignore files aligned is also what stops a file git cannot see from riding
+# into a build that the commit marker then claims to describe.
+**/scripts/shots-out
+**/.reference
+**/.hallmark
+**/.claude
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
