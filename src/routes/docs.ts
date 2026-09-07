@@ -41,7 +41,7 @@ result = run_my_agent()
 client.record(agent_id="researcher", customer_id="user_123", units=10)
   </pre></div>
 
-  <p class="ok">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
+  <p class="closer">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
 
   <h2>Core Concepts</h2>
 

@@ -79,7 +79,16 @@ export const DOCS_CSS = `${CHROME_CSS}
      and the difference between a narrow prose column and a wide panel becomes
      rhythm instead of one flat block. */
   p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; max-width: 54ch; }
-  p.ok { color: var(--green); }
+  /* The closing line of a step sequence, one lift above the prose around it.
+     It was var(--green), which design.md reserves for the brand and the primary
+     action: "Links are --green". Nothing here is a link, so the accent promised
+     a click that does not exist, and it made a throwaway reassurance the single
+     loudest piece of text on the page, brighter than the headings above it.
+     --text is the lift the sentence actually wants and is what h1 a and h2 a
+     already use on this shell for exactly this "brighter, not the accent" job.
+     Named for its role rather than .ok, because .ok means a green status
+     indicator in status.ts and playground.ts and this is neither. */
+  p.closer { color: var(--text); }
   li { color: var(--muted); line-height: 1.7; max-width: 54ch; }
   a { color: var(--green); }
   /* A link at display size is a title, not an action. The blog index renders each
