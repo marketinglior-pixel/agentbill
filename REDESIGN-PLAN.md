@@ -1,6 +1,6 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `fa8d4a1`, Fly v102.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `23d356b`, Fly v103.**
 >
 > After the first deploy (v100) a by-eye verification of production found one high defect the
 > local captures had missed: on a phone the view strip scrolled sideways, so on three of the
@@ -14,6 +14,11 @@
 > longer scroll, the JSON body scrolling inside a phone card, the login card without a
 > gutter, Docs unreachable from a phone, and the sample data claiming two leaks while listing
 > one. All fixed in `fa8d4a1`; the sample's one leak is now derived from its rows.
+>
+> A completeness critic then ran the signed-in SQL verbatim against a database built from the
+> repo's migrations (postgres.js 3.4.9, empty fragments included) and found an int4 product in
+> the near-ceiling count that a task ceiling above 536,870,911 would have turned into a 500.
+> Cast to bigint in `23d356b`, with the day table fitting a 375px phone.
 >
 > Before the merge an adversarial review of the diff (four lenses, three refuters per
 > finding) confirmed six defects and raised eleven lower ones. The worst: array lengths
