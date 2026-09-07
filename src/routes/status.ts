@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { probeDb } from '../lib/db-watchdog.js'
+import { COMMIT } from '../lib/version.js'
 
 // A status page that measures rather than asserts.
 //
@@ -50,6 +51,9 @@ ${checks.map((c) => `    <div class="st-row ${c.ok ? 'ok' : 'down'}">
   </div>
   <p class="st-when">Checked ${checkedAt} UTC. Latency is one round trip from this server, including
      connection setup when the pool is cold.</p>
+  <p class="st-when">Serving commit <code>${COMMIT}</code>. ${COMMIT === 'unknown'
+    ? 'Unknown means this image was built without its GIT_SHA build argument, not that anything is wrong with it.'
+    : 'That is the commit this image was built from, so what is deployed can be checked against the repository from outside.'}</p>
 
   <h2>What this page does not know</h2>
   <p>It has no history. Nothing here records past availability, so there is no

@@ -12,6 +12,7 @@ import { docsRoute } from './routes/docs.js'
 import { preflightRoute } from './routes/preflight.js'
 import { pulseRoute } from './routes/pulse.js'
 import { registerAuth, publicRoute } from './middleware/auth.js'
+import { COMMIT } from './lib/version.js'
 import { registerNotFound, sendNotFoundPage } from './routes/not-found.js'
 import { registerHeaders } from './middleware/headers.js'
 import compress from '@fastify/compress'
@@ -275,7 +276,16 @@ app.get('/og.png', publicRoute(), async (_, reply) => {
 // Health check - useful for deploy verification.
 // Liveness only (Fly restarts machines on failure, a dead DB shouldn't
 // trigger a restart loop). DB truth lives at /health/db.
-app.get('/health', publicRoute(), async () => ({ status: 'ok' }))
+// Liveness only, no database: /health/db below is the deep one. `commit` is
+// the one addition, and it is what lets a running image be tied to a commit
+// from outside; it is a constant read at boot, so this stays a pure function.
+//
+// This route sends an ETag and no Cache-Control, which is what it did before
+// and is deliberately left alone. It means the one field that changes between
+// deploys sits on the only surface with no explicit freshness rule, so read it
+// through a cache with that in mind; /status carries the same value under
+// Cache-Control: no-store.
+app.get('/health', publicRoute(), async () => ({ status: 'ok', commit: COMMIT }))
 
 // Deep health: touches the database. Returns 503 when the DB is unreachable,
 // point external monitors here. The May-Aug 2026 outage hid behind the

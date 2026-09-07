@@ -6,6 +6,12 @@
 app = 'agentbill'
 primary_region = 'sin'
 
+# Deploy with `npm run deploy`, not a bare `flyctl deploy`.
+#
+# The image reports the commit it was built from on GET /health and on /status,
+# and it can only do that if the build receives it: scripts/deploy.sh passes
+# --build-arg GIT_SHA and refuses a dirty tree. A bare `flyctl deploy` still
+# ships; the image just reports "unknown" for its commit.
 [build]
 
 [env]

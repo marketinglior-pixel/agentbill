@@ -8,6 +8,7 @@
     "dev:local": "node --env-file=.env.local node_modules/.bin/tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "deploy": "./scripts/deploy.sh",
     "db:migrate": "psql $DATABASE_URL -f src/db/schema.sql",
     "check:snippets": "./scripts/snippets/run.sh repo",
     "check:snippets:published": "./scripts/snippets/run.sh published",

@@ -1,3 +1,10 @@
+# CI gates; it never deploys.
+#
+# Deploying is manual and it is `npm run deploy` (scripts/deploy.sh) from a
+# clean checkout of main, not a bare `flyctl deploy`: the script passes the
+# commit into the image as a build argument, which is what lets GET /health,
+# /status and the image label name what is running. A bare deploy still ships
+# and reports "unknown".
 name: CI
 
 on:
