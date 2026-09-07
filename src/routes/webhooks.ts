@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
-import { verifyWebhookSignature, planFromProductId } from '../integrations/polar.js'
+import { verifyWebhookSignature, planFromProductId, getCheckoutMetadata } from '../integrations/polar.js'
 import { isUuid, isId } from '../lib/ids.js'
 import { alertRejectedWebhook } from '../lib/webhook-alert.js'
 
@@ -51,17 +51,17 @@ export async function webhooksRoute(app: FastifyInstance) {
       alertRejectedWebhook('not_configured', { note: 'POLAR_WEBHOOK_SECRET is unset on this instance' })
       return reply.code(503).send({ error: 'webhook_not_configured' })
     }
-    const valid = await verifyWebhookSignature(rawBody ?? '', signature, POLAR_WEBHOOK_SECRET)
-    if (!valid) {
+    const verdict = verifyWebhookSignature(rawBody ?? '', request.headers as Record<string, string | string[] | undefined>, POLAR_WEBHOOK_SECRET)
+    if (!verdict.ok) {
       // This branch logged nothing at all, which is the whole reason the empty
       // string bug lived for months: it answered 401 and told no one. The
       // signature is truncated because a full one is a valid MAC over a body
       // somebody chose, and there is no reason to copy it into a mailbox.
-      request.log.warn({ hasSignature: Boolean(signature), bodyBytes: (rawBody ?? '').length },
+      request.log.warn({ reason: verdict.reason, hasSignature: Boolean(signature), bodyBytes: (rawBody ?? '').length },
         'Polar webhook rejected: signature did not verify')
       alertRejectedWebhook('invalid_signature', {
         signaturePrefix: signature ? signature.slice(0, 12) + '...' : '(none sent)',
-        note: `body was ${(rawBody ?? '').length} bytes`,
+        note: `${verdict.reason}; body was ${(rawBody ?? '').length} bytes`,
       })
       return reply.code(401).send({ error: 'invalid_signature' })
     }
@@ -75,10 +75,25 @@ export async function webhooksRoute(app: FastifyInstance) {
       // and a control character there was a 500 the webhook sender retries.
       const rawCustomerId: string = event?.data?.customer_id ?? event?.data?.customerId ?? ''
       const polarCustomerId: string = isId(rawCustomerId) ? rawCustomerId : ''
-      const accountId: string =
+      let accountId: string =
         event?.data?.metadata?.agentbill_account_id ??
         event?.data?.checkoutMetadata?.agentbill_account_id ??
         ''
+
+      // Fallback via checkout_id. The subscription's own metadata comes back
+      // empty (verified on the first real delivery, 2026-09-07), but the payload
+      // always carries data.checkout_id, and the session /checkout/:tier minted
+      // put the account id on that checkout. One guarded GET recovers it, and it
+      // only runs when the fast path above found nothing, so a well-formed
+      // upgrade pays for no extra call.
+      if (!isUuid(accountId)) {
+        const checkoutId: string = event?.data?.checkout_id ?? event?.data?.checkoutId ?? ''
+        if (checkoutId) {
+          const md = await getCheckoutMetadata(checkoutId)
+          const fromCheckout = md?.agentbill_account_id
+          if (typeof fromCheckout === 'string') accountId = fromCheckout
+        }
+      }
 
       // The metadata comes back from Polar, but it started life in a checkout
       // URL the customer could edit, so it is caller input by the time it
@@ -128,10 +143,25 @@ export async function webhooksRoute(app: FastifyInstance) {
 
     // Subscription canceled, downgrade to free
     if (eventType === 'subscription.revoked' || eventType === 'subscription.canceled') {
-      const accountId: string =
+      let accountId: string =
         event?.data?.metadata?.agentbill_account_id ??
         event?.data?.checkoutMetadata?.agentbill_account_id ??
         ''
+
+      // Fallback via checkout_id. The subscription's own metadata comes back
+      // empty (verified on the first real delivery, 2026-09-07), but the payload
+      // always carries data.checkout_id, and the session /checkout/:tier minted
+      // put the account id on that checkout. One guarded GET recovers it, and it
+      // only runs when the fast path above found nothing, so a well-formed
+      // upgrade pays for no extra call.
+      if (!isUuid(accountId)) {
+        const checkoutId: string = event?.data?.checkout_id ?? event?.data?.checkoutId ?? ''
+        if (checkoutId) {
+          const md = await getCheckoutMetadata(checkoutId)
+          const fromCheckout = md?.agentbill_account_id
+          if (typeof fromCheckout === 'string') accountId = fromCheckout
+        }
+      }
 
       // Same rule as the upgrade branch: a uuid, or nothing happens.
       if (isUuid(accountId)) {

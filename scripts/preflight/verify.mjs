@@ -271,48 +271,64 @@ ok('a control character inside a valid https URL is 422', badUrl.status === 422,
 const goodUrl = await post('/webhook-config', { url: 'https://example.com/hook' })
 ok('an ordinary https URL is still accepted', goodUrl.status === 200, JSON.stringify(goodUrl.body).slice(0, 140))
 
-// The Polar metadata comes back signed, but it started in a checkout URL the
-// customer could edit. accounts.id is a uuid column, so any other shape was
-// 22P02 and a 500, which Polar then retries for hours.
-// Polar signs with v1,<hex hmac-sha256 of the raw body>. The harness signs the
-// same way, because the route refuses an unsigned webhook outright: a check
-// that turns itself off when the secret is missing is not a check, and this
-// handler writes accounts.plan.
-const { createHmac } = await import('node:crypto')
+// Polar signs with Standard Webhooks: HMAC-SHA256 over
+// `${webhook-id}.${webhook-timestamp}.${body}`, base64, in a `webhook-signature`
+// header, alongside webhook-id and webhook-timestamp. THE HARNESS SIGNS THROUGH
+// THE SAME LIBRARY THE SERVER VERIFIES WITH. It used to sign v1,<hex over body>,
+// which is what the old verifier expected, so "a correctly signed upgrade is
+// accepted" passed while production rejected every real webhook 401: both sides
+// were wrong the same way, and the test measured the code against itself. A real
+// $0 checkout on 2026-09-07 produced ten 401s and exposed it.
+const { Webhook } = await import('standardwebhooks')
 const SECRET = process.env.WEBHOOK_SECRET ?? ''
+const wh = new Webhook(Buffer.from(SECRET, 'utf-8').toString('base64'))
+let msgSeq = 0
+const signHeaders = (body, { date = new Date(), signBody = body } = {}) => {
+  const id = `msg_${Date.now()}_${msgSeq++}`
+  return {
+    'webhook-id': id,
+    'webhook-timestamp': String(Math.floor(date.getTime() / 1000)),
+    'webhook-signature': wh.sign(id, date, signBody),
+  }
+}
 const hook = (payload, { sign = true } = {}) => {
   const body = JSON.stringify(payload)
-  const headers = { 'Content-Type': 'application/json' }
-  if (sign) headers['webhook-signature'] = `v1,${createHmac('sha256', SECRET).update(body).digest('hex')}`
+  const headers = { 'Content-Type': 'application/json', ...(sign ? signHeaders(body) : {}) }
   return fetch(`${API}/webhooks/polar`, { method: 'POST', headers, body })
     .then(async r => ({ status: r.status, body: await r.text() }))
 }
+const postHook = (body, headers) =>
+  fetch(`${API}/webhooks/polar`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body })
+    .then(async r => ({ status: r.status, body: await r.text() }))
 
 const unsigned = await hook({ type: 'subscription.active', data: {} }, { sign: false })
 ok('an unsigned webhook is refused', unsigned.status === 401, `${unsigned.status} ${unsigned.body.slice(0, 120)}`)
-const forged = await fetch(`${API}/webhooks/polar`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json', 'webhook-signature': 'v1,deadbeef' },
-  body: JSON.stringify({ type: 'subscription.active', data: {} }),
-}).then(async r => ({ status: r.status }))
+
+// Well-formed headers, garbage signature: this is a FORGED signature, not just
+// missing headers, so it exercises the constant-time compare and not the guard.
+const forgedBody = JSON.stringify({ type: 'subscription.active', data: {} })
+const forgedHdr = signHeaders(forgedBody)
+forgedHdr['webhook-signature'] = 'v1,' + Buffer.from('not-the-real-mac').toString('base64')
+const forged = await postHook(forgedBody, forgedHdr)
 ok('a forged signature is refused', forged.status === 401, `got ${forged.status}`)
 
-// The check used to hash the empty string, because nothing populated
-// request.rawBody: a signature over the real body was refused and a signature
-// over '' was accepted, so every genuine webhook 401ed and no payment ever
-// moved an account off the free plan. These two say the body is covered.
-const emptySig = await fetch(`${API}/webhooks/polar`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'webhook-signature': `v1,${createHmac('sha256', SECRET).update('').digest('hex')}` },
-  body: JSON.stringify({ type: 'subscription.active', data: {} }),
-}).then(async r => ({ status: r.status }))
+// The empty-string bug: a signature computed over '' must not verify a real body.
+const emptyBody = JSON.stringify({ type: 'subscription.active', data: {} })
+const emptySig = await postHook(emptyBody, signHeaders(emptyBody, { signBody: '' }))
 ok('a signature over the empty string is refused', emptySig.status === 401, `got ${emptySig.status}`)
 
-const swapped = await fetch(`${API}/webhooks/polar`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'webhook-signature': `v1,${createHmac('sha256', SECRET).update(JSON.stringify({ type: 'a', data: {} })).digest('hex')}` },
-  body: JSON.stringify({ type: 'subscription.active', data: { metadata: { agentbill_account_id: ACCT } } }),
-}).then(async r => ({ status: r.status }))
+// A valid signature over a DIFFERENT body must not verify this one.
+const swapBody = JSON.stringify({ type: 'subscription.active', data: { metadata: { agentbill_account_id: ACCT } } })
+const swapped = await postHook(swapBody, signHeaders(swapBody, { signBody: JSON.stringify({ type: 'a', data: {} }) }))
 ok('a valid signature over a different body is refused', swapped.status === 401, `got ${swapped.status}`)
+
+// A correctly signed body with a stale timestamp must be refused: Standard
+// Webhooks rejects anything older than five minutes, which is replay protection
+// this endpoint gains for free by using the library.
+const oldBody = JSON.stringify({ type: 'subscription.active', data: {} })
+const oldStamp = new Date(Date.now() - 10 * 60_000)
+const stale = await postHook(oldBody, signHeaders(oldBody, { date: oldStamp }))
+ok('a valid signature with a stale timestamp is refused', stale.status === 401, `got ${stale.status}`)
 
 // The path a paying customer actually takes, which has never worked.
 const upgraded = await hook({ type: 'subscription.active', data: { customer_id: 'cus_verify', product_id: 'unknown-product', metadata: { agentbill_account_id: ACCT } } })

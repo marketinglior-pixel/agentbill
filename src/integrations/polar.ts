@@ -1,6 +1,5 @@
 const POLAR_API_KEY      = process.env.POLAR_API_KEY      ?? ''
 const POLAR_METER_SLUG   = process.env.POLAR_METER_SLUG   ?? ''
-const POLAR_CHECKOUT_URL = process.env.POLAR_CHECKOUT_URL ?? ''
 const POLAR_ORG_SLUG     = process.env.POLAR_ORG_SLUG     ?? ''
 
 // Report one billable call to Polar for a paid customer.
@@ -20,12 +19,63 @@ export async function reportUsage(polarCustomerId: string, units = 1): Promise<v
   })
 }
 
-// Returns the Polar checkout URL with the account ID embedded as metadata.
-// Polar will forward this metadata in the webhook so we know who upgraded.
-export function getCheckoutUrl(accountId: string): string {
-  // /upgrade is a 301 to /pricing now, so send them straight there.
-  if (!POLAR_CHECKOUT_URL) return 'https://agentbill.dev/pricing'
-  return `${POLAR_CHECKOUT_URL}?metadata[agentbill_account_id]=${encodeURIComponent(accountId)}`
+// The buy button points at OUR server, never at buy.polar.sh directly. A Polar
+// checkout LINK silently drops a `?metadata[...]` query parameter (verified
+// against their API on 2026-09-07: the created checkout came back with empty
+// metadata), so the account id we used to append never reached the webhook and
+// no purchase could be attributed to an account. A checkout SESSION made via
+// the API keeps its metadata. So the button links to /checkout/:tier, which
+// mints a real session on click.
+export function checkoutPath(tier: string, accountId: string): string {
+  return `/checkout/${encodeURIComponent(tier)}?account_id=${encodeURIComponent(accountId)}`
+}
+
+const PRODUCT_IDS: Record<string, string> = {
+  builder: process.env.POLAR_PRODUCT_ID_BUILDER ?? '',
+  team: process.env.POLAR_PRODUCT_ID_TEAM ?? '',
+  scale: process.env.POLAR_PRODUCT_ID_SCALE ?? '',
+}
+
+// Create a checkout session carrying the account id as metadata; return its
+// hosted URL. Recoverable from the webhook via getCheckoutMetadata by
+// checkout_id, which the payload carries even when subscription.metadata is empty.
+export async function createCheckoutSession(tier: string, accountId: string): Promise<string | null> {
+  const productId = PRODUCT_IDS[tier]
+  if (!POLAR_API_KEY || !productId) return null
+  try {
+    const r = await fetch('https://api.polar.sh/v1/checkouts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${POLAR_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        products: [productId],
+        metadata: { agentbill_account_id: accountId },
+        success_url: 'https://agentbill.dev/thanks',
+      }),
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { url?: string }
+    return typeof j.url === 'string' ? j.url : null
+  } catch {
+    return null
+  }
+}
+
+// Read the metadata off a checkout by id. One guarded GET on the request path,
+// bounded by a short timeout, run only when the webhook's own metadata is empty.
+export async function getCheckoutMetadata(checkoutId: string): Promise<Record<string, unknown>> {
+  if (!POLAR_API_KEY || !checkoutId) return {}
+  try {
+    const r = await fetch(`https://api.polar.sh/v1/checkouts/${encodeURIComponent(checkoutId)}`, {
+      headers: { Authorization: `Bearer ${POLAR_API_KEY}` },
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!r.ok) return {}
+    const j = (await r.json()) as { metadata?: Record<string, unknown> }
+    return j.metadata ?? {}
+  } catch {
+    return {}
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,43 +117,49 @@ export function planFromProductId(productId: string | null | undefined): string 
   return TIER_PRODUCTS[productId] ?? 'paid'
 }
 
-const TIER_CHECKOUTS: Record<string, string> = {
-  builder: process.env.POLAR_CHECKOUT_URL_BUILDER ?? '',
-  team: process.env.POLAR_CHECKOUT_URL_TEAM ?? '',
-  scale: process.env.POLAR_CHECKOUT_URL_SCALE ?? '',
-}
 
-export function getTierCheckoutUrl(tier: string, accountId: string): string {
-  const url = TIER_CHECKOUTS[tier]
-  if (!url) return getCheckoutUrl(accountId)
-  return accountId
-    ? `${url}?metadata[agentbill_account_id]=${encodeURIComponent(accountId)}`
-    : url
-}
+// Verify a Polar webhook the way Polar signs it, which is Standard Webhooks.
+//
+// This function was wrong from the day it was written, in three ways no
+// self-made test could catch: it signed the body alone where Polar signs
+// `${webhook-id}.${webhook-timestamp}.${body}`, it compared hex where Polar
+// emits base64, and it ignored the id and timestamp headers. Every probe
+// passed, because every probe signed the way THIS code expected. Then on
+// 2026-09-07 a real $0 checkout produced ten deliveries from Polar and all ten
+// were 401. The first genuine event this endpoint ever received was the first
+// thing that could expose it.
+//
+// Verification is delegated to the same library Polar's SDK uses, and the
+// secret is prepared the way Polar's SDK prepares it:
+//   new Webhook(Buffer.from(secret, 'utf-8').toString('base64')).verify(body, headers)
+// The library base64-decodes that back to the secret's bytes for the HMAC key,
+// checks the timestamp is within five minutes, and constant-time compares every
+// `v1,` signature in the header. A harness that signs any other way measures the
+// code against itself; scripts/preflight/verify.mjs signs through this library.
+import { Webhook, WebhookVerificationError } from 'standardwebhooks'
 
-// Verify Polar webhook signature (HMAC SHA-256).
-// Polar sends the signature in the "webhook-signature" header as "v1,<hex>".
-export async function verifyWebhookSignature(
+export type WebhookVerdict = { ok: true } | { ok: false; reason: string }
+
+export function verifyWebhookSignature(
   rawBody: string,
-  signatureHeader: string,
+  headers: Record<string, string | string[] | undefined>,
   secret: string,
-): Promise<boolean> {
-  if (!secret || !signatureHeader) return false
-
-  const [version, sig] = signatureHeader.split(',')
-  if (version !== 'v1' || !sig) return false
-
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
-
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody))
-  const expected = Buffer.from(signature).toString('hex')
-
-  return expected === sig
+): WebhookVerdict {
+  if (!secret) return { ok: false, reason: 'no_secret' }
+  const pick = (n: string) => {
+    const v = headers[n]
+    return Array.isArray(v) ? v[0] : v
+  }
+  const h: Record<string, string> = {}
+  for (const n of ['webhook-id', 'webhook-timestamp', 'webhook-signature']) {
+    const v = pick(n)
+    if (v) h[n] = v
+  }
+  try {
+    new Webhook(Buffer.from(secret, 'utf-8').toString('base64')).verify(rawBody, h, { jsonParse: false })
+    return { ok: true }
+  } catch (err) {
+    if (err instanceof WebhookVerificationError) return { ok: false, reason: err.message }
+    return { ok: false, reason: 'verifier_threw: ' + String((err as Error)?.message ?? err).slice(0, 80) }
+  }
 }

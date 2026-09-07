@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { getTierCheckoutUrl, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { checkoutPath, createCheckoutSession, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
@@ -52,7 +53,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     const accountId = ((request.query as any).account_id as string) ?? ''
 
     const cta = (tier: string) =>
-      accountId ? getTierCheckoutUrl(tier, accountId) : '/register'
+      accountId ? checkoutPath(tier, accountId) : '/register'
 
     const paidSummary = PLAN_ORDER.filter((t) => t !== 'free')
       .map((t) => `${t[0].toUpperCase()}${t.slice(1)} $${PLAN_PRICES[t]}`).join('. ')
@@ -268,9 +269,8 @@ ${siteFooter()}
   // only /pricing was canonicalised. Two URLs for one page is a duplicate that
   // a canonical papers over rather than fixes. 301, permanently.
   //
-  // This must ship with the polar.ts change in the same commit: getCheckoutUrl
-  // returned https://agentbill.dev/upgrade as its fallback, and a redirect here
-  // without that edit turns the buy button into a 301 back to the current page.
+  // Buy buttons point at /checkout/:tier (see below), which mints a real Polar
+  // session with the account id as metadata; a bare checkout link would drop it.
   // Forward the query. Until 2026-09-06 this dropped it, and preflight's
   // quota refusals hand agents /upgrade?account_id=<id>: the redirect landed
   // them on the anonymous /pricing, where every paid button says /register.
@@ -288,10 +288,25 @@ ${siteFooter()}
     const accountId = (request as any).accountId
     return reply.send({
       checkout: {
-        builder: getTierCheckoutUrl('builder', accountId),
-        team: getTierCheckoutUrl('team', accountId),
-        scale: getTierCheckoutUrl('scale', accountId),
+        builder: checkoutPath('builder', accountId),
+        team: checkoutPath('team', accountId),
+        scale: checkoutPath('scale', accountId),
       },
     })
+  })
+
+  // The buy button lands here, not on buy.polar.sh, so the account id can be
+  // attached to a real checkout SESSION as metadata (a checkout LINK drops it).
+  // Public: it is a plain navigation from the pricing page, the account id is
+  // in the query, and the worst a stranger can do is start a checkout attributed
+  // to an id they already knew. Any failure is a redirect, never a 500 to a
+  // buyer, because a broken buy button on a slow-Polar day should still land
+  // somewhere sensible.
+  app.get('/checkout/:tier', publicRoute(), async (request, reply) => {
+    const tier = (request.params as { tier: string }).tier
+    const accountId = ((request.query as { account_id?: string }).account_id) ?? ''
+    if (!isUuid(accountId)) return reply.redirect('/register', 302)
+    const url = await createCheckoutSession(tier, accountId)
+    return reply.redirect(url ?? '/pricing', 302)
   })
 }
