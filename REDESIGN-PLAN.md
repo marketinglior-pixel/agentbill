@@ -1,6 +1,12 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `5287cc6`, Fly v104.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed.**
+>
+> This block used to carry its own "live = <sha>, Fly v<n>" line. It is gone rather
+> than corrected: what is deployed is one fact, `C-core/current-state.md` in the vault
+> owns it, and a second copy here is a copy that goes stale, as this one did twice
+> within a day of being written. The deployment can now answer for itself:
+> `curl -s https://agentbill.dev/health` returns the commit it was built from.
 >
 > After the first deploy (v100) a by-eye verification of production found one high defect the
 > local captures had missed: on a phone the view strip scrolled sideways, so on three of the
@@ -326,8 +332,9 @@ check this repo runs and is still broken.
 
 It does not touch positioning or copy. `current-state.md` section 8 records that the
 headline moves from the ceiling to the statement, and section 9 puts that in Phase 2. The
-homepage still leads with "Your loop won't stop itself", which is the old position. That is
-a deliberate hold, not an oversight, and it is out of scope here.
+homepage's positioning was on hold when this was written and has moved since; `current-state.md`
+is where that is recorded, because it is not this plan's fact to hold. What stays true is the
+scope line: this plan changes what renders, not what the page claims.
 
 It also does not add a second accent colour, a logo wall, decorative motion, gradients or
 scroll reveals. Three of those `design.md` forbids, one the measurement refutes, and one
