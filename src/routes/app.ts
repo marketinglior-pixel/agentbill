@@ -815,7 +815,9 @@ ${MARK_CSS}
   .tv { font-family: var(--mono); font-size: var(--fs-figure); font-weight: 700; line-height: 1.1;
         letter-spacing: -.02em; color: var(--text); overflow-wrap: anywhere; }
   .tv.held { color: var(--held); }
-  .tf { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
+  /* margin-top: auto, so the four footers share one baseline whether or not
+     the tile above them carries a sparkline. */
+  .tf { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; margin-top: auto; }
   .tf.now { color: var(--muted); }
   .spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 4px; }
   .spark i { flex: 1 1 0; min-width: 0; background: var(--flow); border-radius: 1px 1px 0 0; }
@@ -979,7 +981,9 @@ ${MARK_CSS}
   .rrow .who a { color: var(--text); }
   .rrow .who .dim { color: var(--dim); }
   .rrow .chip { flex: none; }
-  .rrow .what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+  /* Two lines, then an ellipsis. One line cut the leaked row's own number. */
+  .rrow .what { color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                margin-top: 3px; }
   /* .bad, not .leak: the exception row above owns .leak, and a modifier that
      shares its name inherited display: flex and 12px of padding, which is a
      box text-overflow cannot ellipsise. Same reach as the .kick span bug. */
@@ -1003,7 +1007,7 @@ ${MARK_CSS}
 
   /* The limits ladder. Four rules in evaluation order. Named .lim, not .rule:
      the refusals table has a td.rule and a shared name gave that cell a grid. */
-  .lim { display: grid; grid-template-columns: 34px minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4); padding: var(--s4);
+  .lim { display: grid; grid-template-columns: 34px minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4) var(--s6); padding: var(--s4);
          border-bottom: 1px solid var(--border); }
   .lim:last-child { border-bottom: none; }
   .lim .n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); padding-top: 3px; }
@@ -1055,6 +1059,8 @@ ${MARK_CSS}
   .btn:hover { filter: brightness(1.06); }
   .err { color: var(--red); margin-bottom: var(--s3); }
   .fine { color: var(--dim); margin-top: var(--s4); }
+  /* Outranks .login p, which is what kept the card bottom-heavy. */
+  .login .fine { margin-bottom: 0; }
   nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 var(--s5); }
   a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
     outline: 2px solid var(--green); outline-offset: 2px; }
@@ -1172,7 +1178,6 @@ ${MARK_CSS}
        and the sentence gets two lines instead of one. */
     .rtop { flex-wrap: wrap; gap: 4px 10px; }
     .rrow .who { flex: 1 1 100%; }
-    .rrow .what { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .bhead { flex-direction: column; align-items: flex-start; gap: 4px; }
     .cmd { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
