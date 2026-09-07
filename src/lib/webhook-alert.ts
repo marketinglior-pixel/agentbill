@@ -19,12 +19,14 @@ import { Resend } from 'resend'
 //                       is posting at the endpoint.
 //   not_configured      POLAR_WEBHOOK_SECRET is missing, so the route refuses
 //                       everything. Same retry, same window to fix it.
-//   unusable_account_id A real payment arrived and the account was NOT
-//                       upgraded. This one answers 200, deliberately, because
-//                       no retry can make the payload valid, which also means
-//                       Polar will never send it again. **It is the only one
-//                       where waiting costs the customer**, and it is the one
-//                       that looks healthiest from the outside.
+//   unusable_account_id A signed event arrived that could not be matched to an
+//                       account. This one answers 200, deliberately, because no
+//                       retry can make the payload valid, which also means Polar
+//                       will never send it again. IF it was a real purchase it
+//                       is the only reason where waiting costs the customer, and
+//                       it looks the healthiest from outside. But the handler
+//                       cannot see whether money moved, so the alert says so
+//                       rather than asserting a payment it cannot confirm.
 //
 // It logs whether or not email is configured. The point is that the branch
 // stops being silent; the email is how it travels when Resend is set up.
@@ -41,7 +43,14 @@ export type WebhookAlertReason = 'invalid_signature' | 'not_configured' | 'unusa
 const URGENCY: Record<WebhookAlertReason, string> = {
   invalid_signature: 'Polar retries a 401, so this is recoverable until it stops retrying.',
   not_configured: 'Polar retries a 503, so this is recoverable until it stops retrying.',
-  unusable_account_id: 'This answered 200 and Polar will NOT retry it. A payment was taken and the account was not upgraded.',
+  // States what the alert KNOWS, not what it assumes. It cannot see whether
+  // money moved, only that a signed event it could not attribute arrived and
+  // that answering 200 stopped Polar retrying. Asserting "a payment was taken"
+  // was false for the $0 verification probes that fired this same alert, and a
+  // 3am alert that overstates its own certainty is the same defect as a metric
+  // that cannot name its own source. The customer id travels in the note below,
+  // so the reader can settle it in the Polar dashboard in one click.
+  unusable_account_id: 'A signed Polar event arrived that could not be matched to an account, and answering 200 stopped Polar retrying it. If it was a real purchase, someone paid and was not upgraded; it may instead be a test or a redelivery. This alert cannot tell which. Check the customer below in the Polar dashboard.',
 }
 
 type Tally = { firstAt: number; count: number; lastSentAt: number }
