@@ -2,6 +2,9 @@
   "name": "agentbill-api",
   "version": "0.1.0",
   "description": "Usage-based billing infrastructure for AI agent developers",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "node --env-file=.env node_modules/.bin/tsx watch src/server.ts",
@@ -28,7 +31,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^22.0.0",
     "playwright-core": "^1.63.0",
     "tsx": "^4.15.0",
     "typescript": "^5.4.5"
