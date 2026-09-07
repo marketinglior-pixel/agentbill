@@ -166,6 +166,12 @@ export const TOKENS = `
        which is why Linear and Modal say which way the light falls with the
        frame instead. See .panel's border-top-color. */
     --lift: 0 1px 2px rgba(0,0,0,0.5);
+
+    /* The one gradient. Achromatic, and for media that is looked at rather
+       than used: the share card, the film, a slide. Never on a product page and
+       never behind text. Colour on this site is subtraction: 0.84% chromatic
+       pixels against 0.00 to 0.06% on the references, measured 2026-09-06. */
+    --grad-vignette: radial-gradient(120% 80% at 50% 0%, #0b0f0d 0%, var(--bg) 60%);
   }`
 
 /** Reset plus the element defaults every page shares. */

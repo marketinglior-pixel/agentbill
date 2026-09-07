@@ -645,7 +645,7 @@ function niceMax(max: number): number {
   return n * p
 }
 
-const REASON_LABEL: Record<string, string> = {
+export const REASON_LABEL: Record<string, string> = {
   ceiling_exceeded: 'request ceiling',
   task_ceiling_exceeded: 'task ceiling',
   budget_exhausted: 'customer balance',
@@ -657,7 +657,7 @@ const REASON_LABEL: Record<string, string> = {
 /** One sentence a person can read without opening the body. The body stays
  *  verbatim in the details below it; this is composed from the columns the
  *  row already carries, so it cannot say something the row does not. */
-function decisionLine(r: DecisionRow): string {
+export function decisionLine(r: DecisionRow): string {
   let body: Record<string, unknown> = {}
   try { body = JSON.parse(r.snapshot) as Record<string, unknown> } catch { /* verbatim below */ }
   if (typeof body.message === 'string') return body.message

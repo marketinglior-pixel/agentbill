@@ -1,3 +1,4 @@
+import { HEADLINE, INSTALL_PY } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
@@ -207,7 +208,7 @@ function pricingStrip(): string {
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
-      title: 'AgentBill · A spend ceiling bound to the task, not the month',
+      title: `AgentBill · ${HEADLINE}`,
       description: 'Provider spend caps are bound to a project, an organization and a calendar month. This ceiling is bound to a task_ref: every call that passes the same one is checked before it runs, on units you define. Free tier, API key in 30 seconds.',
       path: '/',
       og: {
@@ -555,7 +556,7 @@ ${siteNav('/')}
 
   <header class="hero wrap">
     <div>
-      <h1>A spend ceiling bound to the task, not the month.</h1>
+      <h1>${HEADLINE}.</h1>
       <p class="sub">Provider caps are real. They fire at a project, an organization over a calendar month,
       or one session on one vendor's own harness. AgentBill's ceiling is bound to a
       <span class="mono-in">task_ref</span>: every call that shares it checks the same number before it runs,
@@ -572,7 +573,7 @@ ${siteNav('/')}
            follows the language tab in the code frame, so the pill and the sample
            always name the same package. -->
       <div class="hero-install">
-        <div data-lang="python">${copyPill('install-py', 'pip install agentbill-sdk')}</div>
+        <div data-lang="python">${copyPill('install-py', INSTALL_PY)}</div>
         <div data-lang="node" hidden>${copyPill('install-node', 'npm install agentbill')}</div>
         <p class="cp-note">or read the <a href="/docs">two-minute quickstart</a></p>
       </div>

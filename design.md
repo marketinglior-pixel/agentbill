@@ -285,6 +285,24 @@ pass that wants to revisit it should change the stamp first.
   and the page was still broken. The PNGs are the check; the exit code only
   catches what a machine can see.
 
+## The share card
+
+`/og.png` is a page like any other, rendered by `scripts/og/build.mts` from the
+same sources as the pages it stands in for: tokens from `theme.ts`, the mark
+from `mark.ts`, `HEADLINE` and `INSTALL_PY` from `site.ts`, and one refusal row
+from `demoConsole()` composed by the console's own `decisionLine()`. Run
+`npm run build:og` after any of those change and commit `src/lib/og-image.ts`.
+The build refuses a card whose fonts fell back or whose content ran past the
+frame.
+
+It is the one surface that carries `--grad-vignette`: achromatic, and allowed
+because a card is looked at rather than used. No product page may use it.
+
+The previous card (2026-08-27, drawn in PIL) carried a retired headline, a
+retired dollar claim, the 8px dot and a typewriter face for eleven days after
+the head was swept, because a grep cannot see a PNG. **A copy sweep opens the
+image.**
+
 ## Closing a row
 
 An unequal two-column row is closed by a hairline, `.row-close` in `chrome.ts`.

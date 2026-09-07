@@ -13,6 +13,15 @@
 
 export const ORIGIN = 'https://agentbill.dev'
 
+/** The one sentence the site leads with. The homepage <title>, its h1 and the
+ *  share card all render from here, so the head, the body and the PNG cannot
+ *  disagree about it again: until 2026-09-07 the PNG carried a headline the
+ *  other two had retired, because a grep cannot see an image. */
+export const HEADLINE = 'A spend ceiling bound to the task, not the month'
+
+/** The install line beside the primary action, and on the share card. */
+export const INSTALL_PY = 'pip install agentbill-sdk'
+
 /** Which share card a page uses. Cards are per section, not per page. */
 export type OgCard = 'default' | 'docs' | 'blog' | 'pricing' | 'register'
 
