@@ -16,6 +16,21 @@ gate() { # name  expected_count  actual_count  detail
 n=$(grep -rn '—' src/ui src/routes src/lib 2>/dev/null | wc -l | tr -d ' ')
 gate "no em dash on a rendered surface" 0 "$n" "$(grep -rn '—' src/ui src/routes src/lib 2>/dev/null | head -5)"
 
+# A source file carrying a NUL byte is binary to git (no line diff, no blame)
+# and invisible to every grep gate in this file, because grep without -a stops
+# at the first NUL and reports nothing. src/lib/ids.ts, the module whose whole
+# job is to REJECT NUL bytes, shipped with one in a comment on 2026-09-07 and
+# silently exempted itself from the em-dash gate above. Proven by planting an
+# em dash in that file: this gate counted 0 while grep -a counted 1.
+n=$(node -e "
+const fs=require('fs'),path=require('path');
+const walk=(d)=>fs.readdirSync(d,{withFileTypes:true}).flatMap((e)=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);
+const bad=walk('src').filter((f)=>/[.](ts|sql|json)$/.test(f)&&fs.readFileSync(f).includes(0));
+if (bad.length) process.stderr.write(bad.join('\\n')+'\\n');
+process.stdout.write(String(bad.length));
+")
+gate "no NUL byte in a source file" 0 "$n"
+
 # The public boundary is declared at the route, never in a list.
 n=$(grep -rn 'PUBLIC_PATHS' src 2>/dev/null | wc -l | tr -d ' ')
 gate "PUBLIC_PATHS stays deleted" 0 "$n"
