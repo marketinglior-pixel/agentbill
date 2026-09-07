@@ -53,16 +53,27 @@ export async function webhooksRoute(app: FastifyInstance) {
     }
     const verdict = verifyWebhookSignature(rawBody ?? '', request.headers as Record<string, string | string[] | undefined>, POLAR_WEBHOOK_SECRET)
     if (!verdict.ok) {
-      // This branch logged nothing at all, which is the whole reason the empty
-      // string bug lived for months: it answered 401 and told no one. The
-      // signature is truncated because a full one is a valid MAC over a body
-      // somebody chose, and there is no reason to copy it into a mailbox.
-      request.log.warn({ reason: verdict.reason, hasSignature: Boolean(signature), bodyBytes: (rawBody ?? '').length },
-        'Polar webhook rejected: signature did not verify')
-      alertRejectedWebhook('invalid_signature', {
-        signaturePrefix: signature ? signature.slice(0, 12) + '...' : '(none sent)',
-        note: `${verdict.reason}; body was ${(rawBody ?? '').length} bytes`,
-      })
+      // Every rejection is logged; that is the fix for the empty-string bug,
+      // which answered 401 and told no one. But only a rejection that PRESENTED
+      // a signature earns an email. A request with no webhook-signature header
+      // cannot be a Polar delivery at all: Polar always signs. It is a scanner
+      // or a monitor poking a public endpoint, and it arrives constantly. On
+      // 2026-09-07 exactly this shipped a "Missing required headers, 15 bytes,
+      // none sent" alert to the owner's phone within an hour of the feature
+      // going live. Emailing on that is alert fatigue, and a wolf-crying alert
+      // gets filtered, which is the same silence the alert was built to end.
+      // So: a rejection WITH a signature (secret rotated, body tampered, replay)
+      // is a real Polar delivery that failed and is worth waking someone; a
+      // rejection with none is logged and left there.
+      const presentedSignature = Boolean(signature)
+      request.log.warn({ reason: verdict.reason, hasSignature: presentedSignature, bodyBytes: (rawBody ?? '').length },
+        presentedSignature ? 'Polar webhook rejected: a signed request did not verify' : 'Unsigned POST to the webhook endpoint, ignored')
+      if (presentedSignature) {
+        alertRejectedWebhook('invalid_signature', {
+          signaturePrefix: signature.slice(0, 12) + '...',
+          note: `${verdict.reason}; body was ${(rawBody ?? '').length} bytes`,
+        })
+      }
       return reply.code(401).send({ error: 'invalid_signature' })
     }
 
