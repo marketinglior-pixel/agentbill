@@ -16,6 +16,7 @@
 // applies the full migration chain and starts the server against it.
 
 import postgres from 'postgres'
+import { gzipSync, brotliCompressSync } from 'node:zlib'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
 const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
@@ -361,6 +362,63 @@ ok('the harness key survived that too', await alive(KEY) === 200, `got ${await a
 const hookCtrl = await hook({ type: 'subscription.active', data: { customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } })
 ok('a control character in the Polar customer id is 200, not 500',
    hookCtrl.status === 200 && !/invalid byte sequence|22021/i.test(hookCtrl.body), `${hookCtrl.status} ${hookCtrl.body.slice(0, 120)}`)
+
+// ---------------------------------------------------------------------------
+// Fastify 5. Each of these is a behaviour the major changed, and each was
+// measured on a local v4 and a local v5 before it was written down.
+
+// @fastify/compress 9 rebuilt its request-decompression transform, and this app
+// receives a compressed request body from nobody, which is exactly why a
+// regression here would be silent. The gate is that a compressed body and a
+// plain one produce the same answer, and that a broken one is a 4xx.
+const sendEncoded = (enc, payload) => fetch(`${API}/preflight`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', 'Content-Encoding': enc },
+  body: payload,
+}).then(async (r) => ({ status: r.status, text: await r.text() }))
+
+const bodyJson = JSON.stringify({ agent_id: 'encoding', estimated_units: 1 })
+const gz = await sendEncoded('gzip', gzipSync(bodyJson))
+ok('a gzip request body decompresses and is approved', gz.status === 200 && /"approved":true/.test(gz.text), `${gz.status} ${gz.text.slice(0, 120)}`)
+const brq = await sendEncoded('br', brotliCompressSync(bodyJson))
+ok('a brotli request body decompresses and is approved', brq.status === 200 && /"approved":true/.test(brq.text), `${brq.status} ${brq.text.slice(0, 120)}`)
+const badGz = await sendEncoded('gzip', Buffer.from('not gzip at all'))
+ok('a corrupt compressed body is 400, not 500', badGz.status === 400, `${badGz.status} ${badGz.text.slice(0, 120)}`)
+const unkEnc = await sendEncoded('weird', bodyJson)
+ok('an unknown Content-Encoding is 415, not 500', unkEnc.status === 415, `${unkEnc.status} ${unkEnc.text.slice(0, 120)}`)
+
+// Fastify 5 added a third frameworkErrors call site: an over-long path segment
+// used to fall to the not-found handler and now arrives here, which is a reply
+// that never reaches the onSend hook. It went out with no security headers at
+// all until this was caught, so the header is the assertion, not the status.
+const overLong = await fetch(`${API}/tasks/${'a'.repeat(200)}`, { headers: { Authorization: `Bearer ${KEY}` } })
+const overLongBody = await overLong.text()
+ok('a path segment past the ceiling is 414', overLong.status === 414, `${overLong.status} ${overLongBody.slice(0, 120)}`)
+ok('and it still carries nosniff', overLong.headers.get('x-content-type-options') === 'nosniff', String(overLong.headers.get('x-content-type-options')))
+ok('and it still carries X-Frame-Options', overLong.headers.get('x-frame-options') === 'DENY', String(overLong.headers.get('x-frame-options')))
+ok('and it reflects no part of the URL', !/aaaaaaaaaa/.test(overLongBody), overLongBody.slice(0, 120))
+
+// A malformed percent-encoding is the other frameworkErrors path, and it was
+// bare of the same headers under Fastify 4.
+const malformedUrl = await fetch(`${API}/%`)
+ok('a malformed URL is 400 and carries nosniff',
+   malformedUrl.status === 400 && malformedUrl.headers.get('x-content-type-options') === 'nosniff',
+   `${malformedUrl.status} ${malformedUrl.headers.get('x-content-type-options')}`)
+
+// request.hostname stopped including the port in Fastify 5, and the same-origin
+// guard on the login form compared it against a URL host that does include one,
+// so every non-443 origin answered 403. Production never showed it because Host
+// there carries no port. The cross-origin direction is asserted next to it,
+// because a guard that stops refusing is the worse half of this bug.
+const session = (headers) => fetch(`${API}/app/session`, {
+  method: 'POST', redirect: 'manual',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
+  body: 'api_key=agb_notarealkey_0000',
+}).then((r) => r.status)
+const origin = new URL(API).origin
+ok('a same-origin POST with a port and no Sec-Fetch-Site is not refused', await session({ Origin: origin }) !== 403)
+ok('a cross-origin POST is still refused', await session({ Origin: 'https://evil.example' }) === 403)
+ok('Sec-Fetch-Site: cross-site is still refused', await session({ Origin: origin, 'Sec-Fetch-Site': 'cross-site' }) === 403)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()

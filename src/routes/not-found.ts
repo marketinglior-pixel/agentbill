@@ -78,7 +78,10 @@ const ENCODED = {
   br: brotliCompressSync(PAGE, { params: { [Z.BROTLI_PARAM_QUALITY]: 5 } }),
 }
 
-export function sendNotFoundPage(request: FastifyRequest, reply: FastifyReply, code: 400 | 404) {
+// 414 joined the list when Fastify 5 started routing an over-long path segment
+// here instead of to the 404 handler. One page serves all three: it names no
+// status and reflects nothing from the request, so it is honest for each.
+export function sendNotFoundPage(request: FastifyRequest, reply: FastifyReply, code: 400 | 404 | 414) {
   const ae = String(request.headers['accept-encoding'] ?? '')
   const enc = /\bbr\b/.test(ae) ? 'br' : /\bgzip\b/.test(ae) ? 'gzip' : 'identity'
   reply.code(code).type('text/html; charset=utf-8').header('Vary', 'Accept-Encoding')

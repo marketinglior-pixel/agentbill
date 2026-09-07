@@ -2,7 +2,6 @@ import 'dotenv/config'
 import { STATUS_CODES } from 'node:http'
 import { ID_MAX } from './lib/ids.js'
 import Fastify, { type FastifyReply } from 'fastify'
-import sensible from '@fastify/sensible'
 import { eventsRoute } from './routes/events.js'
 import { budgetRoute } from './routes/budget.js'
 import { dashboardRoute } from './routes/dashboard.js'
@@ -14,7 +13,7 @@ import { pulseRoute } from './routes/pulse.js'
 import { registerAuth, publicRoute } from './middleware/auth.js'
 import { COMMIT } from './lib/version.js'
 import { registerNotFound, sendNotFoundPage } from './routes/not-found.js'
-import { registerHeaders } from './middleware/headers.js'
+import { registerHeaders, applySecurityHeaders } from './middleware/headers.js'
 import compress from '@fastify/compress'
 import etag from '@fastify/etag'
 import { constants as zlibConstants } from 'node:zlib'
@@ -59,12 +58,34 @@ const app = Fastify({
   // A task_ref may be 128 characters (src/lib/ids.ts) and Fastify's default
   // ceiling on a path segment is 100, so GET /tasks/:task_ref answered 404 for
   // a task that exists and that POST /preflight was happy to create.
-  maxParamLength: ID_MAX,
-  frameworkErrors: (_error, request, reply: FastifyReply) => {
+  //
+  // Nested under routerOptions because Fastify 5 deprecated reading it from the
+  // top level (FSTDEP022) and removes that reading in 6. It warned on every
+  // boot and the warning was the only notice anyone would get.
+  routerOptions: { maxParamLength: ID_MAX },
+  frameworkErrors: (error, request, reply: FastifyReply) => {
+    // This reply never reaches the onSend hook, so it applies that hook's
+    // security headers itself. Under Fastify 4 nothing arrived here except a
+    // malformed URL, and it went out bare; Fastify 5 sends an over-long path
+    // segment here too, so the gap was worth closing rather than preserving.
+    applySecurityHeaders(reply)
     reply.header('X-Robots-Tag', 'noindex').header('Cache-Control', 'no-store')
+
+    // The framework's own status, not a flat 400. /% is FST_ERR_BAD_URL at 400
+    // and a 129-character path segment is FST_ERR_MAX_PARAM_LENGTH at 414, and
+    // answering both 400 would say the URL was malformed when it was merely
+    // too long. Only 4xx is honoured: a 5xx here is ours to own, not to relay.
+    // The message is never relayed either — Fastify's echoes the URL back.
+    const raw = (error as { statusCode?: number } | null)?.statusCode
+    const status = raw === 414 ? 414 : 400
     const accept = request.headers.accept ?? ''
-    if (accept.includes('text/html')) return sendNotFoundPage(request, reply, 400)
-    return reply.code(400).send({ error: 'bad_request', message: 'Malformed URL.' })
+    if (accept.includes('text/html')) return sendNotFoundPage(request, reply, status)
+    return status === 414
+      ? reply.code(414).send({
+          error: 'uri_too_long',
+          message: `A path segment is longer than ${ID_MAX} characters.`,
+        })
+      : reply.code(400).send({ error: 'bad_request', message: 'Malformed URL.' })
   },
 })
 
@@ -83,17 +104,22 @@ const app = Fastify({
 // 415, a body over the limit). Those pass through in the shape Fastify would
 // have sent, because the smoke tests and the SDKs already read that shape.
 app.setErrorHandler((error, request, reply) => {
-  const status = (error as { statusCode?: number }).statusCode ?? 500
+  // Fastify 5 types this parameter as `unknown`, and that is the truth rather
+  // than a nuisance: a handler can throw anything, and under v4's FastifyError
+  // typing a thrown string would have read .message as undefined. Narrow once,
+  // here, instead of casting at each use.
+  const status = (error as { statusCode?: number } | null)?.statusCode ?? 500
+  const code = (error as { code?: string } | null)?.code
+  const message = error instanceof Error ? error.message : String(error)
   if (status < 500) {
     // Fastify's own 4xx bodies carry a `code` (FST_ERR_CTP_INVALID_MEDIA_TYPE
     // and friends) and its default handler logs them. Dropping either would
     // make the comment above this function false.
-    const code = (error as { code?: string }).code
     request.log.warn({ err: error, url: request.url }, 'request error')
     return reply.code(status).send({
       statusCode: status,
       error: STATUS_CODES[status] ?? 'Error',
-      message: error.message,
+      message,
       ...(code ? { code } : {}),
     })
   }
@@ -171,8 +197,12 @@ registerHeaders(app)
 // 1KB. @fastify/compress rather than a zlib hook because it has to recompute
 // Content-Length, skip image/png (/og.png, the icons), and leave streams alone,
 // and getting any one of those wrong is a subtle bug rather than a loud one.
-// Pinned to 7.x: 9.x depends on fastify-plugin ^6, which is Fastify 5, and this
-// server is Fastify 4.29.
+// 9.x, which requires Fastify 5. It also computes a syncThreshold from the
+// core count and compresses anything smaller in one call instead of through a
+// stream. Fly gives this app one shared vCPU, where that threshold is 65536.
+// Measured rather than feared: the homepage is 97,650 bytes, so it still
+// streams, and a full synchronous brotli-5 pass over it costs 1.5ms, which is
+// the ceiling on what any smaller page could block the loop for.
 // brotli quality 5, not the plugin's default of 4. Measured on the homepage:
 // at 4 brotli produced 16,290 bytes against gzip's 15,930, so it was listed
 // first and doing worse than the fallback. 5 costs a little more CPU per
@@ -192,7 +222,6 @@ await app.register(compress, {
   brotliOptions: { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } },
 })
 
-app.register(sensible)
 app.register(homeRoute)
 app.register(docsRoute)
 app.register(guidesRoute)

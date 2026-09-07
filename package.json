@@ -21,11 +21,10 @@
     "shots": "node scripts/shots.mjs"
   },
   "dependencies": {
-    "@fastify/compress": "^7.0.3",
-    "@fastify/etag": "^4.2.0",
-    "@fastify/sensible": "^5.6.0",
+    "@fastify/compress": "^9.2.0",
+    "@fastify/etag": "^6.2.0",
     "dotenv": "^17.4.2",
-    "fastify": "^4.28.0",
+    "fastify": "^5.12.3",
     "postgres": "^3.4.4",
     "resend": "^6.12.3",
     "zod": "^3.23.8"

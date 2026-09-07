@@ -225,7 +225,16 @@ function sameOrigin(request: FastifyRequest): boolean {
   if (typeof sfs === 'string') return sfs === 'same-origin'
   const origin = request.headers.origin
   if (typeof origin === 'string') {
-    try { return new URL(origin).host === request.hostname } catch { return false }
+    // request.host, not request.hostname. Fastify 5 split host into host,
+    // hostname and port, and hostname now drops the port; v4's hostname kept
+    // it. URL.host keeps a non-default port, so comparing it to the new
+    // hostname can only match when the Origin carries no port, and every
+    // non-443 origin started answering 403. Measured on this server: with
+    // Origin: http://localhost:3603 and no Sec-Fetch-Site, hostname gave 403
+    // and host gives 303. Production never showed it, because Host there is
+    // agentbill.dev with no port. That is exactly why it had to be caught here
+    // rather than after a deploy.
+    try { return new URL(origin).host === request.host } catch { return false }
   }
   return true
 }

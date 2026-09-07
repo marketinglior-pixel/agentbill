@@ -20,22 +20,48 @@ const HTML_CACHE: ReadonlyArray<readonly [test: (p: string) => boolean, value: s
           p === '/about' || p === '/terms' || p === '/privacy', 'public, max-age=600'],
 ]
 
+/**
+ * The headers every response carries, whatever produced it.
+ *
+ * Exported because the onSend hook below is not the only exit. A URL the router
+ * refuses never reaches a route, so it never reaches this hook either, and
+ * `frameworkErrors` in server.ts has to apply the same list itself. That path
+ * was invisible under Fastify 4, where an over-long path parameter was a plain
+ * 404 through the normal lifecycle; under Fastify 5 the router rejects it and
+ * the reply went out with none of these headers. Measured, not guessed:
+ * GET /tasks/<150 chars> lost nosniff, HSTS, Referrer-Policy and X-Frame-Options.
+ *
+ * No `preload` on HSTS. Preloading is effectively irreversible: removal takes
+ * months to propagate through browser releases. includeSubDomains is wanted and
+ * is reversible. fly.toml already forces https, so this is defence in depth
+ * against a first-visit downgrade rather than a fix for something broken.
+ */
+export const SECURITY_HEADERS: ReadonlyArray<readonly [name: string, value: string]> = [
+  ['Strict-Transport-Security', 'max-age=31536000; includeSubDomains'],
+  ['X-Content-Type-Options', 'nosniff'],
+  ['Referrer-Policy', 'strict-origin-when-cross-origin'],
+  ['X-Frame-Options', 'DENY'],
+  ['Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()'],
+  ['Cross-Origin-Opener-Policy', 'same-origin'],
+]
+
+/** Apply them without clobbering anything the route set for itself. */
+export function applySecurityHeaders(reply: {
+  hasHeader(name: string): boolean
+  header(name: string, value: string): unknown
+}): void {
+  for (const [name, value] of SECURITY_HEADERS) {
+    if (!reply.hasHeader(name)) reply.header(name, value)
+  }
+}
+
 export function registerHeaders(app: FastifyInstance) {
   app.addHook('onSend', async (request, reply, payload) => {
     const set = (name: string, value: string) => {
       if (!reply.hasHeader(name)) reply.header(name, value)
     }
 
-    // No `preload`. Preloading is effectively irreversible: removal takes months
-    // to propagate through browser releases. includeSubDomains is wanted and is
-    // reversible. fly.toml already forces https, so this is defence in depth
-    // against a first-visit downgrade rather than a fix for something broken.
-    set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-    set('X-Content-Type-Options', 'nosniff')
-    set('Referrer-Policy', 'strict-origin-when-cross-origin')
-    set('X-Frame-Options', 'DENY')
-    set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
-    set('Cross-Origin-Opener-Policy', 'same-origin')
+    applySecurityHeaders(reply)
 
     const path = request.url.split('?')[0]
     let type = String(reply.getHeader('content-type') ?? '')
