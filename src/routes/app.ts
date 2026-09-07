@@ -539,9 +539,13 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
       { approved: false, reason: 'ceiling_exceeded', message: 'Estimated 120 units exceeds the per-request ceiling of 50.' }),
     mk(1, 410, 'researcher', 'job-8864', 'budget_exhausted', true, 60, null, 1000,
       { approved: false, reason: 'budget_exhausted', message: 'Customer cust_initech has 0 units remaining.' }),
-    mk(2, 95, 'crawler', 'nightly-crawl', 'task_overrun_recorded', false, 310, 2000, 2150,
-      { recorded: true, task_ref: 'nightly-crawl', task_used_units: 2150, task_remaining_units: 0, note: 'recorded past the ceiling: preflight was skipped for this call' }),
   ]
+  // The one leak: a record that landed on batch-2211 an hour ago with no
+  // preflight, after the ceiling had refused it two hours earlier. Inserted
+  // in time order so the list stays newest first, and the task row below
+  // carries the same 1,025, so the overview, the task and the row agree.
+  all.splice(1, 0, mk(0, 60, 'enricher', 'batch-2211', 'task_overrun_recorded', false, 25, 1000, 1025,
+    { recorded: true, task_ref: 'batch-2211', task_used_units: 1025, task_remaining_units: 0, task_exceeded: true, note: 'recorded past the ceiling: preflight was skipped for this call' }))
   const decisions = all.filter((d) => (!f.task || d.taskRef === f.task) && (!f.agent || d.agentId === f.agent) && (f.only !== 'leaks' || !d.blocked))
   const customers: CustomerRow[] = [
     { customerRef: 'cust_acme',     limitUnits: 5000, usedUnits: 4820, reservedUnits: 0 },
@@ -554,11 +558,11 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
       { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
       { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
       { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
-      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1000, reservedUnits: 0, updatedAt: day(2) },
+      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1025, reservedUnits: 0, updatedAt: new Date(Date.now() - 60 * 60_000) },
   ]
   return {
     decisionTotal: all.length,
-    overruns: 2,
+    overruns: all.filter((d) => !d.blocked).length,
     lastBlock: new Date(Date.now() - 22 * 60_000),
     // The equivalent window immediately before this one.
     prevBlocked: Math.round(blockedTotal * 0.78),
@@ -1088,6 +1092,8 @@ ${MARK_CSS}
     .vlist a b { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500; color: var(--dim); }
     .vlist .mode { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 4px; }
     .vlist .mode span::before { content: '\\2194  '; color: var(--dim); }
+    .vlist .more { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 4px; }
+    .vlist .mode + .more { margin-top: 0; border-top: none; padding-top: 0; }
     .wrap { padding: var(--s5) var(--s4) var(--s7); }
     .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .duo { grid-template-columns: minmax(0, 1fr); }
@@ -1142,10 +1148,11 @@ ${MARK_CSS}
                                 text-transform: uppercase; letter-spacing: .06em; }
     .cards .share .sbar { flex: 1 1 60px; width: auto; }
     .cards .share > span:last-child { flex: none; white-space: nowrap; }
-    /* A table that still scrolls sideways says so with a fade at its edge. */
-    .tw:not(.cards):not(.refusals) { mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
-                                     -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent); }
     th, td { padding-inline: 10px; }
+    /* The JSON body wraps instead of scrolling inside a 322px card. */
+    td pre { white-space: pre-wrap; word-break: break-word; }
+    /* The login card keeps a gutter like every other card on a phone. */
+    .login { margin: var(--s6) var(--s4); }
     /* The key tail and the wordmark wanted the same 80px at 375px; the tail is
        the one that can go, the banner and the rail say which mode this is. */
     .acct-row span:last-child { display: none; }
@@ -1295,6 +1302,7 @@ function rail(p: Page): string {
         ${p.anon ? '' : p.demo
           ? `<a class="mode" href="${href(p, p.view, { demo: false })}"><span>Your data</span></a>`
           : `<a class="mode" href="${href(p, p.view, { demo: true })}"><span>Sample data</span></a>`}
+        <a class="more" href="/docs"><span>Docs</span></a>
         </div>
       </details>`
   const mode = p.anon
@@ -1325,7 +1333,7 @@ function periodControl(p: Page): string {
     `<a class="${k === p.range ? 'on' : ''}" href="${href(p, p.view, { range: k })}"${k === p.range ? ' aria-current="true"' : ''}>${esc(r.label)}</a>`).join('')}</span>`
 }
 
-function sparkline(series: Series[], key: 'units' | 'blocks', cls: string): string {
+function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused', cls: string): string {
   const max = Math.max(1, ...series.map((s) => s[key]))
   return `<div class="spark" aria-hidden="true">${series.map((s) => {
     const v = s[key]
@@ -1354,7 +1362,8 @@ function kpis(p: Page, rangeLabel: string): string {
       <div class="tile frame">
         <div class="lbl">Units refused · ${esc(win)}</div>
         <div class="tv">${num(refused)}</div>
-        <div class="tf">${blocked ? `${num(avgAsk)} units per refused call, on average` : 'units asked for and not run'}</div>
+        ${sparkline(d.series, 'refused', '')}
+        <div class="tf">${blocked ? `${num(avgAsk)} units per refused call` : 'units asked for and not run'}</div>
       </div>
       <div class="tile frame">
         <div class="lbl">Units metered · ${esc(win)}</div>
