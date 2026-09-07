@@ -71,3 +71,14 @@ export function requestPanel(): string {
         <div class="panel-f">Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
       </div>`
 }
+
+/**
+ * The three key endpoints, once. The console's keys view and the homepage's
+ * keys panel both render from here; the sentences mirror src/routes/keys.ts
+ * and if they ever disagree, keys.ts is right and this is a bug.
+ */
+export const KEY_COMMANDS: ReadonlyArray<readonly [endpoint: string, what: string]> = [
+  ['POST /keys/generate', 'A new key, with an optional label and expiry in days.'],
+  ['POST /keys/rotate', 'A new key now; the old one keeps working for 24 hours, then revokes itself.'],
+  ['POST /keys/revoke', 'Kills the calling key immediately, or another by its prefix.'],
+]

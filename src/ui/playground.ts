@@ -247,7 +247,7 @@ export const PLAYGROUND_CSS = `
 
 /** The section markup. Drop it straight after the hero. */
 export function playgroundSection(): string {
-  return `  <section class="wrap pg-sec">
+  return `  <section class="wrap pg-sec" id="playground">
     <h2>Run an agent into its ceiling.</h2>
     <p class="pg-lede">Set a ceiling for the whole job. Run the agent. The call that would break
     the budget never goes out. You get back the same response body your SDK gets.</p>

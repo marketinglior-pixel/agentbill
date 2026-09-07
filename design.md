@@ -24,6 +24,29 @@ trusts the reader, hates decoration.
   panels render from the same data the console renders (`demoConsole()`,
   `PLAN_LIMITS`), never from copies. One deliberate grid break per page (on `/`
   it is the refusal band).
+
+  The homepage (redesigned for conversion 2026-09-07, `src/routes/home.ts`)
+  runs five rows under the playground, alternating, and the fifth is
+  `.dip.wide`: the head keeps the diptych's columns (title left, argument
+  right) and the console panel spans both beneath, so one row of a different
+  shape closes the sequence instead of stamping a sixth. Two panels joined the
+  set: keys (rows from `demoConsole().keys`, the endpoints from `KEY_COMMANDS`
+  in `panels.ts`, which the console's keys view also renders) and a console
+  overview (three tiles summed over the same series the console draws, the
+  refusals by day, customers by share of spend, and the leak count). The hero's
+  code frame carries a Python / Node tab strip (`src/ui/tabs.ts`): both
+  samples are server-rendered and CI-executed, JavaScript off shows Python,
+  and the install pill follows the tab so the pill and the sample always name
+  the same package. The switch is a state change, not motion. The hero's
+  second action is an in-page jump to the playground, not a second route: the
+  cheapest proof is the one that runs without leaving the page.
+
+  **Two classes outrank one.** `.dip.flip` sets its own tracks and the
+  breakpoint rule named only `.dip`, so every flipped row kept two tracks on a
+  phone and its panel rendered 150px wide beside its own paragraph. It shipped
+  that way to production on 2026-09-06 and no gate saw it. The collapse rule
+  now names the modifier too. A modifier that sets a layout property must be
+  named again by every breakpoint that resets it.
 - **App (`/app`, `/admin`):** Workbench. Function carries the page. No
   enrichment. The console's colour semantics are law: one token, one job
   (`--flow` ordinary traffic, `--held` AgentBill stopped something, `--near`

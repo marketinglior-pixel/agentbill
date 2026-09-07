@@ -5,8 +5,9 @@ import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFU
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole } from './app.js'
 import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
-import { PANEL_CSS, requestPanel } from '../ui/panels.js'
+import { PANEL_CSS, requestPanel, KEY_COMMANDS } from '../ui/panels.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
+import { TABS_CSS, TABS_JS, TABS_HASH, langTabs } from '../ui/tabs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
@@ -16,6 +17,15 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // through the same rule the console applies, so the homepage cannot show a
 // number the console would disagree with. Where a panel is sample data it
 // says so inside its own frame, so a screenshot carries the label with it.
+//
+// Redesigned 2026-09-07 for conversion, measured against the fold and not
+// against taste: the hero says what the product is in one line and how it
+// works in three, the second action keeps the reader on the page and runs
+// the product, the code frame speaks both languages the register form asks
+// about, and the two pillars the page never showed (the key lifecycle and the
+// receipt) each get a row with a real panel. Nothing here is a logo wall, a
+// count or a testimonial: there is nobody to name yet, and design.md records
+// why the install line stands in that slot.
 
 const esc = (s: unknown) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -53,7 +63,7 @@ function taskPanel(): string {
             <i class="res" style="width:${resPct.toFixed(1)}%"></i>
           </div>
           <div class="task-nums"><b>${num(t.usedUnits)}</b> / ${num(t.ceilingUnits)} units${
-            t.reservedUnits ? ` <span class="dimtxt">· ${num(t.reservedUnits)} reserved</span>` : ''}</div>
+            t.reservedUnits ? ` <span class="dimtxt">&middot; ${num(t.reservedUnits)} reserved</span>` : ''}</div>
         </div>`
   }).join('')
   return `<div class="panel">
@@ -82,6 +92,102 @@ function refusalPanel(): string {
         <div class="panel-h"><span>Refusals</span><span>what the agent got back</span></div>
         ${rows}
         <div class="panel-f">Sample rows. Three agents, three tasks, one rule. "Asked" is units, not a dollar figure.</div>
+      </div>`
+}
+
+/**
+ * The key lifecycle: the two sample keys the console lists, in the status
+ * vocabulary keys.ts computes, and the three endpoints that move a key
+ * through it. Statuses are re-derived here from the same fields keys.ts reads
+ * (revoked_at, expires_at); the sample holds two active keys, one with an
+ * expiry, and the panel says so rather than inventing a revoked one.
+ */
+function keysPanel(): string {
+  const now = Date.now()
+  const rows = demoConsole().keys.map((k) => {
+    const days = k.expiresAt ? Math.round((k.expiresAt.getTime() - now) / 86_400_000) : null
+    const status = k.revokedAt ? 'revoked' : days != null && days <= 0 ? 'expired' : 'active'
+    return `
+        <div class="key">
+          <div class="key-top">
+            <span class="ref">${esc(k.label ?? 'key')}</span>
+            <span class="agent">${esc(k.apiKey.slice(0, 12))}&hellip;</span>
+            <span class="chip ${status === 'active' ? 'flow' : 'fail'}">${status}</span>
+          </div>
+          <div class="key-meta">${days != null ? `expires in ${num(days)}d` : 'no expiry'}
+            <span class="dimtxt">&middot; last seen from ${esc(k.lastSeenIp ?? 'nowhere yet')}</span></div>
+        </div>`
+  }).join('')
+  const cmds = KEY_COMMANDS.map(([ep, what]) => `
+        <div class="cmd"><b>${esc(ep)}</b><span>${esc(what)}</span></div>`).join('')
+  return `<div class="panel">
+        <div class="panel-h"><span>Keys</span><span>revoke, rotate, expire</span></div>
+        ${rows}
+        <div class="cmds">${cmds}
+        </div>
+        <div class="panel-f">Sample keys, the same ones the demo console lists. Neither authenticates anything.</div>
+      </div>`
+}
+
+/**
+ * The console's overview, reduced: three tiles summed over the same thirty
+ * day series the console draws, the refusals by day under them, and every
+ * customer by share of spend. The tiles are sums over the series, never
+ * typed, so this panel and the console cannot disagree; the window is named
+ * in each label, the way the console names it.
+ */
+function consolePanel(): string {
+  const d = demoConsole()
+  const blocked = d.series.reduce((a, x) => a + x.blocks, 0)
+  const refused = d.series.reduce((a, x) => a + x.refused, 0)
+  const avgAsk = blocked ? Math.round(refused / blocked) : 0
+  const max = Math.max(1, ...d.series.map((s) => s.blocks))
+  const bars = d.series.map((s) => s.blocks > 0
+    ? `<i style="height:${Math.max(6, Math.round((s.blocks / max) * 100))}%"></i>`
+    : '<i class="zero"></i>').join('')
+  const total = d.customerTotal
+  const customers = [...d.customers].sort((a, b) => b.usedUnits - a.usedUnits).map((c) => {
+    const share = total > 0 ? Math.round((c.usedUnits / total) * 100) : 0
+    const atLimit = c.limitUnits != null && c.usedUnits >= c.limitUnits
+    return `
+          <div class="cust">
+            <span class="ref">${esc(c.customerRef)}</span>
+            <span class="cust-n">${num(c.usedUnits)}<span class="dimtxt"> units</span></span>
+            <span class="sbar" aria-hidden="true"><i class="${atLimit ? 'held' : ''}" style="width:${Math.max(2, share)}%"></i></span>
+            <span class="cust-s">${share}%</span>
+          </div>`
+  }).join('')
+  return `<div class="panel con">
+        <div class="panel-h"><span>Console &middot; overview</span><span>sample account, last 30 days</span></div>
+        <div class="con-grid">
+          <div class="con-l">
+            <div class="tiles">
+              <div class="tile">
+                <div class="tile-l">Refused &middot; 30d</div>
+                <div class="tile-v held">${num(blocked)}</div>
+                <div class="tile-f">calls that never ran</div>
+              </div>
+              <div class="tile">
+                <div class="tile-l">Units refused &middot; 30d</div>
+                <div class="tile-v">${num(refused)}</div>
+                <div class="tile-f">${num(avgAsk)} units per refused call</div>
+              </div>
+              <div class="tile">
+                <div class="tile-l">Live tasks &middot; now</div>
+                <div class="tile-v">${num(d.taskLive)}</div>
+                <div class="tile-f">${d.taskNear ? `${num(d.taskNear)} within a fifth of the ceiling` : 'all under their ceilings'}</div>
+              </div>
+            </div>
+            <div class="tile-l">Refused, by day &middot; 30d</div>
+            <div class="spark" aria-hidden="true">${bars}</div>
+          </div>
+          <div class="con-r">
+            <div class="tile-l">Customers by share of spend &middot; all time</div>
+            ${customers}
+            <div class="con-note">${num(d.overruns)} call recorded past a ceiling, kept as a leak. The one number here that should be zero.</div>
+          </div>
+        </div>
+        <div class="panel-f">Sample account, the same rows the demo console shows. Refused is calls; units refused is what they asked for, not a dollar figure.</div>
       </div>`
 }
 
@@ -131,13 +237,14 @@ export async function homeRoute(app: FastifyInstance) {
       // meta keywords has been ignored by every major engine since 2009. It was
       // 300 bytes on the most-fetched page of the site.
       extraHead: pixelSnippet(),
-      scriptHashes: [PLAYGROUND_HASH, COPY_HASH, ...pixelHashes()],
+      scriptHashes: [PLAYGROUND_HASH, COPY_HASH, TABS_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}${COPY_CSS}
+      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}${COPY_CSS}${TABS_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
-     * theme: studied-DNA (source: url, structure only; paper, type and accent are theme.ts)
+     * theme: design.md (paper, type and accent are theme.ts) · design-system: design.md · designed-as-app
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
-     * pre-emit critique: P4 H4 E4 S5 R5 V4 */
+     * rows: five, alternating, the fifth wide; one grid break, the refusal band
+     * pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
     :root { --shell: 1080px;
             /* Page-local: the refusal band's ground and the code-comment ink.
@@ -148,27 +255,23 @@ export async function homeRoute(app: FastifyInstance) {
 
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
-    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
 
     /* Hero: a diptych. Type on the left, the whole integration on the right.
-       The right half used to be empty at desktop; the code sample was too wide
-       to sit there, so it got shorter, not the column wider. */
-    .hero { padding-block: 64px 88px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+       The headline is one line of meaning at three lines of type; the subhead
+       is three sentences, down from six. On a 390px phone the primary action
+       now lands above the fold, which is where a paid click is spent. */
+    .hero { padding-block: var(--s8) var(--s9); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
             gap: var(--gap); align-items: start; }
-    h1, h2 { overflow-wrap: anywhere; min-width: 0; }
-    h1 { color: var(--white); max-width: 14ch; }
-    .sub { font-size: var(--fs-lede); color: var(--muted); margin: 24px 0 32px; max-width: 46ch; }
+    h1, h2, h3 { overflow-wrap: anywhere; min-width: 0; }
+    h1 { color: var(--white); max-width: 16ch; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 46ch; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     /* The hero pair runs one size up from the site's buttons. The ghost gives
        back the pixel its border adds so the two sit at one height. */
-    .btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 10px; }
+    .btn-lg { padding: 14px 26px; font-size: var(--fs-body); border-radius: 10px; }
     .btn-ghost.btn-lg { padding: 13px 25px; }
     .chip-link:active { transform: translateY(1px); }
-    /* 1080 shell minus 48px of gutter minus the 56px gap, halved, is 488px per
-       column. This line is 66 characters of mono at 12.5px, about 495px at a
-       measured 0.6em advance: it overflowed by seven pixels, orphaned one word,
-       and the break moved as the webfont loaded. Four spans and a flex wrap put
-       the break where the content is instead. */
 
     /* An identifier inside prose. The mono face is the third register in the
        system and it is what makes task_ref read as a thing in the code rather
@@ -191,36 +294,38 @@ export async function homeRoute(app: FastifyInstance) {
        page, the links carry the claim, and a reader who wants them finds them. */
     .lead-p.src { font-size: var(--fs-small); color: var(--dim); line-height: 1.7; max-width: 78ch; }
     .lead-p.src a { color: var(--muted); }
-    .trust { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--dim);
+    .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
     .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
     .trust b { color: var(--green); font-weight: 500; }
+    .hero-install { margin-top: var(--s5); }
 
-    .code-head span { white-space: nowrap; }
-    /* The sample used to end on ">>> run 42 of the retry loop:" and nothing
+    /* The code frame. Its label bar now carries the language tabs on the left
+       and the caption on the right; the bar keeps the 44px floor every control
+       on the site clears, and the selected tab is a bar on the hairline, the
+       same device the nav uses for the current page.
+       The sample used to end on ">>> run 42 of the retry loop:" and nothing
        after it, a dangling colon in the most looked-at element on the page.
-       This is the answer, and it sits OUTSIDE the code element on purpose: the
-       snippet harness executes every one of those against the SDKs, and an
-       interpolation inside one marks the whole block dynamic and silently drops
-       it from CI.
-       Never write that tag's name in a comment in this file. The extractor
-       scans for it and will run from the comment to the real closing tag,
-       swallowing the sample into a phantom block. The suite still passes, one
-       number lower. It happened once while writing this very comment. */
+       The answer sits OUTSIDE the code element on purpose: the snippet harness
+       executes every one of those against the SDKs, and an interpolation inside
+       one marks the whole block dynamic and silently drops it from CI. Never
+       write that tag's name in a comment in this file: the extractor scans for
+       it and would run from the comment to the real closing tag. */
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-frame);
+                  border-top-color: var(--border2); overflow: hidden; min-width: 0; box-shadow: var(--edge), var(--lift); }
+    .code-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
+                 padding: 0 var(--s4); min-height: 44px; border-bottom: 1px solid var(--border); background: var(--surface2);
+                 box-shadow: var(--edge);
+                 font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 1.1px; color: var(--dim); }
+    .code-head > span { white-space: nowrap; }
+    .code-body { padding: 22px 24px; overflow-x: auto; }
+    .code-body pre { font-family: var(--mono); font-size: var(--fs-small); color: var(--code-ink); line-height: 1.75; }
+    .cmt { color: var(--cmt); }
+    .out-dim { color: var(--dim); }
     .code-out { border-top: 1px solid var(--border); padding: 14px 20px;
                 font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65;
                 color: var(--red); background: var(--fail-bg); }
     .code-out b { font-weight: 700; }
-    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-                  overflow: hidden; min-width: 0; }
-    .code-head { display: flex; align-items: center; justify-content: space-between; gap: 16px;
-                 padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--surface2);
-                 font-family: var(--mono); font-size: 11.5px; letter-spacing: 1.1px; color: var(--dim); }
-    .code-head b { color: var(--muted); font-weight: 500; }
-    .code-body { padding: 22px 24px; overflow-x: auto; }
-    .code-body pre { font-family: var(--mono); font-size: 13.5px; color: var(--code-ink); line-height: 1.75; }
-    .cmt { color: var(--cmt); }
-    .out-dim { color: var(--dim); }
 
     /* The refusal band. Every other section on this page is a 1080px column of
        left-aligned type; this one is full bleed with its own ground, because it
@@ -229,11 +334,6 @@ export async function homeRoute(app: FastifyInstance) {
     .refusal { padding-block: 0;
                background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
                border-block: 1px solid var(--border2); box-shadow: var(--edge); }
-    /* The note used to sit under the message at max-width 56ch with a
-       border-top that stopped at 56ch, leaving about 570px of empty ground and
-       a rule ending in the middle of nowhere. That truncated rule is what made
-       the band read as an accident. A gloss beside a statement is a real
-       typographic form; an orphan is not. */
     .refusal .wrap { padding-block: 60px 56px; display: grid;
                      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
                      gap: var(--gap); align-items: start; }
@@ -250,45 +350,47 @@ export async function homeRoute(app: FastifyInstance) {
                     padding-top: 22px; border-top: 1px solid var(--border); }
     .refusal-note b { color: var(--muted); font-weight: 600; }
 
-    /* Diptychs. Text on one side, the product on the other, direction alternating.
-       A gutter, no rule: the two halves are one argument, not two cards. Padding
-       is uneven on purpose, generous above the first and tight between the rest,
-       so the three read as a sequence rather than three stamped sections. */
+    /* The hero's second action jumps here. The nav is sticky, so without this
+       the section head would land under it. */
+    #playground { scroll-margin-top: calc(var(--banner-height) + var(--s4)); }
+
+    /* Sections. Uneven on purpose: the argument opens generously, the
+       guardrails section opens wider still because it changes subject, and
+       pricing sits closer because it is the answer to what came before. */
     section { padding-block: 72px 0; }
-    /* align-items: center is WHY the three of these disagreed: it centred text
-       blocks of three, four and three lines against panels of three different
-       heights, so each landed at a different offset. One rule, visibly the same
-       rule three times: text top aligns with panel top. The nudge is optical,
-       putting the h2's cap-height on the panel's label bar. */
-    /* The row is CLOSED. All three fill about half their panel's height and left
-       134px, 123px and 80px of empty ground under the short column, with no
-       bottom edge, so each read as an unfinished column rather than a finished
-       row. The void is not the defect: Stripe's pricing ships a row filling 39%
-       with 115px under it and nobody notices, because a hairline closes it. Of
-       fourteen reference captures, none leaves an open-bottomed unequal row on
-       flat ground. This is the same device \`.tiers th, .tiers td\` already uses
-       to close the plan rows ninety lines below, on this page.
-       align-items: start and the recorded 0, 0, 0 offsets are untouched. */
+    .guard { padding-block: 96px 0; }
+    .not-for { padding-block: 64px 0; }
+
+    /* Diptychs. Text on one side, the product on the other, direction alternating.
+       A gutter, no rule: the two halves are one argument, not two cards. Every
+       row is closed by a hairline (.row-close), because an open-bottomed unequal
+       row reads as an unfinished column; text top aligns with panel top, with a
+       4px optical nudge putting the h3's cap height on the panel's label bar. */
     .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap);
            align-items: start; padding-block: 40px 40px; }
     .dip-text { padding-top: 4px; }
     .dip + .dip { padding-block: 48px 40px; }
-    .dip:last-of-type { border-bottom: 0; }
-    /* order: 2 reorders the DOM item but not the track, so on the flipped row the
-       panel landed in the 5fr column and rendered 161px narrower than its two
-       siblings. design.md's Alignment section asks siblings to obey one rule
-       VISIBLY; the rule held on the vertical axis and broke on the horizontal
-       one, so the set read as generated. Mirror the tracks with the order. */
+    /* order: 2 reorders the DOM item but not the track, so the flipped row
+       mirrors its tracks too, or its panel lands 161px narrower than its siblings.
+       Two classes outrank one: the collapse rule under --lg names .dip.flip as
+       well, or this row keeps its two tracks on a phone. It did, in production,
+       and the refusals panel rendered 150px wide beside its own paragraph. */
     .dip.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
     .dip.flip .dip-text { order: 2; }
-    /* A sub-claim is not a section. These three measured the identical 22px of
-       ink as the section head that governs all three, so the page had no fourth
-       rung and the hierarchy flattened everywhere below the hero. */
+    /* The wide row. The fifth row is the console, which is a workbench and
+       wants the shell's full width: its head sits in the diptych's own columns
+       (title left, argument right) and the panel spans both beneath. One row
+       of a different shape closes the sequence instead of stamping a sixth. */
+    .dip.wide { grid-template-columns: minmax(0, 1fr); row-gap: var(--s6); }
+    .dip.wide .dip-text { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+                          gap: var(--gap); align-items: start; padding-top: 0; }
+    .dip.wide .dip-text h3 { margin-bottom: 0; }
+    .dip.wide .dip-text p { margin-top: 4px; max-width: 58ch; }
     .dip h3 { font-size: var(--fs-h3); color: var(--white); margin-bottom: 16px; max-width: 16ch; }
     .dip p { color: var(--muted); line-height: 1.7; max-width: 46ch; }
     .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
-                 padding: 0 18px; border: 1px solid var(--border-strong); border-radius: 8px;
-                 color: var(--text); text-decoration: none; font-weight: 600; font-size: 14.5px;
+                 padding: 0 18px; border: 1px solid var(--border-strong); border-radius: var(--r-control);
+                 color: var(--text); text-decoration: none; font-weight: 600; font-size: var(--fs-small);
                  white-space: nowrap; transition: border-color .15s; }
     .chip-link:hover { border-color: var(--text); }
     .lead-h2 { color: var(--white); margin-bottom: 8px; max-width: 22ch; }
@@ -296,102 +398,146 @@ export async function homeRoute(app: FastifyInstance) {
 
     /* Panel contents. The frame (.panel) comes from ui/panels.ts; what goes
        inside is this page's, in the console's own vocabulary. */
-    .task { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
+    .task, .key { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
     .task:last-of-type { border-bottom: 0; }
-    .task-top, .ref-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-    .ref { font-family: var(--mono); font-size: 14px; color: var(--text); }
-    .agent { font-family: var(--mono); font-size: 12px; color: var(--dim); }
-    .task-nums { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 8px;
-                 font-variant-numeric: tabular-nums; }
+    .task-top, .ref-top, .key-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .key-top { margin-bottom: 6px; }
+    .ref { font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
+    .agent { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+    .task-nums, .key-meta { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted);
+                            font-variant-numeric: tabular-nums; }
+    .task-nums { margin-top: 8px; }
     .task-nums b { color: var(--text); font-weight: 500; }
     .dimtxt { color: var(--dim); }
-    .track { height: 8px; background: var(--surface3); border-radius: 999px; overflow: hidden; display: flex; }
+    .track { height: 8px; background: var(--surface3); border-radius: var(--r-pill); overflow: hidden; display: flex; }
     .track i { display: block; height: 100%; }
     .track i.used { background: var(--flow); }
     .track i.used.near { background: var(--amber); }
     .track i.used.held { background: var(--green); }
     .track i.used.fail { background: var(--red); }
     .track i.res { background: var(--res); }
-    .chip { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-            padding: 3px 9px; border-radius: 4px; border: 1px solid; margin-left: auto; }
+    .chip { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em; text-transform: uppercase;
+            padding: 3px 9px; border-radius: var(--r-chip); border: 1px solid; margin-left: auto; }
     .chip.held { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
     .chip.fail { color: var(--fail-ink); border-color: var(--fail-line); background: var(--fail-bg); }
     .chip.near { color: var(--amber); border-color: var(--near-line); background: var(--near-bg); }
     .chip.flow { color: var(--muted); border-color: var(--border2); background: var(--surface3); }
-    .ask { font-family: var(--mono); font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .ask { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); font-variant-numeric: tabular-nums; }
     .ref-row { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
     .ref-row:last-of-type { border-bottom: 0; }
     .ref-row .chip { margin-left: 0; }
-    .ref-msg { font-family: var(--mono); font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .ref-msg { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+
+    /* The key endpoints, under the key rows: a ledger, not a table. */
+    .cmds { padding: 6px 18px 10px; }
+    .cmd { display: grid; grid-template-columns: minmax(0, 11em) minmax(0, 1fr); gap: var(--s3);
+           padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-small); }
+    .cmd:last-child { border-bottom: 0; }
+    .cmd b { font-family: var(--mono); font-weight: 500; color: var(--text); white-space: nowrap; }
+    .cmd span { color: var(--muted); line-height: 1.55; }
+
+    /* The console panel. Two columns inside the frame, the split the console
+       itself draws between activity and customers. Tiles are the console's
+       tiles: a tracked label, the figure, one line of footnote. */
+    .con-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+    .con-l { padding: 18px 20px 20px; }
+    .con-r { padding: 18px 20px 20px; border-left: 1px solid var(--border); background: var(--bg-deep); }
+    .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); margin-bottom: var(--s5); }
+    .tile { min-width: 0; }
+    .tile-l { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em; text-transform: uppercase;
+              color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tile-v { font-family: var(--display); font-size: var(--fs-figure); font-weight: 700; letter-spacing: -0.02em;
+              line-height: 1.1; color: var(--text); margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .tile-v.held { color: var(--green); }
+    .tile-f { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-top: 6px; line-height: 1.5; }
+    .spark { display: flex; align-items: flex-end; gap: 3px; height: 64px; margin-top: 10px;
+             border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+    .spark i { flex: 1 1 0; min-width: 0; display: block; background: var(--green); border-radius: 1px 1px 0 0; }
+    .spark i.zero { height: 2px; background: var(--surface3); }
+    .cust { display: grid; grid-template-columns: minmax(0, 1fr) auto 72px 3.2em; gap: var(--s3); align-items: center;
+            padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+    .cust:first-of-type { margin-top: 6px; }
+    .cust-n { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); font-variant-numeric: tabular-nums;
+              white-space: nowrap; }
+    .sbar { display: block; height: 8px; background: var(--surface3); border-radius: var(--r-pill); overflow: hidden; }
+    .sbar i { display: block; height: 100%; background: var(--flow); border-radius: var(--r-pill); }
+    .sbar i.held { background: var(--green); }
+    .cust-s { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); text-align: right;
+              font-variant-numeric: tabular-nums; }
+    .con-note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--fail-ink); line-height: 1.55;
+                margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
 
     /* Pricing: a spec sheet, not four cards. The recommended tier carries weight
        through type, and the numbers line up because they are a table. */
     .tiers { width: 100%; border-collapse: collapse; margin-top: 28px; font-variant-numeric: tabular-nums; }
     .tiers th { font-weight: inherit; text-align: left; }
-    .tiers th, .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 15.5px; }
-    /* \`> *\`, not \`td\`: the first cell of each row is a th, so a td-only selector
-       left the opening rule short of the FREE label. */
+    .tiers th, .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-body); }
     .tiers tr:first-child > * { border-top: 1px solid var(--border); }
-    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px;
+    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: var(--fs-micro);
                    color: var(--dim); width: 18%; }
-    .tiers .amount { text-align: right; font-family: var(--display); font-size: 22px; font-weight: 700;
+    .tiers .amount { text-align: right; font-family: var(--display); font-size: var(--fs-h3); font-weight: 700;
                      color: var(--text); letter-spacing: -0.02em; }
     .tiers tr.rec .tier { color: var(--green); }
     .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
-    .hero-install { margin-top: var(--s5); }
     .price-links { margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-    .not-for ul { list-style: none; max-width: 60ch; }
-    .not-for li { color: var(--muted); font-size: var(--fs-small); margin-bottom: 12px; padding-left: 22px; position: relative; }
-    /* Was a typed lowercase "x" in mono, which at 13.5px is ambiguous with a
-       glyph that failed to load. A short rule reads as negation, needs no icon
-       set, and speaks the mark's own vocabulary: a line that stops something. */
+    /* What it does not do: two columns of short rules. The list is the honest
+       substitute for the proof this page cannot show, so it stays; two columns
+       keep it to one screen instead of a scroll. */
+    .not-for ul { list-style: none; columns: 2; column-gap: var(--gap); margin-top: var(--s5); }
+    .not-for li { color: var(--muted); font-size: var(--fs-small); line-height: 1.6; margin-bottom: 14px;
+                  padding-left: 22px; position: relative; break-inside: avoid; }
+    .not-for li b { color: var(--text); font-weight: 600; }
+    /* A short rule reads as negation, needs no icon set, and speaks the mark's
+       own vocabulary: a line that stops something. */
     .not-for li::before { content: ""; position: absolute; left: 0; top: 0.62em;
                           width: 11px; height: 1.5px; background: var(--red); }
 
-    .final { padding-block: 88px 24px; }
+    .final { padding-block: var(--s9) var(--s5); }
     .final h2 { color: var(--white); margin-bottom: 10px; }
     .final p { color: var(--muted); margin-bottom: 26px; max-width: 54ch; }
 
     @media (max-width: ${BP.lg}px) {
-      .hero, .dip, .refusal .wrap { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .hero, .dip, .dip.flip, .refusal .wrap, .dip.wide .dip-text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .dip.wide .dip-text { gap: 0; }
       .refusal .wrap { gap: 26px; }
       .refusal-note { border-top: 1px solid var(--border); padding-top: 22px; }
       .dip.flip .dip-text { order: 0; }
       .dip-text { padding-top: 0; }
-      .hero { padding-block: 48px 64px; }
+      .hero { padding-block: var(--s7) var(--s8); }
       .sub { max-width: 54ch; }
       section { padding-block: 56px 0; }
+      .guard { padding-block: 72px 0; }
+      .con-grid { grid-template-columns: minmax(0, 1fr); }
+      .con-r { border-left: 0; border-top: 1px solid var(--border); }
+    }
+    @media (max-width: ${BP.md}px) {
+      .not-for ul { columns: 1; }
     }
     @media (max-width: ${BP.sm}px) {
-      /* The subhead ran five lines and pushed the CTA to about 590px, below the
-         fold on a small phone. The rule above WIDENS it to 54ch, which is the
-         wrong direction once there is one column. Copy is untouched; this is
-         type size and block padding only. */
+      /* One column: the subhead takes the column's width at body size, and the
+         two hero buttons go full width and centred, the sanctioned exception
+         recorded in design.md. */
       .sub { max-width: none; font-size: var(--fs-body); margin: 18px 0 26px; }
-      .hero { padding-block: 32px 48px; }
-      /* Two buttons at their content widths stack ragged, 176px above 162px.
-         Full width and centred: a left-aligned label in a full-width button
-         reads as broken. Sanctioned exception, recorded in design.md. */
+      .hero { padding-block: var(--s6) var(--s7); }
       .hero-cta { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
       .hero-cta > a { text-align: center; }
       .cp { max-width: none; }
       .code-body { padding: 18px 16px; }
-      /* No pre-wrap. It preserved the deep source indent on some lines and broke
-         others flush to the gutter, so the panel captioned "the whole integration"
-         showed code that read as a paste that failed. \`.code-body\` already scrolls
-         (overflow-x: auto), which is what design.md specifies for a code frame. */
-      .code-body pre { font-size: 12px; }
-      /* The label bar is typographic, and at 390px both nowrap spans overflowed a
-         space-between flex, so \`overflow: hidden\` guillotined the second one mid
-         glyph. The meaning is carried by "python · the whole integration"; the
-         package name repeats the \`from agentbill import\` line right beneath it. */
-      .code-head span:last-child { display: none; }
-      .tiers .amount { font-size: 19px; }
-      .tiers td { font-size: 14.5px; }
-      /* 18% of a 342px table is 61.6px; BUILDER at 12.5px mono with .12em tracking
-         needs ~63px, and the neighbouring cell has no inline padding to absorb it,
-         so one row of four rendered as "BUILDER50,000". */
+      .code-body pre { font-size: var(--fs-micro); }
+      /* The caption in the label bar yields to the tabs at 390px; the tabs
+         carry the meaning and the caption repeats the section under it. */
+      .code-head > span { display: none; }
+      .tiles { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+      /* A tracked label that cannot fit a 150px tile wraps here rather than
+         losing its window to an ellipsis. */
+      .tile-l { white-space: normal; overflow: visible; text-overflow: clip; }
+      .cust { grid-template-columns: minmax(0, 1fr) auto 3.2em; }
+      .cust .sbar { display: none; }
+      .cmd { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      .tiers td { font-size: var(--fs-small); }
+      /* 18% of a 342px table is 61.6px; BUILDER at 12px mono with .12em tracking
+         needs more, and the neighbouring cell has no inline padding to absorb it. */
       .tiers .tier { width: auto; padding-right: var(--s4); letter-spacing: .06em; }
     }
 `,
@@ -402,23 +548,25 @@ ${siteNav('/')}
 
   <header class="hero wrap">
     <div>
-      <h1>Your job is not an account, and it does not last a month.</h1>
-      <p class="sub">Provider spend caps are real and they fire. What they are bound to is a project,
-      an organization over a calendar month, or a single session on one vendor's own agent harness.
-      This ceiling is bound to a <span class="mono-in">task_ref</span>: every call that passes the
-      same one checks the same number before it runs, in whatever process it runs in, and the check
-      and the reservation are one conditional update. You pass what each call is worth. We never
-      read your provider bill.</p>
+      <h1>A spend ceiling bound to the task, not the month.</h1>
+      <p class="sub">Provider caps are real. They fire at a project, an organization over a calendar month,
+      or one session on one vendor's own harness. AgentBill's ceiling is bound to a
+      <span class="mono-in">task_ref</span>: every call that shares it checks the same number before it runs,
+      in whatever process it runs in. You pass what each call is worth, in units you define, and a call the
+      ceiling cannot cover never goes out.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
-        <a class="btn-ghost btn-lg" href="/app?demo=1">See a live console</a>
+        <a class="btn-ghost btn-lg" href="#playground">Run it in your browser</a>
       </div>
       <!-- The step that needs no account. The references all put proof beside the
            primary action; this product has two external signups, so a logo wall is
            unavailable and inventing one would break the claims rules. The install
-           line is the honest equivalent: something the reader can act on now. -->
+           line is the honest equivalent: something the reader can act on now. It
+           follows the language tab in the code frame, so the pill and the sample
+           always name the same package. -->
       <div class="hero-install">
-        ${copyPill('install-cmd', 'pip install agentbill-sdk')}
+        <div data-lang="python">${copyPill('install-py', 'pip install agentbill-sdk')}</div>
+        <div data-lang="node" hidden>${copyPill('install-node', 'npm install agentbill')}</div>
         <p class="cp-note">or read the <a href="/docs">two-minute quickstart</a></p>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
@@ -434,9 +582,9 @@ ${siteNav('/')}
     </div>
 
     <div class="code-block">
-      <div class="code-head"><span>python <b>&middot;</b> the whole integration</span><span>agentbill-sdk</span></div>
+      <div class="code-head">${langTabs([['python', 'Python'], ['node', 'Node']], 'python', 'Language of the sample')}<span>the whole integration</span></div>
       <div class="code-body">
-        <pre>from agentbill import AgentBillClient
+        <pre id="code-python" role="tabpanel" aria-labelledby="tab-python" data-lang="python">from agentbill import AgentBillClient
 
 client = AgentBillClient(
     api_key="agb_your_key")
@@ -458,6 +606,27 @@ client.record(agent_id="researcher",
               units=12)
 
 <span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
+        <pre id="code-node" role="tabpanel" aria-labelledby="tab-node" data-lang="node" hidden>import { preflight, record }
+  from 'agentbill'
+
+<span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
+<span class="cmt">// 1 unit = 1 cent here. job-142 dies</span>
+<span class="cmt">// at 500 units, across every call</span>
+<span class="cmt">// that passes the same taskRef.</span>
+await preflight({ agentId: 'researcher',
+                  taskRef: 'job-142',
+                  taskCeiling: 500,
+                  estimatedUnits: 12 })
+
+<span class="cmt">// your provider call goes here</span>
+
+<span class="cmt">// settle, or the units stay held</span>
+<span class="cmt">// until the reservation expires.</span>
+await record({ agentId: 'researcher',
+               taskRef: 'job-142',
+               units: 12 })
+
+<span class="out-dim">// run 42 of the retry loop:</span></pre>
       </div>
       <div class="code-out"><b>${REFUSAL.name}:</b> ${REFUSAL.message}</div>
     </div>
@@ -477,13 +646,13 @@ client.record(agent_id="researcher",
 
 ${playgroundSection()}
 
-  <section class="wrap">
-    <h2 class="lead-h2">The cap is real. It is bound to an account and a month.</h2>
-    <p class="lead-p">Turn them on and keep them on. They fire, and they are documented. What they
-    are bound to is a project, an organization, or one session on one vendor's own harness, measured
-    over a calendar month. Two things follow from where that line is drawn. A run too small to move
-    a monthly number never crosses it. And a monthly number low enough to catch that run takes every
-    agent in the organization down with it when it fires, until the month turns.</p>
+  <section class="wrap why">
+    <h2 class="lead-h2">Your job is not an account, and it does not last a month.</h2>
+    <p class="lead-p">The cap is real. Turn it on and keep it on. It fires, and it is documented. What it
+    is bound to is a project, an organization, or one session on one vendor's own harness, measured over
+    a calendar month. Two things follow from where that line is drawn. A run too small to move a monthly
+    number never crosses it. And a monthly number low enough to catch that run takes every agent in the
+    organization down with it when it fires, until the month turns.</p>
     <p class="lead-p src">Their own documentation, read at source on 2026-09-06:
     <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">a
     hard limit returns <span class="mono-in">429 project_spend_limit_exceeded</span> and enforcement
@@ -530,6 +699,42 @@ ${playgroundSection()}
         <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
       </div>
       ${requestPanel()}
+    </div>
+  </section>
+
+  <section class="wrap guard">
+    <h2 class="lead-h2">Guardrails on the key. A receipt for every refusal.</h2>
+    <p class="lead-p">A ceiling stops a job from overspending. A leaked key is a different failure, and
+    it has its own controls, each of them one HTTP call away. And every refusal is written down with the
+    body the agent got back, so what the ceiling saved you from is a row you can open, not a log line
+    you have to go and find.</p>
+
+    <div class="dip flip row-close">
+      <div class="dip-text">
+        <h3>Keys you can kill in one call</h3>
+        <p>Revoke a key and it is refused on its next request: the check is one predicate in SQL, on
+        the database clock, so no skew between our app and our database can keep a dead key alive.
+        Rotate, and the old key keeps working for 24 hours, then revokes itself. Give a key a label
+        and an expiry in days. Every key is limited to 100 requests a minute, and a request from a
+        new IP address emails the account owner with the previous address and the new one. None of
+        this touches your provider keys. We never hold them.</p>
+        <a class="chip-link" href="/app?demo=1&amp;view=keys">See the keys view &rarr;</a>
+      </div>
+      ${keysPanel()}
+    </div>
+
+    <div class="dip wide row-close">
+      <div class="dip-text">
+        <h3>Every refusal is written down</h3>
+        <div>
+          <p>Each <span class="mono-in">approved: false</span> is persisted with the literal body the
+          agent received, per agent and per task. The console reads those rows: calls refused and units
+          refused over a window, the tasks burning down now, and every customer by share of spend. A
+          record that lands past a ceiling because preflight was skipped is kept as a leak, not hidden.</p>
+          <a class="chip-link" href="/app?demo=1">Open the sample console &rarr;</a>
+        </div>
+      </div>
+      ${consolePanel()}
     </div>
   </section>
 
@@ -581,7 +786,7 @@ ${playgroundSection()}
 
 </main>
 ${siteFooter()}
-${PLAYGROUND_JS}${COPY_JS}
+${PLAYGROUND_JS}${COPY_JS}${TABS_JS}
 </body>
 </html>
     `)

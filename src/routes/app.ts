@@ -7,6 +7,7 @@ import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
+import { KEY_COMMANDS } from '../ui/panels.js'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -1775,9 +1776,8 @@ function keysView(p: Page): string {
   return `${keysTable(p.d.keys, p.v.apiKey)}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
     <div class="frame cmds">
-      <div class="cmd"><b>POST /keys/generate</b><span>A new key, with an optional label and expiry in days.</span></div>
-      <div class="cmd"><b>POST /keys/rotate</b><span>A new key now; the old one keeps working for 24 hours, then revokes itself.</span></div>
-      <div class="cmd"><b>POST /keys/revoke</b><span>Kills the calling key immediately, or another by its prefix. A revoked key ends this session on its next request.</span></div>
+      ${KEY_COMMANDS.map(([ep, what]) =>
+        `<div class="cmd"><b>${ep}</b><span>${what}${ep.endsWith('/revoke') ? ' A revoked key ends this session on its next request.' : ''}</span></div>`).join('\n      ')}
     </div>
     <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : 'Oldest first. The key that opened this console is marked.'}</p>`
 }
