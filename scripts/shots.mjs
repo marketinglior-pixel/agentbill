@@ -34,9 +34,18 @@ const PAGES = [
   ['status', '/status'],
 ]
 
+// 320 is here because two real defects have now shipped below the 390 floor,
+// and this gate could not see either of them: the mobile CTA button on
+// 2026-09-06, and the playground ceiling value on 2026-09-07 (`eb6c003`), where
+// the ceiling row wanted more than 288px and the frame cut a digit off the
+// number. Both were found by a hand-run sweep that lived and died inside one
+// session. 320 is the narrowest width still in real use, so it is the floor
+// that matters; 390 stays because it is the common one and the two widths
+// break differently.
 const VIEWPORTS = [
   ['desktop', 1440, 1000, false],
   ['mobile', 390, 844, true],
+  ['narrow', 320, 568, true],
 ]
 
 /** Find a Chromium. Prefer an explicit path, then the Playwright cache, then a
@@ -96,12 +105,74 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         // /pricing on 2026-09-06 and only a human looking at the render caught
         // it, which is exactly the gap this script exists to close.
         leak: (document.body.innerText.match(/\$\{|\bsiteNav\(|\bsiteFooter\(/) || [])[0] || null,
+        // Text cut off inside its own box, which the overflowX check above
+        // cannot see: `overflow-x: hidden` on a panel stops the DOCUMENT from
+        // scrolling sideways, so the page-level test goes green while the panel
+        // silently eats its own content. That is not hypothetical. The homepage
+        // playground shipped "500 UNIT" and "0 CAL" at 320px behind exactly
+        // that rule, months after a fix that was supposed to have handled it.
+        //
+        // Two exclusions, or this reports the whole site. `text-overflow:
+        // ellipsis` is a deliberate truncation with a visible affordance, and
+        // an ancestor that actually scrolls means the content is reachable.
+        clipped: (() => {
+          // Text actually cut off, which the overflowX check above cannot see:
+          // `overflow-x: hidden` on a panel stops the DOCUMENT from scrolling
+          // sideways, so the page-level test goes green while the panel
+          // silently eats its own content. Not hypothetical. The homepage
+          // playground shipped "500 UNIT" and "0 CAL" at 320px behind exactly
+          // that rule, months after a fix that was supposed to have handled it.
+          //
+          // The test is "is this content clipped by something", NOT
+          // "scrollWidth > clientWidth". Those differ, and the difference is
+          // most of the noise: an element whose overflow is `visible` spills
+          // past its own box and stays perfectly readable. Only an ancestor
+          // that actually clips turns a spill into a cut. Written this way
+          // because the first version reported eleven of those spills as
+          // failures, and a gate that cries wolf gets switched off.
+          const hits = []
+          const clips = (cs) => cs.overflowX === 'hidden' || cs.overflowX === 'clip'
+          for (const el of document.querySelectorAll('body *')) {
+            const cs = getComputedStyle(el)
+            if (cs.display === 'none' || cs.visibility === 'hidden') continue
+            const text = (el.innerText || '').trim().replace(/\s+/g, ' ')
+            if (!text) continue
+            const r = el.getBoundingClientRect()
+            if (r.width === 0) continue
+            // an ellipsis is a deliberate truncation with a visible affordance
+            if (cs.textOverflow === 'ellipsis') continue
+            let cut = 0, by = null
+            // the element can clip its own children
+            if (clips(cs) && el.scrollWidth > el.clientWidth + 1) { cut = el.scrollWidth - el.clientWidth; by = 'itself' }
+            // or an ancestor can cut it off
+            let p = el.parentElement, depth = 0
+            while (p && depth < 8) {
+              const pc = getComputedStyle(p)
+              // A scrollable ancestor is reached FIRST or not at all. Without
+              // this the walk sails past a scrolling <pre> and blames the
+              // `overflow-x: hidden` on body, reporting every long code comment
+              // on /docs as cut when the block scrolls perfectly well.
+              if (/(auto|scroll)/.test(pc.overflowX)) { cut = 0; by = null; break }
+              if (clips(pc)) {
+                const pr = p.getBoundingClientRect()
+                const over = Math.round(r.right - (pr.right - parseFloat(pc.borderRightWidth || 0)))
+                if (over > 1 && over > cut) { cut = over; by = p.tagName.toLowerCase() + '.' + (String(p.className).trim().split(/\s+/)[0] || '?') }
+                break
+              }
+              p = p.parentElement; depth++
+            }
+            if (!cut) continue
+            hits.push(`${el.tagName.toLowerCase()}.${String(el.className).trim().split(/\s+/)[0] || '?'} cut ${cut}px by ${by}: "${text.slice(0, 38)}"`)
+          }
+          return hits
+        })(),
       }))
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)
       if (m.overflowX) failures.push(`${vp} ${name}: scrolls sideways`)
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
+      for (const c of m.clipped.slice(0, 4)) failures.push(`${vp} ${name}: ${c}`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
-      rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} ${status} ${String(m.h).padStart(6)}px${m.overflowX ? '  OVERFLOW-X' : ''}${errs.length ? `  ERRS:${errs.length}` : ''}`)
+      rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} ${status} ${String(m.h).padStart(6)}px${m.overflowX ? '  OVERFLOW-X' : ''}${errs.length ? `  ERRS:${errs.length}` : ''}${m.clipped.length ? `  CLIPPED:${m.clipped.length}` : ''}`)
     } catch (e) {
       failures.push(`${vp} ${name}: ${String(e).slice(0, 160)}`)
       rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} FAILED`)

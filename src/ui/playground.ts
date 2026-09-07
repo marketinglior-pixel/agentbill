@@ -156,7 +156,11 @@ export const PLAYGROUND_CSS = `
   .pg-btn.pri:hover:not(:disabled) { filter: brightness(1.09); }
   .pg-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  .pg-split { display: grid; grid-template-columns: 1fr 1fr; }
+  /* minmax(0, 1fr), not 1fr. A bare 1fr track has min-width:auto, so it refuses
+     to shrink below its content and the TRACK grows wider than the grid. That is
+     why .pg-left measured wider than .pg itself at 320 and got cut by the
+     frame's overflow:hidden, which reads as a text bug and is a grid bug. */
+  .pg-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pg-left { border-right: 1px solid var(--border); padding: 20px; }
   .pg-right { padding: 20px; background: var(--bg-deep); display: flex; flex-direction: column; }
   .pg-h { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.18em;
@@ -184,12 +188,12 @@ export const PLAYGROUND_CSS = `
      height, the height never changes when the run starts, and the section says
      something with JavaScript off. */
   .pg-log { display: flex; flex-direction: column; gap: 1px; }
-  .pg-cols { display: grid; grid-template-columns: 24px 1fr auto 68px; gap: 12px;
+  .pg-cols { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 68px; gap: 12px;
              font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em;
              text-transform: uppercase; color: var(--dim); padding-bottom: 6px;
              border-bottom: 1px solid var(--border); }
   .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
-  .pg-row { display: grid; grid-template-columns: 24px 1fr auto 68px; gap: 12px; align-items: baseline;
+  .pg-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 68px; gap: 12px; align-items: baseline;
             font-family: var(--mono); font-size: 14.5px; padding: 7px 0;
             border-bottom: 1px solid var(--border-soft); }
   /* Only a row that CHANGES state animates. At rest every row is already there,
@@ -239,16 +243,35 @@ export const PLAYGROUND_CSS = `
              text-align: right; line-height: 1.5; }
 
   @media (max-width: 820px) {
-    .pg-split { grid-template-columns: 1fr; }
+    .pg-split { grid-template-columns: minmax(0, 1fr); }
     .pg-left { border-right: none; border-bottom: 1px solid var(--border); }
     .pg-actions { margin-left: 0; }
     .pg-disc { margin-left: 0; text-align: left; }
   }
-  /* At 320px the ceiling row (label, 150px slider, value, unit) wants more
-     than the 288px between the bar's gutters, and the frame clipped the value
-     mid-digit. The slider gives up the width; the value is the point. */
-  @media (max-width: 400px) {
-    .pg-sl { width: 100px; }
+  /* At 320px the ceiling row (label, slider, value, unit) wants more than the
+     space between the bar's gutters, and .pg is overflow:hidden, so what does
+     not fit is not merely pushed out, it is CUT. The slider gives up the width;
+     the value is the point.
+     This block used to set a flat width:100px here, and 100px was still too
+     wide: production shipped "500 UNIT" and "0 CAL" at 320 for weeks after that
+     supposed fix, because the sweep that found the first one was hand-run and
+     nothing re-ran it. A second hard-coded number would have the same shelf
+     life, so the slider is elastic now and gives up whatever is needed at any
+     width. min-width:0 on the field is what lets a flex item shrink below its
+     content size at all; without it the rest of this does nothing.
+     The two header rows wrap instead of cutting, for the same reason: losing a
+     line break is recoverable, losing the letter S is not. */
+  @media (max-width: 480px) {
+    .pg-field { min-width: 0; flex: 1 1 auto; }
+    .pg-sl { width: auto; flex: 1 1 48px; min-width: 48px; }
+    .pg-left, .pg-right { padding: 16px; }
+    .pg-h, .pg-nums { flex-wrap: wrap; gap: 2px 10px; }
+    .pg-h { letter-spacing: 0.12em; }
+    /* The log row is 24 + 68 of fixed columns plus three 12px gaps before the
+       two elastic ones get anything. Tightening the gutters is what puts the
+       running total back inside the frame; the alternative was dropping a
+       column, and every column here is part of the demonstration. */
+    .pg-cols, .pg-row { gap: 8px; grid-template-columns: 16px minmax(0, 1fr) auto 56px; }
   }`
 
 /** The section markup. Drop it straight after the hero. */
