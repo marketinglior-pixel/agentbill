@@ -1,6 +1,6 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `23d356b`, Fly v103.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `5287cc6`, Fly v104.**
 >
 > After the first deploy (v100) a by-eye verification of production found one high defect the
 > local captures had missed: on a phone the view strip scrolled sideways, so on three of the
