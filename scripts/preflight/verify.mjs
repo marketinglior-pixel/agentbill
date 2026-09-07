@@ -364,6 +364,31 @@ ok('a control character in the Polar customer id is 200, not 500',
    hookCtrl.status === 200 && !/invalid byte sequence|22021/i.test(hookCtrl.body), `${hookCtrl.status} ${hookCtrl.body.slice(0, 120)}`)
 
 // ---------------------------------------------------------------------------
+// The rejected-webhook alert keeps module state (a per-reason tally and a
+// cooldown) and runs on the request path. State on a request path is a way to
+// make the tenth call behave unlike the first, and this route answers a sender
+// that retries, so the tenth call is the normal case rather than the edge.
+// Nothing here asserts that an email went out; it asserts that trying to send
+// one cannot change what the route answers.
+const rejectBurst = []
+for (let i = 0; i < 6; i++) rejectBurst.push(await hook({ type: 'subscription.active', data: {} }, { sign: false }))
+ok('six rejections in a row all still answer 401', rejectBurst.every((r) => r.status === 401),
+   rejectBurst.map((r) => r.status).join(','))
+ok('and none of them leaked an alert or a stack into the body',
+   rejectBurst.every((r) => /invalid_signature/.test(r.body) && !/webhook-alert|resend|Error:/i.test(r.body)),
+   rejectBurst[0].body.slice(0, 120))
+
+// The 200 branch is the one that costs money: the signature verified, so a real
+// payment arrived, and answering 200 is what stops Polar retrying it. It has to
+// keep answering 200 (a 500 would be retried forever) while the account stays
+// on the plan it had.
+const beforePlan = (await sql`SELECT plan FROM accounts WHERE id = ${ACCT}`)[0]?.plan
+const unusable = await hook({ type: 'subscription.active', data: { customer_id: 'alert-probe', metadata: { agentbill_account_id: 'still-not-a-uuid' } } })
+ok('a signed webhook with an unusable account id is 200, not a retry loop', unusable.status === 200, `${unusable.status} ${unusable.body.slice(0, 100)}`)
+const afterPlan = (await sql`SELECT plan FROM accounts WHERE id = ${ACCT}`)[0]?.plan
+ok('and it changed no plan', beforePlan === afterPlan, `${beforePlan} -> ${afterPlan}`)
+
+// ---------------------------------------------------------------------------
 // Fastify 5. Each of these is a behaviour the major changed, and each was
 // measured on a local v4 and a local v5 before it was written down.
 

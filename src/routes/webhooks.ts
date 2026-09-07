@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { verifyWebhookSignature, planFromProductId } from '../integrations/polar.js'
 import { isUuid, isId } from '../lib/ids.js'
+import { alertRejectedWebhook } from '../lib/webhook-alert.js'
 
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
@@ -47,10 +48,21 @@ export async function webhooksRoute(app: FastifyInstance) {
     // it closes the case where a rotation or a new environment leaves it unset.
     if (!POLAR_WEBHOOK_SECRET) {
       request.log.error('POLAR_WEBHOOK_SECRET is not set, refusing a webhook this server cannot verify')
+      alertRejectedWebhook('not_configured', { note: 'POLAR_WEBHOOK_SECRET is unset on this instance' })
       return reply.code(503).send({ error: 'webhook_not_configured' })
     }
     const valid = await verifyWebhookSignature(rawBody ?? '', signature, POLAR_WEBHOOK_SECRET)
     if (!valid) {
+      // This branch logged nothing at all, which is the whole reason the empty
+      // string bug lived for months: it answered 401 and told no one. The
+      // signature is truncated because a full one is a valid MAC over a body
+      // somebody chose, and there is no reason to copy it into a mailbox.
+      request.log.warn({ hasSignature: Boolean(signature), bodyBytes: (rawBody ?? '').length },
+        'Polar webhook rejected: signature did not verify')
+      alertRejectedWebhook('invalid_signature', {
+        signaturePrefix: signature ? signature.slice(0, 12) + '...' : '(none sent)',
+        note: `body was ${(rawBody ?? '').length} bytes`,
+      })
       return reply.code(401).send({ error: 'invalid_signature' })
     }
 
@@ -73,9 +85,22 @@ export async function webhooksRoute(app: FastifyInstance) {
       // lands here. accounts.id is a uuid column: any other shape is 22P02, a
       // 500, and a webhook Polar then retries for hours. 200 with a warning
       // instead, because no retry will ever make this payload valid.
+      // Read before the guard, not inside it. isUuid is a `v is string`
+      // predicate, so on a value already typed string TypeScript narrows the
+      // FAILING branch to never and .length stops existing there.
+      const accountIdLen = accountId.length
       if (!isUuid(accountId)) {
         request.log.warn({ eventType, polarCustomerId, malformed: Boolean(accountId) },
           accountId ? 'Polar webhook carried a malformed agentbill_account_id' : 'Polar webhook missing agentbill_account_id')
+        // The loudest of the three, despite answering 200. A signature that
+        // verified means this is a REAL payment from Polar, and the 200 below
+        // is what stops the retries, so nothing will ever deliver it again.
+        // Somebody paid and their account is still on free.
+        alertRejectedWebhook('unusable_account_id', {
+          eventType,
+          accountIdShape: accountIdLen ? `present but not a uuid (${accountIdLen} chars)` : 'absent',
+          note: polarCustomerId ? `polar_customer_id ${polarCustomerId}` : 'no polar customer id either',
+        })
         return reply.send({ received: true })
       }
 
