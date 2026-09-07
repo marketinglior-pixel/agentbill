@@ -1,6 +1,14 @@
 # Redesign plan: from competent to premium
 
-> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `6649f40`, Fly v100.**
+> **CONSOLE REDESIGN 2026-09-07 (`/app`, `src/routes/app.ts`), merged and deployed: live = `f60f673`, Fly v101.**
+>
+> After the first deploy (v100) a by-eye verification of production found one high defect the
+> local captures had missed: on a phone the view strip scrolled sideways, so on three of the
+> seven views the current item was off screen with no highlight. Under 960px the views now
+> live in a native disclosure that names the current view, the pattern the site nav already
+> uses. The same pass moved the x labels under their bars, turned the customers and keys
+> tables into cards on a phone, and dropped the refused strip's peak label, which sat on the
+> units chart's zero tick. Captured and looked at on every view at 390px this time.
 >
 > Before the merge an adversarial review of the diff (four lenses, three refuters per
 > finding) confirmed six defects and raised eleven lower ones. The worst: array lengths
