@@ -49,7 +49,12 @@ export async function createCheckoutSession(tier: string, accountId: string): Pr
       body: JSON.stringify({
         products: [productId],
         metadata: { agentbill_account_id: accountId },
-        success_url: 'https://agentbill.dev/thanks',
+        // {CHECKOUT_ID} is Polar's own placeholder, substituted at redirect
+        // time (their docs, "Creating Checkout Sessions"). It is what lets
+        // /thanks name the plan that was bought instead of guessing, and it is
+        // read-only: the page verifies the id against Polar and against our own
+        // accounts row, so a forged or stale one confirms nothing.
+        success_url: 'https://agentbill.dev/thanks?checkout_id={CHECKOUT_ID}',
       }),
       signal: AbortSignal.timeout(6000),
     })
@@ -61,21 +66,60 @@ export async function createCheckoutSession(tier: string, accountId: string): Pr
   }
 }
 
-// Read the metadata off a checkout by id. One guarded GET on the request path,
-// bounded by a short timeout, run only when the webhook's own metadata is empty.
-export async function getCheckoutMetadata(checkoutId: string): Promise<Record<string, unknown>> {
-  if (!POLAR_API_KEY || !checkoutId) return {}
+// One guarded GET for a checkout by id, bounded by a short timeout. Two callers
+// read different parts of the same object: the webhook wants the metadata when
+// its own payload carried none, and /thanks wants the status and the product.
+// Every failure is null, never a throw: both callers sit on a path where a slow
+// or unreachable Polar must degrade the page, not break the request.
+async function fetchCheckout(checkoutId: string): Promise<Record<string, any> | null> {
+  if (!POLAR_API_KEY || !checkoutId) return null
   try {
     const r = await fetch(`https://api.polar.sh/v1/checkouts/${encodeURIComponent(checkoutId)}`, {
       headers: { Authorization: `Bearer ${POLAR_API_KEY}` },
       signal: AbortSignal.timeout(4000),
     })
-    if (!r.ok) return {}
-    const j = (await r.json()) as { metadata?: Record<string, unknown> }
-    return j.metadata ?? {}
+    if (!r.ok) return null
+    return (await r.json()) as Record<string, any>
   } catch {
-    return {}
+    return null
   }
+}
+
+// Read the metadata off a checkout by id. Run only when the webhook's own
+// metadata is empty.
+export async function getCheckoutMetadata(checkoutId: string): Promise<Record<string, unknown>> {
+  const j = await fetchCheckout(checkoutId)
+  return (j?.metadata as Record<string, unknown>) ?? {}
+}
+
+/**
+ * What /thanks needs to tell a buyer what they bought, read from Polar rather
+ * than from our own query string, which the buyer could edit.
+ *
+ * `status` is Polar's own enum (open, expired, confirmed, succeeded, failed);
+ * only the paid ones may be rendered as a purchase. `plan` is the tier the
+ * product maps to, by the same function the webhook uses, so the page and the
+ * upgrade cannot disagree about what was sold.
+ */
+export type CheckoutSummary = { status: string; accountId: string | null; plan: string }
+
+export async function getCheckoutSummary(checkoutId: string): Promise<CheckoutSummary | null> {
+  const j = await fetchCheckout(checkoutId)
+  if (!j) return null
+  // Same three shapes the webhook accepts for the product id, for the same
+  // reason: Polar spells it differently across payloads and SDK versions.
+  const productId: string = j.product_id ?? j.productId ?? j.product?.id ?? ''
+  const accountId = j.metadata?.agentbill_account_id
+  return {
+    status: typeof j.status === 'string' ? j.status : '',
+    accountId: typeof accountId === 'string' ? accountId : null,
+    plan: planFromProductId(productId),
+  }
+}
+
+/** The Polar checkout states in which money has actually moved. */
+export function checkoutIsPaid(status: string): boolean {
+  return status === 'succeeded' || status === 'confirmed'
 }
 
 // ---------------------------------------------------------------------------

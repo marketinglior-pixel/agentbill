@@ -284,6 +284,14 @@ type ShellOpts = {
    * a rail listing them is the page written twice.
    */
   rail?: boolean
+  /**
+   * Suppress the nav's "Get your API key" button and its sticky twin. Default
+   * true, because almost every page on this site is talking to someone who has
+   * not signed up. /thanks after a completed checkout is the exception: the
+   * reader has just paid, and selling them a free key is the wrong sentence to
+   * put at the top of a receipt.
+   */
+  navCta?: boolean
   /** The page body. Its <h2>s become the rail. */
   body: string
 }
@@ -326,7 +334,7 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
@@ -339,7 +347,7 @@ ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
                     css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
 <body>
-${siteNav(current)}
+${siteNav(current, { cta: navCta })}
 <div class="docs${wantRail ? '' : ' no-rail'}">
 ${crumb ? crumb.html : ''}
 ${rail}

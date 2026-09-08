@@ -79,8 +79,10 @@ export type PageMeta = {
    *
    * So this is true only for a page with no inbound links that should be out of
    * crawl entirely. /app is noindex and NOT disallowed, because it is where the
-   * homepage's own "See a live console" button points. /thanks is linked from
-   * the register success panel, so the same reasoning applies.
+   * homepage's own "See a live console" button points. /thanks is noindex and
+   * not disallowed either: no page links to it, but Polar redirects a buyer
+   * there after checkout, and a Disallowed URL a real person lands on is one
+   * whose noindex is never read.
    */
   disallow?: boolean
 }
@@ -127,7 +129,7 @@ export const PAGES: readonly PageMeta[] = [
   // in the other.
   // A landing page after writing in. Not indexable: it is the end of an action,
   // not a destination, and it says nothing a search result should promise.
-  { path: '/thanks', section: 'marketing', crumbs: [], crumb: 'Thanks', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'yearly' },
+  { path: '/thanks', section: 'marketing', crumbs: [], crumb: 'After checkout', og: 'default', index: false, updated: '2026-09-08', priority: 0, changefreq: 'yearly' },
   { path: '/app', section: 'marketing', crumbs: [], crumb: 'Console', og: 'default', index: false, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
   { path: '/admin', section: 'marketing', crumbs: [], crumb: 'Admin', og: 'default', index: false, disallow: true, updated: '2026-09-05', priority: 0, changefreq: 'weekly' },
 ]
