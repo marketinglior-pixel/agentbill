@@ -381,7 +381,8 @@ def run_research_agent(customer_id: str, topic: str) -> str:
         estimated_units=10,
         customer_id=customer_id
     )
-    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError</span>
+    <span class="comment"># above; nothing to check here</span>
 
     <span class="comment"># 2. Run the LangChain chain normally (LCEL syntax)</span>
     llm = ChatOpenAI(model="gpt-4o")
@@ -422,7 +423,8 @@ from agentbill import AgentBillClient
 client = AgentBillClient(api_key="agb_your_key")
 
 def run_multi_step_agent(customer_id: str, tasks: list) -> list:
-    client.preflight(agent_id="multi_step", estimated_units=len(tasks), customer_id=customer_id)
+    client.preflight(agent_id="multi_step", estimated_units=len(tasks),
+                     customer_id=customer_id)
 
     results = []
     for i, task in enumerate(tasks):
@@ -445,7 +447,9 @@ def run_multi_step_agent(customer_id: str, tasks: list) -> list:
 
       <h2>Error handling</h2>
       <div class="code"><pre>
-from agentbill import AgentBillClient, BudgetExhaustedError, CeilingExceededError, FreeTierExceededError
+from agentbill import (
+    AgentBillClient, BudgetExhaustedError, CeilingExceededError, FreeTierExceededError,
+)
 
 try:
     result = run_research_agent("user_123", "quantum computing")
@@ -471,7 +475,8 @@ except FreeTierExceededError as e:
       <p>Pass <span class="inline">customer_id</span> to enforce separate budgets per user. Each customer has their own usage counters and free tier allowance.</p>
       <div class="code"><pre>
 <span class="comment"># Different customers, isolated budgets</span>
-check_alice = client.preflight(agent_id="research", estimated_units=10, customer_id="alice")
+check_alice = client.preflight(agent_id="research", estimated_units=10,
+                               customer_id="alice")
 check_bob   = client.preflight(agent_id="research", estimated_units=10, customer_id="bob")
       </pre></div>
 
@@ -515,7 +520,8 @@ def run_agent(customer_id: str, task: str) -> str:
         estimated_units=10,
         customer_id=customer_id
     )
-    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError</span>
+    <span class="comment"># above; nothing to check here</span>
 
     response = openai_client.chat.completions.create(
         model="gpt-4o",
@@ -569,7 +575,8 @@ const openai = new OpenAI()
 
 async function runAgent(customerId: string, task: string): Promise&lt;string&gt; {
   <span class="comment">// A refused call throws before this line returns, so no OpenAI call is made.</span>
-  await preflight({ agentId: 'openai_assistant', estimatedUnits: 10, ceiling: 100, customerId })
+  await preflight({ agentId: 'openai_assistant', estimatedUnits: 10,
+                    ceiling: 100, customerId })
 
   const res = await openai.chat.completions.create({
     model: 'gpt-4o',

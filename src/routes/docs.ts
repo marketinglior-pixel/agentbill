@@ -94,7 +94,8 @@ except TaskCeilingExceededError as e:
   <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>
 
   <div class="code"><pre>
-client = AgentBillClient(api_key="agb_your_key", ceiling=20)  <span class="comment"># no single run may cost more than 20 units</span>
+<span class="comment"># No single call may cost more than 20 units.</span>
+client = AgentBillClient(api_key="agb_your_key", ceiling=20)
 
 client.preflight(
     agent_id="researcher",
@@ -188,7 +189,9 @@ WHERE account_id = :account
   <div class="code"><pre>
 {
   "approved": false,
-  "reason": "free_tier_exceeded",  <span class="comment"># plan_limit_exceeded on a paid plan; budget_exhausted and ceiling refusals carry no upgrade_url</span>
+<span class="comment"># plan_limit_exceeded on a paid plan. budget_exhausted and the</span>
+<span class="comment"># ceiling refusals carry no upgrade_url.</span>
+  "reason": "free_tier_exceeded",
   "plan": "free",
   "monthly_calls": 1000,
   "plan_limit": 1000,
@@ -240,13 +243,15 @@ curl -X PUT https://agentbill.dev/budget \\
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
-<span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to define; here 1 unit = 1 cent.</span>
+<span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to</span>
+<span class="comment">// define; here 1 unit = 1 cent.</span>
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
 <span class="comment">// Before each call: 1 unit = 1 cent here, so this job dies at $5 across</span>
 <span class="comment">// every call that shares job-142.</span>
 <span class="comment">// A refused call throws TaskCeilingExceededError, so the expensive work never starts.</span>
-await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+await preflight({ agentId: 'researcher', taskRef: 'job-142',
+                 taskCeiling: 500, estimatedUnits: 12 })
 
 <span class="comment">// ... your LLM or tool call ...</span>
 
