@@ -583,9 +583,9 @@ ${siteNav('/')}
 client = AgentBillClient(
     api_key="agb_your_key")
 
-<span class="cmt"># 1 unit = 1 cent here. job-142 dies</span>
-<span class="cmt"># at 500 units, across every call</span>
-<span class="cmt"># that passes the same task_ref.</span>
+<span class="cmt"># You decide what a unit is worth.</span>
+<span class="cmt"># job-142 gets 500 of them, across</span>
+<span class="cmt"># every call passing this task_ref.</span>
 client.preflight(agent_id="researcher",
                  task_ref="job-142",
                  task_ceiling=500,
@@ -604,9 +604,9 @@ client.record(agent_id="researcher",
   from 'agentbill'
 
 <span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
-<span class="cmt">// 1 unit = 1 cent here. job-142 dies</span>
-<span class="cmt">// at 500 units, across every call</span>
-<span class="cmt">// that passes the same taskRef.</span>
+<span class="cmt">// You decide what a unit is worth.</span>
+<span class="cmt">// job-142 gets 500 of them, across</span>
+<span class="cmt">// every call passing this taskRef.</span>
 await preflight({ agentId: 'researcher',
                   taskRef: 'job-142',
                   taskCeiling: 500,
@@ -767,7 +767,9 @@ ${playgroundSection()}
       your own workload instead of taking a number off this page.</li>
       <li><b>Replace observability.</b> It does not trace, sample or explain a run after it
       finished. If you want to know what last night cost, that is a different tool. Keep it.</li>
-      <li><b>Replace your payment processor.</b> It sits in front of it.</li>
+      <li><b>Replace your payment processor.</b> It does not move money, hold a card
+      or charge your end customers, and it is not positioned between you and one that does.
+      Polar bills you for AgentBill; nothing bills anyone on your behalf.</li>
       <li><b>Give your ops team a no-code dashboard.</b> There is a console. The product is an SDK
       and one endpoint.</li>
       <li><b>Show you a logo wall, a customer count or a testimonial.</b> There is nobody yet who

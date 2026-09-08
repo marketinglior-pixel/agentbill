@@ -341,7 +341,7 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   </pre></div>
 
   <h2>What it does NOT do</h2>
-  <p>AgentBill does not replace your payment processor, it sits in front of it. Multi-step workflows with state machines or reversal logic are out of scope.</p>
+  <p>AgentBill does not replace your payment processor: it does not move money, hold a card or charge your end customers, and it is not positioned between you and one that does. Multi-step workflows with state machines or reversal logic are out of scope.</p>
 
   <h2>Guides</h2>
   <p><a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a></p>

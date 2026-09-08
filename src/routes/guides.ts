@@ -60,7 +60,7 @@ export async function guidesRoute(app: FastifyInstance) {
       'Task budgets, a hard cost ceiling per agent job',
       'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. The ceiling is bound to the job rather than to a project, an organization or a calendar month, and every process that passes that task_ref draws on the same number.',
       `
-  <h1>Task budgets, the job dies at your number</h1>
+  <h1>Task budgets, one ceiling for the whole job</h1>
   <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no
   cross-provider budget, and tool spend isn't counted at all. A <b>task budget</b> is the number
   that actually matters, what <i>this job</i> is allowed to spend, across every call that passes
@@ -70,7 +70,7 @@ export async function guidesRoute(app: FastifyInstance) {
 
   <h2>What a unit is</h2>
   <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.
-  The common convention is <b>1 unit = 1 cent</b>, so "the job dies at $5" is
+  The common convention is <b>1 unit = 1 cent</b>, so a $5 ceiling for the job is
   <span class="inline">task_ceiling=500</span> and a call you expect to cost 12 cents is
   <span class="inline">estimated_units=12</span>. Tokens, requests or tool calls work just as well,
   as long as every call under the same task uses the same unit.</p>
@@ -86,7 +86,7 @@ export async function guidesRoute(app: FastifyInstance) {
   silently dropped.</p>
 
   <h2>Quick start, curl</h2>
-  <div class="code"><pre><span class="comment"># First call creates the task: this job dies at 50 units</span>
+  <div class="code"><pre><span class="comment"># First call creates the task with a ceiling of 50 units</span>
 curl -X POST https://agentbill.dev/preflight \\
   -H "Authorization: Bearer agb_your_key" \\
   -H "Content-Type: application/json" \\
@@ -146,7 +146,7 @@ client = AgentBillClient(api_key="agb_your_key")
 
 TASK     = "job-142"   <span class="comment"># one job. Every call below shares this budget.</span>
 CUSTOMER = "cust_abc"
-CEILING  = 500         <span class="comment"># 1 unit = 1 cent here, so this job dies at 5 dollars</span>
+CEILING  = 500         <span class="comment"># 1 unit = 1 cent here, so this job has 5 dollars</span>
 
 
 def guarded(step: str, units: int, work):
