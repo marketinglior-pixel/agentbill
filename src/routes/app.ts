@@ -1671,7 +1671,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         <div>
           <h3>Per customer</h3>
           <div class="param">customer_id · one balance each</div>
-          <p>A customer is created the first time its id is seen, ${born}, and its limit does not change after that. Calls without a <code>customer_id</code> share the customer named <code>default</code>. The reservation is atomic: used, reserved and the estimate must fit under the limit together, or the call is refused with <code>budget_exhausted</code>.</p>
+          <p>A customer is created the first time its id is seen, ${born}. Change it with <code>PUT /budget</code>, which also creates the customer if it is new; a ceiling may be set below what is already used and reserved, and that customer is then refused until the reservations settle. Calls without a <code>customer_id</code> share the customer named <code>default</code>. The reservation is atomic: used, reserved and the estimate must fit under the limit together, or the call is refused with <code>budget_exhausted</code>.</p>
         </div>
         <div class="live">
           <span><b>${num(withLimit)}</b> ${withLimit === 1 ? 'customer' : 'customers'} with a limit${unlimited ? ` · <b>${num(unlimited)}</b> without` : ''}</span>
@@ -1694,7 +1694,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         </div>
       </div>
     </div>
-    <p class="note">Every ceiling above is set by the calling code, per request, and read here. Nothing on this page edits one. <code>GET /budget?customer_id=</code> returns a customer's balance and creates it if it is new.</p>`
+    <p class="note">Every ceiling above is set by the calling code, and read here. Nothing on this page edits one. <code>GET /budget?customer_id=</code> returns a customer's balance and creates it if it is new; <code>PUT /budget</code> sets that customer's ceiling. The per-request and per-task ceilings are arguments to the call itself and have no endpoint.</p>`
 }
 
 function onboarding(p: Page): string {

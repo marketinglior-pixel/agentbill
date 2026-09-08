@@ -461,6 +461,108 @@ ok('a same-origin POST with a port and no Sec-Fetch-Site is not refused', await 
 ok('a cross-origin POST is still refused', await session({ Origin: 'https://evil.example' }) === 403)
 ok('Sec-Fetch-Site: cross-site is still refused', await session({ Origin: origin, 'Sec-Fetch-Site': 'cross-site' }) === 403)
 
+// ---------------------------------------------------------------- 6: PUT /budget
+console.log('\n[6] a customer ceiling can be set, raised and lowered')
+// Until this endpoint existed the only way to choose a customer's ceiling was
+// accounts.default_budget_units, read once at customer-creation time and
+// hardcoded to 1000 at signup. A customer's budget was therefore fixed for
+// life and the documented fix was a hand-written UPDATE.
+//
+// The assertion that matters is the lowering group: a ceiling may legally land
+// BELOW what is already used and reserved. Nothing may be rewritten to fit it
+// and no counter may go negative; the customer is simply refused until the
+// reservations settle or expire.
+await reset()
+
+const put = (body) => fetch(`${API}/budget`, {
+  method: 'PUT',
+  headers: { 'Authorization': `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+}).then(async r => ({ status: r.status, body: await r.json() }))
+
+const getBudget = (ref) => fetch(`${API}/budget?customer_id=${encodeURIComponent(ref)}`, {
+  headers: { 'Authorization': `Bearer ${KEY}` },
+}).then(async r => ({ status: r.status, body: await r.json() }))
+
+// Set a ceiling on a customer that has never made a call.
+const created = await put({ customer_id: 'cust_put', limit_units: 100 })
+ok('PUT creates the customer and sets the ceiling',
+   created.status === 200 && created.body.limit === 100 && created.body.customer_created === true,
+   JSON.stringify(created.body))
+ok('and GET agrees with it', (await getBudget('cust_put')).body.limit === 100)
+
+// Raise it. The second PUT must update, not insert a second row.
+const raised = await put({ customer_id: 'cust_put', limit_units: 300 })
+ok('PUT raises an existing ceiling', raised.status === 200 && raised.body.limit === 300, JSON.stringify(raised.body))
+ok('and reports it was not created this time', raised.body.customer_created === false)
+const rowCount = Number((await sql`
+  SELECT count(*) AS n FROM customers WHERE account_id=${ACCT} AND customer_ref='cust_put'`)[0].n)
+ok('and there is still exactly one row', rowCount === 1, String(rowCount))
+
+// A ceiling of 0 refuses everything; null clears it.
+await put({ customer_id: 'cust_put', limit_units: 0 })
+const atZero = await pre({ agent_id: 'r', customer_id: 'cust_put', estimated_units: 1 })
+ok('a ceiling of 0 refuses everything',
+   atZero.body.approved === false && atZero.body.reason === 'budget_exhausted', JSON.stringify(atZero.body))
+const unlimited = await put({ customer_id: 'cust_put', limit_units: null })
+ok('null clears the ceiling',
+   unlimited.body.limit === null && unlimited.body.remaining === null, JSON.stringify(unlimited.body))
+const afterNull = await pre({ agent_id: 'r', customer_id: 'cust_put', estimated_units: 999999 })
+ok('and then nothing is refused on budget', afterNull.body.approved === true, JSON.stringify(afterNull.body))
+
+// The real case: lower the ceiling under what is already committed.
+await reset()
+await put({ customer_id: 'cust_low', limit_units: 100 })
+await pre({ agent_id: 'r', customer_id: 'cust_low', estimated_units: 40, idempotency_key: 'low-1' })
+await rec({ customer_id: 'cust_low', event_type: 'llm', idempotency_key: 'low-rec-1', units: 40 })
+await pre({ agent_id: 'r', customer_id: 'cust_low', estimated_units: 30, idempotency_key: 'low-2' })  // left open
+const beforeLower = await cust('cust_low')
+ok('setup: 40 used and 30 reserved',
+   beforeLower.usedUnits === 40 && beforeLower.reservedUnits === 30, JSON.stringify(beforeLower))
+
+const lowered = await put({ customer_id: 'cust_low', limit_units: 50 })
+ok('the ceiling may be lowered under used + reserved',
+   lowered.status === 200 && lowered.body.limit === 50, JSON.stringify(lowered.body))
+ok('used and reserved are untouched by it',
+   lowered.body.used === 40 && lowered.body.reserved === 30, JSON.stringify(lowered.body))
+ok('remaining is floored at 0, never negative', lowered.body.remaining === 0, JSON.stringify(lowered.body))
+ok('and it reports the customer as blocked', lowered.body.is_blocked === true, JSON.stringify(lowered.body))
+
+const afterLower = await pre({ agent_id: 'r', customer_id: 'cust_low', estimated_units: 1 })
+ok('the next call is refused rather than reserved',
+   afterLower.body.approved === false && afterLower.body.reason === 'budget_exhausted', JSON.stringify(afterLower.body))
+const lowRow = await cust('cust_low')
+ok('and no counter went negative',
+   lowRow.usedUnits === 40 && lowRow.reservedUnits === 30, JSON.stringify(lowRow))
+ok('reserved still equals the open reservations', lowRow.reservedUnits === await openSum(lowRow.id))
+
+// Raising it again must let the same customer through, with no repair step.
+await put({ customer_id: 'cust_low', limit_units: 200 })
+const afterRaise = await pre({ agent_id: 'r', customer_id: 'cust_low', estimated_units: 10 })
+ok('raising the ceiling releases the customer immediately',
+   afterRaise.body.approved === true, JSON.stringify(afterRaise.body))
+
+// Validation, and the one that matters: an absent limit_units is not "no change".
+const noField = await put({ customer_id: 'cust_put' })
+ok('a body with no limit_units is 422, not a silent no-op', noField.status === 422, String(noField.status))
+const negative = await put({ customer_id: 'cust_put', limit_units: -5 })
+ok('a negative ceiling is 422', negative.status === 422, String(negative.status))
+const badRef = await put({ customer_id: 'a\u0000b', limit_units: 10 })
+ok('a NUL in customer_id is 422, never a 500', badRef.status === 422, String(badRef.status))
+const overLongCustomerRef = await put({ customer_id: 'x'.repeat(129), limit_units: 10 })
+ok('a customer_id past 128 characters is 422', overLongCustomerRef.status === 422, String(overLongCustomerRef.status))
+const noAuth = await fetch(`${API}/budget`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ customer_id: 'x', limit_units: 1 }),
+}).then(r => r.status)
+ok('PUT /budget is not public', noAuth === 401, String(noAuth))
+
+// The write must stay inside the calling account.
+const otherPut = await put({ customer_id: 'cust_put', limit_units: 7 })
+const otherRow = Number((await sql`
+  SELECT count(*) AS n FROM customers WHERE customer_ref='cust_put' AND account_id <> ${ACCT}`)[0].n)
+ok('the write stays inside the caller account', otherPut.status === 200 && otherRow === 0, String(otherRow))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

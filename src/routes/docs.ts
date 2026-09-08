@@ -213,6 +213,30 @@ WHERE account_id = :account
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Settles against that task's ceiling. Pass the same one you preflighted with, or the units stay reserved until the reservation expires.</td></tr>
   </table>
 
+  <h3>PUT /budget</h3>
+  <p>Sets one customer's ceiling, and creates that customer if it has never been seen. The per-request
+  and per-task ceilings are arguments to <span class="inline">preflight()</span> and have no endpoint;
+  this is the only ceiling with one.</p>
+
+  <div class="code"><pre>
+curl -X PUT https://agentbill.dev/budget \\
+  -H "Authorization: Bearer agb_your_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{"customer_id":"user_123","limit_units":5000}'
+
+<span class="comment"># {"customer_id":"user_123","customer_created":false,"limit":5000,</span>
+<span class="comment">#  "used":1200,"reserved":40,"remaining":3760,"is_blocked":false}</span>
+  </pre></div>
+
+  <p><span class="inline">limit_units</span> is required and may be <span class="inline">null</span>,
+  which means no limit. It is never optional: a body that left it out would have to mean "change
+  nothing", and a write that silently does nothing is how a typo looks like a success.</p>
+
+  <p>It is a ceiling, not a balance, so it may be set <em>below</em> what that customer has already
+  used and reserved. Nothing is rewritten to fit, no counter goes negative, and the customer is
+  simply refused with <span class="inline">budget_exhausted</span> until the open reservations settle
+  or expire. Raising it again releases them on the next call, with no repair step.</p>
+
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
