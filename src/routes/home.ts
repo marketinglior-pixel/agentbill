@@ -660,9 +660,9 @@ ${playgroundSection()}
     <div class="dip row-close">
       <div class="dip-text">
         <h3>Per-task ceilings</h3>
-        <p>One job, many calls, one budget. "This task dies at 500 units," and you decide what a
-        unit is worth. The ceiling is consulted before each call, and the total across the whole
-        job cannot pass it.</p>
+        <p>One job, many calls, one budget. "This task gets 500 units," and you decide what a
+        unit is worth. The ceiling is consulted before each call, and no call that consults it
+        is approved once the job's total would cross it.</p>
         <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch budgets burn down &rarr;</a>
       </div>
       ${taskPanel()}
@@ -698,7 +698,7 @@ ${playgroundSection()}
 
   <section class="wrap guard">
     <h2 class="lead-h2">Guardrails on the key. A receipt for every refusal.</h2>
-    <p class="lead-p">A ceiling stops a job from overspending. A leaked key is a different failure, and
+    <p class="lead-p">A ceiling is what a job is measured against before each call. A leaked key is a different failure, and
     it has its own controls, each of them one HTTP call away. And every refusal is written down with the
     body the agent got back, so what the ceiling saved you from is a row you can open, not a log line
     you have to go and find.</p>

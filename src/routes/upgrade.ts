@@ -3,7 +3,7 @@ import { checkoutPath, createCheckoutSession, PLAN_LIMITS, PLAN_PRICES, PLAN_ORD
 import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
-import { ORIGIN } from '../ui/site.js'
+import { ORIGIN, HEADLINE } from '../ui/site.js'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS } from '../ui/panels.js'
@@ -89,7 +89,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     reply.type('text/html')
     return reply.send(`${head({
       title: 'AgentBill · Pricing',
-      description: `A spend ceiling bound to the task, not the month. Free tier with ${num(PLAN_LIMITS.free)} preflight calls/month, paid plans from $${PLAN_PRICES.builder}/month. No credit card to start.`,
+      description: `${HEADLINE}. Free tier with ${num(PLAN_LIMITS.free)} preflight calls/month, paid plans from $${PLAN_PRICES.builder}/month. No credit card to start.`,
       // Both /pricing and /upgrade render this, and both canonicalise to
       // /pricing, which is the registry's only entry for the page.
       path: '/pricing',
@@ -206,9 +206,10 @@ ${siteNav('/pricing', { sticky: false })}
   <div class="wrap">
 
     <h1>Your agents get a hard budget. Per task. One ceiling, any provider.</h1>
-    <p class="sub">Provider spend caps stop at monthly totals for one vendor. AgentBill enforces the number
-    that actually matters: what this job is allowed to spend, in units you define, across every call
-    that passes the same task_ref. Blocked before the call goes out.</p>
+    <p class="sub">Your provider's cap is real and it fires. What it is bound to is a project, an
+    organization over a calendar month, or one session on that vendor's own harness. This one is
+    bound to a task_ref you choose: every call carrying it consults the same ceiling before it runs,
+    in units you define, and preflight answers approved: false when the next one would cross it.</p>
 
     <table class="tiers">
       <tbody>${rows}

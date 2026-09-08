@@ -62,21 +62,22 @@ export async function aboutRoute(app: FastifyInstance) {
      in front of a production loop.</p>
 
   <h2>Why it exists</h2>
-  <p>Provider spend caps are monthly and per vendor. They tell you about the
-     money after the month that spent it. An agent loop does its damage in an
-     evening, across whichever providers the job happens to touch, and a cap
-     that resets tomorrow does not stop the run that is going now.</p>
+  <p>Provider spend caps are real and they fire. What they are bound to is a
+     project, an organization over a calendar month, or one session on that
+     vendor's own harness. An agent loop does its damage in an evening, across
+     whichever providers the job happens to touch, and a boundary drawn around
+     the month is not drawn around that run.</p>
   <p>So the ceiling here is attached to a job rather than to a calendar. Every
      call that carries the same <code class="inline">task_ref</code> draws down
-     one budget, whatever the provider, and the call that would break it does
-     not go out.</p>
+     one budget, whatever the provider, and the preflight for the call that would
+     break it comes back <code class="inline">approved: false</code>.</p>
 
   <h2>What it deliberately is not</h2>
   <p>It is not a proxy. Your traffic does not route through anything of ours and
      we never hold your provider keys. It does not read your provider bill, and
      it does not convert the units you pass into money. It will not tell you
-     what a call cost; it will stop the one that would cost too much, on the
-     number you gave it.</p>
+     what a call cost; it refuses the one that would cross the number you gave
+     it, and what happens to the run after that is your code's decision.</p>
 
   <h2>Who is behind it</h2>
   <div class="who-is row-close">

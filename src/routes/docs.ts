@@ -113,7 +113,7 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># 1 unit = 1 cent here, so job-142 dies at $5 across every call</span>
+<span class="comment"># 1 unit = 1 cent here, so job-142 has $5 across every call</span>
 <span class="comment"># that passes the same task_ref, however many that turns out to be.</span>
 client.preflight(agent_id="researcher", task_ref="job-142",
                  task_ceiling=500, estimated_units=12)
@@ -281,10 +281,10 @@ WHERE account_id = :account
   </pre></div>
 
   <p>That is the raw HTTP shape. Both SDKs then apply one rule to it, and it is the same rule in
-  Python and Node: they <strong>raise when your spend rule stopped the run</strong>
+  Python and Node: they <strong>raise when your own spend rule refused the call</strong>
   (<span class="inline">ceiling_exceeded</span>, <span class="inline">task_ceiling_exceeded</span>,
-  <span class="inline">budget_exhausted</span>) and <strong>return the result when AgentBill's own
-  billing stopped it</strong> (<span class="inline">free_tier_exceeded</span>,
+  <span class="inline">budget_exhausted</span>) and <strong>return the result when the refusal is
+  AgentBill's own quota</strong> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
   <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.</p>
 
@@ -328,7 +328,7 @@ curl -X PUT https://agentbill.dev/budget \\
 <span class="comment">// define; here 1 unit = 1 cent.</span>
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-<span class="comment">// Before each call: 1 unit = 1 cent here, so this job dies at $5 across</span>
+<span class="comment">// Before each call: 1 unit = 1 cent here, so this job has $5 across</span>
 <span class="comment">// every call that shares job-142.</span>
 <span class="comment">// A refused call throws TaskCeilingExceededError, so the expensive work never starts.</span>
 await preflight({ agentId: 'researcher', taskRef: 'job-142',

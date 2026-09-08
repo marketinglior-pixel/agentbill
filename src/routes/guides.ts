@@ -3,6 +3,12 @@ import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
+import { PLAN_LIMITS } from '../integrations/polar.js'
+
+// The free-tier number is read from the same table preflight enforces, never
+// typed. /docs/langchain-billing used to claim each customer had their own free
+// tier allowance, which is not what PLAN_LIMITS is: it is per ACCOUNT.
+const num = (n: number) => n.toLocaleString('en-US')
 
 // Guides render through the shared content shell in src/ui/docs.ts: one copy
 // of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
@@ -61,12 +67,12 @@ export async function guidesRoute(app: FastifyInstance) {
       'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. The ceiling is bound to the job rather than to a project, an organization or a calendar month, and every process that passes that task_ref draws on the same number.',
       `
   <h1>Task budgets, one ceiling for the whole job</h1>
-  <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no
-  cross-provider budget, and tool spend isn't counted at all. A <b>task budget</b> is the number
-  that actually matters, what <i>this job</i> is allowed to spend, across every call that passes
-  the same <span class="inline">task_ref</span>. Instrument a tool with that same
-  <span class="inline">task_ref</span> and it draws down the same ceiling. Enforced <i>before</i>
-  the call runs.</p>
+  <p>Provider spend caps are real and they fire. What they are bound to is a project, an
+  organization over a calendar month, or one session on that vendor's own harness. A <b>task
+  budget</b> is bound to something else: what <i>this job</i> is allowed to spend, across every
+  call that passes the same <span class="inline">task_ref</span>. Instrument a tool with that same
+  <span class="inline">task_ref</span> and it draws down the same ceiling; one you do not
+  instrument is invisible to it. Consulted <i>before</i> each call runs.</p>
 
   <h2>What a unit is</h2>
   <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.
@@ -279,12 +285,12 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># 1 unit = 1 cent here, so this run dies at $5 no matter how many</span>
-<span class="comment"># calls, tools or retries it turns into.</span>
+<span class="comment"># 1 unit = 1 cent here, so this run has $5 across every call,</span>
+<span class="comment"># tool and retry that passes the same task_ref.</span>
 client.preflight(
     agent_id="researcher",     <span class="comment"># a label for attribution, not a budget</span>
     task_ref="job-142",        <span class="comment"># your name for this run</span>
-    task_ceiling=500,          <span class="comment"># the whole run dies here</span>
+    task_ceiling=500,          <span class="comment"># the ceiling for the whole run</span>
     estimated_units=12,        <span class="comment"># what this one call is worth</span>
 )
 
@@ -346,8 +352,8 @@ client = AgentBillClient(api_key="agb_your_key", ceiling=50)
       <div class="code"><pre>
 import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
-<span class="comment">// The run dies at 500 units across every call that passes job-142.</span>
-<span class="comment">// A refused call throws, so nothing expensive can happen by forgetting a check.</span>
+<span class="comment">// The run has 500 units across every call that passes job-142.</span>
+<span class="comment">// A refused call throws, so your catch block decides what happens next.</span>
 await preflight({ agentId: 'researcher', taskRef: 'job-142',
                   taskCeiling: 500, estimatedUnits: 12 })
 
@@ -381,7 +387,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from agentbill import AgentBillClient
 
-<span class="comment"># ceiling=50: block any run estimated at more than 50 units</span>
+<span class="comment"># ceiling=50: refuse any single call estimated at more than 50 units</span>
 client = AgentBillClient(api_key="agb_your_key", ceiling=50)
 
 def run_research_agent(customer_id: str, topic: str) -> str:
@@ -481,8 +487,13 @@ except FreeTierExceededError as e:
         <span class="inline">LangGraph</span>
       </p>
 
-      <h2>Per-customer billing</h2>
-      <p>Pass <span class="inline">customer_id</span> to enforce separate budgets per user. Each customer has their own usage counters and free tier allowance.</p>
+      <h2>Per-customer ceilings</h2>
+      <p>Pass <span class="inline">customer_id</span> to keep a separate ceiling per user of your
+      product. Each customer carries their own counters, and you set that ceiling yourself with
+      <span class="inline">PUT /budget</span>. It is an internal number for your own accounting:
+      AgentBill does not charge your users, hold their cards or issue them credit. And the free
+      tier is ${num(PLAN_LIMITS.free)} preflight calls a month for the whole account, not per
+      customer.</p>
       <div class="code"><pre>
 <span class="comment"># Different customers, isolated budgets</span>
 check_alice = client.preflight(agent_id="research", estimated_units=10,
@@ -519,12 +530,12 @@ check_bob   = client.preflight(agent_id="research", estimated_units=10, customer
 from openai import OpenAI
 from agentbill import AgentBillClient
 
-<span class="comment"># ceiling=100: block any run estimated at more than 100 units</span>
+<span class="comment"># ceiling=100: refuse any single call estimated at more than 100 units</span>
 agentbill = AgentBillClient(api_key="agb_your_key", ceiling=100)
 openai_client = OpenAI()
 
 def run_agent(customer_id: str, task: str) -> str:
-    <span class="comment"># Block before any OpenAI tokens are consumed</span>
+    <span class="comment"># Consulted before any OpenAI tokens are spent</span>
     check = agentbill.preflight(
         agent_id="openai_assistant",
         estimated_units=10,
@@ -564,7 +575,7 @@ def run_agent(task: str) -> str:
     return response.choices[0].message.content
       </pre></div>
 
-      <h2>Handle blocking errors</h2>
+      <h2>Handle the refusals</h2>
       <div class="code"><pre>
 from agentbill import AgentBillClient, BudgetExhaustedError, CeilingExceededError
 

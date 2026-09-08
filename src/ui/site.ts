@@ -90,13 +90,13 @@ const DOCS = ['Docs', '/docs'] as const
 const BLOG = ['Blog', '/blog'] as const
 
 export const PAGES: readonly PageMeta[] = [
-  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-05', priority: 1.0, changefreq: 'weekly' },
-  { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
-  { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-05', priority: 0.8, changefreq: 'monthly' },
+  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-08', priority: 1.0, changefreq: 'weekly' },
+  { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-08', priority: 0.8, changefreq: 'monthly' },
+  { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-08', priority: 0.8, changefreq: 'monthly' },
 
   { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-08', priority: 0.7, changefreq: 'monthly' },
   { path: '/status', section: 'marketing', crumbs: [HOME], crumb: 'Status', og: 'default', index: true, updated: '2026-09-05', priority: 0.3, changefreq: 'weekly' },
-  { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-05', priority: 0.4, changefreq: 'yearly' },
+  { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-08', priority: 0.4, changefreq: 'yearly' },
 
   // The Hebrew lead magnet for the n8n/Make vertical. Indexed on purpose: it is
   // written to be forwarded and to be found, and it is the only surface here
@@ -108,12 +108,12 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-08', priority: 0.9, changefreq: 'weekly' },
   { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-08', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
   { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/openai-agent-spend-ceiling', section: 'docs', crumbs: [HOME, DOCS], crumb: 'OpenAI', og: 'docs', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs/openai-agent-spend-ceiling', section: 'docs', crumbs: [HOME, DOCS], crumb: 'OpenAI', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
 
   { path: '/blog', section: 'blog', crumbs: [HOME], crumb: 'Blog', og: 'blog', index: true, updated: '2026-09-05', priority: 0.6, changefreq: 'monthly' },
   { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
-  { path: '/blog/monthly-caps-wont-save-you', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Monthly caps', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
+  { path: '/blog/monthly-caps-wont-save-you', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Monthly caps', og: 'blog', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
 
   // Indexable on purpose. noindex on a policy page buys nothing (nobody is
   // competing for "AgentBill terms of service"), ad review prefers them

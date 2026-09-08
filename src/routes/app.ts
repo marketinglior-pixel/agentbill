@@ -1712,7 +1712,7 @@ function onboarding(p: Page): string {
       <pre>${esc(curlBlock)}</pre>
       <p>You get back <span class="out">{"approved":false,"reason":"ceiling_exceeded",…}</span> and the overview fills in.</p>
       <details>
-        <summary>A real one: a job that dies at 5 units across calls</summary>
+        <summary>A real one: a job with a ceiling of 5 units across calls</summary>
         <p style="margin-top:10px">The first call opens the task with its ceiling and reserves 3. The second asks for 3 more, 3 + 3 &gt; 5, and is refused. The ceiling holds across every call and tool that shares the task_ref.</p>
         <pre>${esc(curlTask1)}</pre>
         <pre>${esc(curlTask2)}</pre>

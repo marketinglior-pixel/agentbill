@@ -305,7 +305,7 @@ record(units=7)
 
   <p>The monthly cap is passed somewhere around midnight. But the cap check runs on a billing cycle, not on each request, so nothing stops. The agent keeps looping until someone wakes up and kills it, thousands of calls later.</p>
 
-  <p>Monthly caps are accounting tools. They tell you what happened. They don't stop anything from happening.</p>
+  <p>Monthly caps are real and they fire. What they are bound to is a billing cycle, so the boundary they enforce is a month, not a run.</p>
 
 
   <h2>Why the cap didn't fire</h2>
@@ -410,7 +410,7 @@ async function runAgentSafely(customerId: string, task: string) {
 
   <h2>Summary</h2>
 
-  <p>Monthly caps are accounting. Preflight checks are protection. One tells you what happened; the other prevents it from happening.</p>
+  <p>A monthly cap fires on a calendar, over a whole account. A preflight check answers before one call goes out, on a budget you named, and your code decides what to do with the answer. The two are bound to different things, and only one of them knows about this job.</p>
 
   <p>If you're running AI agents in production, especially agents that loop, retry, or run unattended, you need a check that fires before the first token, not after the last one.</p>
 
