@@ -34,6 +34,7 @@ import { heCostPerClientRoute } from './routes/he-cost-per-client.js'
 import { faqRoute } from './routes/faq.js'
 import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
+import { recoverRoute } from './routes/recover.js'
 import { statusRoute } from './routes/status.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
@@ -243,6 +244,7 @@ app.register(legalRoute)
 app.register(faqRoute)
 app.register(aboutRoute)
 app.register(thanksRoute)
+app.register(recoverRoute)
 app.register(statusRoute)
 app.register(heCostPerClientRoute)
 registerAuth(app)

@@ -1,13 +1,19 @@
-// In-memory abuse guards for the public /register endpoint.
+// In-memory abuse guards for the public /register and /recover endpoints.
 // Same tradeoff as the per-key rate limiter (2026-05-15): no Redis, per-machine
-// counters, damage control, not perfect distribution. Two guards:
-//   - per-IP request cap (stops signup floods / email enumeration sweeps)
-//   - per-email recovery-mail cooldown (stops mail-bombing a victim's inbox)
+// counters, damage control, not perfect distribution. Three guards:
+//   - per-IP request cap on /register (stops signup floods / enumeration sweeps)
+//   - per-IP request cap on /recover, counted separately so that being locked
+//     out of an account is not made worse by having also tried to register
+//   - per-email recovery-mail cooldown, SHARED by both endpoints, because both
+//     now send the same recovery link to the same address and the thing being
+//     protected is the mailbox, not the route
 
 const ipHits = new Map<string, number[]>()
+const recoverIpHits = new Map<string, number[]>()
 const emailSends = new Map<string, number>()
 
 const IP_LIMIT = 5
+const RECOVER_IP_LIMIT = 10
 const IP_WINDOW_MS = 60 * 60 * 1000
 const EMAIL_COOLDOWN_MS = 60 * 60 * 1000
 const MAX_ENTRIES = 10_000
@@ -33,6 +39,24 @@ export function allowRegisterAttempt(ip: string): boolean {
   hits.push(now)
   ipHits.set(ip, hits)
   prune(ipHits)
+  return true
+}
+
+/**
+ * Per-IP cap on /recover, on its own counters. Deliberately more generous than
+ * the register cap: the person hitting this is already locked out, and a typo
+ * in their own address costs them an attempt.
+ */
+export function allowRecoverAttempt(ip: string): boolean {
+  const now = Date.now()
+  const hits = (recoverIpHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS)
+  if (hits.length >= RECOVER_IP_LIMIT) {
+    recoverIpHits.set(ip, hits)
+    return false
+  }
+  hits.push(now)
+  recoverIpHits.set(ip, hits)
+  prune(recoverIpHits)
   return true
 }
 

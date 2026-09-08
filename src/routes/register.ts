@@ -11,31 +11,42 @@ import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
-import { HEADLINE } from '../ui/site.js'
+import { HEADLINE, ORIGIN } from '../ui/site.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
+import { sendRecoveryLink } from './recover.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 const SUPPORT_EMAIL = 'hello@agentbill.dev'
 
-// Best-effort: mail the existing key to the account owner. Returns true only
-// when Resend accepted the send. (With the sandbox sender this fails for
-// arbitrary recipients until the agentbill.dev domain is verified in Resend,
-// the caller falls back to a support message, never to exposing the key.)
-async function emailExistingKey(email: string, apiKey: string): Promise<boolean> {
+/**
+ * Sent once, when the account is created. It carries no key and no token.
+ *
+ * The key itself stays where it has always been, on screen, once, so the
+ * 30-second signup promise is untouched. What was missing was any record that
+ * the account exists at all: someone who closed the tab had nothing, not even
+ * proof of which address they had used. This is that record, and it names the
+ * one route back.
+ */
+async function emailWelcome(email: string): Promise<boolean> {
   if (!resend) return false
   try {
     const res = await resend.emails.send({
       from: RESEND_FROM,
       to: email,
-      subject: 'Your AgentBill API key',
+      subject: 'Your AgentBill account is ready',
       html: `
-        <p>Someone (hopefully you) asked for the API key of this AgentBill account.</p>
-        <p>Your key: <code>${apiKey}</code></p>
-        <p>Store it in your environment variables, not your code.</p>
-        <p>Wasn't you? Rotate it immediately:</p>
-        <pre>curl -X POST https://agentbill.dev/keys/rotate -H "Authorization: Bearer ${apiKey}"</pre>
+        <p>Your AgentBill account is open on the free tier. No card, nothing to confirm.</p>
+        <p>Your API key was shown once in the browser when you registered, and it is not in this
+           email on purpose: an API key that lives in a mailbox is a key anyone who reads that
+           mailbox has. Keep it in an environment variable.</p>
+        <p>The same key opens your console at <a href="${ORIGIN}/app">${ORIGIN}/app</a>.</p>
+        <p>If you no longer have it, you can get back in at
+           <a href="${ORIGIN}/recover">${ORIGIN}/recover</a>. That link lets you see the current
+           key or replace it, after you prove you can read this address.</p>
+        <p>The quickstart is at <a href="${ORIGIN}/docs">${ORIGIN}/docs</a>. Questions:
+           ${SUPPORT_EMAIL}</p>
       `,
     })
     return !res.error
@@ -49,24 +60,25 @@ async function emailExistingKey(email: string, apiKey: string): Promise<boolean>
 // (Deliberate change 2026-08-27; replaces the old "idempotent register"
 // behavior.) New-account creation still shows the key instantly, so the
 // 30-second signup promise is untouched.
-async function existingAccountReply(reply: any, email: string, apiKey: string) {
+//
+// 2026-09-09: this used to mail the live key itself. That was not stealable,
+// because it went to the owner's mailbox rather than the sender's, but it let a
+// stranger drop a permanent bearer credential into someone's inbox, where it
+// then stayed. It now sends the same single-use link /recover sends, so there
+// is one recovery mechanism on the system rather than two.
+async function existingAccountReply(reply: any, email: string, accountId: string) {
+  const inbox = `This email already has an account. Check your inbox: we sent a link to get back in.`
   if (recoveryInCooldown(email)) {
-    return reply.code(200).send({
-      status: 'existing_account_emailed',
-      message: `This email already has an account. We recently sent your API key to ${email}. Check your inbox.`,
-    })
+    return reply.code(200).send({ status: 'existing_account_emailed', message: inbox })
   }
-  const emailed = await emailExistingKey(email, apiKey)
+  markRecoverySent(email)
+  const emailed = await sendRecoveryLink(email, accountId)
   if (emailed) {
-    markRecoverySent(email)
-    return reply.code(200).send({
-      status: 'existing_account_emailed',
-      message: `This email already has an account. We sent your API key to ${email}.`,
-    })
+    return reply.code(200).send({ status: 'existing_account_emailed', message: inbox })
   }
   return reply.code(409).send({
     error: 'account_exists',
-    message: `This email already has an account. Lost your key? Email ${SUPPORT_EMAIL} from that address and we'll rotate it for you.`,
+    message: `This email already has an account, but the recovery mail could not be sent. Email ${SUPPORT_EMAIL} from that address and a person will sort it out.`,
   })
 }
 
@@ -120,7 +132,8 @@ const reg = inlineScript(`  let apiKey = ''
         return
       }
 
-      // Existing account: the key went to their inbox, not to this response.
+      // Existing account: a single-use recovery link went to their inbox. The key
+      // is never in this response and never in an email.
       if (!data.api_key) {
         errEl.textContent = data.message ?? 'This email already has an account. Check your inbox.'
         errEl.style.color = 'var(--green)'
@@ -373,6 +386,7 @@ ${siteNav('/register', { cta: false })}
         <div class="msg-slot"><p class="err" id="err" aria-live="polite"></p></div>
         <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
         <p class="form-note">By registering you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email. Just a key.</p>
+        <p class="form-note">Already registered and no longer have the key? <a href="/recover">Get back in</a>.</p>
       </form>
 
       <!-- Under the button, not beside it. The right column stopped 410px above
@@ -388,7 +402,9 @@ ${siteNav('/register', { cta: false })}
 
     <div class="success" id="success-state">
       <h2>Your API key is ready.</h2>
-      <p>Copy it now. We won't show it again. Store it in your environment variables, not your code.</p>
+      <p>Copy it now. We won't show it again. Store it in your environment variables, not your code.
+         If you lose it, <a href="/recover">/recover</a> will get you back in with the email you
+         just used. We have sent that address a note saying so, with no key in it.</p>
       <div class="panel">
         <div class="panel-h"><span>API key</span><span>shown once</span></div>
         <div class="key-value">
@@ -453,18 +469,17 @@ ${REGISTER_JS}
     const { email, name, use_case, stack } = parsed.data
 
     try {
-      // Check if account already exists, return existing key instead of 409
+      // Already registered? Send the recovery link. This only needs the account
+      // id now: it used to join developer_api_keys and read a live key into
+      // memory in order to mail it, and nothing on this path handles a key any
+      // more. An account with no key left is no longer a special case either,
+      // because the recovery flow mints one when it finds none.
       const [existing] = await sql`
-        SELECT k.api_key
-        FROM accounts a
-        JOIN developer_api_keys k ON k.account_id = a.id
-        WHERE a.email = ${email}
-        ORDER BY k.created_at ASC
-        LIMIT 1
+        SELECT id FROM accounts WHERE email = ${email}
       `
 
       if (existing) {
-        return existingAccountReply(reply, email, existing.apiKey)
+        return existingAccountReply(reply, email, existing.id as string)
       }
 
       // New account
@@ -477,15 +492,10 @@ ${REGISTER_JS}
         `
 
         if (!account) {
-          // Race condition: another request created the account between our check and insert.
-          // Fetch the key created by the other request.
-          const [raceKey] = await tx`
-            SELECT k.api_key FROM accounts a
-            JOIN developer_api_keys k ON k.account_id = a.id
-            WHERE a.email = ${email}
-            ORDER BY k.created_at ASC LIMIT 1
-          `
-          return { type: 'existing' as const, apiKey: raceKey?.apiKey ?? null }
+          // Race: another request created the account between the check above
+          // and this insert. Its id is all this path needs.
+          const [raced] = await tx`SELECT id FROM accounts WHERE email = ${email}`
+          return { type: 'existing' as const, accountId: (raced?.id as string) ?? null }
         }
 
         const apiKey = generateApiKey()
@@ -494,22 +504,30 @@ ${REGISTER_JS}
           VALUES (${account.id}, ${apiKey}, 'default')
         `
 
-        return { type: 'created' as const, apiKey }
+        return { type: 'created' as const, apiKey, accountId: account.id as string }
       })
 
       if (result.type === 'existing') {
-        if (!result.apiKey) {
+        if (!result.accountId) {
           return reply.code(409).send({
             error: 'account_exists',
             message: `This email already has an account. Email ${SUPPORT_EMAIL} to recover your key.`,
           })
         }
-        return existingAccountReply(reply, email, result.apiKey)
+        return existingAccountReply(reply, email, result.accountId)
       }
+
+      // Fire and forget. The key is already in the response, so a slow or
+      // failing Resend must not hold up a signup or turn one into a 500. It is
+      // logged instead, because silently not sending is how the old recovery
+      // gap stayed invisible.
+      void emailWelcome(email)
+        .then((ok) => { if (!ok) request.log.error({ email }, 'welcome email was not accepted by Resend') })
+        .catch((err) => request.log.error({ err }, 'welcome email threw'))
 
       return reply.code(201).send({
         api_key: result.apiKey,
-        message: 'Account created. Store your API key. It will not be shown again.',
+        message: 'Account created. Store your API key. It will not be shown again. A link to get back in if you lose it is on its way to your inbox.',
       })
 
     } catch (err) {

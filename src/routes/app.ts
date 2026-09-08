@@ -220,7 +220,11 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
 // same-origin passes. Without it (old browsers, curl) fall back to the Origin
 // host. A literal `Origin: null` is what a browser sends for a POST under a
 // no-referrer policy, so it counts only when Sec-Fetch-Site already vouched.
-function sameOrigin(request: FastifyRequest): boolean {
+/**
+ * Exported because /recover posts too, and a second copy of this would be a
+ * second chance to reintroduce the Fastify 5 host/hostname bug documented below.
+ */
+export function sameOrigin(request: FastifyRequest): boolean {
   const sfs = request.headers['sec-fetch-site']
   if (typeof sfs === 'string') return sfs === 'same-origin'
   const origin = request.headers.origin
@@ -1233,6 +1237,7 @@ function loginPage(err: string): string {
       <button class="btn" type="submit">Open console &rarr;</button>
     </form>
     <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and dies with the key. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
+    <p class="fine">No longer have the key? <a href="/recover">Get back in</a> with the email you registered with.</p>
   </div>
 </body>
 </html>`

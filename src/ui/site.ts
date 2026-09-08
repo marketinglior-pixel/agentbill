@@ -95,6 +95,10 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-08', priority: 1.0, changefreq: 'weekly' },
   { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-08', priority: 0.8, changefreq: 'monthly' },
   { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-08', priority: 0.8, changefreq: 'monthly' },
+  // noindex and NOT disallowed, for the same reason as /app and /thanks: a real
+  // person follows a link here out of their mailbox, and a Disallowed URL is one
+  // whose noindex a crawler never gets to read.
+  { path: '/recover', section: 'marketing', crumbs: [HOME], crumb: 'Recover access', og: 'default', index: false, updated: '2026-09-09', priority: 0, changefreq: 'yearly' },
 
   { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-08', priority: 0.7, changefreq: 'monthly' },
   { path: '/status', section: 'marketing', crumbs: [HOME], crumb: 'Status', og: 'default', index: true, updated: '2026-09-05', priority: 0.3, changefreq: 'weekly' },
