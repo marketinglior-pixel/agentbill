@@ -24,24 +24,30 @@ export async function docsRoute(app: FastifyInstance) {
   <h3>Step 2, Get your API key</h3>
   <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
-  <h3>Step 3, Add 3 lines to your agent</h3>
+  <h3>Step 3, Give the job a ceiling</h3>
+  <p>Pass the same <span class="inline">task_ref</span> on every call the job makes. They are all
+  checked against one ceiling, and the first preflight of a new task is the one that fixes it.</p>
   <div class="code"><pre>
 from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># Before the run: check if the customer has budget</span>
-check = client.preflight(agent_id="researcher", customer_id="user_123", estimated_units=10)
-<span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
+<span class="comment"># 1 unit = 1 cent here, so job-142 dies at $5 across every call</span>
+<span class="comment"># that passes the same task_ref, however many that turns out to be.</span>
+client.preflight(agent_id="researcher", task_ref="job-142",
+                 task_ceiling=500, estimated_units=12)
+<span class="comment"># a refused call raised TaskCeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># ... run your agent here ...</span>
 result = run_my_agent()
 
-<span class="comment"># After the run: record what was actually used</span>
-client.record(agent_id="researcher", customer_id="user_123", units=10)
+<span class="comment"># Settle, or the units stay held until the reservation expires</span>
+client.record(agent_id="researcher", task_ref="job-142", units=12)
   </pre></div>
 
-  <p class="closer">That's it. The free tier is 1,000 preflight calls per month, per account.</p>
+  <p class="closer">That is the whole integration. <span class="inline">agent_id</span> is a label the
+  console groups by; the ceiling is on the task, not on the agent. The free tier is 1,000 preflight
+  calls per month, per account.</p>
 
   <h2>Core Concepts</h2>
 
@@ -51,8 +57,41 @@ client.record(agent_id="researcher", customer_id="user_123", units=10)
   <h3>Record</h3>
   <p>Logs actual usage after a successful run. Idempotent per <code class="inline">idempotency_key</code>: /events dedupes on it. Both SDKs generate a fresh key for each call, so calling record() again on a retry is a second event; to dedupe a retried job, pass your own key to the endpoint.</p>
 
+  <h3>Per-task ceiling</h3>
+  <p>One job, one ceiling, held across every call and every tool that passes the same
+  <span class="inline">task_ref</span>. This is the one that is not bound to a calendar month and not
+  to an identity, and that is the whole point: a budget that resets tomorrow does not stop the loop
+  running tonight.</p>
+
+  <p>Pass <span class="inline">task_ceiling</span> on the first preflight of a new
+  <span class="inline">task_ref</span>. A task preflight has never seen must carry one or the call is
+  rejected with <span class="inline">task_ceiling_required</span>; later values are ignored, so a
+  retry cannot quietly raise the ceiling it was supposed to respect. When the units already used plus
+  this call's estimate would cross it, preflight answers <span class="inline">approved: false</span>
+  with <span class="inline">task_ceiling_exceeded</span> and the SDK raises.</p>
+
+  <div class="code"><pre>
+from agentbill import AgentBillClient, TaskCeilingExceededError
+
+client = AgentBillClient(api_key="agb_your_key")
+
+<span class="comment"># First call of the job opens it and fixes the ceiling at 500.</span>
+client.preflight(agent_id="researcher", task_ref="job-142",
+                 task_ceiling=500, estimated_units=300)
+
+try:
+    <span class="comment"># A different agent, same job: 300 + 250 &gt; 500, refused before it runs.</span>
+    client.preflight(agent_id="writer", task_ref="job-142", estimated_units=250)
+except TaskCeilingExceededError as e:
+    print(f"task {e.task_ref} hit its ceiling")
+  </pre></div>
+
+  <p>Note which identifier is doing the work there. <span class="inline">agent_id</span> is a label
+  for attribution and carries no budget of its own; two different agents that share a
+  <span class="inline">task_ref</span> share one ceiling. The job is what costs money, not the agent.</p>
+
   <h3>Per-request ceiling</h3>
-  <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised.</p>
+  <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>
 
   <div class="code"><pre>
 client = AgentBillClient(api_key="agb_your_key", ceiling=20)  <span class="comment"># no single run may cost more than 20 units</span>
@@ -126,7 +165,7 @@ WHERE account_id = :account
   <h3>preflight()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td>agent_id</td><td>string</td><td>Identifier for this agent. Appears in the dashboard.</td></tr>
+    <tr><td>agent_id</td><td>string</td><td>A label for attribution, not a budget. Every task and every refusal in the console carries it, and nothing is capped by it.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is refused if estimated_units exceeds it.</td></tr>
@@ -168,9 +207,10 @@ WHERE account_id = :account
   <h3>record()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td>agent_id</td><td>string</td><td>Identifier for this agent or task type.</td></tr>
+    <tr><td>agent_id</td><td>string</td><td>The same attribution label you passed to preflight.</td></tr>
     <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default".</td></tr>
+    <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Settles against that task's ceiling. Pass the same one you preflighted with, or the units stay reserved until the reservation expires.</td></tr>
   </table>
 
   <h2>Node.js</h2>
@@ -195,7 +235,7 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 
   <h2>Guides</h2>
   <p><a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a></p>
-  <p><a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a></p>
+  <p><a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a></p>
   <p><a href="/docs/langchain-billing">How to add billing to a LangChain agent</a></p>
   <p><a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a></p>
 

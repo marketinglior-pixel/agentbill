@@ -37,7 +37,7 @@ function page(path: string, title: string, description: string, body: string) {
     <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
-    <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
+    <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
   </div>`,
   })
 }
@@ -245,10 +245,10 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   app.get('/docs/limit-cost-per-agent-run', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       '/docs/limit-cost-per-agent-run',
-      'How to limit cost per agent run',
-      'Set a per-request spend ceiling on any AI agent. Block the run before compute is consumed if the budget is exceeded.',
+      'How to cap what one agent run can spend',
+      'Put a hard spend ceiling on a single agent run with task_ref and task_ceiling. Every call in the job is checked against one ceiling, before it goes out, on units you define.',
       `
-      <h1>How to limit cost per agent run</h1>
+      <h1>How to cap what one agent run can spend</h1>
       <span class="badge">Python</span><span class="badge">Node.js</span>
       <p>A provider spend cap is bound to a project, or to an organization over a calendar month. A single 3-hour research loop is neither. AgentBill's ceiling is bound to a <span class="inline">task_ref</span>, consulted before each call, on units you define.</p>
 
@@ -258,65 +258,92 @@ with ThreadPoolExecutor(max_workers=2) as pool:
       <h2>Install</h2>
       <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
-      <h2>Set a ceiling at client initialization</h2>
-      <p>Pass <span class="inline">ceiling</span> when creating the client. Any <span class="inline">preflight()</span> whose <span class="inline">estimated_units</span> exceeds this value is refused.</p>
+      <h2>Give the run an id, and give that id a ceiling</h2>
+      <p>Two parameters do the work. <span class="inline">task_ref</span> is your name for this run,
+      and every call that passes it is checked against the same ceiling.
+      <span class="inline">task_ceiling</span> is that ceiling, in units you define, and it is fixed
+      by the first preflight of a new run; later values are ignored, so a retry cannot raise the
+      ceiling it was meant to respect.</p>
       <div class="code"><pre>
 from agentbill import AgentBillClient
 
-<span class="comment"># Refuse any call estimated at more than 50 units</span>
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-      </pre></div>
+client = AgentBillClient(api_key="agb_your_key")
 
-      <h2>Run the preflight check</h2>
-      <div class="code"><pre>
-check = client.preflight(
-    agent_id="my_agent",
-    estimated_units=10,        <span class="comment"># how many units this run is expected to use</span>
-    customer_id="user_123"     <span class="comment"># optional: per-customer enforcement</span>
+<span class="comment"># 1 unit = 1 cent here, so this run dies at $5 no matter how many</span>
+<span class="comment"># calls, tools or retries it turns into.</span>
+client.preflight(
+    agent_id="researcher",     <span class="comment"># a label for attribution, not a budget</span>
+    task_ref="job-142",        <span class="comment"># your name for this run</span>
+    task_ceiling=500,          <span class="comment"># the whole run dies here</span>
+    estimated_units=12,        <span class="comment"># what this one call is worth</span>
 )
 
-<span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError above; nothing to check here</span>
-
-<span class="comment"># Your agent runs here, budget is confirmed</span>
+<span class="comment"># a refused call raised TaskCeilingExceededError above; nothing to check here</span>
 result = run_agent()
 
-<span class="comment"># Record actual units used</span>
-client.record(agent_id="my_agent", units=10, customer_id="user_123")
+<span class="comment"># Settle, or the units stay held until the reservation expires</span>
+client.record(agent_id="researcher", task_ref="job-142", units=12)
+      </pre></div>
+
+      <p>Every later call in the same run passes <span class="inline">task_ref</span> and nothing
+      else about the budget. It does not need to know the ceiling, or what the calls before it
+      spent.</p>
+      <div class="code"><pre>
+<span class="comment"># A different agent, a different tool, the same run and the same ceiling.</span>
+client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
       </pre></div>
 
       <h2>Use the @gate decorator (shortest path)</h2>
-      <p>The <span class="inline">@client.gate()</span> decorator handles preflight and record automatically. No boilerplate.</p>
+      <p>The <span class="inline">@client.gate()</span> decorator does the preflight before the body
+      and the record after it, and it takes the same two parameters. On an exception it settles with
+      <span class="inline">success=False</span>, which releases the reservation instead of billing
+      it.</p>
       <div class="code"><pre>
-@client.gate(agent_id="my_agent", estimated_units=10, customer_id="user_123")
+@client.gate(agent_id="researcher", task_ref="job-142",
+             task_ceiling=500, estimated_units=12)
 def run_agent(task: str) -> str:
-    <span class="comment"># preflight runs before this body</span>
-    <span class="comment"># record runs after this body completes</span>
+    <span class="comment"># preflight runs before this body, record runs after it</span>
     return do_the_work(task)
       </pre></div>
 
-      <h2>Handle blocking errors</h2>
+      <h2>Handle the refusal</h2>
+      <p>The exception carries the numbers, so the handler can say what happened without a second
+      call.</p>
       <div class="code"><pre>
-from agentbill import AgentBillClient, BudgetExhaustedError, CeilingExceededError
+from agentbill import TaskCeilingExceededError
 
 try:
     result = run_agent("analyze this")
-except CeilingExceededError:
-    return {"error": "run exceeds per-request ceiling"}
-except BudgetExhaustedError:
-    return {"error": "customer budget exhausted"}
+except TaskCeilingExceededError as e:
+    return {"error": f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units"}
       </pre></div>
+
+      <h2>What a per-request ceiling is, and is not</h2>
+      <p>There is a second, narrower ceiling: <span class="inline">ceiling</span> on the client
+      refuses any <em>single</em> call whose <span class="inline">estimated_units</span> exceed it.
+      It is a sanity check on one bad estimate. It is not the cross-call ceiling above, and on its
+      own it will not stop a loop that makes two hundred individually reasonable calls.</p>
+      <div class="code"><pre>
+<span class="comment"># No single call may cost more than 50 units. The run still needs a task_ceiling.</span>
+client = AgentBillClient(api_key="agb_your_key", ceiling=50)
+      </pre></div>
+
+      <p>And note what is <em>not</em> on this list. <span class="inline">agent_id</span> is a label
+      the console groups tasks and refusals by; it carries no budget of its own. Ceilings are bound
+      to a run, a customer, or a single call, never to an agent name.</p>
 
       <h2>Node.js</h2>
       <div class="code"><pre>
 import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
-<span class="comment">// ceiling is per call: refuse any single call expected to cost more than 50 units.</span>
+<span class="comment">// The run dies at 500 units across every call that passes job-142.</span>
 <span class="comment">// A refused call throws, so nothing expensive can happen by forgetting a check.</span>
-await preflight({ agentId: 'my_agent', estimatedUnits: 10, ceiling: 50 })
+await preflight({ agentId: 'researcher', taskRef: 'job-142',
+                  taskCeiling: 500, estimatedUnits: 12 })
 
 const result = await runAgent()
 
-await record({ agentId: 'my_agent', units: 10 })
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
       </pre></div>
 
       <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>

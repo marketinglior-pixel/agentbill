@@ -267,7 +267,7 @@ record(units=7)
   <div class="also">
     <p>Related</p>
     <a href="/blog/monthly-caps-wont-save-you">Why monthly caps don't protect you from one bad LLM run</a>
-    <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
+    <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
   </div>
 
 `,
@@ -417,7 +417,7 @@ async function runAgentSafely(customerId: string, task: string) {
 
   <div class="also">
     <p>Related guides</p>
-    <a href="/docs/limit-cost-per-agent-run">How to limit cost per agent run</a>
+    <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
   </div>

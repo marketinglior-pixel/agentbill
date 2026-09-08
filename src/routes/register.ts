@@ -300,9 +300,13 @@ export async function registerRoute(app: FastifyInstance) {
        floor for 12px mono: .ask, .tile-f and .st-ms already use it. */
     .ns-num { font-family: var(--mono); font-size: 12px; color: var(--dim); padding-top: 2px; }
     .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    /* break-all was right when the only block here was one unbroken curl line;
+       it shreds the Python sample in step 3 mid-identifier. overflow-wrap:
+       anywhere breaks a token only when it genuinely cannot fit, so the curl
+       still wraps and code still breaks at spaces. */
     .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
               padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code-ink);
-              white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
+              white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
     .ns code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
                padding: 1px 5px; border-radius: 3px; }
 
@@ -396,7 +400,15 @@ ${siteNav('/register', { cta: false })}
         <div class="steps">
           <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is refused before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
           <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app">your console</a> and paste the key. That refusal is the first row on it.</p></div>
-          <div class="ns"><span class="ns-num">3</span><p>Then wire it in: <code>pip install agentbill-sdk</code>, <code>export AGENTBILL_API_KEY=your_key</code>, and <code>@meter(event="agent_run", preflight=True)</code> on your agent function. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div>
+          <div class="ns"><span class="ns-num">3</span><div><p>Then wire it in with <code>pip install agentbill-sdk</code>. Put the ceiling on the job, not on the agent: every call that passes the same <code>task_ref</code> is checked against it, and the first one fixes it.</p><pre class="ns-pre">from agentbill import AgentBillClient
+
+client = AgentBillClient(api_key="agb_your_key")
+
+@client.gate(agent_id="researcher",
+             task_ref="job-142", task_ceiling=500,
+             estimated_units=12)
+def run_job():
+    ...</pre><p><a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div></div>
         </div>
       </div>
     </div>
