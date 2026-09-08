@@ -1,9 +1,9 @@
 # AgentBill
 
-**Usage-based billing for AI agents. 3-line integration.**
+**One spend ceiling per job, enforced before the call goes out.**
 
-Stop charging flat monthly fees for agents whose costs swing between $2 and $40 per run.  
-Stop losing money when a rogue agent loops for 45 minutes at your expense.
+Your provider's cap is bound to a project, to an organization over a calendar month, or to one
+session on that vendor's own harness. This one is bound to `job-142`.
 
 ---
 
@@ -14,23 +14,34 @@ You built an AI agent. It does something valuable. You charge $99/month flat.
 - A 3-second run costs you $0.80. You made $98.20.
 - A 45-minute recursive loop costs you $140. You lost $41.
 
-And you don't find out until your OpenAI invoice arrives.
+A monthly cap does not catch that, because a loop that burns $140 over one weekend is too small to
+move a monthly number, and a monthly number low enough to catch it takes every agent you run down
+with it until the 1st.
 
-## The fix: 3 lines
+## The fix: name the job, give it a ceiling
 
 ```python
-from agentbill import meter
+from agentbill import AgentBillClient
 
-@meter(event="research_run", customer_id_from="customer_id", preflight=True)
-async def run_agent(customer_id: str, topic: str) -> str:
-    result = await call_your_llm(topic)
-    return result
+client = AgentBillClient(api_key="agb_your_key")
+
+# 1 unit = 1 cent here, so this job dies at $5 across every call,
+# tool and retry that passes the same task_ref.
+@client.gate(agent_id="researcher", task_ref="job-142",
+             task_ceiling=500, estimated_units=12)
+def run_agent(topic: str) -> str:
+    return call_your_llm(topic)
 ```
 
-That's it. AgentBill now:
-- Checks the customer's credit balance **before** the LLM call (`preflight=True`)
-- Records the credit usage **after** the function succeeds
-- Blocks the call with `BudgetExhaustedError` the moment the customer runs out. No surprise overages
+That's it. On every call AgentBill now:
+- Reserves the units **before** your provider call goes out, in the same statement that checks
+  them, so ten parallel calls cannot all be approved for the last 8 units
+- Refuses with `TaskCeilingExceededError` once the job's total would cross its ceiling
+- Records what the run actually used, and releases the reservation without billing if it raised
+
+`task_ref` is the whole idea: a second agent, a different tool and a retried step all pass the same
+one, and they are all checked against a single ceiling. `agent_id` is a label for attribution and
+carries no budget of its own.
 
 ---
 
@@ -54,39 +65,56 @@ npm install agentbill
 AGENTBILL_API_KEY=your_key_here
 ```
 
-### 2. Decorate your agent
+### 2. Put the ceiling on the job
+
+Two parameters do the work. `task_ref` is your name for this run, and every call that passes it is
+checked against the same ceiling. `task_ceiling` is that ceiling, in units you define, fixed by the
+first preflight of a new run; later values are ignored, so a retry cannot raise the ceiling it was
+meant to respect.
 
 ```python
-from agentbill import meter, BudgetExhaustedError
+from agentbill import AgentBillClient
 
-# Charge 1 credit per run
-@meter(event="research_run", customer_id_from="customer_id")
-async def run_agent(customer_id: str, topic: str) -> str:
-    ...
+client = AgentBillClient(api_key="agb_your_key")
 
-# Pre-flight: block BEFORE the LLM call if the customer is out of credits
-@meter(event="research_run", customer_id_from="customer_id", preflight=True)
-async def run_agent_safe(customer_id: str, topic: str) -> str:
-    ...
+# Explicit: preflight before, record after.
+client.preflight(agent_id="researcher", task_ref="job-142",
+                 task_ceiling=500, estimated_units=12)
 
-# Outcome-based: charge credits only if the task succeeded
-@meter(
-    event="ticket_resolved",
-    customer_id_from="customer_id",
-    units=lambda result: 5 if result["resolved"] else 0,
-)
-async def resolve_ticket(customer_id: str, ticket_id: str) -> dict:
-    ...
+result = call_your_llm("quarterly report")
+
+client.record(agent_id="researcher", task_ref="job-142", units=12)
 ```
 
-### 3. Handle credit exhaustion
+```python
+# Or let the decorator do both. On an exception it settles with success=False,
+# which releases the reservation instead of billing it.
+@client.gate(agent_id="researcher", task_ref="job-142",
+             task_ceiling=500, estimated_units=12)
+def run_agent(topic: str) -> str:
+    return call_your_llm(topic)
+```
+
+Every later call in the same run passes `task_ref` and nothing else about the budget. It does not
+need to know the ceiling, or what the calls before it spent:
 
 ```python
+# A different agent, a different tool, the same run and the same ceiling.
+client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
+```
+
+### 3. Handle the refusal
+
+The exception carries the numbers, so the handler can say what happened without a second call.
+
+```python
+from agentbill import TaskCeilingExceededError
+
 try:
-    result = await run_agent(customer_id="cust_123", topic="quarterly report")
-except BudgetExhaustedError as e:
-    # Show paywall, send upgrade email, pause the agent, your call
-    show_paywall(e.customer_id)
+    result = run_agent("quarterly report")
+except TaskCeilingExceededError as e:
+    # Stop the loop, alert, degrade, your call.
+    alert_ops(f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units")
 ```
 
 **One rule, identical in the Node SDK: it raises when your spend rule stopped the run, and returns a result when AgentBill's own billing did.**
@@ -113,38 +141,101 @@ if not check.approved:
 > still exported so your imports keep working, but nothing raises them any more. If you were
 > catching them, check `result.approved` instead. The other three are unchanged.
 
-### 4. Watch your dashboard
+### 4. Watch the console
 
-Open `https://agentbill.dev/app` and paste your API key to see live task budgets, every refusal, and each customer's credit usage:
+Open `https://agentbill.dev/app` and paste your API key:
 
-- Credit usage bar (turns red at 80%)
-- Remaining credits
-- BLOCKED badge when limit is hit
+- Live task burn-down: each job's ceiling, what it has spent, and what is still reserved
+- Every refusal, with the reason your code got back
+- Per-customer balances, key health, and this month's plan quota
+- What refuses a call on your account today, in the order preflight checks it
+
+There is no signup wall on the sample: `https://agentbill.dev/app?demo=1` is the same page with
+invented data.
+
+---
+
+## Task budgets: "this job dies at $5"
+
+The same mechanism as the Quick start, with the two pieces that section left out: what the refusal
+carries, and how to read a job's burn-down while it runs. The ceiling is fixed on the first
+preflight; every later call reserves against the same budget, and the call that would cross it is
+refused before the money is spent.
+
+```python
+from agentbill import AgentBillClient, TaskCeilingExceededError
+
+client = AgentBillClient(api_key="agb_...")
+
+# First call creates the task with its ceiling
+client.preflight("researcher", estimated_units=2,
+                 task_ref="job-42", task_ceiling=50)
+
+# ... run your LLM / tool call, then record what actually happened
+client.record("researcher", units=2, task_ref="job-42")
+
+# Every later call just names the task
+try:
+    client.preflight("researcher", estimated_units=10, task_ref="job-42")
+except TaskCeilingExceededError as e:
+    print(f"job-42 is done: {e.task_used_units}/{e.task_ceiling} units spent")
+
+# Live burn-down
+status = client.get_task("job-42")
+print(status.used_units, "/", status.ceiling_units)
+```
+
+---
+
+## Retries and abandoned runs
+
+A reservation is placed by `preflight()` and released by `record()`. Two things can go wrong between them, and both are handled explicitly.
+
+**A retried preflight.** Without an idempotency key, retrying a timed-out check reserves the budget a second time, so the mechanism meant to prevent waste is the one consuming it. Pass a key that is stable across retries:
+
+```python
+from agentbill import AgentBillClient, PreflightInProgressError
+
+client = AgentBillClient(api_key="agb_...")
+
+try:
+    check = client.preflight(
+        "researcher", estimated_units=12,
+        task_ref="job-142", task_ceiling=500,
+        idempotency_key="job-142:summarize",   # stable across retries
+    )
+except PreflightInProgressError:
+    ...  # the original is still being decided. Not a block, nothing reserved.
+```
+
+Same key, same decision, one reservation.
+
+**A run that never comes back.** If the process dies between `preflight()` and `record()`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `check.reservation_expires_at`.
+
+Note the direction. An abandoned reservation makes the ceiling tighter, never looser. The gate does not open by accident.
+
+Settle every run, including the ones that fail. `record(..., success=False)` releases the reservation without billing, and the `gate` decorator does it for you.
 
 ---
 
 ## Node.js
 
 ```typescript
-import { meter, BudgetExhaustedError } from 'agentbill'
+import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-const runAgent = meter(
-  async ({ customerId, topic }: { customerId: string; topic: string }) => {
-    const result = await callLLM(topic)
-    return result
-  },
-  {
-    event: 'research_run',
-    customerIdFrom: 'customerId',
-    preflight: true,
-  }
-)
-
+// Reads AGENTBILL_API_KEY. The run dies at 500 units across every call
+// that passes job-142, however many that turns out to be.
 try {
-  await runAgent({ customerId: 'cust_123', topic: 'quarterly report' })
+  await preflight({ agentId: 'researcher', taskRef: 'job-142',
+                    taskCeiling: 500, estimatedUnits: 12 })
+
+  const result = await callLLM('quarterly report')
+
+  await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 } catch (e) {
-  if (e instanceof BudgetExhaustedError) {
-    showPaywall(e.customerId)
+  if (e instanceof TaskCeilingExceededError) {
+    // e.taskRef, e.taskCeiling, e.taskUsedUnits
+    stopTheLoop(e.taskRef)
   }
 }
 ```
@@ -204,24 +295,35 @@ If credits resolve to `0`, no event is recorded. The customer is not charged. Yo
 
 AgentBill is different in two ways:
 
-### 1. Pre-flight enforcement
+### 1. The ceiling is bound to a job, not to a month
 
-Metronome and Orb record usage *after the fact*. They have no way to stop an expensive operation before it starts.
+Metronome and Orb record usage *after the fact*. They have no way to stop an expensive operation
+before it starts.
 
-AgentBill checks the customer's credit balance **before** the LLM call runs. If they're out, the function never executes. No API call is made. No money is spent.
+Provider spend caps do stop things, and they are real. What they are bound to is a project, or an
+organization over a calendar month, or one session on that vendor's own harness. A 3-hour research
+loop spread across two providers and a scraping tool is none of those.
+
+AgentBill's ceiling is bound to a `task_ref` you choose. If the units already used plus this call's
+estimate would cross it, preflight answers `approved: false` and the SDK raises before your provider
+call goes out.
 
 ```
 Metronome/Orb:   run → bill → (oops, over budget)
-AgentBill:       check → [blocked if over budget] → run → bill
+Monthly cap:     run → run → run → ... → dark until the 1st
+AgentBill:       check this job's total → [refused] → run → settle
 ```
 
 This matters when a single agent run costs $0.80 on a good day and $43 on a bad one.
 
 ### 2. Lives inside your function
 
-Metronome requires you to emit events from your infrastructure. AgentBill is a decorator: it wraps your function directly and handles everything: pre-flight check, credit deduction, idempotency, error handling.
+Metronome requires you to emit events from your infrastructure. AgentBill is a decorator: it wraps
+your function directly and handles the preflight, the reservation, the settle, idempotency and error
+handling.
 
-No event pipelines. No webhooks to configure. One line.
+And there is no proxy in your request path. Your provider call is still yours; AgentBill answers a
+separate allow/deny question next to it.
 
 ---
 
@@ -242,7 +344,7 @@ AgentBill is designed for **atomic, short-running agent tasks**: functions that 
 
 These are real problems. They require a different architecture: event sourcing, state machines, reversal logic. If you're building at that level of complexity, AgentBill's current version isn't the right tool yet.
 
-For atomic tasks, it's 3 lines.
+For atomic tasks, it is one decorator.
 
 ---
 
@@ -252,40 +354,75 @@ For atomic tasks, it's 3 lines.
 Your agent code
      │
      ▼
-@meter decorator
+client.gate(task_ref=..., task_ceiling=...)   ← or preflight()/record() by hand
      │
-     ├─ [preflight=true] GET /budget → is_blocked? → raise BudgetExhaustedError
+     ├─ POST /preflight → reserve the units in the same statement that checks them
+     │     │
+     │     ├─ over the task ceiling  → raise TaskCeilingExceededError, nothing reserved
+     │     ├─ over the per-call ceiling → raise CeilingExceededError
+     │     ├─ customer out of budget → raise BudgetExhaustedError
+     │     └─ our own quota gone    → return approved=False with .upgrade_url, never raise
      │
-     ├─ Run your function (LLM call happens here)
+     ├─ Run your function (LLM or tool call happens here)
      │
-     ├─ [function succeeded] POST /events → record credits used
+     ├─ [succeeded] POST /events → settle the reservation with what it really used
      │
-     └─ Return result
+     └─ [raised]    POST /events success=False → release the reservation, bill nothing
 ```
 
-Credits are recorded **after success only**. If your agent throws, the customer is not charged.
+Nothing is billed for a run that raised. And note which way an abandoned run fails: the units stay
+reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never looser.
 
 ---
 
 ## API reference
 
-### `@meter(event, options)`
+### `client.preflight(...)` and `@client.gate(...)`
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `event` | `str` | required | Event label, shown in dashboard |
+| `agent_id` | `str` | required | A label for attribution, not a budget. Nothing is capped by it. |
+| `task_ref` | `str` | none | Your name for this run. Every call passing it shares one ceiling. |
+| `task_ceiling` | `int` | none | The run's total, in units you define. Required on the first preflight of a new `task_ref`; ignored after. |
+| `estimated_units` | `int` | `1` | What this one call is worth. This is the amount reserved. |
+| `customer_id` | `str` | `"default"` | Your internal customer identifier. Carries its own balance. |
+| `idempotency_key` | `str` | none | Stable across retries: same key, same decision, one reservation. |
+| `ceiling` | `int` | none | Set on `AgentBillClient(...)`, not per call. Refuses any single call whose `estimated_units` exceed it. |
+
+### `@meter(event, options)`
+
+Separate tool, for **outcome-based metering** rather than enforcement: it records what a run was
+worth after the fact, with `units` as a function of the result.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `event` | `str` | required | Event label, shown in the console |
 | `customer_id` | `str` | none | Fixed customer identifier |
 | `customer_id_from` | `str` | none | Name of a function parameter to read customer_id from |
-| `units` | `int \| callable` | `1` | Credits per call, or a function `(result) -> int` returning 0 to skip billing |
-| `preflight` | `bool` | `False` | Check credit balance before running. Blocks immediately if exhausted. |
+| `units` | `int \| callable` | `1` | Units per call, or a function `(result) -> int` returning 0 to skip billing |
+| `task_ref` | `str` | none | Attributes the event to a task budget opened by `client.preflight(task_ref=..., task_ceiling=...)` |
 | `metadata` | `dict` | none | Static key-value pairs attached to every event |
+
+> **`preflight=True` on `@meter` is not the task ceiling.** It calls `GET /budget` and refuses only
+> if that customer's balance is already exhausted: no estimate, no per-call ceiling, no task
+> ceiling, and no reservation, so it gives you none of the concurrency guarantee above. Use
+> `@client.gate(...)` or `client.preflight(...)` for a ceiling. The option is kept for the accounts
+> that already depend on it.
 
 ### Exceptions
 
 | Exception | When |
 |---|---|
-| `BudgetExhaustedError` | Customer has 0 remaining credits (HTTP 402) |
+| `TaskCeilingExceededError` | The run's total would cross its `task_ceiling`. Carries `.task_ref`, `.task_ceiling`, `.task_used_units`, `.task_remaining_units` |
+| `TaskCeilingRequiredError` | A `task_ref` preflight has never seen arrived without a `task_ceiling` |
+| `CeilingExceededError` | `estimated_units` exceed the per-call `ceiling` set on the client |
+| `BudgetExhaustedError` | That customer's balance is gone |
+| `PreflightInProgressError` | A preflight with the same `idempotency_key` is still being decided |
 | `AgentBillError` | Network error or unexpected server response |
+
+`FreeTierExceededError` and `PlanLimitExceededError` are still exported but nothing raises them:
+AgentBill's own quota running out returns `approved=False` with `.upgrade_url` instead. Our billing
+must never crash your agent.
 
 ---
 
@@ -305,11 +442,11 @@ Requires: Node 20+, PostgreSQL 14+
 
 ## Roadmap
 
-- [x] Core metering (`POST /events`)
-- [x] Credit balance enforcement (HTTP 402)
-- [x] Pre-flight guardrails (`preflight=True`)
-- [x] Outcome-based billing (`units=lambda`)
-- [x] Live dashboard
+- [x] Core metering (`POST /events`), idempotent per `idempotency_key`
+- [x] Cross-call task ceilings (`task_ref` + `task_ceiling`), reserved atomically
+- [x] Per-call ceiling and per-customer balances
+- [x] Outcome-based metering (`units=lambda`)
+- [x] Live console at `/app`
 - [ ] Stripe Connect, bill your customers directly
 - [ ] Webhooks, alerts at 80% and 100% credit usage
 - [ ] Multi-signal outcome support
@@ -328,72 +465,3 @@ AgentBill handles all of that behind a single decorator.
 ---
 
 Built for developers who ship agents and want to get paid fairly for what they actually deliver.
-
-## Task budgets: "this job dies at $5"
-
-A task groups many calls, across providers and tools, under one hard
-cross-call ceiling. The ceiling is fixed on the first preflight; every later
-call reserves against the same budget, and the run that would cross it is
-blocked before the money is spent.
-
-```python
-from agentbill import AgentBillClient, TaskCeilingExceededError
-
-client = AgentBillClient(api_key="agb_...")
-
-# First call creates the task with its ceiling
-client.preflight("researcher", estimated_units=2,
-                 task_ref="job-42", task_ceiling=50)
-
-# ... run your LLM / tool call, then record what actually happened
-client.record("researcher", units=2, task_ref="job-42")
-
-# Every later call just names the task
-try:
-    client.preflight("researcher", estimated_units=10, task_ref="job-42")
-except TaskCeilingExceededError as e:
-    print(f"job-42 is done: {e.task_used_units}/{e.task_ceiling} units spent")
-
-# Live burn-down
-status = client.get_task("job-42")
-print(status.used_units, "/", status.ceiling_units)
-```
-
-Or wrap the whole thing with the gate decorator: preflight before, record
-after, reservation released automatically when the function raises:
-
-```python
-@client.gate("researcher", estimated_units=2,
-             task_ref="job-42", task_ceiling=50)
-def run_step(query: str) -> str:
-    return call_llm(query)
-```
-
-## Retries and abandoned runs
-
-A reservation is placed by `preflight()` and released by `record()`. Two things can go wrong between them, and both are handled explicitly.
-
-**A retried preflight.** Without an idempotency key, retrying a timed-out check reserves the budget a second time, so the mechanism meant to prevent waste is the one consuming it. Pass a key that is stable across retries:
-
-```python
-from agentbill import AgentBillClient, PreflightInProgressError
-
-client = AgentBillClient(api_key="agb_...")
-
-try:
-    check = client.preflight(
-        "researcher", estimated_units=12,
-        task_ref="job-142", task_ceiling=500,
-        idempotency_key="job-142:summarize",   # stable across retries
-    )
-except PreflightInProgressError:
-    ...  # the original is still being decided. Not a block, nothing reserved.
-```
-
-Same key, same decision, one reservation.
-
-**A run that never comes back.** If the process dies between `preflight()` and `record()`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `check.reservation_expires_at`.
-
-Note the direction. An abandoned reservation makes the ceiling tighter, never looser. The gate does not open by accident.
-
-Settle every run, including the ones that fail. `record(..., success=False)` releases the reservation without billing, and the `gate` decorator does it for you.

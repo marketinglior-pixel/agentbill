@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbill-sdk"
-version = "0.6.0"
-description = "Preflight spend control for AI agents. Block runaway loops before they start."
+version = "0.6.1"
+description = "One spend ceiling per agent job, enforced before the call goes out. Bound to a task_ref, not to a calendar month."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
