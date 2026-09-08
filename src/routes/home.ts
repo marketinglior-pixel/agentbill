@@ -1,4 +1,4 @@
-import { HEADLINE, INSTALL_PY } from '../ui/site.js'
+import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
@@ -10,6 +10,7 @@ import { PANEL_CSS, requestPanel, KEY_COMMANDS } from '../ui/panels.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { TABS_CSS, TABS_JS, TABS_HASH, langTabs } from '../ui/tabs.js'
 import { publicRoute } from '../middleware/auth.js'
+import { softwareLd } from '../ui/ld.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 // The page is a Split Studio: every claim below the fold sits beside a panel
@@ -214,27 +215,11 @@ export async function homeRoute(app: FastifyInstance) {
       og: {
         description: 'One ceiling per task_ref, consulted before each call, on units you define. Not per project, not per calendar month.',
       },
-      // Offers render from PLAN_ORDER / PLAN_PRICES / PLAN_LIMITS rather than
-      // being typed here. A price written twice is a price that will disagree
-      // with itself, and this one would disagree with the table 200px below it.
-      jsonLd: {
-        '@context': 'https://schema.org',
-        '@type': 'SoftwareApplication',
-        '@id': 'https://agentbill.dev/#software',
-        name: 'AgentBill',
-        applicationCategory: 'DeveloperApplication',
-        operatingSystem: 'Any',
-        description: 'A per-task spend ceiling for AI agents, bound to a task_ref and checked before each call, on units the developer defines.',
-        url: 'https://agentbill.dev',
-        provider: { '@id': 'https://agentbill.dev/#organization' },
-        offers: PLAN_ORDER.map((tier) => ({
-          '@type': 'Offer',
-          name: tier[0].toUpperCase() + tier.slice(1),
-          price: String(PLAN_PRICES[tier]),
-          priceCurrency: 'USD',
-          description: `${PLAN_LIMITS[tier].toLocaleString('en-US')} preflight calls/month`,
-        })),
-      },
+      // The product entity lives in ui/ld.ts and is emitted identically here
+      // and on /pricing under one @id. It used to be typed in both files and
+      // the two copies had already drifted apart.
+      jsonLd: softwareLd(),
+      mainEntity: `${ORIGIN}/#software`,
       // meta keywords has been ignored by every major engine since 2009. It was
       // 300 bytes on the most-fetched page of the site.
       extraHead: pixelSnippet(),

@@ -271,6 +271,8 @@ type ShellOpts = {
   extraHead?: string
   /** JSON-LD for this page, beside the automatic Organization and WebSite. */
   jsonLd?: unknown | unknown[]
+  /** @id of the entity this page is about. See HeadOpts.mainEntity. */
+  mainEntity?: string
   /** Share-card overrides. Type and description only; the title is the page's. */
   og?: { type?: string; title?: string; description?: string }
   /** Page-specific CSS, appended after DOCS_CSS. */
@@ -310,6 +312,9 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
     ld: {
       '@context': 'https://schema.org',
       '@type': 'BreadcrumbList',
+      // Named so the page's WebPage node can point at it. An unnamed node is
+      // one a `breadcrumb` reference would dangle against.
+      '@id': `${abs(path)}#breadcrumb`,
       itemListElement: trail.map((t, i) => ({
         '@type': 'ListItem',
         position: i + 1,
@@ -321,7 +326,7 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, og, css = '', current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
@@ -331,8 +336,8 @@ export function docsShell({ title, description, path, extraHead, jsonLd, og, css
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : ''
-  return `${head({ title, description, path, jsonLd: ld, og, css: `${DOCS_CSS}${css}`, extraHead,
-                    scriptHashes: [DOCS_HASH] })}
+  return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
+                    css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
 <body>
 ${siteNav(current)}
 <div class="docs${wantRail ? '' : ' no-rail'}">

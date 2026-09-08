@@ -18,9 +18,18 @@ function page(path: string, title: string, description: string, body: string) {
     // A guide is a technical article. datePublished and dateModified come from
     // the registry, which is also what the sitemap's lastmod reads, so the two
     // cannot claim different things about the same page.
+    //
+    // `description` is the field an answer engine quotes: it is both the meta
+    // description and this node's own description, so a claim written here is
+    // shipped twice. /docs/task-budgets used to end it with "the per-run cap
+    // that OpenAI, Google, AWS and Anthropic spend limits do not give you",
+    // which is a negative capability claim about four vendors that nothing
+    // re-verifies and that any one of them can turn with a release. It now
+    // states our own binding instead, which no release of theirs can falsify.
     jsonLd: {
       '@context': 'https://schema.org',
       '@type': 'TechArticle',
+      '@id': `https://agentbill.dev${path}#techarticle`,
       headline: title,
       description,
       url: `https://agentbill.dev${path}`,
@@ -31,6 +40,7 @@ function page(path: string, title: string, description: string, body: string) {
       publisher: { '@id': 'https://agentbill.dev/#organization' },
       isPartOf: { '@id': 'https://agentbill.dev/#website' },
     },
+    mainEntity: `https://agentbill.dev${path}#techarticle`,
     body: `${body}
   <div class="also">
     <p>Related guides</p>
@@ -48,7 +58,7 @@ export async function guidesRoute(app: FastifyInstance) {
     return reply.type('text/html').send(page(
       '/docs/task-budgets',
       'Task budgets, a hard cost ceiling per agent job',
-      'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. Cross-call budget ceilings with per-agent attribution, the per-run cap that OpenAI, Google, AWS and Anthropic spend limits do not give you.',
+      'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. The ceiling is bound to the job rather than to a project, an organization or a calendar month, and every process that passes that task_ref draws on the same number.',
       `
   <h1>Task budgets, the job dies at your number</h1>
   <p>Provider spend caps stop at monthly totals for one vendor: no per-run ceiling, no

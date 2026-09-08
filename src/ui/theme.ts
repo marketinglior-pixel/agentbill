@@ -237,6 +237,21 @@ type HeadOpts = {
   og?: { type?: string; title?: string; description?: string }
   /** JSON-LD for this page. The sitewide Organization and WebSite are automatic. */
   jsonLd?: unknown | unknown[]
+  /**
+   * @id of the entity this page is primarily about, e.g. the #software node or
+   * this page's own #techarticle. Emitted as WebPage.mainEntity, which is the
+   * one field that tells a reader which of the several nodes on the page is the
+   * subject rather than the furniture.
+   */
+  mainEntity?: string
+  /**
+   * True when the caller ALSO emits a BreadcrumbList carrying this page's
+   * #breadcrumb @id. Passed rather than derived from the registry: /pricing has
+   * crumbs in PAGES and deliberately draws none, so a registry-derived link
+   * would point at a node that is not in the document. Only docsShell, which
+   * actually emits one, sets it.
+   */
+  breadcrumb?: boolean
   /** Emit robots noindex. Derived from the registry when `path` is given. */
   noindex?: boolean
   /**
@@ -287,6 +302,43 @@ function sitewideLd(): unknown[] {
   ]
 }
 
+/**
+ * One node per indexable page, joining the URL to the entity it is about.
+ *
+ * Without it, Organization, WebSite, SoftwareApplication, BreadcrumbList and
+ * the article nodes are five islands on one page with nothing saying which of
+ * them the page is FOR. That is the question an answer engine is actually
+ * asking, and mainEntity is the field that answers it.
+ *
+ * It lives in head() rather than in each route because a route that forgets it
+ * leaves its own article node dangling, and the failure is invisible.
+ */
+function webPageLd(
+  href: string,
+  path: string | undefined,
+  title: string,
+  description: string | undefined,
+  lang: string,
+  mainEntity: string | undefined,
+  breadcrumb: boolean | undefined,
+): unknown {
+  const meta = path ? byPath.get(path) : undefined
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    '@id': `${href}#webpage`,
+    url: href,
+    name: title,
+    ...(description ? { description } : {}),
+    inLanguage: lang === 'he' ? 'he-IL' : 'en-US',
+    isPartOf: { '@id': `${ORIGIN}/#website` },
+    ...(meta?.updated ? { dateModified: meta.updated } : {}),
+    primaryImageOfPage: { '@type': 'ImageObject', url: `${ORIGIN}/og.png`, width: 1200, height: 630 },
+    ...(mainEntity ? { mainEntity: { '@id': mainEntity } } : {}),
+    ...(breadcrumb ? { breadcrumb: { '@id': `${href}#breadcrumb` } } : {}),
+  }
+}
+
 /** Doctype through <body>. Every HTML route opens with this. */
 /**
  * Emitted by every page. Until this existed the site had no favicon at all and
@@ -303,7 +355,7 @@ const ICONS = `  <meta name="color-scheme" content="dark" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir }: HeadOpts): string {
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
   // A canonical on a noindex page is two contradictory signals about one URL.
@@ -316,7 +368,11 @@ export function head({ title, description, path, canonical, css = '', extraHead 
   const card = `${ORIGIN}/og.png`
   const ogTitle = og?.title ?? title
   const ogDesc = og?.description ?? description ?? ''
-  const blocks = hidden ? [] : [...sitewideLd(), ...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [])]
+  const blocks = hidden ? [] : [
+    ...sitewideLd(),
+    ...(href ? [webPageLd(href, path, title, description, lang, mainEntity, breadcrumb)] : []),
+    ...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []),
+  ]
   // Delivered as a meta rather than a header so it lives beside the head it
   // describes, and because the one directive a meta cannot carry,
   // frame-ancestors, is already covered by X-Frame-Options: DENY in

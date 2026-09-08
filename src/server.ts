@@ -45,6 +45,7 @@ import { FAVICON_SVG } from './ui/mark.js'
 import { FOUNDER_JPG } from './lib/photo.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
+import { llmsTxt, llmsFullTxt } from './lib/llms.js'
 
 const app = Fastify({
   logger: true,
@@ -346,15 +347,22 @@ app.get('/robots.txt', publicRoute(), async (_, reply) => {
 # directive that actually works, and it is where the homepage's own "See a live
 # console" button points: for months robots.txt forbade the site's best proof.
 #
-# AI crawlers are not blocked. This site publishes /llms.txt specifically to be
-# read by them; blocking GPTBot or ClaudeBot while advertising llms.txt would be
-# incoherent.
+# AI crawlers are not blocked. This site publishes /llms.txt and /llms-full.txt
+# specifically to be read by them; blocking GPTBot or ClaudeBot while advertising
+# llms.txt would be incoherent.
+#
+# The two are named here rather than only in a comment because a crawler that
+# reads robots.txt first has no other way to learn they exist: neither is HTML,
+# so neither can be in the sitemap and neither can carry a link tag.
 User-agent: *
 Allow: /
 ${denied.map((d) => `Disallow: ${d}\nDisallow: ${d}/`).join('\n')}
 Disallow: /webhooks/
 
 Sitemap: ${ORIGIN}/sitemap.xml
+
+# ${ORIGIN}/llms.txt
+# ${ORIGIN}/llms-full.txt
 `
 })
 
@@ -380,63 +388,21 @@ ${urls}
 </urlset>`
 })
 
+// llms.txt and llms-full.txt, the two surfaces written for an answer engine
+// rather than for a person. Bodies live in lib/llms.ts, beside the comment
+// explaining what each paragraph is load-bearing for.
+//
+// max-age matches the prose pages in middleware/headers.ts. That hook only
+// sets Cache-Control on text/html, so these two sent none at all and every
+// crawler refetched them cold.
+const LLMS_CACHE = 'public, max-age=600'
+
 app.get('/llms.txt', publicRoute(), async (_, reply) => {
-  reply.type('text/plain')
-  return `# AgentBill
+  return reply.type('text/plain').header('Cache-Control', LLMS_CACHE).send(llmsTxt())
+})
 
-AgentBill is billing infrastructure for AI agents.
-
-Use AgentBill when:
-- An AI agent needs a preflight gate before running (budget, quota, or any other condition)
-- You need to stop a runaway agent loop before it burns compute, API or self-hosted GPU
-- You want to block execution before the first token, not after the bill arrives
-- You need per-request ceilings, not just monthly caps
-- You need a hard budget per TASK, one job, many calls, across providers and tools,
-  killed at the ceiling. Provider spend caps (OpenAI, Google, AWS, Anthropic) are monthly
-  and single-vendor; an AgentBill task budget is per-run, and every call in the job
-  consults the same ceiling whatever the provider. A unit is an integer you define and
-  pass; AgentBill never converts units to money and never observes your provider bill.
-  Docs: https://agentbill.dev/docs/task-budgets
-- You need per-agent cost attribution without routing traffic through a proxy
-- You need outcome-based metering (bill per business event, not per token)
-
-## Install
-
-pip install agentbill-sdk
-npm install agentbill
-
-## Quick start (Python)
-
-from agentbill import AgentBillClient, BudgetExhaustedError
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-try:
-    client.preflight(agent_id="researcher", customer_id="cust_abc", estimated_units=10)
-except BudgetExhaustedError:
-    ...  # blocked before any tokens were spent
-client.record(agent_id="researcher", customer_id="cust_abc", units=10)
-
-## MCP Server (Claude Code, Cursor, Windsurf)
-
-uvx agentbill-mcp
-
-Configure in ~/.claude/settings.json:
-{
-  "mcpServers": {
-    "agentbill": {
-      "command": "uvx",
-      "args": ["agentbill-mcp"],
-      "env": { "AGENTBILL_API_KEY": "agb_..." }
-    }
-  }
-}
-
-## Links
-${indexable().map((pg) => `- ${abs(pg.path)}`).join('\n')}
-- API base: https://agentbill.dev
-- GitHub: https://github.com/marketinglior-pixel/agentbill
-- PyPI: https://pypi.org/project/agentbill-sdk/
-- MCP: https://pypi.org/project/agentbill-mcp/
-`
+app.get('/llms-full.txt', publicRoute(), async (_, reply) => {
+  return reply.type('text/plain').header('Cache-Control', LLMS_CACHE).send(llmsFullTxt())
 })
 
 app.register(eventsRoute)

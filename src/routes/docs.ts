@@ -2,6 +2,85 @@ import { FastifyInstance } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { KEY_CTA } from '../ui/chrome.js'
+import { byPath, ORIGIN } from '../ui/site.js'
+import { softwareLd, sourceLd } from '../ui/ld.js'
+
+// /docs carried no page-level structured data at all, while every guide under
+// it emitted a TechArticle. It is the second-highest priority page in the
+// registry and the one an answer engine reads to learn the integration, so the
+// gap mattered more here than anywhere else.
+//
+// dateModified reads PAGES, which is also what the sitemap's lastmod reads, so
+// the two cannot claim different things about one page. There is no
+// datePublished: the registry has none for this page and inventing one would be
+// a date nobody can check.
+const docsMeta = byPath.get('/docs')
+
+const docsArticleLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  '@id': `${ORIGIN}/docs#techarticle`,
+  headline: 'AgentBill documentation',
+  description:
+    'Add a per-task spend ceiling to an AI agent: preflight before the call, record after, on units you define. Python and Node SDKs.',
+  url: `${ORIGIN}/docs`,
+  dateModified: docsMeta?.updated,
+  inLanguage: 'en-US',
+  proficiencyLevel: 'Beginner',
+  author: { '@id': `${ORIGIN}/#organization` },
+  publisher: { '@id': `${ORIGIN}/#organization` },
+  isPartOf: { '@id': `${ORIGIN}/#website` },
+  about: { '@id': `${ORIGIN}/#software` },
+  hasPart: { '@id': `${ORIGIN}/docs#quickstart` },
+}
+
+// The three steps that are already on the page, and nothing else. Every `text`
+// below is lifted from the rendered body: step 1 from the pre, steps 2 and 3
+// from the paragraph under each heading. Structured steps a reader cannot see
+// are a claim the page does not support, so if that copy changes this must
+// change in the same commit. totalTime is PT2M because the visible h2 says
+// "Quick Start, 2 minutes".
+//
+// Worth knowing before anyone counts on it: Google retired the HowTo rich
+// result in 2023. This buys no carousel. What it buys is a machine-readable
+// "here are the three steps" for an answer engine, which is what this page is
+// most often read by.
+const quickStartLd = {
+  '@context': 'https://schema.org',
+  '@type': 'HowTo',
+  '@id': `${ORIGIN}/docs#quickstart`,
+  name: 'Quick Start, 2 minutes',
+  description:
+    'Install the SDK, get an API key, and give one job a ceiling that every call sharing its task_ref is checked against.',
+  totalTime: 'PT2M',
+  inLanguage: 'en-US',
+  isPartOf: { '@id': `${ORIGIN}/docs#techarticle` },
+  supply: { '@type': 'HowToSupply', name: 'An AgentBill API key, free, no credit card' },
+  tool: { '@type': 'HowToTool', name: 'agentbill-sdk for Python' },
+  step: [
+    {
+      '@type': 'HowToStep',
+      position: 1,
+      name: 'Step 1, Install',
+      text: 'pip install agentbill-sdk',
+      url: `${ORIGIN}/docs#step-install`,
+    },
+    {
+      '@type': 'HowToStep',
+      position: 2,
+      name: 'Step 2, Get your API key',
+      text: 'Register at agentbill.dev/register, free, no credit card. Your key starts with agb_.',
+      url: `${ORIGIN}/docs#step-api-key`,
+    },
+    {
+      '@type': 'HowToStep',
+      position: 3,
+      name: 'Step 3, Give the job a ceiling',
+      text: 'Pass the same task_ref on every call the job makes. They are all checked against one ceiling, and the first preflight of a new task is the one that fixes it.',
+      url: `${ORIGIN}/docs#step-ceiling`,
+    },
+  ],
+}
 
 export async function docsRoute(app: FastifyInstance) {
   app.get('/docs', publicRoute(), async (request, reply) => {
@@ -12,19 +91,21 @@ export async function docsRoute(app: FastifyInstance) {
       // This page used to carry og and twitter tags and no og:image at all, so
       // every share of the docs was a card with no art.
       og: { description: 'Add a per-task spend ceiling to your AI agent. Preflight before the call, record after. Python and Node SDKs.' },
+      jsonLd: [docsArticleLd, quickStartLd, softwareLd(), ...sourceLd()],
+      mainEntity: `${ORIGIN}/docs#techarticle`,
       body: `
   <h1>Documentation</h1>
   <p class="lede">Everything you need to add preflight billing to your agents.</p>
 
   <h2>Quick Start, 2 minutes</h2>
 
-  <h3>Step 1, Install</h3>
+  <h3 id="step-install">Step 1, Install</h3>
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
-  <h3>Step 2, Get your API key</h3>
+  <h3 id="step-api-key">Step 2, Get your API key</h3>
   <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
-  <h3>Step 3, Give the job a ceiling</h3>
+  <h3 id="step-ceiling">Step 3, Give the job a ceiling</h3>
   <p>Pass the same <span class="inline">task_ref</span> on every call the job makes. They are all
   checked against one ceiling, and the first preflight of a new task is the one that fixes it.</p>
   <div class="code"><pre>

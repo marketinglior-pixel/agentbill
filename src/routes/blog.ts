@@ -50,6 +50,7 @@ const dateline = (path: Post['path']): string =>
 const postLd = (path: Post['path']) => ({
   '@context': 'https://schema.org',
   '@type': 'BlogPosting',
+  '@id': `https://agentbill.dev${path}#post`,
   headline: post(path).title,
   description: post(path).description,
   url: `https://agentbill.dev${path}`,
@@ -69,6 +70,7 @@ export async function blogRoute(app: FastifyInstance) {
       title: `${post('/blog/how-preflight-avoids-double-billing').title} · AgentBill`,
       description: post('/blog/how-preflight-avoids-double-billing').description,
       jsonLd: postLd('/blog/how-preflight-avoids-double-billing'),
+      mainEntity: 'https://agentbill.dev/blog/how-preflight-avoids-double-billing#post',
       og: { type: 'article' },
       current: '',
       body: `
@@ -280,6 +282,7 @@ record(units=7)
       title: `${post('/blog/monthly-caps-wont-save-you').title} · AgentBill`,
       description: post('/blog/monthly-caps-wont-save-you').description,
       jsonLd: postLd('/blog/monthly-caps-wont-save-you'),
+      mainEntity: 'https://agentbill.dev/blog/monthly-caps-wont-save-you#post',
       og: { type: 'article' },
       current: '',
       body: `
@@ -440,6 +443,7 @@ async function runAgentSafely(customerId: string, task: string) {
       // No rail: on an index the h2s are the content, so a rail listing them
       // would be the same two titles printed twice on one screen.
       rail: false,
+      mainEntity: 'https://agentbill.dev/blog#blog',
       jsonLd: {
         '@context': 'https://schema.org',
         '@type': 'Blog',

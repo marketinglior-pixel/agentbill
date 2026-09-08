@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { checkoutPath, createCheckoutSession, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
+import { softwareLd } from '../ui/ld.js'
+import { ORIGIN } from '../ui/site.js'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { PANEL_CSS } from '../ui/panels.js'
@@ -92,25 +94,8 @@ export async function upgradeRoute(app: FastifyInstance) {
       // /pricing, which is the registry's only entry for the page.
       path: '/pricing',
       og: { description: `Free: ${num(PLAN_LIMITS.free)} preflight calls/month. ${paidSummary}. Hard per-task ceilings, cross-provider, no proxy.` },
-      jsonLd: {
-        '@context': 'https://schema.org',
-        '@type': 'SoftwareApplication',
-        // Same @id as the homepage on purpose: two pages describing one product
-        // should merge into one entity rather than compete as two.
-        '@id': 'https://agentbill.dev/#software',
-        name: 'AgentBill',
-        applicationCategory: 'DeveloperApplication',
-        operatingSystem: 'Any',
-        url: 'https://agentbill.dev',
-        provider: { '@id': 'https://agentbill.dev/#organization' },
-        offers: PLAN_ORDER.map((tier) => ({
-          '@type': 'Offer',
-          name: tier[0].toUpperCase() + tier.slice(1),
-          price: String(PLAN_PRICES[tier]),
-          priceCurrency: 'USD',
-          description: `${num(PLAN_LIMITS[tier])} preflight calls/month`,
-        })),
-      },
+      jsonLd: softwareLd(),
+      mainEntity: `${ORIGIN}/#software`,
       extraHead: pixelSnippet(),
       scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),

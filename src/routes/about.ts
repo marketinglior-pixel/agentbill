@@ -52,6 +52,7 @@ export async function aboutRoute(app: FastifyInstance) {
       jsonLd: {
         '@context': 'https://schema.org',
         '@type': 'AboutPage',
+        '@id': 'https://agentbill.dev/about#aboutpage',
         url: 'https://agentbill.dev/about',
         mainEntity: { '@id': 'https://agentbill.dev/#organization' },
       },
