@@ -54,8 +54,15 @@ export async function upgradeRoute(app: FastifyInstance) {
   const pricingPage = async (request: FastifyRequest, reply: FastifyReply) => {
     const accountId = ((request.query as any).account_id as string) ?? ''
 
+    // With ?account_id (preflight's upgrade_url, the console's "raise the
+    // ceiling" link) the button is a real checkout session for that account.
+    // Without it, the button goes to /app/upgrade/:tier, which can see the
+    // console session this page cannot (the cookie is scoped to /app) and
+    // either hands a signed-in buyer straight to Polar or asks for the key
+    // once. It used to go to /register, which sent a buyer who already had an
+    // account off to sign up again.
     const cta = (tier: string) =>
-      accountId ? checkoutPath(tier, accountId) : '/register'
+      accountId ? checkoutPath(tier, accountId) : `/app/upgrade/${tier}`
 
     const paidSummary = PLAN_ORDER.filter((t) => t !== 'free')
       .map((t) => `${t[0].toUpperCase()}${t.slice(1)} $${PLAN_PRICES[t]}`).join('. ')

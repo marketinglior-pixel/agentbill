@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { sql } from '../db/index.js'
-import { PLAN_LIMITS } from '../integrations/polar.js'
+import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
 import { clientIp } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
@@ -35,6 +35,27 @@ const LOGIN_LIMIT = 20
 const LOGIN_WINDOW_MS = 15 * 60_000
 const loginHits = new Map<string, number[]>()
 
+// img-src and manifest-src are here because head() emits the favicon and
+// manifest links on every page, and this is the one page with a real CSP:
+// under default-src 'none' the browser blocked all four and logged a
+// violation for each on every load. 'self' only, plus data: for the one
+// inline SVG the site uses as a select arrow.
+//
+// form-action 'self' has a consequence the checkout hand-off is built around:
+// Chrome enforces it against EVERY redirect that follows a form POST, so a
+// login that 303s into a redirect chain ending at polar.sh is blocked at the
+// last hop, silently. The hand-off below therefore lands on a 200 page and
+// hops from there.
+const APP_CSP = "default-src 'none'; img-src 'self' data:; manifest-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+
+// The only place a post-login redirect may go. Anything else, a full URL
+// included, is dropped and the login lands on /app as it always has, so this
+// cannot become an open redirect however the query is edited.
+const NEXT_RE = /^\/app\/upgrade\/(builder|team|scale)$/
+const safeNext = (v: unknown): string => (typeof v === 'string' && NEXT_RE.test(v) ? v : '')
+const TIERS = new Set(['builder', 'team', 'scale'])
+const back = (err: string, next: string) => `/app?err=${err}${next ? `&next=${encodeURIComponent(next)}` : ''}`
+
 type Viewer = {
   keyId: string
   apiKey: string
@@ -61,12 +82,7 @@ export async function appRoute(app: FastifyInstance) {
     reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
       .header('X-Robots-Tag', 'noindex')
       .header('X-Content-Type-Options', 'nosniff')
-      // img-src and manifest-src are here because head() emits the favicon and
-      // manifest links on every page, and this is the one page with a real CSP:
-      // under default-src 'none' the browser blocked all four and logged a
-      // violation for each on every load. 'self' only, plus data: for the one
-      // inline SVG the site uses as a select arrow.
-      .header('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; manifest-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+      .header('Content-Security-Policy', APP_CSP)
     const q = request.query as Record<string, unknown>
     const demo = q?.demo === '1'
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
@@ -81,7 +97,7 @@ export async function appRoute(app: FastifyInstance) {
     // made ?demo=1 reachable only to people who had already signed up.
     if (!viewer) {
       if (demo) return reply.send(consolePage({ v: DEMO_VIEWER, d: demoConsole(filter, RANGES[range].days), demo: true, anon: true, range, view, filter }))
-      return reply.send(loginPage(typeof q?.err === 'string' ? q.err : ''))
+      return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
     }
 
     const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
@@ -100,7 +116,11 @@ export async function appRoute(app: FastifyInstance) {
 
     const body = request.body as Record<string, unknown>
     const key = typeof body?.api_key === 'string' ? body.api_key.trim() : ''
-    if (!/^[A-Za-z0-9_-]{8,200}$/.test(key)) return reply.redirect('/app?err=key', 303)
+    // Where to go after a good login. Validated, and carried across a failed
+    // attempt so a buyer who mistypes the key is not dropped back on /app with
+    // the tier forgotten.
+    const next = safeNext(body?.next)
+    if (!/^[A-Za-z0-9_-]{8,200}$/.test(key)) return reply.redirect(back('key', next), 303)
 
     // Decided in SQL, same reason as the API middleware: revoked_at is written
     // by the database clock, so an app-side comparison turns clock skew into a
@@ -113,21 +133,47 @@ export async function appRoute(app: FastifyInstance) {
       WHERE api_key = ${key}
       LIMIT 1
     `
-    if (!row) return reply.redirect('/app?err=key', 303)
-    if (row.isRevoked) return reply.redirect('/app?err=revoked', 303)
-    if (row.isExpired) return reply.redirect('/app?err=expired', 303)
+    if (!row) return reply.redirect(back('key', next), 303)
+    if (row.isRevoked) return reply.redirect(back('revoked', next), 303)
+    if (row.isExpired) return reply.redirect(back('expired', next), 303)
 
     reply.header(
       'Set-Cookie',
       `${COOKIE}=${mintToken(row.id as string, secret)}; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=${MAX_AGE}`,
     )
-    return reply.redirect('/app', 303)
+    return reply.redirect(next || '/app', 303)
   })
 
   app.post('/app/logout', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     reply.header('Set-Cookie', `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=0`)
     return reply.redirect('/app', 303)
+  })
+
+  // Where the paid buttons on /pricing point. The pricing page cannot see the
+  // console session (the cookie is scoped Path=/app, deliberately), so it sends
+  // the click here, where the session IS visible, and this route decides:
+  //
+  //   session       a 200 hand-off page that refreshes into /checkout/:tier for
+  //                 that account. A page, not a redirect: see APP_CSP for why a
+  //                 redirect chain from the login form is blocked in Chrome.
+  //   no session    the login page, with this path as its validated next, so
+  //                 one paste of the key lands the buyer back here and on into
+  //                 checkout. The page tells someone with no key where to get
+  //                 one; it does not try to register them.
+  //
+  // Until 2026-09-09 those buttons went to /register for anyone not carrying
+  // ?account_id, so a ready buyer with an account was sent to sign up again.
+  app.get('/app/upgrade/:tier', publicRoute(), async (request, reply) => {
+    const tier = (request.params as { tier: string }).tier
+    if (!TIERS.has(tier)) return reply.redirect('/pricing', 302)
+    const viewer = await loadSession(request)
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', APP_CSP)
+    if (!viewer) return reply.send(loginPage('', `/app/upgrade/${tier}`))
+    return reply.send(handoffPage(tier, checkoutPath(tier, viewer.accountId)))
   })
 }
 
@@ -1223,21 +1269,61 @@ const ERRORS: Record<string, string> = {
   unavailable: 'Sign-in is not configured on this server.',
 }
 
-function loginPage(err: string): string {
-  return `${HEAD('Console')}
+/**
+ * `next` is already validated by the caller (safeNext), so the only values
+ * that reach here are /app/upgrade/<tier>. When it is set the page is a sign-in
+ * on the way to checkout and says so; the form carries it as a hidden field
+ * and /app/session honours it after a good login.
+ */
+function loginPage(err: string, next = ''): string {
+  const tier = next ? next.slice(next.lastIndexOf('/') + 1) : ''
+  const tierName = tier ? tier[0].toUpperCase() + tier.slice(1) : ''
+  return `${HEAD(tier ? `Sign in to buy ${tierName}` : 'Console')}
 <body>
   <nav class="top" aria-label="Account"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
   <div class="login frame">
-    <h1>Your console</h1>
-    <p>Live task budgets, every call refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>
+    ${tier
+      ? `<h1>Sign in to buy ${esc(tierName)}.</h1>
+    <p>Paste the API key of the account that should carry the plan. After that you go straight to checkout.
+       No key yet? <a href="/register">Get a free one</a> in 30 seconds, then come back to this page.</p>`
+      : `<h1>Your console</h1>
+    <p>Live task budgets, every call refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>`}
     ${Object.hasOwn(ERRORS, err) ? `<p class="err">${esc(ERRORS[err])}</p>` : ''}
     <form method="POST" action="/app/session" autocomplete="off">
+      ${next ? `<input type="hidden" name="next" value="${esc(next)}" />` : ''}
       <label for="api_key">API key</label>
       <input id="api_key" name="api_key" type="password" placeholder="agb_..." autofocus required />
-      <button class="btn" type="submit">Open console &rarr;</button>
+      <button class="btn" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
     </form>
     <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and dies with the key. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
     <p class="fine">No longer have the key? <a href="/recover">Get back in</a> with the email you registered with.</p>
+  </div>
+</body>
+</html>`
+}
+
+/**
+ * The 200 page between a signed-in click on /pricing and Polar. It refreshes
+ * into /checkout/:tier at once; the link is the fallback for a client that
+ * ignores meta refresh. A page rather than a 302 on purpose: a redirect chain
+ * that starts at the login form and ends at polar.sh is what Chrome's
+ * form-action check blocks, and the block is silent. See APP_CSP.
+ */
+function handoffPage(tier: string, to: string): string {
+  const name = tier[0].toUpperCase() + tier.slice(1)
+  return `${head({
+    title: `Opening checkout for ${esc(name)} · AgentBill`,
+    description: 'Handing this account to Polar for checkout.',
+    path: '/app',
+    css: CSS,
+    extraHead: `<meta http-equiv="refresh" content="0;url=${esc(to)}">`,
+  })}
+<body>
+  <nav class="top" aria-label="Account"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
+  <div class="login frame">
+    <h1>Opening checkout for ${esc(name)}.</h1>
+    <p>Polar takes the payment, and the plan lands on the account you are signed in as.
+       If nothing happens in a second, <a href="${esc(to)}">continue to checkout</a>.</p>
   </div>
 </body>
 </html>`

@@ -61,7 +61,9 @@ SQL
 
 (cd "$ROOT" && npm run build --silent)
 
-DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+# APP_SESSION_SECRET so the console login is real in the harness: without it
+# every login answers err=unavailable and the checkout hand-off cannot be tested.
+DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break

@@ -597,6 +597,41 @@ const otherRow = Number((await sql`
   SELECT count(*) AS n FROM customers WHERE customer_ref='cust_put' AND account_id <> ${ACCT}`)[0].n)
 ok('the write stays inside the caller account', otherPut.status === 200 && otherRow === 0, String(otherRow))
 
+// ---------------------------------------------------------------- 7: checkout hand-off
+// /pricing's paid buttons point at /app/upgrade/:tier. The pricing page cannot
+// see the console session (cookie is Path=/app), so this route does the
+// deciding. What must hold: no session shows a login carrying the tier as a
+// validated next; a forged next is dropped, never echoed; a real login with a
+// next lands on the upgrade page; and with a session the page is a 200
+// hand-off, not a redirect chain, because Chrome enforces form-action 'self'
+// against every redirect after a form POST and would block the polar.sh hop.
+console.log('\n[7] pricing hands a keyed account to checkout without re-registering')
+const nav = (path, init = {}) => fetch(`${API}${path}`, { redirect: 'manual', ...init })
+const FORM = { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }
+let r7 = await nav('/app/upgrade/team')
+let html7 = await r7.text()
+ok('no session: the login page, not a redirect', r7.status === 200, String(r7.status))
+ok('and it carries the tier as a validated next', html7.includes('name="next" value="/app/upgrade/team"'))
+ok('and it says what the sign-in is for', html7.includes('Sign in to buy Team'))
+r7 = await nav('/app/upgrade/nope')
+ok('an unknown tier goes back to pricing', r7.status === 302 && (r7.headers.get('location') ?? '').endsWith('/pricing'), `${r7.status} ${r7.headers.get('location')}`)
+r7 = await nav('/app/session', { method: 'POST', headers: FORM, body: 'api_key=agb_notarealkey_0000&next=https%3A%2F%2Fevil.example%2F' })
+let loc7 = r7.headers.get('location') ?? ''
+ok('a forged next is dropped on the error path, never echoed', r7.status === 303 && loc7 === '/app?err=key', loc7)
+r7 = await nav('/app/session', { method: 'POST', headers: FORM, body: 'api_key=agb_notarealkey_0000&next=%2Fapp%2Fupgrade%2Fteam' })
+loc7 = r7.headers.get('location') ?? ''
+ok('a valid next survives a failed login', r7.status === 303 && loc7 === '/app?err=key&next=%2Fapp%2Fupgrade%2Fteam', loc7)
+r7 = await nav('/app/session', { method: 'POST', headers: FORM, body: `api_key=${KEY}&next=%2Fapp%2Fupgrade%2Fteam` })
+loc7 = r7.headers.get('location') ?? ''
+ok('a real login with next lands on the upgrade page, not /app', r7.status === 303 && loc7 === '/app/upgrade/team', loc7)
+const cookie7 = (r7.headers.get('set-cookie') ?? '').split(';')[0]
+ok('and it set the session cookie', cookie7.startsWith('agentbill_app='), cookie7.slice(0, 20))
+r7 = await nav('/app/upgrade/team', { headers: { cookie: cookie7 } })
+html7 = await r7.text()
+ok('with a session the page is a 200 hand-off, not a redirect chain', r7.status === 200 && html7.includes('http-equiv="refresh"'), String(r7.status))
+ok('and it hands off to checkout for this account', html7.includes(`/checkout/team?account_id=${ACCT}`))
+ok('and /app itself still opens with that cookie', (await nav('/app', { headers: { cookie: cookie7 } })).status === 200)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)
