@@ -41,7 +41,7 @@ Get an API key: https://agentbill.dev/register. Free, no card. Both SDKs default
 
 ## Quick Start
 
-The ceiling belongs to the job. Pass `task_ceiling` on the **first** preflight of a new `task_ref`; it is fixed at creation and ignored on every later call, so a retry cannot quietly raise the ceiling it was meant to respect.
+The ceiling belongs to the job. Open it with `task_ceiling` on the first preflight of a new `task_ref`, or before any code runs with `PUT /tasks/:task_ref/ceiling` or the console. Once the job exists a `task_ceiling` on preflight is not applied, so a retry cannot quietly raise the ceiling it was meant to respect; the last save through the endpoint or the console is the one in force.
 
 ```python
 from agentbill import AgentBillClient, TaskCeilingExceededError
@@ -55,7 +55,7 @@ def research_step(query):
             estimated_units=10,        # reserved now, settled by record()
             customer_id="cust_abc",
             task_ref="job_4417",       # the same job, in every process
-            task_ceiling=500,          # first call only, ignored after
+            task_ceiling=500,          # opens the job; the console or PUT can change it later
         )
     except TaskCeilingExceededError as e:
         # e.task_ref, e.task_ceiling, e.task_used_units, e.task_remaining_units
@@ -142,6 +142,8 @@ An approved preflight holds `estimated_units` and returns `reservation_expires_a
 **Preflight reservation.** The check and the reservation are one conditional `UPDATE`, so two concurrent calls on the same job cannot both be approved against the last of the budget.
 
 **Units you define.** A unit is an integer you pass. AgentBill reserves the number you send and never converts units to money. `1 unit = 1 cent` is a common convention, not a rule.
+
+**Per-job ceilings from outside the code.** `PUT /tasks/:task_ref/ceiling` opens a job with a ceiling or changes one; a ceiling under the job's spent plus reserved units is refused with the smallest value that would be accepted.
 
 **Per-customer ceilings.** `PUT /budget` sets one customer's `limit_units`, a ceiling separate from the task one.
 

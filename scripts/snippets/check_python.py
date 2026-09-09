@@ -139,7 +139,7 @@ def contract(s, tree):
 # ---------------------------------------------------------------- execution
 CANNED = {
     '/preflight': {"approved": True, "reason": None, "estimated_units": 1, "remaining_units": 999,
-                   "task_ref": "job-142", "task_remaining_units": 488},
+                   "task_ref": "job-142", "task_ceiling": 500, "task_remaining_units": 488},
     '/events': {"event_id": "evt_ci", "status": "recorded", "customer_created": False,
                 "customer_remaining_units": 999, "task_used_units": 12, "task_remaining_units": 488, "task_exceeded": False},
     '/budget': {"customer_id": "default", "limit": 1000, "used": 1, "remaining": 999, "is_blocked": False},

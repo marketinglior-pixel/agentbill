@@ -450,7 +450,7 @@ ${siteNav('/register', { cta: false })}
         <div class="steps">
           <div class="ns"><span class="ns-num">1</span><div><p>Install the SDK.</p>${copyPill('install-py', INSTALL_PY)}</div></div>
           <div class="ns"><span class="ns-num">2</span><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
-          <div class="ns"><span class="ns-num">3</span><div><p>Preflight before the call, record after it. The first preflight of a new <code>task_ref</code> opens it with its ceiling: here <code>job-1</code> gets 10 units across every call that names it. The console can change that number later; code cannot.</p><pre class="ns-pre">import os
+          <div class="ns"><span class="ns-num">3</span><div><p>Preflight before the call, record after it. The first preflight of a new <code>task_ref</code> opens it with its ceiling: here <code>job-1</code> gets 10 units across every call that names it. It changes later only in the console or through <code>PUT /tasks/:task_ref/ceiling</code>; a <code>task_ceiling</code> on a later preflight is not applied.</p><pre class="ns-pre">import os
 from agentbill import AgentBillClient
 
 key = os.environ["AGENTBILL_API_KEY"]

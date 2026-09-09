@@ -61,12 +61,14 @@ export function requestPanel(): string {
 <span class="k">approved</span>
 { "approved": <span class="t">true</span>,
   "task_ref": "job-142",
+  "task_ceiling": 500,
   "task_remaining_units": 488 }
 
 <span class="k">refused</span>
 { "approved": <span class="f">false</span>,
   "reason": "task_ceiling_exceeded",
   "task_ref": "job-142",
+  "task_ceiling": 500,
   "task_remaining_units": 8 }</div>
         <div class="panel-f">Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
       </div>`

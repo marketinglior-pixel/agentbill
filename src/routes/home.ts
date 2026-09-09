@@ -648,8 +648,9 @@ ${playgroundSection()}
         <h2>One job, many calls, one ceiling.</h2>
         <p>Give the job a ceiling in the console, or pass <span class="mono-in">task_ceiling</span> on
         its first call, and the same <span class="mono-in">task_ref</span> on every call after it.
-        Every call is checked against that one number, in units you define. The console's last save
-        is the ceiling in force; code cannot raise it.</p>
+        Every call is checked against that one number, in units you define. Once the job exists a
+        <span class="mono-in">task_ceiling</span> on a later call is not applied; the ceiling changes only
+        in the console or through <span class="mono-in">PUT /tasks/:task_ref/ceiling</span>.</p>
         <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch budgets burn down &rarr;</a>
       </div>
       ${taskPanel()}

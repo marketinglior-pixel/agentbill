@@ -235,8 +235,9 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <h3>POST /preflight, extra fields</h3>
   <p><span class="inline">task_ref</span>, job identifier (1-128 chars). Same ref = same budget.<br>
   <span class="inline">task_ceiling</span>, opens a new task_ref with that ceiling, required then
-  unless the job was opened first from the console; not applied once the job exists. Every answer
-  carries the ceiling in force as <span class="inline">task_ceiling</span>.<br>
+  unless the job was opened first from the console; not applied once the job exists. An approved answer
+  and a <span class="inline">task_ceiling_exceeded</span> refusal carry the ceiling in force as
+  <span class="inline">task_ceiling</span>.<br>
   <span class="inline">idempotency_key</span>, optional (1-128 chars). Same key = same decision,
   one reservation, so a retried preflight cannot reserve twice. A retry that arrives while the
   original is still being decided gets <span class="inline">409 preflight_in_progress</span>,
@@ -258,7 +259,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <h3>PUT /tasks/:task_ref/ceiling</h3>
   <p>Opens a job with a ceiling, or changes one. Body: <span class="inline">ceiling_units</span>
   (required), <span class="inline">agent_id</span> (optional, read only when this opens the job).
-  The console's last save is the ceiling in force; code can open a job with one and cannot change it after. A ceiling under the job's spent plus
+  The last save through the endpoint or the console is the ceiling in force; a task_ceiling sent on a later preflight is not applied. A ceiling under the job's spent plus
   reserved units is <span class="inline">409 ceiling_below_committed</span> with the smallest value
   that would be accepted; nothing in flight is rewritten.</p>
 

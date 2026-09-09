@@ -76,7 +76,7 @@ const quickStartLd = {
       '@type': 'HowToStep',
       position: 3,
       name: 'Step 3, Give the job a ceiling',
-      text: 'Pass the same task_ref on every call the job makes. They are all checked against one ceiling, set on the first preflight of a new task or in the console; the console can change it later, code cannot.',
+      text: 'Pass the same task_ref on every call the job makes. They are all checked against one ceiling, set on the first preflight of a new task or in the console. It changes later only through the console or PUT /tasks/:task_ref/ceiling; a task_ceiling on a later preflight is not applied.',
       url: `${ORIGIN}/docs#step-ceiling`,
     },
   ],
@@ -107,8 +107,9 @@ export async function docsRoute(app: FastifyInstance) {
 
   <h3 id="step-ceiling">Step 3, Give the job a ceiling</h3>
   <p>Pass the same <span class="inline">task_ref</span> on every call the job makes. They are all
-  checked against one ceiling, set on the first preflight of a new task or in the console. The
-  console can change it later; code cannot.</p>
+  checked against one ceiling, set on the first preflight of a new task or in the console. It
+  changes later only through the console or <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>;
+  a <span class="inline">task_ceiling</span> on a later preflight is not applied.</p>
   <div class="code"><pre>
 from agentbill import AgentBillClient
 
@@ -158,9 +159,11 @@ client.record(agent_id="researcher", task_ref="job-142", units=12)
   <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a> or on the console's task budgets view.
   A preflight for a job that does not exist yet, sent without a ceiling, is rejected with
   <span class="inline">task_ceiling_required</span>. Once the job exists, a
-  <span class="inline">task_ceiling</span> from code is not applied, so a retry cannot raise the
-  ceiling it was supposed to respect; the console's last save is the ceiling in force, and every
-  preflight answers with it as <span class="inline">task_ceiling</span>. When the units already used
+  <span class="inline">task_ceiling</span> on preflight is not applied, so a retry cannot raise the
+  ceiling it was supposed to respect; the last save through the console or the endpoint is the
+  ceiling in force. An approved answer and a <span class="inline">task_ceiling_exceeded</span> refusal
+  carry it as <span class="inline">task_ceiling</span> in the HTTP body (the other refusals are decided
+  before the job's row is consulted; the SDK result objects expose it in a later SDK release). When the units already used
   plus this call's estimate would cross it, preflight answers <span class="inline">approved: false</span>
   with <span class="inline">task_ceiling_exceeded</span> and the SDK raises.</p>
 
@@ -265,7 +268,7 @@ WHERE account_id = :account
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is refused if estimated_units exceeds it.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets">task budgets</a>.</td></tr>
-    <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Opens a new task_ref with that ceiling, and is required then unless the job was opened first with <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>. Not applied once the job exists; the response carries the ceiling in force.</td></tr>
+    <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Opens a new task_ref with that ceiling, and is required then unless the job was opened first with <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>. Not applied once the job exists; an approved answer and a task_ceiling_exceeded refusal carry the ceiling in force as task_ceiling.</td></tr>
   </table>
 
   <p>Every identifier above (agent_id, customer_id, task_ref, and idempotency_key) is 1 to 128 characters and may not contain control characters. A value that breaks either rule is a 422 with <span class="inline">validation_error</span>, never a 500.</p>
@@ -312,8 +315,9 @@ WHERE account_id = :account
 
   <h3 id="put-task-ceiling">PUT /tasks/:task_ref/ceiling</h3>
   <p>Opens a job with a ceiling, or changes the ceiling of one that exists. The same write the
-  console's task budgets view makes. The console's last save is the ceiling in force; code can open a job with one and cannot change it after. Every preflight
-  answers with the ceiling in force as <span class="inline">task_ceiling</span>.</p>
+  console's task budgets view makes. The last save through the endpoint or the console is the ceiling in force; a task_ceiling sent on a later preflight is not applied. An approved
+  answer and a <span class="inline">task_ceiling_exceeded</span> refusal carry the ceiling in force as
+  <span class="inline">task_ceiling</span>.</p>
 
   <div class="code"><pre>
 curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\

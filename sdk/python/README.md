@@ -70,7 +70,8 @@ AGENTBILL_API_KEY=your_key_here
 
 Two parameters do the work. `task_ref` is your name for this run, and every call that passes it is
 checked against the same ceiling. `task_ceiling` is that ceiling, in units you define, fixed by the
-first preflight of a new run; later values are ignored, so a retry cannot raise the ceiling it was
+first preflight of a new run, or by the console or `PUT /tasks/:task_ref/ceiling` before it starts; a
+`task_ceiling` on a later preflight is not applied, so a retry cannot raise the ceiling it was
 meant to respect.
 
 ```python
@@ -169,7 +170,7 @@ invented data.
 ## Task budgets: "this job gets 500 units"
 
 The same mechanism as the Quick start, with the two pieces that section left out: what the refusal
-carries, and how to read a job's burn-down while it runs. The ceiling is fixed on the first
+carries, and how to read a job's burn-down while it runs. The ceiling is set on the first
 preflight; every later call reserves against the same budget, and the call that would cross it is
 refused before the money is spent.
 
@@ -394,7 +395,7 @@ reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never
 |---|---|---|---|
 | `agent_id` | `str` | required | A label for attribution, not a budget. Nothing is capped by it. |
 | `task_ref` | `str` | none | Your name for this run. Every call passing it shares one ceiling. |
-| `task_ceiling` | `int` | none | The run's total, in units you define. Required on the first preflight of a new `task_ref`; ignored after. |
+| `task_ceiling` | `int` | none | The run's total, in units you define. Opens a new `task_ref`; required then unless the job was opened first from the console or `PUT /tasks/:task_ref/ceiling`. Not applied once the job exists. |
 | `estimated_units` | `int` | `1` | What this one call is worth. This is the amount reserved. |
 | `customer_id` | `str` | `"default"` | Your internal customer identifier. Carries its own balance. |
 | `idempotency_key` | `str` | none | Stable across retries: same key, same decision, one reservation. |
