@@ -83,8 +83,10 @@ export async function guidesRoute(app: FastifyInstance) {
 
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>
-  <p>1, The first preflight that names a <span class="inline">task_ref</span> creates the task
-  and fixes its <span class="inline">task_ceiling</span>.<br>
+  <p>1, A job is opened with its ceiling: by the first preflight that names a new
+  <span class="inline">task_ref</span> with a <span class="inline">task_ceiling</span>, or in the
+  console (or <span class="inline">PUT /tasks/:task_ref/ceiling</span>) before any code runs. After
+  that the console's last save is the ceiling in force; a later value from code is not applied.<br>
   2, Every later preflight atomically reserves against the same budget; the call that would
   cross the ceiling is <b>refused before it runs</b>.<br>
   3, Records report reality: a failed run releases its reservation, and spend that lands past
@@ -163,7 +165,7 @@ def guarded(step: str, units: int, work):
                 agent_id="researcher",
                 customer_id=CUSTOMER,
                 task_ref=TASK,
-                task_ceiling=CEILING,             <span class="comment"># fixed on the first call, ignored after</span>
+                task_ceiling=CEILING,             <span class="comment"># opens the job on the first call; the console can change it</span>
                 estimated_units=units,
                 idempotency_key=f"{TASK}:{step}", <span class="comment"># stable across retries: one reservation</span>
             )
@@ -232,8 +234,9 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <h2>API reference</h2>
   <h3>POST /preflight, extra fields</h3>
   <p><span class="inline">task_ref</span>, job identifier (1-128 chars). Same ref = same budget.<br>
-  <span class="inline">task_ceiling</span>, required on the first preflight of a new task_ref;
-  fixed at creation, ignored afterwards.<br>
+  <span class="inline">task_ceiling</span>, opens a new task_ref with that ceiling, required then
+  unless the job was opened first from the console; not applied once the job exists. Every answer
+  carries the ceiling in force as <span class="inline">task_ceiling</span>.<br>
   <span class="inline">idempotency_key</span>, optional (1-128 chars). Same key = same decision,
   one reservation, so a retried preflight cannot reserve twice. A retry that arrives while the
   original is still being decided gets <span class="inline">409 preflight_in_progress</span>,
@@ -252,6 +255,12 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <h3>GET /tasks and GET /tasks/:task_ref</h3>
   <p>Per-agent cost attribution: every job's ceiling, spend, live reservations and overage flag.
   Filter with <span class="inline">?agent_id=</span>.</p>
+  <h3>PUT /tasks/:task_ref/ceiling</h3>
+  <p>Opens a job with a ceiling, or changes one. Body: <span class="inline">ceiling_units</span>
+  (required), <span class="inline">agent_id</span> (optional, read only when this opens the job).
+  The console's last save is the ceiling in force; code can open a job with one and cannot change it after. A ceiling under the job's spent plus
+  reserved units is <span class="inline">409 ceiling_below_committed</span> with the smallest value
+  that would be accepted; nothing in flight is rewritten.</p>
 
   <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
 `
@@ -277,9 +286,10 @@ with ThreadPoolExecutor(max_workers=2) as pool:
       <h2>Give the run an id, and give that id a ceiling</h2>
       <p>Two parameters do the work. <span class="inline">task_ref</span> is your name for this run,
       and every call that passes it is checked against the same ceiling.
-      <span class="inline">task_ceiling</span> is that ceiling, in units you define, and it is fixed
-      by the first preflight of a new run; later values are ignored, so a retry cannot raise the
-      ceiling it was meant to respect.</p>
+      <span class="inline">task_ceiling</span> is that ceiling, in units you define. The first
+      preflight of a new run opens it, or the console does before the run starts; once the run
+      exists a value from code is not applied, so a retry cannot raise the ceiling it was meant to
+      respect, and the console's last save is the one in force.</p>
       <div class="code"><pre>
 from agentbill import AgentBillClient
 

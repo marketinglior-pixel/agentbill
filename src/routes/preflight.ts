@@ -226,8 +226,13 @@ export async function preflightRoute(app: FastifyInstance) {
         let task = null
         if (task_ref) {
           if (task_ceiling != null) {
-            // First call for this task creates it; the ceiling is fixed at
-            // creation and later task_ceiling values are ignored.
+            // The first call for a new task_ref opens it with this ceiling.
+            // Once the row exists, a task_ceiling from code is not applied:
+            // the console (PUT /tasks/:task_ref/ceiling, or the form on /app)
+            // is what changes it, and its last save is the ceiling in force.
+            // So a retry cannot raise the number it was meant to respect, and
+            // nothing is silent either: the response below carries the ceiling
+            // that decided, as task_ceiling, approved or refused.
             await tx`
               INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units)
               VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling})
@@ -291,7 +296,7 @@ export async function preflightRoute(app: FastifyInstance) {
         if (err.reason === 'task_ceiling_required') {
           const body = {
             error: 'task_ceiling_required',
-            message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task.`,
+            message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task, or open the job first with PUT /tasks/:task_ref/ceiling or in the console.`,
           }
           await remember(body)
           return reply.status(422).send(body)
@@ -383,6 +388,11 @@ export async function preflightRoute(app: FastifyInstance) {
       ...(task
         ? {
             task_ref,
+            // The ceiling that decided this call. Until 2026-09-10 an approved
+            // answer did not carry it, so a task_ceiling the server did not
+            // apply was invisible from code; the console row was the only
+            // place the real number showed.
+            task_ceiling: task.ceilingUnits,
             task_remaining_units:
               task.ceilingUnits - task.usedUnits - task.reservedUnits,
           }

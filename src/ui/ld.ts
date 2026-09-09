@@ -76,7 +76,7 @@ export function softwareLd(): unknown {
     featureList: [
       'POST /preflight reserves the units your code estimates and answers before your provider call goes out. An approved answer carries remaining_units and reservation_expires_at.',
       'One ceiling per task_ref: every call passing the same task_ref is checked against the same task budget, from any process, any machine and any provider.',
-      'The ceiling is fixed by the first preflight that opens a task_ref. A task_ceiling sent on a later call for that same task_ref is ignored, so a retry cannot raise the number it was meant to respect.',
+      'A job is opened with its ceiling by the first preflight that names a new task_ref, or from the console before any code runs. A task_ceiling sent by code on a later call is not applied, so a retry cannot raise the number it was meant to respect; the console can change it, and every preflight answers with the ceiling in force.',
       'When used plus reserved plus this estimate would cross the task ceiling, preflight answers approved:false with reason task_ceiling_exceeded and the numbers it decided on; the SDK raises TaskCeilingExceededError and the calling code decides what happens next.',
       'Units are integers the developer defines and passes. AgentBill compares units to a ceiling and never converts them to currency or reads a provider invoice.',
       'The check and the reservation are one conditional UPDATE, so two preflights arriving together cannot both be approved against the same remaining units.',

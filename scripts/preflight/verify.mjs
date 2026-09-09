@@ -251,6 +251,9 @@ const idCases = [
   ['GET /decisions?agent_id', () => get('/decisions?agent_id=%00')],
   ['GET /tasks?agent_id', () => get('/tasks?agent_id=%00')],
   ['GET /tasks/:task_ref', () => get('/tasks/%00')],
+  ['PUT /tasks/:task_ref/ceiling', () => fetch(`${API}/tasks/%00/ceiling`, {
+    method: 'PUT', headers: { 'Authorization': `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ceiling_units: 5 }) }).then(async r => ({ status: r.status, text: await r.text() }))],
   ['GET /budget?customer_id', () => get('/budget?customer_id=%00')],
   ['POST /preflight task_ref', () => pre({ agent_id: 'ctrl', task_ref: `t${NUL}`, task_ceiling: 5, estimated_units: 1 })],
   ['POST /preflight idempotency_key', () => pre({ agent_id: 'ctrl', idempotency_key: `k${NUL}`, estimated_units: 1 })],
@@ -631,6 +634,147 @@ html7 = await r7.text()
 ok('with a session the page is a 200 hand-off, not a redirect chain', r7.status === 200 && html7.includes('http-equiv="refresh"'), String(r7.status))
 ok('and it hands off to checkout for this account', html7.includes(`/checkout/team?account_id=${ACCT}`))
 ok('and /app itself still opens with that cookie', (await nav('/app', { headers: { cookie: cookie7 } })).status === 200)
+
+// ---------------------------------------------------------------- 8: a job's ceiling from the console
+console.log('\n[8] a job ceiling can be openedJob and changed from outside the code')
+// Until 2026-09-10 the only way to choose a job's ceiling was task_ceiling on
+// the first preflight of a new task_ref, and every later value was dropped
+// without a word. The console's empty state told a reader to go pass two
+// arguments in code. The rule now: the last successful save through
+// PUT /tasks/:task_ref/ceiling (or the console form, same statement) is the
+// ceiling in force; code may open a job but cannot change one; a ceiling may
+// not go under used + reserved; nothing in flight is rewritten; and every
+// preflight answers with the ceiling that decided it.
+await reset()
+// Own key: the suite is near the per-key limiter's window by this point,
+// same reason section 6 mints one.
+const KEY8 = (await post('/keys/generate', { label: 'harness-section-8' })).body.api_key
+if (typeof KEY8 !== 'string' || !KEY8.startsWith('agb_')) throw new Error('[8] could not mint its key')
+const pre8 = (body) => fetch(`${API}/preflight`, {
+  method: 'POST', headers: { 'Authorization': `Bearer ${KEY8}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json() }))
+const rec8 = (body) => fetch(`${API}/events`, {
+  method: 'POST', headers: { 'Authorization': `Bearer ${KEY8}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json() }))
+const putCeil = (ref, body, key = KEY8) => fetch(`${API}/tasks/${encodeURIComponent(ref)}/ceiling`, {
+  method: 'PUT', headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json() }))
+const task8 = async (ref) => (await sql`
+  SELECT agent_id, ceiling_units, used_units, reserved_units FROM task_budgets WHERE account_id=${ACCT} AND task_ref=${ref}`)[0]
+
+// Open a job from outside the code, then preflight with only its name.
+const openedJob = await putCeil('job-c', { ceiling_units: 50, agent_id: 'r' })
+ok('PUT opens the job with its ceiling',
+   openedJob.status === 200 && openedJob.body.ceiling_units === 50 && openedJob.body.task_created === true, JSON.stringify(openedJob.body))
+const onlyRef = await pre8({ agent_id: 'r', task_ref: 'job-c', estimated_units: 5 })
+ok('a preflight with only task_ref is approved against the console ceiling',
+   onlyRef.body.approved === true, JSON.stringify(onlyRef.body))
+ok('and the answer carries the ceiling in force', onlyRef.body.task_ceiling === 50, JSON.stringify(onlyRef.body))
+ok('and remaining is ceiling minus this reservation', onlyRef.body.task_remaining_units === 45, JSON.stringify(onlyRef.body))
+
+// Code cannot raise it once the job exists, and nothing is silent about that.
+const codeRaiseTry = await pre8({ agent_id: 'r', task_ref: 'job-c', task_ceiling: 999, estimated_units: 5 })
+ok('a task_ceiling from code on an existing job is approved on the stored ceiling, not the passed one',
+   codeRaiseTry.body.approved === true && codeRaiseTry.body.task_ceiling === 50, JSON.stringify(codeRaiseTry.body))
+ok('and the row still says 50', (await task8('job-c')).ceilingUnits === 50)
+// A refusal carries it too, so the retry that "raisedJob" it can see it did not.
+const codeRefusedTry = await pre8({ agent_id: 'r', task_ref: 'job-c', task_ceiling: 999, estimated_units: 45 })
+ok('the refusal names the ceiling that decided it',
+   codeRefusedTry.body.approved === false && codeRefusedTry.body.reason === 'task_ceiling_exceeded' && codeRefusedTry.body.task_ceiling === 50,
+   JSON.stringify(codeRefusedTry.body))
+
+// The console can, and the next preflight sees it, with no repair step.
+const raisedJob = await putCeil('job-c', { ceiling_units: 80 })
+ok('PUT raises an existing ceiling', raisedJob.status === 200 && raisedJob.body.ceiling_units === 80 && raisedJob.body.task_created === false, JSON.stringify(raisedJob.body))
+ok('and the agent that opened the job is kept', raisedJob.body.agent_id === 'r', raisedJob.body.agent_id)
+const afterRaiseJob = await pre8({ agent_id: 'r', task_ref: 'job-c', estimated_units: 45 })
+ok('the call refused at 50 is approved at 80', afterRaiseJob.body.approved === true && afterRaiseJob.body.task_ceiling === 80, JSON.stringify(afterRaiseJob.body))
+const rows8 = Number((await sql`SELECT count(*) AS n FROM task_budgets WHERE account_id=${ACCT} AND task_ref='job-c'`)[0].n)
+ok('still exactly one row', rows8 === 1, String(rows8))
+
+// A job openedJob from code first: the console's later save is what stays in force.
+await pre8({ agent_id: 'r', task_ref: 'job-code', task_ceiling: 30, estimated_units: 1 })
+await putCeil('job-code', { ceiling_units: 60 })
+const codeThenConsoleJob = await pre8({ agent_id: 'r', task_ref: 'job-code', task_ceiling: 30, estimated_units: 1 })
+ok('after a console save, the first-preflight number is no longer the ceiling',
+   codeThenConsoleJob.body.task_ceiling === 60, JSON.stringify(codeThenConsoleJob.body))
+
+// The lowering rule. 20 spent, 30 reserved and open: 50 is committed.
+await reset()
+await putCeil('job-low', { ceiling_units: 100, agent_id: 'r' })
+await pre8({ agent_id: 'r', task_ref: 'job-low', estimated_units: 20, idempotency_key: 'jl-1' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'jl-rec-1', units: 20, task_ref: 'job-low' })
+await pre8({ agent_id: 'r', task_ref: 'job-low', estimated_units: 30, idempotency_key: 'jl-2' })   // left open
+let lowJob = await task8('job-low')
+ok('setup: 20 spent and 30 reserved', lowJob.usedUnits === 20 && lowJob.reservedUnits === 30, JSON.stringify(lowJob))
+
+const underApi = await putCeil('job-low', { ceiling_units: 40 })
+ok('a ceiling underApi used + reserved is refused, not clamped',
+   underApi.status === 409 && underApi.body.error === 'ceiling_below_committed', JSON.stringify(underApi.body))
+ok('and it names the smallest value that would be accepted', underApi.body.minimum_ceiling_units === 50, JSON.stringify(underApi.body))
+lowJob = await task8('job-low')
+ok('the row is untouched by the refused save', lowJob.ceilingUnits === 100 && lowJob.usedUnits === 20 && lowJob.reservedUnits === 30, JSON.stringify(lowJob))
+
+const exactJob = await putCeil('job-low', { ceiling_units: 50 })
+ok('exactly used + reserved is accepted', exactJob.status === 200 && exactJob.body.ceiling_units === 50 && exactJob.body.remaining_units === 0, JSON.stringify(exactJob.body))
+lowJob = await task8('job-low')
+ok('the reservation in flight is not rewritten by the lower ceiling', lowJob.reservedUnits === 30, JSON.stringify(lowJob))
+const atWallJob = await pre8({ agent_id: 'r', task_ref: 'job-low', estimated_units: 1 })
+ok('the next preflight is refused on the new ceiling',
+   atWallJob.body.approved === false && atWallJob.body.reason === 'task_ceiling_exceeded' && atWallJob.body.task_ceiling === 50 && atWallJob.body.task_remaining_units === 0,
+   JSON.stringify(atWallJob.body))
+// The open reservation settles normally under the lowered ceiling.
+const settled8 = await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'jl-rec-2', units: 30, task_ref: 'job-low' })
+lowJob = await task8('job-low')
+ok('settling the open reservation moves it to spent, nothing negative',
+   settled8.status === 200 && lowJob.usedUnits === 50 && lowJob.reservedUnits === 0, JSON.stringify({ status: settled8.status, lowJob }))
+
+// Validation and boundaries.
+ok('a ceiling of 0 is 422', (await putCeil('job-low', { ceiling_units: 0 })).status === 422)
+ok('a non-integer ceiling is 422', (await putCeil('job-low', { ceiling_units: 12.5 })).status === 422)
+ok('a missing ceiling_units is 422, not a silent no-op', (await putCeil('job-low', {})).status === 422)
+ok('a ceiling past int4 is 422', (await putCeil('job-low', { ceiling_units: 3_000_000_000 })).status === 422)
+ok('a NUL in agent_id is 422', (await putCeil('job-low', { ceiling_units: 60, agent_id: 'a\u0000b' })).status === 422)
+const noAuth8 = await fetch(`${API}/tasks/job-low/ceiling`, { method: 'PUT',
+  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ceiling_units: 1 }) }).then(r => r.status)
+ok('PUT /tasks/:task_ref/ceiling is not public', noAuth8 === 401, String(noAuth8))
+ok('a job openedJob without agent_id is labelled console',
+   (await putCeil('job-plain', { ceiling_units: 5 })).body.agent_id === 'console')
+
+// The console form runs the same statement, session-gated and same-origin only.
+const nav8 = (path, init = {}) => fetch(`${API}${path}`, { redirect: 'manual', ...init })
+const FORM8 = { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }
+const login8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}` })
+const cookie8 = (login8.headers.get('set-cookie') ?? '').split(';')[0]
+ok('[console] login for the form', cookie8.startsWith('agentbill_app='), cookie8.slice(0, 20))
+const anon8 = await nav8('/app/tasks', { method: 'POST', headers: FORM8, body: 'task_ref=job-anon&ceiling_units=9' })
+ok('[console] a POST with no session writes nothing and lands on the tasks view',
+   anon8.status === 303 && anon8.headers.get('location') === '/app?view=tasks' && !(await task8('job-anon')), `${anon8.status} ${anon8.headers.get('location')}`)
+const xsite8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, 'Sec-Fetch-Site': 'cross-site', cookie: cookie8 }, body: 'task_ref=job-x&ceiling_units=9' })
+ok('[console] a cross-site POST is 403 and writes nothing', xsite8.status === 403 && !(await task8('job-x')), String(xsite8.status))
+const form8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-form&ceiling_units=500&agent_id=researcher' })
+ok('[console] the form opens a job and comes back saying so',
+   form8.status === 303 && form8.headers.get('location') === '/app?view=tasks&saved=job-form&created=1', `${form8.status} ${form8.headers.get('location')}`)
+const formRowJob = await task8('job-form')
+ok('[console] with the ceiling and agent it was given', formRowJob?.ceilingUnits === 500 && formRowJob?.agentId === 'researcher', JSON.stringify(formRowJob))
+const page8 = await nav8('/app?view=tasks&saved=job-form&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[console] the tasks view shows the job at 0 / 500 and the confirmation',
+   page8.includes('job-form') && page8.includes('<b>0</b> / 500') && page8.includes('Ceiling set on <code>job-form</code>, a new job'), 'page did not carry the row or the confirmation')
+ok('[console] and states the rule in one line', page8.includes('cannot change it once the job exists'))
+const fromCode8 = await pre8({ agent_id: 'researcher', task_ref: 'job-form', estimated_units: 120 })
+ok('[console] a preflight that names the job is approved on the form ceiling', fromCode8.body.approved === true && fromCode8.body.task_ceiling === 500, JSON.stringify(fromCode8.body))
+const under8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-form&ceiling_units=100' })
+ok('[console] lowering underApi the reservation in flight comes back as an error with the minimum',
+   under8.status === 303 && under8.headers.get('location') === '/app?view=tasks&err=below&ref=job-form&min=120', `${under8.status} ${under8.headers.get('location')}`)
+ok('[console] and the row was not changed', (await task8('job-form')).ceilingUnits === 500)
+const bad8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-form&ceiling_units=1e3' })
+ok('[console] a ceiling that is not digits is rejected before any write', bad8.status === 303 && bad8.headers.get('location') === '/app?view=tasks&err=ceiling&ref=job-form', `${bad8.headers.get('location')}`)
+const badRef8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=%00&ceiling_units=5' })
+ok('[console] a NUL task_ref is rejected, never a 500', badRef8.status === 303 && badRef8.headers.get('location') === '/app?view=tasks&err=ref', `${badRef8.status} ${badRef8.headers.get('location')}`)
+const errPage8 = await nav8('/app?view=tasks&err=below&ref=job-form&min=120', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[console] the error page says what would be accepted', errPage8.includes('<b>120</b> units committed'))
+const demo8 = await nav8('/app?view=tasks&demo=1', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[console] sample data never shows the form', !demo8.includes('action="/app/tasks"'))
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
