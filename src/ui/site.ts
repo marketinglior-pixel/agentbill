@@ -18,22 +18,34 @@ export const ORIGIN = 'https://agentbill.dev'
  *  disagree about it again: until 2026-09-07 the PNG carried a headline the
  *  other two had retired, because a grep cannot see an image.
  *
- *  Changed 2026-09-07. The old line, "A spend ceiling bound to the task, not
- *  the month", named a category rather than a mechanism, and any budget tool
- *  could have signed it unchanged. This one names our own field and then states
- *  the two bindings it is NOT, both of which we read at source. It asserts
- *  nothing about anyone else's product, so no provider release can turn it.
+ *  Changed 2026-09-10, and this one reverses the 2026-09-07 change on purpose.
+ *  That change retired "A spend ceiling bound to the task, not the month" for
+ *  naming a category rather than a mechanism, and replaced it with
+ *  "One ceiling per task_ref. Not per project, not per calendar month".
+ *  Two pieces of evidence turned it back:
  *
- *  It is deliberately plain text with no markup, even though `task_ref` would
- *  read better in mono. The <title> and the PNG cannot carry a span, and a
- *  second hand-kept copy of the headline is exactly the drift this constant
- *  exists to prevent.
+ *  1. The founder cold-visited the homepage on 2026-09-09 and could not say
+ *     what the product did. task_ref is our own field name; a first-time
+ *     reader does not have one yet, so the h1 spent its one sentence on a
+ *     word that means nothing until after integration.
+ *  2. A sweep of nine live folds in this niche the same day: eight of nine
+ *     name an audience or an outcome in the h1. Ours was the only one naming
+ *     a data structure, and the only one with code above the fold.
  *
- *  Known cost, accepted: with the "AgentBill · " prefix the title runs past the
- *  ~60 characters a search result shows. The clause that carries the
- *  differentiator is first, so the half that survives truncation is the half
- *  that matters. */
-export const HEADLINE = 'One ceiling per task_ref. Not per project, not per calendar month'
+ *  The 09-07 objection still stands on its own terms — this line IS one any
+ *  budget tool could sign — and it is accepted knowingly. The differentiator
+ *  moved down the page, to where a reader who has decided to keep reading can
+ *  receive it; the h1's job is to earn that scroll, which the mechanism line
+ *  measurably did not.
+ *
+ *  It is deliberately plain text with no markup. The <title> and the PNG
+ *  cannot carry a span, and a second hand-kept copy of the headline is exactly
+ *  the drift this constant exists to prevent.
+ *
+ *  The 09-07 note recorded a known cost, the title running past the ~60
+ *  characters a search result shows. This line removes it: with the
+ *  "AgentBill · " prefix the title is 51 characters and no longer truncates. */
+export const HEADLINE = 'A ceiling on this job, not on the month'
 
 /** The install line beside the primary action, and on the share card. */
 export const INSTALL_PY = 'pip install agentbill-sdk'
