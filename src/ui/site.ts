@@ -111,7 +111,7 @@ export const PAGES: readonly PageMeta[] = [
   // gives it a canonical and a sitemap row instead of a bare 200.
   { path: '/he/cost-per-client', section: 'marketing', crumbs: [HOME], crumb: 'כמה כל לקוח עולה לך', og: 'default', index: true, updated: '2026-09-06', priority: 0.6, changefreq: 'monthly' },
 
-  { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-08', priority: 0.9, changefreq: 'weekly' },
+  { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-09', priority: 0.9, changefreq: 'weekly' },
   { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-08', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
   { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
   { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
