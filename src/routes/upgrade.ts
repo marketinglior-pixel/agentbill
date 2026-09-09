@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { checkoutPath, createCheckoutSession, isPolarCheckoutUrl, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { TIERS_CSS, tierCards, SAME_FEATURES } from '../ui/tiers.js'
 import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
@@ -12,16 +13,6 @@ import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 const num = (n: number) => n.toLocaleString('en-US')
-const RECOMMENDED = 'team'
-
-// What a paid tier adds that is not code. Everything that IS code ships on
-// every plan (nothing in the codebase gates a feature by plan; only
-// PLAN_LIMITS is read), so these are the only per-tier lines the page may
-// carry, and they are labelled as service, not as features.
-const SERVICE: Record<string, string> = {
-  team: 'priority support',
-  scale: 'direct line to the founder',
-}
 
 
 // Lifted out of the page template so its hash matches the string emitted.
@@ -67,28 +58,6 @@ export async function upgradeRoute(app: FastifyInstance) {
     const paidSummary = PLAN_ORDER.filter((t) => t !== 'free')
       .map((t) => `${t[0].toUpperCase()}${t.slice(1)} $${PLAN_PRICES[t]}`).join('. ')
 
-    const rows = PLAN_ORDER.map((tier) => {
-      const free = tier === 'free'
-      // One primary per fold, which design.md already requires and this table
-      // broke: three filled greens stacked in a 215px column, for three tiers a
-      // stranger cannot buy yet, while the tier they CAN act on got the outlined
-      // chip. It also contradicted the homepage, where the identical "Start free"
-      // label is the green one. On mobile the fixed .sticky-cta was on screen
-      // beside those three fills, which is the exact duplication the sticky-CTA
-      // rule exists to prevent. Team is still marked, by the type and the service
-      // line it already carries, not by a second green button.
-      const button = free
-        ? `<a class="btn" href="/register">Start free</a>`
-        : `<a class="btn-ghost" data-tier="${tier}" href="${cta(tier)}">Get ${tier[0].toUpperCase()}${tier.slice(1)}</a>`
-      return `
-        <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
-          <th scope="row" class="tier">${tier}${SERVICE[tier] ? `<span class="svc">${SERVICE[tier]}</span>` : ''}</th>
-          <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
-          <td class="amount">$${PLAN_PRICES[tier]}${free ? '' : '<span class="dimtxt"> / mo</span>'}</td>
-          <td class="act">${button}</td>
-        </tr>`
-    }).join('')
-
     // sticky: false. design.md says the mobile primary MOVES rather than being
     // duplicated, and on every other page the bar IS the only primary on a phone.
     // Here the page's whole purpose is the tier buttons, so the bar put a second
@@ -106,10 +75,10 @@ export async function upgradeRoute(app: FastifyInstance) {
       extraHead: pixelSnippet(),
       scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PANEL_CSS}
-    /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, spec-sheet page (F3)
+      css: `${CHROME_CSS}${PANEL_CSS}${TIERS_CSS}
+    /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, pricing page
      * design-system: design.md · designed-as-app · nav: N1b shared · footer: Ft2 shared
-     * enrichment: none, the table is the product surface */
+     * enrichment: none, the four tier cards (ui/tiers.ts, shared with /) are the product surface */
 
     :root { --shell: 1080px; }
     .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; padding-block: 56px 88px; }
@@ -119,41 +88,7 @@ export async function upgradeRoute(app: FastifyInstance) {
     h1 { font-size: var(--fs-h1-sub); color: var(--white); max-width: 30ch; overflow-wrap: anywhere; min-width: 0; }
     .sub { color: var(--muted); font-size: var(--fs-lede); margin-top: 16px; max-width: 58ch; line-height: 1.6; }
 
-    /* The tiers as a spec sheet: one row each, the numbers in columns that line
-       up because they are a table. The recommended tier carries weight through
-       type, not through a tinted border and a floating badge. */
-    .tiers { width: 100%; border-collapse: collapse; margin-top: 44px; font-variant-numeric: tabular-nums; }
-    .tiers th { font-weight: inherit; text-align: left; }
-    .tiers th, .tiers td { padding: 18px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-body);
-                vertical-align: middle; }
-    /* \`> *\`, not \`td\`: the row's first cell is a th, so a td-only selector drew
-       the table's opening rule from the second column on and left FREE with no
-       rule above it while its four siblings had one. */
-    .tiers tr:first-child > * { border-top: 1px solid var(--border); }
-    /* The plan name was the second-smallest text in its own row: 12.5px against
-       a 15.5px call count and a 24px price, so the thing the row is named after
-       was caption-sized. Both reference pricing pages do the opposite. The mono
-       family stays, which design.md wants for labels over numbers; the rung and
-       the ink change, and .12em tracking is tuned for 12.5px. */
-    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; font-size: var(--fs-h3);
-                   color: var(--white); width: 22%; }
-    .tiers .svc { display: block; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--dim);
-                  margin-top: 4px; }
-    .tiers .amount { font-family: var(--display); font-size: 24px; font-weight: 700; color: var(--text);
-                     letter-spacing: -0.02em; white-space: nowrap; }
-    .tiers .act { text-align: right; white-space: nowrap; padding-left: 16px; }
-    /* Weight, not colour, and deliberately not --white either: the base .tier
-       above is ALREADY --white on this page, so recolouring would silently
-       unmark the recommended row and leave .calls carrying it alone. Weight is
-       what this table always claimed marked it, and design.md L105 allows
-       either. The accent mattered more than it looked here: the only green in
-       the Team row was the tier name, which is not clickable, while the green
-       filled button sits in the FREE row. The one green word in the row
-       pointed away from the tier being sold. */
-    .tiers tr.rec .tier { font-weight: 700; }
-    .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
-    .dimtxt { color: var(--dim); }
-    .same { margin-top: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); max-width: 70ch; line-height: 1.6; }
+    .lead { margin-top: var(--s5); }
 
     /* What every plan includes. Two columns of plain text on hairlines, not
        a card per tier repeating "everything in the tier before". */
@@ -186,23 +121,6 @@ export async function upgradeRoute(app: FastifyInstance) {
 
     @media (max-width: 720px) {
       .wrap { padding-block: 40px 64px; }
-      .tiers, .tiers tbody, .tiers tr { display: block; }
-      .tiers tr { padding: 16px 0; border-bottom: 1px solid var(--border);
-                  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; }
-      .tiers tr:first-child { border-top: 1px solid var(--border); }
-      /* th as well as td. \`.tier\` is a th, so a td-only reset left it carrying the
-         base rule's 18px padding and bottom border. Because it is grid-column 1
-         that border spanned only the 1fr track, whose width changes with the
-         price string, so every row was cut in half by a stub ending at a
-         different x. The second FREE-row stub was \`.tiers tr:first-child td\`
-         (0-2-2) outranking this reset (0-1-2); it is zeroed explicitly below.
-         The full-width opening rule is drawn by \`.tiers tr:first-child\`. */
-      .tiers th, .tiers td { display: block; padding: 0; border: 0; }
-      .tiers tr:first-child th, .tiers tr:first-child td { border-top: 0; }
-      .tiers .tier { width: auto; grid-column: 1; }
-      .tiers .amount { grid-column: 2; grid-row: 1; text-align: right; }
-      .tiers .calls { grid-column: 1; }
-      .tiers .act { grid-column: 2; grid-row: 2; text-align: right; padding-left: 0; }
       .incl { grid-template-columns: minmax(0, 1fr); }
     }
 `,
@@ -212,18 +130,13 @@ ${siteNav('/pricing', { sticky: false })}
 <main>
   <div class="wrap">
 
-    <h1>Your agents get a hard budget. Per task. One ceiling, any provider.</h1>
-    <p class="sub">Your provider's cap is real and it fires. What it is bound to is a project, an
-    organization over a calendar month, or one session on that vendor's own harness. This one is
-    bound to a task_ref you choose: every call carrying it consults the same ceiling before it runs,
-    in units you define, and preflight answers approved: false when the next one would cross it.</p>
+    <h1>One ceiling per task. Priced by preflight calls.</h1>
+    <p class="sub">Every call sharing a task_ref consults the same ceiling before it runs, in units you
+    define. Your provider's cap is bound to a project or an organization over a calendar month; this one
+    is bound to the job. The plans differ only in how many preflight calls a month they include.</p>
 
-    <table class="tiers">
-      <tbody>${rows}
-      </tbody>
-    </table>
-    <p class="same">Every plan has every feature. The tiers differ in how many preflight calls a month
-    they include, and in who answers when you write in.</p>
+    ${tierCards(cta)}
+    <p class="tiers-note">${SAME_FEATURES}</p>
 
     <h2>Every plan includes</h2>
     <ul class="incl row-close">

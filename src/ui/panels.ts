@@ -80,5 +80,5 @@ export function requestPanel(): string {
 export const KEY_COMMANDS: ReadonlyArray<readonly [endpoint: string, what: string]> = [
   ['POST /keys/generate', 'A new key, with an optional label and expiry in days.'],
   ['POST /keys/rotate', 'A new key now; the old one keeps working for 24 hours, then revokes itself.'],
-  ['POST /keys/revoke', 'Kills the calling key immediately, or another by its prefix.'],
+  ['POST /keys/revoke', 'Revokes the calling key immediately, or another by its prefix.'],
 ]

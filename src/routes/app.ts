@@ -592,17 +592,22 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
     snapshot: JSON.stringify(snapshot),
     createdAt: new Date(Date.now() - back * 86_400_000 - mins * 60_000),
   })
+  // Each snapshot is the body preflight.ts actually sends for that reason, field
+  // for field: approved, reason, estimated_units, then the reason's own detail.
+  // There is no `message` on the wire. The sentence a person reads is composed
+  // by decisionLine() from these columns; the "Task ... blocked" text that used
+  // to sit here is the SDK's client-side exception string, not the response.
   const all = [
     mk(0, 22, 'researcher', 'job-8871', 'task_ceiling_exceeded', true, 40, 500, 492,
-      { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'job-8871' blocked: 492/500 units used, 8 remaining is not enough for this call.", task_ref: 'job-8871', task_remaining_units: 8 }),
+      { approved: false, reason: 'task_ceiling_exceeded', estimated_units: 40, task_ref: 'job-8871', task_ceiling: 500, task_used_units: 492, task_remaining_units: 8 }),
     mk(0, 74, 'crawler', 'nightly-crawl', 'task_ceiling_exceeded', true, 200, 2000, 1840,
-      { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'nightly-crawl' blocked: 1840/2000 units used, 160 remaining is not enough for this call.", task_ref: 'nightly-crawl', task_remaining_units: 160 }),
+      { approved: false, reason: 'task_ceiling_exceeded', estimated_units: 200, task_ref: 'nightly-crawl', task_ceiling: 2000, task_used_units: 1840, task_remaining_units: 160 }),
     mk(0, 190, 'enricher', 'batch-2211', 'task_ceiling_exceeded', true, 25, 1000, 1000,
-      { approved: false, reason: 'task_ceiling_exceeded', message: "Task 'batch-2211' blocked: 1000/1000 units used, 0 remaining is not enough for this call.", task_ref: 'batch-2211', task_remaining_units: 0 }),
+      { approved: false, reason: 'task_ceiling_exceeded', estimated_units: 25, task_ref: 'batch-2211', task_ceiling: 1000, task_used_units: 1000, task_remaining_units: 0 }),
     mk(1, 30, 'summarizer', null, 'ceiling_exceeded', true, 120, 50, null,
-      { approved: false, reason: 'ceiling_exceeded', message: 'Estimated 120 units exceeds the per-request ceiling of 50.' }),
+      { approved: false, reason: 'ceiling_exceeded', estimated_units: 120, ceiling: 50, remaining_units: null }),
     mk(1, 410, 'researcher', 'job-8864', 'budget_exhausted', true, 60, null, 1000,
-      { approved: false, reason: 'budget_exhausted', message: 'Customer cust_initech has 0 units remaining.' }),
+      { approved: false, reason: 'budget_exhausted', estimated_units: 60, remaining_units: 0 }),
   ]
   // The one leak: a record that landed on batch-2211 an hour ago with no
   // preflight, after the ceiling had refused it two hours earlier. Inserted

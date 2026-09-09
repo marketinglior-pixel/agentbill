@@ -23,23 +23,40 @@ trusts the reader, hates decoration.
   beside a panel that shows the product doing what the claim describes. The
   panels render from the same data the console renders (`demoConsole()`,
   `PLAN_LIMITS`), never from copies. One deliberate grid break per page (on `/`
-  it is the refusal band).
+  it is the playground band).
 
-  The homepage (redesigned for conversion 2026-09-07, `src/routes/home.ts`)
-  runs five rows under the playground, alternating, and the fifth is
-  `.dip.wide`: the head keeps the diptych's columns (title left, argument
-  right) and the console panel spans both beneath, so one row of a different
-  shape closes the sequence instead of stamping a sixth. Two panels joined the
-  set: keys (rows from `demoConsole().keys`, the endpoints from `KEY_COMMANDS`
-  in `panels.ts`, which the console's keys view also renders) and a console
-  overview (three tiles summed over the same series the console draws, the
-  refusals by day, customers by share of spend, and the leak count). The hero's
-  code frame carries a Python / Node tab strip (`src/ui/tabs.ts`): both
-  samples are server-rendered and CI-executed, JavaScript off shows Python,
-  and the install pill follows the tab so the pill and the sample always name
-  the same package. The switch is a state change, not motion. The hero's
-  second action is an in-page jump to the playground, not a second route: the
-  cheapest proof is the one that runs without leaving the page.
+  The homepage (restructured for scan speed 2026-09-09, `src/routes/home.ts`)
+  reads in this order and nothing else: hero, the playground as a full-bleed
+  band directly under it, the provider-cap argument as three sourced cards,
+  five rows (per-task ceilings, the request path, refusals, keys, and the
+  console as `.dip.wide`, where the head keeps the row's columns and the panel
+  spans both beneath), the four tier cards, the not-list at one line per item,
+  and the close. Every row is an eyebrow (tracked mono, `.eyebrow`), an `h2`,
+  two sentences and a panel; the rows are top-level sections, so their heads
+  are `h2` at the section rung and no group heading governs them. The copy
+  budget that produced this: hero subhead under 25 words, a row under 45, the
+  not-list under 25 per item. The hero's code frame carries a Python / Node
+  tab strip (`src/ui/tabs.ts`): both samples are server-rendered and
+  CI-executed, JavaScript off shows Python, and the install pill follows the
+  tab so the pill and the sample always name the same package. The switch is
+  a state change, not motion. Under the code frame the answer is the wire
+  body the sample's own call gets back when 8 units remain, built by
+  `heroRefusalBody()` in `playground.ts` from the run's numbers, and the
+  exception name after it; the SDK's exception TEXT is not rendered on the
+  page, because it still says "blocked" until the SDKs republish. The hero's
+  second action is the docs route; the playground is one scroll down and
+  needs no button to be found.
+
+  The refusal band that used to sit between the hero and the playground is
+  gone: it restated at 40px the string the playground produces on demand, and
+  it was the tallest piece of copy on the page. The playground band inherits
+  its ground (`--band-hi` / `--band-lo`) and its role as the page's grid break.
+
+  The tiers render from one place, `src/ui/tiers.ts`: four cards on the panel
+  frame, Free carrying the one filled button per fold, Team marked by weight
+  and a chip. `/` and `/pricing` call the same function with a different
+  `cta`, so the two pages cannot disagree on a price, a limit or the
+  recommended tier.
 
   **Two classes outrank one.** `.dip.flip` sets its own tracks and the
   breakpoint rule named only `.dip`, so every flipped row kept two tracks on a
@@ -202,7 +219,10 @@ lines of code". `copyPill()` in `src/ui/copy.ts` is the control; one delegated
 listener covers every instance, so one CSP hash does too. The label changes to
 "Copied" and back, which is a state change rather than motion for mood.
 
-The hero's install line is also the honest answer to the proof the references put
+The hero's second action is the docs route (changed 2026-09-09 from an in-page
+jump to the playground: with the playground directly under the hero, a button
+that scrolls one screen is a button that says nothing). The install line under
+the pair is also the honest answer to the proof the references put
 beside their primary action. Fourteen of fourteen show a logo wall or a customer
 count within one screen of the CTA. This product has two external signups, so a
 logo wall is unavailable and a fabricated one would break the claims rules. The
@@ -244,12 +264,14 @@ bar ("python · the whole integration"), never window chrome.
 Macrostructure within their family. Shell width per family. Whether a grid
 break exists (marketing yes, content no).
 
-`/pricing` is the spec-sheet variant of the marketing family, and its own stamp
-records it: `enrichment: none, the table is the product surface`. The 2026-09-06
-audit asked for a product panel there on the grounds that Split Studio pages put
-one beside every claim. Declined: the table IS the panel on that page, and the
-rule this file states is that macrostructure may differ within a family. A future
-pass that wants to revisit it should change the stamp first.
+`/pricing` is the pricing variant of the marketing family. Until 2026-09-09 it
+was a spec-sheet table and its stamp said so; it is now the same four tier cards
+the homepage renders (`src/ui/tiers.ts`), plus the includes list and the
+already-have-a-key panel, and the stamp names the cards as the product surface.
+The 2026-09-06 audit's request for a product panel there is answered the same
+way it was declined: the tiers ARE the panel on that page. The 2026-09-09 change
+was a founder decision to bring the tiers onto the card system, not a reversal
+of that reasoning.
 
 ## Known open gates (for the all-surfaces pass)
 
@@ -318,8 +340,8 @@ it. Do not solve one of these by padding the short column or by cutting content
 out of the tall one.
 
 Applied to `.dip` on `/`, the register grid, the pricing includes grid and the
-about portrait row. `.tiers` and the panels' `.task` / `.ref-row` predate the
-utility and close themselves; a new marketing row uses the class.
+about portrait row. The tier cards and the panels' `.task` / `.ref-row` close
+themselves; a new marketing row uses the class.
 
 ## Alignment
 
@@ -327,7 +349,10 @@ Sibling sections obey one rule, visibly. Three diptychs on `/` used
 `align-items: center`, which centred text blocks of three, four and three lines
 against panels of three different heights, so each landed at a different
 offset and the set read as generated. They are `align-items: start` with a 4px
-optical nudge, and their measured offsets are 0, 0, 0.
+optical nudge, and their measured offsets are 0, 0, 0. The hero is the one row
+that centres (2026-09-09): it has no sibling row to disagree with, and a short
+copy column beside a tall code frame reads as a hero only when the two share a
+middle.
 
 ## CTA voice, mobile
 

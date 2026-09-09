@@ -2,13 +2,14 @@ import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
-import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL } from '../ui/playground.js'
+import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL, heroRefusalBody } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
-import { demoConsole } from './app.js'
-import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { demoConsole, decisionLine } from './app.js'
+import { PLAN_LIMITS } from '../integrations/polar.js'
 import { PANEL_CSS, requestPanel, KEY_COMMANDS } from '../ui/panels.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { TABS_CSS, TABS_JS, TABS_HASH, langTabs } from '../ui/tabs.js'
+import { TIERS_CSS, tierCards, SAME_FEATURES } from '../ui/tiers.js'
 import { publicRoute } from '../middleware/auth.js'
 import { softwareLd } from '../ui/ld.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -20,22 +21,21 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // number the console would disagree with. Where a panel is sample data it
 // says so inside its own frame, so a screenshot carries the label with it.
 //
-// Redesigned 2026-09-07 for conversion, measured against the fold and not
-// against taste: the hero says what the product is in one line and how it
-// works in three, the second action keeps the reader on the page and runs
-// the product, the code frame speaks both languages the register form asks
-// about, and the two pillars the page never showed (the key lifecycle and the
-// receipt) each get a row with a real panel. Nothing here is a logo wall, a
-// count or a testimonial: there is nobody to name yet, and design.md records
-// why the install line stands in that slot.
+// Restructured 2026-09-09 for scan speed, measured against a stopwatch and
+// not against taste: problem, demo, benefits, pricing, close, in that order,
+// and each stop is a short head beside a product surface rather than an
+// argument. The hero says what the product is in one line and how it works
+// in one sentence; the playground sits directly under it as the page's one
+// full-bleed band; the provider-cap argument is three sourced cards instead
+// of an essay; each benefit row is an eyebrow, a head, two sentences and a
+// panel; the tiers are the same four cards /pricing renders; and the list of
+// what the product does not do is kept, compressed to one line per item.
+// Nothing here is a logo wall, a count or a testimonial: there is nobody to
+// name yet, and design.md records why the install line stands in that slot.
 
 const esc = (s: unknown) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const num = (n: number) => n.toLocaleString('en-US')
-
-// Limits, prices and order all come from polar.ts, the same tables preflight
-// enforces and /pricing renders, so no number here can drift from either.
-const RECOMMENDED = 'team'
 
 /** Task budgets burning down: the first three rows of the demo console. */
 function taskPanel(): string {
@@ -75,11 +75,13 @@ function taskPanel(): string {
       </div>`
 }
 
-/** Three refusals from three agents, with the literal body each one got back. */
+/**
+ * Three refusals from three agents. The sentence on each row is composed by
+ * the console's own decisionLine() from the columns the refusal carries, so
+ * this panel and the console's refusals view read the same words.
+ */
 function refusalPanel(): string {
-  const rows = demoConsole().decisions.filter((d) => d.blocked && d.taskRef).slice(0, 3).map((d) => {
-    const body = JSON.parse(d.snapshot) as { message?: string }
-    return `
+  const rows = demoConsole().decisions.filter((d) => d.blocked && d.taskRef).slice(0, 3).map((d) => `
         <div class="ref-row">
           <div class="ref-top">
             <span class="agent">${esc(d.agentId ?? '')}</span>
@@ -87,9 +89,8 @@ function refusalPanel(): string {
             <span class="chip held">refused</span>
             <span class="ask">asked ${num(d.estimatedUnits ?? 0)}</span>
           </div>
-          <div class="ref-msg">${esc(body.message ?? d.reason)}</div>
-        </div>`
-  }).join('')
+          <div class="ref-msg">${esc(decisionLine(d))}</div>
+        </div>`).join('')
   return `<div class="panel">
         <div class="panel-h"><span>Refusals</span><span>what the agent got back</span></div>
         ${rows}
@@ -193,24 +194,58 @@ function consolePanel(): string {
       </div>`
 }
 
-function pricingStrip(): string {
-  const rows = PLAN_ORDER.map((tier) => `
-        <tr class="${tier === RECOMMENDED ? 'rec' : ''}">
-          <th scope="row" class="tier">${tier}</th>
-          <td class="calls">${num(PLAN_LIMITS[tier])}<span class="dimtxt"> calls / mo</span></td>
-          <td class="amount">$${PLAN_PRICES[tier]}${tier === 'free' ? '' : '<span class="dimtxt"> / mo</span>'}</td>
-        </tr>`).join('')
-  return `<table class="tiers">
-        <tbody>${rows}
-        </tbody>
-      </table>`
+/**
+ * The answer under the hero's code frame: the body POST /preflight sends when
+ * the sample's own call is refused, painted the way the playground paints a
+ * response. The object comes from playground.ts, which owns the run's numbers.
+ */
+function heroAnswer(): string {
+  const body = heroRefusalBody()
+  const fields = Object.entries(body).map(([k, v]) => {
+    const val = v === false
+      ? '<span class="f">false</span>'
+      : typeof v === 'string' ? `<span class="s">"${esc(v)}"</span>` : `<span class="n">${esc(String(v))}</span>`
+    return `<span class="k">"${k}"</span>: ${val}`
+  })
+  return `{ ${fields.join(', ')} }`
+}
+
+/**
+ * The provider-cap argument, as evidence rather than prose. Three sources,
+ * each read at the URL beside it on 2026-09-07. The claim on the page is only
+ * what each ceiling is BOUND to; nothing here says a provider lacks a cap,
+ * because the first card is a provider's cap firing.
+ */
+function sourceCards(): string {
+  return `<div class="src-grid">
+        <div class="src">
+          <span class="src-l">OpenAI &middot; spend limits</span>
+          <p>A hard limit answers <b class="mono-in">429 project_spend_limit_exceeded</b>, and enforcement
+          &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount.&rdquo;
+          The boundary is the project or the organization.</p>
+          <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">developers.openai.com</a>
+        </div>
+        <div class="src">
+          <span class="src-l">Anthropic &middot; rate limits</span>
+          <p>A tier spend cap pauses API usage &ldquo;until 00:00 UTC on the first day of the next month.&rdquo;
+          The boundary is the organization, and the clock is the calendar.</p>
+          <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">platform.claude.com</a>
+        </div>
+        <div class="src">
+          <span class="src-l">claude-code &middot; issue 64744, open</span>
+          <p>Enterprise plan, <b>$3,000/month limit</b>: &ldquo;~$300 of unintended API usage over a single
+          weekend with no way to detect or stop it from the CLI.&rdquo; The limit is a month. The incident
+          was a weekend.</p>
+          <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener">github.com</a>
+        </div>
+      </div>`
 }
 
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: `AgentBill · ${HEADLINE}`,
-      description: 'Your provider cap is bound to a project, to an org over a calendar month, or to one session on the vendor’s own harness. This one is bound to a task_ref: every call carrying the same one consults it before it runs, on units you define. Free tier, API key in 30 seconds.',
+      description: 'One ceiling per task_ref, consulted before every call, in units you define. Not per project, not per calendar month. The call that would cross it gets approved: false. Free tier, API key in 30 seconds, no card.',
       path: '/',
       og: {
         description: 'One ceiling per task_ref, consulted before each call, on units you define. Not per project, not per calendar month.',
@@ -225,15 +260,16 @@ export async function homeRoute(app: FastifyInstance) {
       extraHead: pixelSnippet(),
       scriptHashes: [PLAYGROUND_HASH, COPY_HASH, TABS_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}${COPY_CSS}${TABS_CSS}
+      css: `${CHROME_CSS}${PLAYGROUND_CSS}${PANEL_CSS}${COPY_CSS}${TABS_CSS}${TIERS_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: design.md (paper, type and accent are theme.ts) · design-system: design.md · designed-as-app
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
-     * rows: five, alternating, the fifth wide; one grid break, the refusal band
+     * order: hero, playground band, three sourced cards, five rows (the fifth wide), four tier cards,
+     *        the not-list, the close · one grid break, the playground band
      * pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
     :root { --shell: 1080px;
-            /* Page-local: the refusal band's ground and the code-comment ink.
+            /* Page-local: the playground band's ground and the code-comment ink.
                The console colours the panels use (--flow, --res, the chip
                grounds) live in theme.ts, one copy for every page. */
             --band-hi: #121212; --band-lo: #0c0c0c;
@@ -242,60 +278,41 @@ export async function homeRoute(app: FastifyInstance) {
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
     .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
-
-    /* Hero: a diptych. Type on the left, the whole integration on the right.
-       The headline is one line of meaning at three lines of type; the subhead
-       is three sentences, down from six. On a 390px phone the primary action
-       now lands above the fold, which is where a paid click is spent. */
-    .hero { padding-block: var(--s8) var(--s9); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            gap: var(--gap); align-items: start; }
     h1, h2, h3 { overflow-wrap: anywhere; min-width: 0; }
-    h1 { color: var(--white); max-width: 16ch; }
-    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 46ch; }
+
+    /* The label over a section or a row. Tracked mono, the same register as a
+       panel's label bar, so the eye reads it as a tag and not as a sentence. */
+    .eyebrow { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .14em;
+               text-transform: uppercase; color: var(--dim); margin-bottom: var(--s3); }
+
+    /* An identifier inside prose. The mono face is the third register in the
+       system and it is what makes task_ref read as a thing in the code rather
+       than as a word in a sentence. No chip ground: this is body copy. */
+    .mono-in { font-family: var(--mono); font-size: .92em; color: var(--text); font-weight: 500; }
+
+    /* Hero: a diptych. One line of what it is and one sentence of how it works
+       on the left, the whole integration on the right. Centred against each
+       other because this is one row, not a sibling of other rows; the diptychs
+       below align start, per design.md. */
+    .hero { padding-block: var(--s8) var(--s8); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: var(--gap); align-items: center; }
+    h1 { color: var(--white); max-width: 15ch; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 42ch; line-height: 1.55; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     /* The hero pair runs one size up from the site's buttons. The ghost gives
        back the pixel its border adds so the two sit at one height. */
     .btn-lg { padding: 14px 26px; font-size: var(--fs-body); border-radius: 10px; }
     .btn-ghost.btn-lg { padding: 13px 25px; }
-    .chip-link:active { transform: translateY(1px); }
-
-    /* An identifier inside prose. The mono face is the third register in the
-       system and it is what makes task_ref read as a thing in the code rather
-       than as a word in a sentence. No chip ground: this is body copy. */
-    .mono-in { font-family: var(--mono); font-size: .92em; color: var(--text); }
-
-    /* The proof line beside the primary action. Every premium reference fills
-       this slot with a logo wall; we have nobody who has agreed to be named, so
-       it holds one sourced incident. It is set at the trust line's register, not
-       the body's, because it is evidence rather than argument. */
-    .proof { font-size: var(--fs-small); color: var(--dim); line-height: 1.65;
-             max-width: 52ch; margin-top: var(--s4);
-             padding-top: var(--s4); border-top: 1px solid var(--border); }
-    .proof b { color: var(--muted); font-weight: 600; }
-    .proof a { color: var(--muted); text-decoration: underline;
-               text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
-    .proof a:hover { color: var(--text); text-decoration-color: var(--text); }
-
-    /* The citation row under a claim. Dim on purpose: the claim carries the
-       page, the links carry the claim, and a reader who wants them finds them. */
-    .lead-p.src { font-size: var(--fs-small); color: var(--dim); line-height: 1.7; max-width: 78ch; }
-    .lead-p.src a { color: var(--muted); }
+    .hero-install { margin-top: var(--s5); }
     .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
     .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
-    /* --muted, not the accent and not --text. The .trust run is --dim mono
-       micro, and the house rung for a bold term on a --dim ground is --muted:
-       .proof b twelve lines above does exactly this on the same ground. The
-       accent said "link" on a word that is not one. */
     .trust b { color: var(--muted); font-weight: 500; }
-    .hero-install { margin-top: var(--s5); }
 
-    /* The code frame. Its label bar now carries the language tabs on the left
-       and the caption on the right; the bar keeps the 44px floor every control
-       on the site clears, and the selected tab is a bar on the hairline, the
-       same device the nav uses for the current page.
-       The sample used to end on ">>> run 42 of the retry loop:" and nothing
-       after it, a dangling colon in the most looked-at element on the page.
+    /* The code frame. Its label bar carries the language tabs on the left and
+       the caption on the right; the bar keeps the 44px floor every control on
+       the site clears, and the selected tab is a bar on the hairline, the same
+       device the nav uses for the current page.
        The answer sits OUTSIDE the code element on purpose: the snippet harness
        executes every one of those against the SDKs, and an interpolation inside
        one marks the whole block dynamic and silently drops it from CI. Never
@@ -308,58 +325,63 @@ export async function homeRoute(app: FastifyInstance) {
                  box-shadow: var(--edge);
                  font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 1.1px; color: var(--dim); }
     .code-head > span { white-space: nowrap; }
-    .code-body { padding: 22px 24px; overflow-x: auto; }
-    .code-body pre { font-family: var(--mono); font-size: var(--fs-small); color: var(--code-ink); line-height: 1.75; }
+    .code-body { padding: 20px 24px; overflow-x: auto; }
+    .code-body pre { font-family: var(--mono); font-size: var(--fs-small); color: var(--code-ink); line-height: 1.7; }
     .cmt { color: var(--cmt); }
     .out-dim { color: var(--dim); }
-    .code-out { border-top: 1px solid var(--border); padding: 14px 20px;
-                font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65;
-                color: var(--red); background: var(--fail-bg); }
-    .code-out b { font-weight: 700; }
+    /* The answer: the wire body the sample's call gets back on the run where
+       8 units remain, then the exception the SDK raises from it. Body first,
+       because the body is what is checkable against POST /preflight. */
+    .code-out { border-top: 1px solid var(--border); padding: 14px 20px 16px; background: var(--bg-deep);
+                font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65; }
+    .co-l { display: flex; justify-content: space-between; gap: var(--s3); font-size: var(--fs-chip);
+            letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+    .co-l .no { color: var(--red); }
+    .co-json { display: block; color: var(--code-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .co-json .k { color: var(--muted); }
+    .co-json .s, .co-json .n { color: var(--code); }
+    .co-json .f { color: var(--red); font-weight: 700; }
+    .co-n { margin-top: 8px; color: var(--dim); }
+    .co-n b { color: var(--muted); font-weight: 500; }
 
-    /* The refusal band. Every other section on this page is a 1080px column of
-       left-aligned type; this one is full bleed with its own ground, because it
-       carries the one string the whole product exists to produce. Breaking the
-       grid once is what stops the page reading as a template. */
-    .refusal { padding-block: 0;
-               background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
-               border-block: 1px solid var(--border2); box-shadow: var(--edge); }
-    .refusal .wrap { padding-block: 60px 56px; display: grid;
-                     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-                     gap: var(--gap); align-items: start; }
-    .refusal-head { min-width: 0; }
-    .refusal-name, .refusal-msg { font-family: var(--mono); }
-    /* One unbreakable 24-character token, so the floor of this clamp is not a
-       taste call: at 0.585em of measured mono advance, 24 chars need 14.04em,
-       and 320px minus the 48px gutter leaves 272px. 17px fits; 21px does not. */
-    .refusal-name { font-size: clamp(17px, 5.6vw, 40px); font-weight: 700; color: var(--red);
-                    letter-spacing: -0.015em; line-height: 1.1; }
-    .refusal-msg { font-size: clamp(13px, 1.5vw, 17px); color: var(--muted); line-height: 1.6;
-                   margin-top: 14px; max-width: 62ch; white-space: pre-wrap; }
-    .refusal-note { font-size: var(--fs-small); color: var(--dim); margin-top: 6px; max-width: none;
-                    padding-top: 22px; border-top: 1px solid var(--border); }
-    .refusal-note b { color: var(--muted); font-weight: 600; }
-
-    /* The hero's second action jumps here. The nav is sticky, so without this
-       the section head would land under it. */
+    /* The hero's docs link is a route; the playground is one scroll down. The
+       nav is sticky, so the anchor lands beneath it rather than under it. */
     #playground { scroll-margin-top: calc(var(--banner-height) + var(--s4)); }
 
-    /* Sections. Uneven on purpose: the argument opens generously, the
-       guardrails section opens wider still because it changes subject, and
-       pricing sits closer because it is the answer to what came before. */
-    section { padding-block: 72px 0; }
-    .guard { padding-block: 96px 0; }
-    .not-for { padding-block: 64px 0; }
+    /* Sections. Uneven on purpose: the argument opens generously, the rows sit
+       closer to each other than to the sections that frame them, and pricing
+       opens wide because it changes subject. */
+    section { padding-block: 88px 0; }
+    .rows { padding-block: 24px 0; }
+    .pricing { padding-block: 104px 0; }
+    .not-for { padding-block: 88px 0; }
 
-    /* Diptychs. Text on one side, the product on the other, direction alternating.
+    /* The why. One head, one paragraph, three cards of evidence. */
+    .why h2 { color: var(--white); max-width: 22ch; margin-bottom: var(--s4); }
+    .lead-p { color: var(--muted); max-width: 62ch; line-height: 1.7; }
+    .src-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); margin-top: var(--s6); }
+    .src { min-width: 0; display: flex; flex-direction: column; gap: var(--s3);
+           background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
+           border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s4) var(--s5) var(--s5); }
+    .src-l { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+    .src p { color: var(--muted); font-size: var(--fs-small); line-height: 1.65; flex: 1; }
+    .src p b { color: var(--text); font-weight: 600; }
+    /* Source links at the citation register: --muted and underlined, the way
+       .proof a used to be, because the claim carries the page and the link
+       carries the claim. */
+    .src a { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); text-decoration: underline;
+             text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
+    .src a:hover { color: var(--text); text-decoration-color: var(--text); }
+    .src-note { margin-top: var(--s4); font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); max-width: 70ch; }
+
+    /* Rows. Text on one side, the product on the other, direction alternating.
        A gutter, no rule: the two halves are one argument, not two cards. Every
        row is closed by a hairline (.row-close), because an open-bottomed unequal
        row reads as an unfinished column; text top aligns with panel top, with a
-       4px optical nudge putting the h3's cap height on the panel's label bar. */
+       4px optical nudge putting the head's cap height on the panel's label bar. */
     .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap);
-           align-items: start; padding-block: 40px 40px; }
+           align-items: start; padding-block: 48px 48px; }
     .dip-text { padding-top: 4px; }
-    .dip + .dip { padding-block: 48px 40px; }
     /* order: 2 reorders the DOM item but not the track, so the flipped row
        mirrors its tracks too, or its panel lands 161px narrower than its siblings.
        Two classes outrank one: the collapse rule under --lg names .dip.flip as
@@ -368,23 +390,21 @@ export async function homeRoute(app: FastifyInstance) {
     .dip.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
     .dip.flip .dip-text { order: 2; }
     /* The wide row. The fifth row is the console, which is a workbench and
-       wants the shell's full width: its head sits in the diptych's own columns
-       (title left, argument right) and the panel spans both beneath. One row
-       of a different shape closes the sequence instead of stamping a sixth. */
+       wants the shell's full width: its head sits in the row's own columns
+       (eyebrow and head left, argument right) and the panel spans both beneath. */
     .dip.wide { grid-template-columns: minmax(0, 1fr); row-gap: var(--s6); }
     .dip.wide .dip-text { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
                           gap: var(--gap); align-items: start; padding-top: 0; }
-    .dip.wide .dip-text h3 { margin-bottom: 0; }
+    .dip.wide .dip-text h2 { margin-bottom: 0; }
     .dip.wide .dip-text p { margin-top: 4px; max-width: 58ch; }
-    .dip h3 { font-size: var(--fs-h3); color: var(--white); margin-bottom: 16px; max-width: 16ch; }
-    .dip p { color: var(--muted); line-height: 1.7; max-width: 46ch; }
+    .dip h2 { color: var(--white); margin-bottom: var(--s4); max-width: 14ch; }
+    .dip p { color: var(--muted); line-height: 1.7; max-width: 44ch; }
     .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
                  padding: 0 18px; border: 1px solid var(--border-strong); border-radius: var(--r-control);
                  color: var(--text); text-decoration: none; font-weight: 600; font-size: var(--fs-small);
                  white-space: nowrap; transition: border-color .15s; }
     .chip-link:hover { border-color: var(--text); }
-    .lead-h2 { color: var(--white); margin-bottom: 8px; max-width: 22ch; }
-    .lead-p { color: var(--muted); max-width: 58ch; }
+    .chip-link:active { transform: translateY(1px); }
 
     /* Panel contents. The frame (.panel) comes from ui/panels.ts; what goes
        inside is this page's, in the console's own vocabulary. */
@@ -457,55 +477,48 @@ export async function homeRoute(app: FastifyInstance) {
     .con-note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--fail-ink); line-height: 1.55;
                 margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
 
-    /* Pricing: a spec sheet, not four cards. The recommended tier carries weight
-       through type, and the numbers line up because they are a table. */
-    .tiers { width: 100%; border-collapse: collapse; margin-top: 28px; font-variant-numeric: tabular-nums; }
-    .tiers th { font-weight: inherit; text-align: left; }
-    .tiers th, .tiers td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-body); }
-    .tiers tr:first-child > * { border-top: 1px solid var(--border); }
-    .tiers .tier { font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; font-size: var(--fs-micro);
-                   color: var(--dim); width: 18%; }
-    .tiers .amount { text-align: right; font-family: var(--display); font-size: var(--fs-h3); font-weight: 700;
-                     color: var(--text); letter-spacing: -0.02em; }
-    /* --white, joining .calls and .amount on the line below. The base .tier
-       here is --dim, so this is still a two-rung lift; the accent only made the
-       one word in the row you cannot click the greenest thing in it. */
-    .tiers tr.rec .tier { color: var(--white); }
-    .tiers tr.rec .calls, .tiers tr.rec .amount { color: var(--white); }
-    .price-links { margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    /* Pricing: the four cards /pricing renders, from ui/tiers.ts. */
+    .pricing h2 { color: var(--white); margin-bottom: var(--s2); max-width: 22ch; }
+    .price-links { margin-top: var(--s5); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-    /* What it does not do: two columns of short rules. The list is the honest
-       substitute for the proof this page cannot show, so it stays; two columns
-       keep it to one screen instead of a scroll. */
-    .not-for ul { list-style: none; columns: 2; column-gap: var(--gap); margin-top: var(--s5); }
-    .not-for li { color: var(--muted); font-size: var(--fs-small); line-height: 1.6; margin-bottom: 14px;
-                  padding-left: 22px; position: relative; break-inside: avoid; }
-    .not-for li b { color: var(--text); font-weight: 600; }
+    /* What it does not do: one line per item, two columns, on hairlines. The
+       list is the honest substitute for the proof this page cannot show, so it
+       stays; one line per item keeps it to a glance instead of a scroll. */
+    .not-for h2 { color: var(--white); margin-bottom: var(--s2); }
+    .nots { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--gap);
+            margin-top: var(--s5); }
+    .nots li { color: var(--muted); font-size: var(--fs-small); line-height: 1.6; padding: 12px 0 12px 22px;
+               border-bottom: 1px solid var(--border-soft); position: relative; }
+    .nots li b { color: var(--text); font-weight: 600; }
     /* A short rule reads as negation, needs no icon set, and speaks the mark's
        own vocabulary: a line that stops something. */
-    .not-for li::before { content: ""; position: absolute; left: 0; top: 0.62em;
-                          width: 11px; height: 1.5px; background: var(--red); }
+    .nots li::before { content: ""; position: absolute; left: 0; top: calc(12px + 0.62em);
+                       width: 11px; height: 1.5px; background: var(--red); }
 
+    /* The close. Calm: a head, one line, the button and the install line. On a
+       phone the sticky bar is the primary, so .end stands the button down. */
     .final { padding-block: var(--s9) var(--s5); }
     .final h2 { color: var(--white); margin-bottom: 10px; }
-    .final p { color: var(--muted); margin-bottom: 26px; max-width: 54ch; }
+    .final p { color: var(--muted); margin-bottom: var(--s5); max-width: 54ch; }
+    .final-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
     @media (max-width: ${BP.lg}px) {
-      .hero, .dip, .dip.flip, .refusal .wrap, .dip.wide .dip-text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .hero, .dip, .dip.flip, .dip.wide .dip-text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .hero { align-items: start; padding-block: var(--s7) var(--s7); }
       .dip.wide .dip-text { gap: 0; }
-      .refusal .wrap { gap: 26px; }
-      .refusal-note { border-top: 1px solid var(--border); padding-top: 22px; }
       .dip.flip .dip-text { order: 0; }
       .dip-text { padding-top: 0; }
-      .hero { padding-block: var(--s7) var(--s8); }
+      .dip { padding-block: 36px 36px; }
+      section { padding-block: 64px 0; }
+      .rows { padding-block: 16px 0; }
+      .pricing { padding-block: 80px 0; }
       .sub { max-width: 54ch; }
-      section { padding-block: 56px 0; }
-      .guard { padding-block: 72px 0; }
+      .src-grid { grid-template-columns: minmax(0, 1fr); }
       .con-grid { grid-template-columns: minmax(0, 1fr); }
       .con-r { border-left: 0; border-top: 1px solid var(--border); }
     }
     @media (max-width: ${BP.md}px) {
-      .not-for ul { columns: 1; }
+      .nots { grid-template-columns: minmax(0, 1fr); }
     }
     @media (max-width: ${BP.sm}px) {
       /* One column: the subhead takes the column's width at body size, and the
@@ -528,10 +541,7 @@ export async function homeRoute(app: FastifyInstance) {
       .cust { grid-template-columns: minmax(0, 1fr) auto 3.2em; }
       .cust .sbar { display: none; }
       .cmd { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-      .tiers td { font-size: var(--fs-small); }
-      /* 18% of a 342px table is 61.6px; BUILDER at 12px mono with .12em tracking
-         needs more, and the neighbouring cell has no inline padding to absorb it. */
-      .tiers .tier { width: auto; padding-right: var(--s4); letter-spacing: .06em; }
+      .final-row { display: grid; grid-template-columns: minmax(0, 1fr); }
     }
 `,
     })}
@@ -542,15 +552,12 @@ ${siteNav('/')}
   <header class="hero wrap">
     <div>
       <h1>${HEADLINE}.</h1>
-      <p class="sub">Your provider cap is bound to a project, to an org over a calendar month, or to
-      one session on the vendor's own harness. This one is bound to <span class="mono-in">job-142</span>.
-      You pass two numbers: the ceiling for the task, and what this call is worth, both in units you
-      define. Every call carrying the same <span class="mono-in">task_ref</span> consults that ceiling
-      before it runs, and the reservation is atomic, so two calls cannot both be approved for the last
-      8 units.</p>
+      <p class="sub">Every call sharing a <span class="mono-in">task_ref</span> consults one ceiling before
+      it runs, in units you define. The call that would cross it gets
+      <span class="mono-in">approved: false</span>.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
-        <a class="btn-ghost btn-lg" href="#playground">Run it in your browser</a>
+        <a class="btn-ghost btn-lg" href="/docs">Read the docs</a>
       </div>
       <!-- The step that needs no account. The references all put proof beside the
            primary action; this product has two external signups, so a logo wall is
@@ -561,18 +568,8 @@ ${siteNav('/')}
       <div class="hero-install">
         <div data-lang="python">${copyPill('install-py', INSTALL_PY)}</div>
         <div data-lang="node" hidden>${copyPill('install-node', 'npm install agentbill')}</div>
-        <p class="cp-note">or read the <a href="/docs">two-minute quickstart</a></p>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
-      <!-- The slot every premium reference fills with a logo wall. We have nobody who
-           has agreed to be named, so it holds a sourced incident with a link instead.
-           The number belongs to the reporter, in his own issue, and the point is made
-           by the two units disagreeing: the limit is a month, the incident was a weekend. -->
-      <p class="proof">One reporter, one issue, on an <b>Enterprise plan ($3,000/month limit)</b>:
-      <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener">
-      &ldquo;~$300 of unintended API usage over a single weekend with no way to detect or stop it
-      from the CLI&rdquo;</a>, on a loop that ran ~864 iterations. The limit is stated per month.
-      The incident was a weekend.</p>
     </div>
 
     <div class="code-block">
@@ -622,47 +619,36 @@ await record({ agentId: 'researcher',
 
 <span class="out-dim">// run 42 of the retry loop:</span></pre>
       </div>
-      <div class="code-out"><b>${REFUSAL.name}:</b> ${REFUSAL.message}</div>
+      <div class="code-out">
+        <div class="co-l"><span>POST /preflight</span><span class="no">200 &middot; refused</span></div>
+        <code class="co-json">${heroAnswer()}</code>
+        <p class="co-n">The SDK raises <b>${REFUSAL.name}</b>. Your code decides what happens next.</p>
+      </div>
     </div>
   </header>
-
-  <section class="refusal">
-    <div class="wrap">
-      <div class="refusal-head">
-        <div class="refusal-name">${REFUSAL.name}</div>
-        <div class="refusal-msg">${REFUSAL.message}</div>
-      </div>
-      <p class="refusal-note">That is the exception your code catches, raised the moment the ceiling
-      is checked and before the call goes out, not a log line written after the fact. <b>The call
-      never ran.</b> The response body it was built from is below, and you can produce it yourself.</p>
-    </div>
-  </section>
 
 ${playgroundSection()}
 
   <section class="wrap why">
-    <h2 class="lead-h2">Your job is not an account, and it does not last a month.</h2>
-    <p class="lead-p">The cap is real. Turn it on and keep it on. It fires, and it is documented. What it
-    is bound to is a project, an organization, or one session on one vendor's own harness, measured over
-    a calendar month. Two things follow from where that line is drawn. A run too small to move a monthly
-    number never crosses it. And a monthly number low enough to catch that run takes every agent in the
-    organization down with it when it fires, until the month turns.</p>
-    <p class="lead-p src">Their own documentation, read at source on 2026-09-07:
-    <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">a
-    hard limit returns <span class="mono-in">429 project_spend_limit_exceeded</span> and enforcement
-    &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount&rdquo;</a>
-    &middot; <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">a
-    tier cap pauses usage &ldquo;until 00:00 UTC on the first day of the next month&rdquo;</a>
-    &middot; <a href="https://ai.google.dev/gemini-api/docs/billing" rel="nofollow noopener">&ldquo;Long-running
-    tasks like batch mode and agents may continue to consume credits beyond your balance before
-    the system can process and halt usage.&rdquo;</a></p>
+    <p class="eyebrow">Why a task, not a month</p>
+    <h2>Your job is not an account, and it does not last a month.</h2>
+    <p class="lead-p">The provider cap is real and it fires. It is bound to a project, to an organization
+    over a calendar month, or to one session on the vendor's own harness. A run too small to move a
+    monthly number never trips it. A number low enough to catch that run stops every agent in the
+    organization until the month turns.</p>
+    ${sourceCards()}
+    <p class="src-note">Read at source on 2026-09-07. What differs is not whether a cap fires. It is what
+    the cap is bound to.</p>
+  </section>
 
+  <section class="wrap rows">
     <div class="dip row-close">
       <div class="dip-text">
-        <h3>Per-task ceilings</h3>
-        <p>One job, many calls, one budget. "This task gets 500 units," and you decide what a
-        unit is worth. The ceiling is consulted before each call, and no call that consults it
-        is approved once the job's total would cross it.</p>
+        <p class="eyebrow">Per-task ceilings</p>
+        <h2>One job, many calls, one ceiling.</h2>
+        <p>Pass <span class="mono-in">task_ceiling</span> on the first call and the same
+        <span class="mono-in">task_ref</span> on every call after it. The first call fixes the ceiling.
+        Each one consults it before it runs, in units you define.</p>
         <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch budgets burn down &rarr;</a>
       </div>
       ${taskPanel()}
@@ -670,48 +656,36 @@ ${playgroundSection()}
 
     <div class="dip flip row-close">
       <div class="dip-text">
-        <h3>One ceiling, one task, across processes</h3>
-        <p>Something draws down this ceiling <b>only if it calls preflight with the same
-        <span class="mono-in">task_ref</span></b>. That is why anything can, and why nothing does on
-        its own. The row is unique on <span class="mono-in">(account_id, task_ref)</span>, so a
-        fan-out spread across four processes and two machines draws down one number, and a later
-        call passing a different ceiling for the same task does not move it. You pass what each call
-        is worth. We never look at your provider bill.</p>
+        <p class="eyebrow">No proxy</p>
+        <h2>Two calls. Nothing in your request path.</h2>
+        <p><span class="mono-in">preflight</span> before your provider call,
+        <span class="mono-in">record</span> after it. No base URL to change, no traffic routed through
+        us, no provider keys held. If we are unreachable, the SDK raises inside your process and your
+        code decides.</p>
+        <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
+      </div>
+      ${requestPanel()}
+    </div>
+
+    <div class="dip row-close">
+      <div class="dip-text">
+        <p class="eyebrow">The receipt</p>
+        <h2>Every refusal is written down.</h2>
+        <p>Each <span class="mono-in">approved: false</span> is persisted with the body the agent
+        received, per agent and per task. A record that lands past a ceiling because preflight was
+        skipped is kept as a leak, not hidden.</p>
         <a class="chip-link" href="/app?demo=1&amp;view=refusals">See the refusals &rarr;</a>
       </div>
       ${refusalPanel()}
     </div>
 
-    <div class="dip row-close">
-      <div class="dip-text">
-        <h3>No proxy in your request path</h3>
-        <p>No base URL to change, none of your traffic routed through us, no third party holding
-        your provider keys. What you do add is one synchronous HTTP call before your own: the SDK posts
-        to <span class="mono-in">/preflight</span> with a five second timeout and no fail-open, so
-        if we are unreachable that raises inside your process and your except block decides whether
-        to run anyway. A gateway would have made that decision for you.</p>
-        <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
-      </div>
-      ${requestPanel()}
-    </div>
-  </section>
-
-  <section class="wrap guard">
-    <h2 class="lead-h2">Guardrails on the key. A receipt for every refusal.</h2>
-    <p class="lead-p">A ceiling is what a job is measured against before each call. A leaked key is a different failure, and
-    it has its own controls, each of them one HTTP call away. And every refusal is written down with the
-    body the agent got back, so what the ceiling saved you from is a row you can open, not a log line
-    you have to go and find.</p>
-
     <div class="dip flip row-close">
       <div class="dip-text">
-        <h3>Keys you can kill in one call</h3>
-        <p>Revoke a key and it is refused on its next request: the check is one predicate in SQL, on
-        the database clock, so no skew between our app and our database can keep a dead key alive.
-        Rotate, and the old key keeps working for 24 hours, then revokes itself. Give a key a label
-        and an expiry in days. Every key is limited to 100 requests a minute, and a request from a
-        new IP address emails the account owner with the previous address and the new one. None of
-        this touches your provider keys. We never hold them.</p>
+        <p class="eyebrow">Keys</p>
+        <h2>Keys you can revoke in one call.</h2>
+        <p>Revoke, and the key is refused on its next request. Rotate, and the old key works for
+        24 hours, then revokes itself. Labels, expiry in days, 100 requests a minute per key, and an
+        email when a key is used from a new address. Your provider keys never touch us.</p>
         <a class="chip-link" href="/app?demo=1&amp;view=keys">See the keys view &rarr;</a>
       </div>
       ${keysPanel()}
@@ -719,12 +693,13 @@ ${playgroundSection()}
 
     <div class="dip wide row-close">
       <div class="dip-text">
-        <h3>Every refusal is written down</h3>
         <div>
-          <p>Each <span class="mono-in">approved: false</span> is persisted with the literal body the
-          agent received, per agent and per task. The console reads those rows: calls refused and units
-          refused over a window, the tasks burning down now, and every customer by share of spend. A
-          record that lands past a ceiling because preflight was skipped is kept as a leak, not hidden.</p>
+          <p class="eyebrow">Console</p>
+          <h2>What the ceiling saved you from, as rows.</h2>
+        </div>
+        <div>
+          <p>Calls refused and units refused over a window, the tasks burning down now, every customer
+          by share of spend, and the one number that should be zero.</p>
           <a class="chip-link" href="/app?demo=1">Open the sample console &rarr;</a>
         </div>
       </div>
@@ -732,57 +707,53 @@ ${playgroundSection()}
     </div>
   </section>
 
-  <section class="wrap">
-    <h2 class="lead-h2">Free to start. Cheap enough to leave on.</h2>
-    ${pricingStrip()}
+  <section class="wrap pricing" id="pricing">
+    <p class="eyebrow">Pricing</p>
+    <h2>Free to start. Cheap enough to leave on.</h2>
+    <p class="lead-p">${SAME_FEATURES}</p>
+    ${tierCards((tier) => `/app/upgrade/${tier}`)}
     <div class="price-links">
-      <a class="btn" href="/register">Start free</a>
-      <a class="btn-ghost" href="/pricing">Full pricing</a>
+      <a class="btn-ghost" href="/pricing">Full pricing &rarr;</a>
     </div>
   </section>
 
   <section class="wrap not-for">
-    <h2 class="lead-h2">What AgentBill does NOT do</h2>
-    <ul>
-      <li><b>Stop your run.</b> Preflight answers <span class="mono-in">approved: false</span> and
-      the SDK raises. Your code decides what happens next. Nothing here can terminate a process.</li>
-      <li><b>Read your provider bill.</b> No access to your provider account, no reconciliation
-      against an invoice, no estimate of what a call costs.</li>
-      <li><b>Invent a dollar number.</b> You decide what a unit is worth. Units refused is what was
-      asked for and denied; it is not a dollar figure.</li>
-      <li><b>See a call that never asks.</b> An uninstrumented tool, a subprocess someone added last
-      week, a retry buried in a library: invisible to the ceiling, because there is no proxy to see
-      it.</li>
+    <h2>What AgentBill does not do</h2>
+    <ul class="nots">
+      <li><b>Stop your run.</b> Preflight answers <span class="mono-in">approved: false</span> and the
+      SDK raises. Your code decides what happens next.</li>
+      <li><b>Read your provider bill.</b> No access to your provider account, no invoice, no dollar
+      estimate. Units are yours to define, and units refused is not money.</li>
+      <li><b>See a call that never asks.</b> No proxy, so an uninstrumented tool or a retry buried in a
+      library is invisible to the ceiling.</li>
       <li><b>Bind a caller.</b> The ceiling is keyed on
-      <span class="mono-in">(account_id, task_ref)</span>, so a loop that opens a new
-      <span class="mono-in">task_ref</span> gets a new ceiling. It binds the task you named, not
-      whoever is running it.</li>
-      <li><b>Unwind a multi-step workflow.</b> Calls are refused, not reversed. Refusing the next
-      call does not undo the calls that already ran.</li>
-      <li><b>Guarantee the TTL fits your job.</b> A reservation not settled inside the TTL, 60
-      minutes by default, is reclaimed by a sweeper that runs every five minutes, while your call
-      may still be running. Set it longer than your longest call.</li>
-      <li><b>Publish a latency SLO.</b> We do not have one. The free tier is
-      ${num(PLAN_LIMITS.free)} calls with no card, which is enough to measure the added latency on
-      your own workload instead of taking a number off this page.</li>
-      <li><b>Replace observability.</b> It does not trace, sample or explain a run after it
-      finished. If you want to know what last night cost, that is a different tool. Keep it.</li>
-      <li><b>Replace your payment processor.</b> It does not move money, hold a card
-      or charge your end customers, and it is not positioned between you and one that does.
-      Polar bills you for AgentBill; nothing bills anyone on your behalf.</li>
-      <li><b>Give your ops team a no-code dashboard.</b> There is a console. The product is an SDK
-      and one endpoint.</li>
-      <li><b>Show you a logo wall, a customer count or a testimonial.</b> There is nobody yet who
-      has agreed to be named. The install line, the free tier and the response bodies above are what
-      is checkable instead.</li>
+      <span class="mono-in">(account_id, task_ref)</span>. A loop that opens a new
+      <span class="mono-in">task_ref</span> gets a new ceiling.</li>
+      <li><b>Unwind a workflow.</b> Calls are refused, not reversed. Refusing the next call does not
+      undo the ones that already ran.</li>
+      <li><b>Guarantee the TTL fits your job.</b> A reservation not settled inside 60 minutes is
+      reclaimed by a sweeper while your call may still be running.</li>
+      <li><b>Publish a latency SLO.</b> There is none. The free tier is ${num(PLAN_LIMITS.free)} calls
+      with no card, enough to measure the added latency on your own workload.</li>
+      <li><b>Replace observability or payments.</b> No tracing, no invoices, no money moved. Polar bills
+      you for AgentBill; nothing bills anyone on your behalf.</li>
+      <li><b>Give your ops team a no-code dashboard.</b> There is a console. The product is an SDK and
+      one endpoint.</li>
+      <li><b>Show a logo wall or a testimonial.</b> Nobody has agreed to be named yet. The install line,
+      the free tier and the response bodies above are what is checkable.</li>
     </ul>
   </section>
 
-  <div class="final wrap">
+  <section class="wrap final end">
     <h2>Give one job a ceiling.</h2>
-    <p>Free tier. No card. If this page took you longer to read than the integration takes, we did our job.</p>
-    <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
-  </div>
+    <p>Free tier, no card, ${num(PLAN_LIMITS.free)} preflight calls a month. If this page took longer to
+    read than the integration takes, we did our job.</p>
+    <div class="final-row">
+      <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
+      <div data-lang="python">${copyPill('install-py-2', INSTALL_PY)}</div>
+      <div data-lang="node" hidden>${copyPill('install-node-2', 'npm install agentbill')}</div>
+    </div>
+  </section>
 
 </main>
 ${siteFooter()}

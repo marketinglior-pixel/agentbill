@@ -218,8 +218,13 @@ export async function registerRoute(app: FastifyInstance) {
        starts at the top beside the headline; the proof panel sits under the
        pitch. On one column the order becomes pitch, form, proof: the form is
        what a phone arriving from a paid click came for. */
+    /* auto 1fr: the form spans both rows, and without explicit tracks the grid
+       shared its height between them, which floated the request panel some
+       150px below the pitch. The first row now fits the pitch and the second
+       takes the rest. */
     .reg { padding-block: 56px 88px; display: grid; gap: 40px 56px; align-items: start;
            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+           grid-template-rows: auto 1fr;
            grid-template-areas: "pitch form" "proof form"; }
     .pitch { grid-area: pitch; } .proof { grid-area: proof; } .form-col { grid-area: form; }
 
@@ -247,10 +252,14 @@ export async function registerRoute(app: FastifyInstance) {
     .trust b { color: var(--muted); font-weight: 500; }
 
     /* Form. Inputs and the button share one 44px floor; state changes move
-       colour, outline and background, never border width, so nothing shifts. */
-    .form-h h2 { color: var(--white); margin-bottom: 6px; }
-    .form-h p { color: var(--muted); font-size: 14.5px; margin-bottom: 28px; }
-    .form { display: grid; gap: 16px; max-width: 440px; }
+       colour, outline and background, never border width, so nothing shifts.
+       The whole column sits on the panel frame the rest of the site leads
+       with, so the thing to fill in reads as one object, not loose fields. */
+    .form-card { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
+                 border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s5); }
+    .form-h h2 { color: var(--white); margin-bottom: 6px; font-size: var(--fs-h3); }
+    .form-h p { color: var(--muted); font-size: var(--fs-small); margin-bottom: var(--s5); }
+    .form { display: grid; gap: 16px; }
     .field { display: grid; gap: 6px; }
     label { font-size: 13.5px; font-weight: 600; color: var(--text); }
     label .opt { color: var(--dim); font-weight: 400; margin-left: 4px; }
@@ -288,7 +297,7 @@ export async function registerRoute(app: FastifyInstance) {
     .form-note { font-size: 12.5px; color: var(--dim); line-height: 1.6; }
 
     /* Success. Same panel frame as everywhere else on the site. */
-    .success { display: none; flex-direction: column; gap: 20px; max-width: 440px; }
+    .success { display: none; flex-direction: column; gap: 20px; }
     .success h2 { color: var(--white); }
     .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
     /* --code-ink: design.md calls it "the base ink inside a code frame", and
@@ -325,10 +334,11 @@ export async function registerRoute(app: FastifyInstance) {
                padding: 1px 5px; border-radius: 3px; }
 
     @media (max-width: 900px) {
-      .reg { grid-template-columns: minmax(0, 1fr); grid-template-areas: "pitch" "form" "proof"; gap: 36px;
+      .reg { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
+             grid-template-areas: "pitch" "form" "proof"; gap: 36px;
              padding-block: 40px 64px; }
       .lede { margin-bottom: 20px; }
-      .form, .success { max-width: none; }
+      .form-card { padding: var(--s4); }
     }
 `,
     })}
@@ -346,6 +356,7 @@ ${siteNav('/register', { cta: false })}
   <div class="proof">${requestPanel()}</div>
 
   <div class="form-col">
+    <div class="form-card">
     <div id="form-state">
       <div class="form-h">
         <h2>Get your API key</h2>
@@ -428,6 +439,7 @@ def run_job():
     ...</pre><p><a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div></div>
         </div>
       </div>
+    </div>
     </div>
   </div>
 </div>
