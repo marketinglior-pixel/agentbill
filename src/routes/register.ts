@@ -484,9 +484,15 @@ ${REGISTER_JS}
 
       // New account
       const result = await sql.begin(async (tx) => {
+        // default_budget_units is NULL on purpose. It is copied onto every
+        // customer the account lazily creates, and customers.used_units never
+        // resets, so the 1000 that sat here until 2026-09-09 was a silent
+        // lifetime cap on the customer named "default", refusing a call the
+        // task ceiling had approved. A customer's ceiling is set by PUT /budget
+        // and nothing else. Migration 010 cleared the inherited 1000s.
         const [account] = await tx`
           INSERT INTO accounts (email, name, plan, use_case, stack, default_budget_units)
-          VALUES (${email}, ${name ?? null}, 'free', ${use_case ?? null}, ${stack ?? null}, 1000)
+          VALUES (${email}, ${name ?? null}, 'free', ${use_case ?? null}, ${stack ?? null}, NULL)
           ON CONFLICT (email) DO NOTHING
           RETURNING id
         `

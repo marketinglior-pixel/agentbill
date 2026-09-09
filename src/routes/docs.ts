@@ -130,12 +130,13 @@ client.record(agent_id="researcher", task_ref="job-142", units=12)
   console groups by; the ceiling is on the task, not on the agent. The free tier is 1,000 preflight
   calls per month, per account.</p>
 
-  <p>One more ceiling applies before real traffic. A call that passes no
-  <span class="inline">customer_id</span> draws on a customer named <span class="inline">default</span>,
-  and a new account gives every customer 1,000 units for life, not per month. Once that many units are
-  recorded against it, preflight refuses with <span class="inline">budget_exhausted</span> and the SDK
-  raises <span class="inline">BudgetExhaustedError</span>, whatever the task ceiling says. Raise it, or
-  set it to <span class="inline">null</span> for no limit, with <a href="#put-budget">PUT /budget</a>.</p>
+  <p>A call that passes no <span class="inline">customer_id</span> draws on a customer named
+  <span class="inline">default</span>. A customer starts with no limit, so until you set one the task
+  ceiling is the only thing that refuses, and <span class="inline">remaining_units</span> in the
+  preflight body is <span class="inline">null</span>. <a href="#put-budget">PUT /budget</a> gives a
+  customer a ceiling in units; past it, preflight refuses with
+  <span class="inline">budget_exhausted</span> and the SDK raises
+  <span class="inline">BudgetExhaustedError</span>. That balance never resets on its own.</p>
 
   <h2>Core Concepts</h2>
 
@@ -255,7 +256,7 @@ WHERE account_id = :account
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td>agent_id</td><td>string</td><td>A label for attribution, not a budget. Every task and every refusal in the console carries it, and nothing is capped by it.</td></tr>
-    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default", which a new account creates with 1,000 units; see <a href="#put-budget">PUT /budget</a>.</td></tr>
+    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default". A customer starts with no limit; set one with <a href="#put-budget">PUT /budget</a>.</td></tr>
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is refused if estimated_units exceeds it.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets">task budgets</a>.</td></tr>
@@ -300,7 +301,7 @@ WHERE account_id = :account
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td>agent_id</td><td>string</td><td>The same attribution label you passed to preflight.</td></tr>
     <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1.</td></tr>
-    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default", which a new account creates with 1,000 units; see <a href="#put-budget">PUT /budget</a>.</td></tr>
+    <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default". A customer starts with no limit; set one with <a href="#put-budget">PUT /budget</a>.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Settles against that task's ceiling. Pass the same one you preflighted with, or the units stay reserved until the reservation expires.</td></tr>
   </table>
 
