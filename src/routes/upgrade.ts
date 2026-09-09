@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { checkoutPath, createCheckoutSession, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { checkoutPath, createCheckoutSession, isPolarCheckoutUrl, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
@@ -300,6 +300,9 @@ ${siteFooter()}
     const accountId = ((request.query as { account_id?: string }).account_id) ?? ''
     if (!isUuid(accountId)) return reply.redirect('/register', 302)
     const url = await createCheckoutSession(tier, accountId)
-    return reply.redirect(url ?? '/pricing', 302)
+    // createCheckoutSession already refuses anything off polar.sh; the check is
+    // repeated at the sink so the redirect never depends on a caller upstream
+    // remembering to. Off-list means /pricing, the same as a failed call.
+    return reply.redirect(isPolarCheckoutUrl(url) ? url : '/pricing', 302)
   })
 }

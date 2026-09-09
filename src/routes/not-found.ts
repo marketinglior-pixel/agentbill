@@ -94,8 +94,17 @@ export function registerNotFound(app: FastifyInstance) {
     // /docs/ is /docs. Only /app/ had a redirect and it dropped the query; every
     // other page 404'd on a trailing slash, which is how links get typed.
     const qi = request.url.indexOf('?')
-    const path = qi === -1 ? request.url : request.url.slice(0, qi)
+    const rawPath = qi === -1 ? request.url : request.url.slice(0, qi)
     const query = qi === -1 ? '' : request.url.slice(qi)
+    // One leading slash, always. The redirect target is built from the request
+    // path, and a path that opens with two slashes is not a path to a browser:
+    // `//evil.example/` used to answer `Location: //evil.example`, which every
+    // browser reads as scheme-relative and follows off-site (CWE-601, found by
+    // Snyk Code 2026-09-09). A leading backslash is the same hole in the WHATWG
+    // parser, which treats `/\` like `//` for http(s), so both characters are
+    // collapsed. `//` alone becomes `/`, which is a page, so it falls through
+    // to the 404 below instead of redirecting to an empty Location.
+    const path = rawPath.replace(/^[\/\\]+/, '/')
     if (path.length > 1 && path.endsWith('/')) {
       return reply.redirect(path.replace(/\/+$/, '') + query, 301)
     }

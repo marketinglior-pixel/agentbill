@@ -36,9 +36,30 @@ const PRODUCT_IDS: Record<string, string> = {
   scale: process.env.POLAR_PRODUCT_ID_SCALE ?? '',
 }
 
+/**
+ * True only for an https URL on polar.sh or one of its subdomains, which is
+ * where Polar hosts a checkout session (production `polar.sh/checkout/...`,
+ * sandbox `sandbox.polar.sh/...`). The buy button 302s a visitor to whatever
+ * createCheckoutSession returns, so the returned string is a redirect target
+ * and gets the same allowlist a user-supplied one would (CWE-601, Snyk Code
+ * 2026-09-09). Verified against a session minted by production the same day:
+ * its host was `polar.sh`.
+ */
+export function isPolarCheckoutUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && (hostname === 'polar.sh' || hostname.endsWith('.polar.sh'))
+  } catch {
+    return false
+  }
+}
+
 // Create a checkout session carrying the account id as metadata; return its
 // hosted URL. Recoverable from the webhook via getCheckoutMetadata by
 // checkout_id, which the payload carries even when subscription.metadata is empty.
+// Anything that is not an https polar.sh URL comes back as null, the same as a
+// failed call, so no caller can be handed an off-site redirect target.
 export async function createCheckoutSession(tier: string, accountId: string): Promise<string | null> {
   const productId = PRODUCT_IDS[tier]
   if (!POLAR_API_KEY || !productId) return null
@@ -60,7 +81,7 @@ export async function createCheckoutSession(tier: string, accountId: string): Pr
     })
     if (!r.ok) return null
     const j = (await r.json()) as { url?: string }
-    return typeof j.url === 'string' ? j.url : null
+    return isPolarCheckoutUrl(j.url) ? j.url : null
   } catch {
     return null
   }
