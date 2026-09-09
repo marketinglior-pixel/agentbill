@@ -32,8 +32,8 @@ export const ORIGIN = 'https://agentbill.dev'
  *     name an audience or an outcome in the h1. Ours was the only one naming
  *     a data structure, and the only one with code above the fold.
  *
- *  The 09-07 objection still stands on its own terms — this line IS one any
- *  budget tool could sign — and it is accepted knowingly. The differentiator
+ *  The 09-07 objection still stands on its own terms, and this line IS one
+ *  any budget tool could sign. That is accepted knowingly. The differentiator
  *  moved down the page, to where a reader who has decided to keep reading can
  *  receive it; the h1's job is to earn that scroll, which the mechanism line
  *  measurably did not.
