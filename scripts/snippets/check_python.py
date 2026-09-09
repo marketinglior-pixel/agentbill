@@ -228,6 +228,11 @@ def execute(s, tree):
     finally:
         signal.alarm(0)
 
+# A sample that reads the key from AGENTBILL_API_KEY is the form with no
+# placeholder in it for a reader to paste over. /register sets that variable in
+# the step before its sample runs, so the harness sets it too. The value never
+# reaches a socket: the network is stubbed on the next line.
+os.environ.setdefault("AGENTBILL_API_KEY", "agb_ci_not_a_real_key")
 stub_network()
 for s in inventory:
     if s['kind'] != 'python':

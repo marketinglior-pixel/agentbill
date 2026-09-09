@@ -11,7 +11,8 @@ import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
-import { HEADLINE, ORIGIN } from '../ui/site.js'
+import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
@@ -145,8 +146,10 @@ const reg = inlineScript(`  let apiKey = ''
 
       apiKey = data.api_key
       document.getElementById('key-display').textContent = apiKey
-      const fc = document.getElementById('first-curl')
-      if (fc) fc.textContent = "curl -s -X POST https://agentbill.dev/preflight -H \\"Authorization: Bearer " + apiKey + "\\" -H \\"Content-Type: application/json\\" -d '{\\"agent_id\\":\\"first-run\\",\\"estimated_units\\":5,\\"ceiling\\":1}'"
+      // Step 2 of the install path carries the key itself, so what the reader
+      // copies is the line they run, not a template with a gap in it. A gap is
+      // how a key became agb_agb_... and a 401 on the first run (2026-09-09).
+      document.getElementById('key-export').textContent = 'export AGENTBILL_API_KEY=' + apiKey
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
@@ -204,9 +207,9 @@ export async function registerRoute(app: FastifyInstance) {
       path: '/register',
       og: { description: `${HEADLINE}. Free tier, key in 30 seconds, no credit card.` },
       extraHead: pixelSnippet(),
-      scriptHashes: [REGISTER_HASH, ...pixelHashes()],
+      scriptHashes: [REGISTER_HASH, COPY_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PANEL_CSS}
+      css: `${CHROME_CSS}${PANEL_CSS}${COPY_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
      * enrichment: none, the request panel is real */
@@ -330,8 +333,18 @@ export async function registerRoute(app: FastifyInstance) {
     .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
               padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code-ink);
               white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
-    .ns code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
+    /* p code, not bare code: the copy pill inside a step is also a <code>,
+       and the chip ground on it drew a box inside a box. */
+    .ns p code, .success > p code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
                padding: 1px 5px; border-radius: 3px; }
+    /* The shared pill keeps its command on one line and scrolls it. Step 2's
+       command carries the reader's whole key, and a key that scrolls out of a
+       320px column is a key half-copied by hand. Here it wraps instead, and
+       the button drops below the command when the two do not fit on one row:
+       sharing the row squeezed "pip install agentbill-sdk" into a mid-word
+       break at 390px. fit-content keeps the short pill hugging its text. */
+    .ns .cp { margin-top: 8px; width: fit-content; max-width: 100%; padding-block: var(--s2); flex-wrap: wrap; }
+    .ns .cp code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
 
     @media (max-width: 900px) {
       .reg { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
@@ -423,20 +436,39 @@ ${siteNav('/register', { cta: false })}
           <button class="btn-copy" id="copy-key" type="button">Copy</button>
         </div>
       </div>
+      <!-- What the key is, and what the next preflight does, in the words the
+           reader will meet in their own terminal. The two code spans are the
+           wire answer and the SDK's exception text; nothing here says that
+           anything of theirs is stopped, because nothing is: their code
+           catches the exception and decides. -->
+      <p>You have a free account: 1,000 preflight calls a month, no card. A preflight checks one
+         call against the ceiling you gave its <code>task_ref</code>, before that call goes out.
+         Past the ceiling it answers <code>approved: false</code>, the SDK raises
+         <code>Refused (task_ceiling_exceeded)</code>, and your code decides what the job does next.</p>
       <div class="panel">
-        <div class="panel-h"><span>Next</span><span>see it refuse a call, right now</span></div>
+        <div class="panel-h"><span>Install</span><span>four steps, one action each</span></div>
         <div class="steps">
-          <div class="ns"><span class="ns-num">1</span><div><p>Paste this in a terminal. It asks for 5 units against a ceiling of 1, so it is refused before anything runs.</p><pre class="ns-pre" id="first-curl"></pre></div></div>
-          <div class="ns"><span class="ns-num">2</span><p>Open <a href="/app">your console</a> and paste the key. That refusal is the first row on it.</p></div>
-          <div class="ns"><span class="ns-num">3</span><div><p>Then wire it in with <code>pip install agentbill-sdk</code>. Put the ceiling on the job, not on the agent: every call that passes the same <code>task_ref</code> is checked against it, and the first one fixes it.</p><pre class="ns-pre">from agentbill import AgentBillClient
+          <div class="ns"><span class="ns-num">1</span><div><p>Install the SDK.</p>${copyPill('install-py', INSTALL_PY)}</div></div>
+          <div class="ns"><span class="ns-num">2</span><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
+          <div class="ns"><span class="ns-num">3</span><div><p>Preflight before the call, record after it. The first preflight of a new <code>task_ref</code> fixes its ceiling: here <code>job-1</code> gets 10 units across every call that names it.</p><pre class="ns-pre">import os
+from agentbill import AgentBillClient
 
-client = AgentBillClient(api_key="agb_your_key")
+key = os.environ["AGENTBILL_API_KEY"]
+client = AgentBillClient(api_key=key)
 
-@client.gate(agent_id="researcher",
-             task_ref="job-142", task_ceiling=500,
-             estimated_units=12)
-def run_job():
-    ...</pre><p><a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div></div>
+client.preflight(
+    agent_id="researcher",
+    task_ref="job-1",
+    task_ceiling=10,
+    estimated_units=3,
+)
+# your model call runs here
+client.record(
+    agent_id="researcher",
+    task_ref="job-1",
+    units=3,
+)</pre></div></div>
+          <div class="ns"><span class="ns-num">4</span><div><p>Open <a href="/app">your console</a> and paste the key. <code>job-1</code> is under Recent tasks at 3 / 10, and Task budgets in the rail lists every task burning down. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div></div>
         </div>
       </div>
     </div>
@@ -447,7 +479,7 @@ def run_job():
 </main>
 ${siteFooter()}
 
-${REGISTER_JS}
+${REGISTER_JS}${COPY_JS}
 </body>
 </html>`)
   })
