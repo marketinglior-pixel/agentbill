@@ -80,7 +80,7 @@ if (!REFUSED) {
 export const REFUSAL = {
   name: 'TaskCeilingExceededError',
   message:
-    `Task '${TASK_REF}' blocked: ${REFUSED.used}/${REFUSED.ceiling} units used, `
+    `Refused (task_ceiling_exceeded): task '${TASK_REF}' is at ${REFUSED.used}/${REFUSED.ceiling} units and `
     + `${REFUSED.remaining} remaining is not enough for this call.`,
   taskRef: TASK_REF,
   used: REFUSED.used,

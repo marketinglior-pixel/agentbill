@@ -1,7 +1,7 @@
 {
   "name": "agentbill",
-  "version": "0.4.0",
-  "description": "Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives.",
+  "version": "0.4.1",
+  "description": "One spend ceiling per agent job, consulted before the call goes out. Bound to a task_ref, not to a calendar month.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

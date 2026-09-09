@@ -8,7 +8,7 @@ AgentBill MCP server. Add spend controls and usage billing to any AI agent in 3 
 
 Exposes two tools to any MCP-compatible agent host (Claude Code, Cursor, Windsurf, etc.):
 
-- `preflight(agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling, idempotency_key)`. Check budget before starting work, blocks if exhausted. Pass `task_ref` with a `task_ceiling` to give one job a single cross-call budget that every later call in the job consults, and `idempotency_key` so a retried check cannot reserve the budget twice.
+- `preflight(agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling, idempotency_key)`. Check budget before starting work; answers approved=False with a reason when a ceiling or balance is spent. Pass `task_ref` with a `task_ceiling` to give one job a single cross-call budget that every later call in the job consults, and `idempotency_key` so a retried check cannot reserve the budget twice.
 - `record_event(agent_id, units, customer_id, metadata)`. Bill a customer after work completes. Idempotent.
 
 ## Install
@@ -69,7 +69,7 @@ preflight(agent_id="research_agent", customer_id="user_123", estimated_units=5)
 record_event(agent_id="research_agent", units=5, customer_id="user_123")
 ```
 
-The server blocks the run if the customer has no remaining budget. No code changes needed in your agent.
+The server answers approved=False when the customer has no remaining balance, and the agent host decides what happens next. No code changes needed in your agent.
 
 ## Environment variables
 

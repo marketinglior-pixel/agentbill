@@ -51,7 +51,7 @@ class CeilingExceededError(Exception):
 class PreflightInProgressError(Exception):
     """Another preflight with this idempotency_key is still being decided.
 
-    Retry in a moment. This is never a block, and nothing was reserved for
+    Retry in a moment. This is never a refusal, and nothing was reserved for
     this call: it means the original request holds the key and its decision
     is one write away.
     """
@@ -87,9 +87,9 @@ class PlanLimitExceededError(Exception):
         super().__init__(f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
 
 class TaskCeilingExceededError(Exception):
-    """The cross-call budget for this task is spent. The job dies here.
-
-    Catch this to stop the run cleanly:
+    """The cross-call ceiling for this task is spent: preflight refused this
+    call before it ran. Nothing of yours was stopped; your code decides what
+    the job does next. Catch it to end the job cleanly:
 
         try:
             client.preflight("researcher", estimated_units=2,
@@ -106,8 +106,9 @@ class TaskCeilingExceededError(Exception):
         self.task_used_units = task_used_units
         self.task_remaining_units = task_remaining_units
         super().__init__(
-            f"Task {task_ref!r} blocked: {task_used_units}/{task_ceiling} units used, "
-            f"{task_remaining_units} remaining is not enough for this call."
+            f"Refused (task_ceiling_exceeded): task {task_ref!r} is at "
+            f"{task_used_units}/{task_ceiling} units and {task_remaining_units} remaining "
+            f"is not enough for this call."
         )
 
 class TaskCeilingRequiredError(Exception):
@@ -136,7 +137,7 @@ class AgentBillClient:
         """Check every budget BEFORE the call runs.
 
         task_ref groups many calls (across providers and tools) under one hard
-        cross-call ceiling, "this job dies at 50 units". Pass task_ceiling on
+        cross-call ceiling: "this job gets 50 units, across every call". Pass task_ceiling on
         the first call for a new task_ref; later calls only need task_ref.
 
         idempotency_key makes a retried preflight safe. Without it a retry
@@ -185,7 +186,7 @@ class AgentBillClient:
         )
 
         # One rule, and it is the same in both SDKs as of 0.6.0 / 0.4.0:
-        # raise when YOUR spend rule stopped the run, return a result when
+        # raise when YOUR spend rule refused the call, return a result when
         # AGENTBILL'S OWN BILLING did.
         #
         # free_tier_exceeded and plan_limit_exceeded mean our quota ran out,
@@ -198,10 +199,11 @@ class AgentBillClient:
         if not result.approved:
             if result.reason == "ceiling_exceeded":
                 raise CeilingExceededError(
-                    f"Run blocked: estimated {estimated_units} units exceeds ceiling of {self.ceiling}"
+                    f"Refused (ceiling_exceeded): estimated {estimated_units} units exceeds "
+                    f"the per-request ceiling of {self.ceiling}."
                 )
             if result.reason == "budget_exhausted":
-                raise BudgetExhaustedError(customer_id or "default", "Run blocked: customer budget exhausted")
+                raise BudgetExhaustedError(customer_id or "default", "Refused (budget_exhausted): this customer's balance is spent.")
             if result.reason == "task_ceiling_exceeded":
                 raise TaskCeilingExceededError(
                     task_ref=data.get("task_ref") or task_ref or "",
@@ -332,7 +334,7 @@ class AgentBillClient:
                     task_ceiling=task_ceiling,
                 )
                 if not check.approved:
-                    raise Exception(f"Agent blocked: {check.reason}")
+                    raise Exception(f"Refused ({check.reason}): preflight did not approve this call.")
                 reserved = check.estimated_units or 1
                 try:
                     result = func(*args, **kwargs)

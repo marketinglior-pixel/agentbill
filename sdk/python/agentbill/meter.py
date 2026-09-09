@@ -148,7 +148,7 @@ def _resolve_units(units: UnitsResolver, result: Any) -> int:
 
 
 def _preflight_sync(customer_id: str) -> None:
-    """Raise BudgetExhaustedError before the agent runs if the customer is blocked."""
+    """Raise BudgetExhaustedError before the agent runs if the customer's balance is spent."""
     with httpx.Client() as client:
         resp = client.get(
             f"{_BASE_URL}/budget",
@@ -227,7 +227,7 @@ def meter(
         customer_id_from: Name of a function parameter to read customer_id from.
         metadata:         Static key-value pairs attached to every event (not billed).
         preflight:        If True, check budget BEFORE running the function. Raises
-                          BudgetExhaustedError immediately if the customer is blocked,
+                          BudgetExhaustedError immediately if the customer's balance is spent,
                           preventing any expensive LLM calls from being made.
         task_ref:         Attribute this event to a cross-call task budget created
                           via AgentBillClient.preflight(task_ref=..., task_ceiling=...).

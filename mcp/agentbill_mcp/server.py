@@ -43,9 +43,9 @@ def preflight(
     Check if an agent is allowed to run before starting work.
 
     Call this at the start of every agent invocation. Returns approved=True when
-    the run has budget. Returns approved=False with a reason when the run should be
-    blocked (budget_exhausted, ceiling_exceeded, free_tier_exceeded,
-    task_ceiling_exceeded).
+    the run has budget. Returns approved=False with a reason when preflight refused
+    the call (budget_exhausted, ceiling_exceeded, free_tier_exceeded,
+    task_ceiling_exceeded). Nothing is stopped by this server; the host decides.
 
     A unit is an integer you define and pass. AgentBill reserves the number you send
     and never converts units to money, so the ceiling is only as tight as your
@@ -56,7 +56,7 @@ def preflight(
         customer_id: Your internal customer identifier. Defaults to "default".
         estimated_units: How many units you expect this run to consume. This is the
             number reserved against every budget below.
-        ceiling: Max units allowed per single run. Run is blocked if estimated_units exceeds this.
+        ceiling: Max units allowed per single call. The call is refused if estimated_units exceeds this.
         task_ref: Groups many calls under one cross-call budget, so one job spanning
             several providers and tools shares a single ceiling. Pass the same
             task_ref on every call in the job.
@@ -106,17 +106,17 @@ def preflight(
 
     if not data.get("approved", True):
         reason = data.get("reason", "unknown")
-        blocked = {
+        refused = {
             "approved": False,
             "reason": reason,
             "remaining_units": data.get("remaining_units"),
             "upgrade_url": data.get("upgrade_url"),
-            "message": _blocked_message(reason, data),
+            "message": _refusal_message(reason, data),
         }
         if data.get("task_ref"):
-            blocked["task_ref"] = data.get("task_ref")
-            blocked["task_remaining_units"] = data.get("task_remaining_units")
-        return blocked
+            refused["task_ref"] = data.get("task_ref")
+            refused["task_remaining_units"] = data.get("task_remaining_units")
+        return refused
 
     result = {
         "approved": True,
@@ -179,29 +179,31 @@ def record_event(
     }
 
 
-def _blocked_message(reason: str, data: dict) -> str:
+def _refusal_message(reason: str, data: dict) -> str:
+    # The sentence a host shows beside approved=False. Same voice as the SDKs:
+    # preflight refused the call; nothing was stopped, and the host decides.
     if reason == "ceiling_exceeded":
         return (
-            f"Run blocked: estimated {data.get('estimated_units')} units "
-            f"exceeds per-request ceiling of {data.get('ceiling')}."
+            f"Refused (ceiling_exceeded): estimated {data.get('estimated_units')} units "
+            f"exceeds the per-request ceiling of {data.get('ceiling')}."
         )
     if reason == "task_ceiling_exceeded":
         return (
-            f"Run blocked: task {data.get('task_ref')!r} has spent "
-            f"{data.get('task_used_units')}/{data.get('task_ceiling')} units, "
+            f"Refused (task_ceiling_exceeded): task {data.get('task_ref')!r} is at "
+            f"{data.get('task_used_units')}/{data.get('task_ceiling')} units and "
             f"{data.get('task_remaining_units')} remaining is not enough for this call."
         )
     if reason == "task_ceiling_required":
         return (
-            "Run blocked: this task_ref is unknown. Pass task_ceiling on the first "
-            "preflight of a new task."
+            "Refused (task_ceiling_required): this task_ref is unknown. Pass task_ceiling "
+            "on the first preflight of a new task."
         )
     if reason == "budget_exhausted":
-        return "Run blocked: customer budget is exhausted."
+        return "Refused (budget_exhausted): this customer's balance is spent."
     if reason == "free_tier_exceeded":
         url = data.get("upgrade_url", "https://agentbill.dev/pricing")
-        return f"Run blocked: free tier limit reached. Upgrade at {url}"
-    return f"Run blocked: {reason}"
+        return f"Refused (free_tier_exceeded): this month's free preflight calls are used up. Upgrade at {url}"
+    return f"Refused ({reason})."
 
 
 def main():
