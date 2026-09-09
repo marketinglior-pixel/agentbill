@@ -1730,7 +1730,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
   const inWin = ` · last ${esc(rangeLabel)}`
   const refusedLine = (n: number) => `<span><b class="${n ? 'held' : ''}">${num(n)}</b> refused${inWin}</span>`
   const born = v.defaultBudgetUnits == null
-    ? 'with no limit, because this account has no default balance set'
+    ? 'with no limit'
     : `with <b>${num(v.defaultBudgetUnits)} units</b>, the account default`
   return `<div class="frame">
       <div class="lim">
