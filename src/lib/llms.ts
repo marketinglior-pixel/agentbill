@@ -34,7 +34,7 @@ const num = (n: number) => n.toLocaleString('en-US')
  *  reader can install. Bump in the same commit as the publish or delete the line. */
 export const SDK_VERSIONS = {
   python: '0.6.2', // pypi.org/pypi/agentbill-sdk/0.6.2/json, published and checked 2026-09-09
-  node: '0.4.0',   // registry.npmjs.org/agentbill, checked 2026-09-08
+  node: '0.4.1',   // registry.npmjs.org/agentbill, published and checked 2026-09-09
   mcp: '0.2.1',    // pypi.org/pypi/agentbill-mcp/0.2.1/json, published and checked 2026-09-09
 } as const
 
