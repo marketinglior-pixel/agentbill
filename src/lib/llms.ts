@@ -33,7 +33,7 @@ const num = (n: number) => n.toLocaleString('en-US')
  *  a machine-readable file that is ahead of the registry describes something no
  *  reader can install. Bump in the same commit as the publish or delete the line. */
 export const SDK_VERSIONS = {
-  python: '0.6.1', // pypi.org/pypi/agentbill-sdk/json, checked 2026-09-08
+  python: '0.6.2', // pypi.org/pypi/agentbill-sdk/json, checked 2026-09-08
   node: '0.4.0',   // registry.npmjs.org/agentbill, checked 2026-09-08
   mcp: '0.2.0',    // pypi.org/pypi/agentbill-mcp/json, checked 2026-09-08
 } as const

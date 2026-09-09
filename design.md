@@ -43,7 +43,8 @@ trusts the reader, hates decoration.
   body the sample's own call gets back when 8 units remain, built by
   `heroRefusalBody()` in `playground.ts` from the run's numbers, and the
   exception name after it; the SDK's exception TEXT is not rendered on the
-  page, because it still says "blocked" until the SDKs republish. The hero's
+  page; since agentbill-sdk 0.6.2 it reads "Refused (task_ceiling_exceeded): ..."
+  and `REFUSAL.message` in playground.ts mirrors that template. The hero's
   second action is the docs route; the playground is one scroll down and
   needs no button to be found.
 
