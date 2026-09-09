@@ -422,6 +422,7 @@ const PLAYGROUND_SRC = `
         remaining_units:null,
         reservation_expires_at:new Date(Date.now()+120000).toISOString(),
         task_ref:o.taskRef,
+        task_ceiling: task.ceiling,
         task_remaining_units: task.ceiling - task.used - task.reserved };
     }
     return { approved:false, reason:'task_ceiling_exceeded',

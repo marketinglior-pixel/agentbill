@@ -84,6 +84,10 @@ export async function budgetRoute(app: FastifyInstance) {
   //
   // API only, deliberately: the console stays read-mostly (decision 2026-09-03)
   // and the landing page says we do not ship a dashboard for non-developers.
+  // Narrowed 2026-09-10: a JOB's ceiling got a console form (POST /app/tasks,
+  // sharing src/lib/task-ceiling.ts with PUT /tasks/:task_ref/ceiling), on the
+  // founder's dogfood verdict that setting a budget only from code was the
+  // product's whole problem. A customer's ceiling is still this endpoint only.
   app.put('/budget', async (request, reply) => {
     const parsed = BudgetBody.safeParse(request.body)
     if (!parsed.success) {

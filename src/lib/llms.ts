@@ -272,10 +272,13 @@ settle its reservation; the sweeper reclaims it when it expires. Settle from the
 
 ## How a task budget behaves
 
-- The first preflight carrying a task_ref with a task_ceiling creates the task and fixes the
-  ceiling. A task_ref preflight has never seen, sent without a ceiling, is 422 task_ceiling_required.
-- A task_ceiling sent on a later preflight for the same task_ref is ignored, so a retry cannot
-  quietly raise the ceiling it was meant to respect.
+- A job is opened with its ceiling either by the first preflight carrying a task_ref with a
+  task_ceiling, or by PUT /tasks/:task_ref/ceiling (the console's task budgets view makes the same
+  write). A preflight for a job that does not exist, sent without a ceiling, is 422
+  task_ceiling_required.
+- Once the job exists, a task_ceiling from code is not applied, so a retry cannot raise the ceiling
+  it was meant to respect. The console's last save is the ceiling in force. Nothing is silent: every
+  preflight answers with the ceiling that decided it, as task_ceiling, approved or refused.
 - The row is unique on (account_id, task_ref), which is why processes, machines, providers and
   agent_ids converge on one ceiling by sending one string.
 - The check and the reservation are one conditional UPDATE, so two calls arriving together cannot
@@ -482,8 +485,17 @@ as an overrun rather than as a save.
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
 remaining_units, exceeded, created_at, updated_at. The list accepts agent_id and limit (default 50,
-max 200). An unknown ref is 404 task_not_found; tasks exist only from the first preflight that
-passed a task_ref with a task_ceiling.
+max 200). An unknown ref is 404 task_not_found; a task exists from the first preflight that passed
+its task_ref with a task_ceiling, or from PUT /tasks/:task_ref/ceiling.
+
+### PUT /tasks/:task_ref/ceiling
+
+Opens a job with a ceiling or changes one. Body: ceiling_units (required, positive integer) and
+agent_id (optional, read only when this call opens the job). Returns the task as GET does plus
+task_created. The console's last save is the ceiling in force; code can open a job with one and cannot change it after. A ceiling under used_units +
+reserved_units is 409 ceiling_below_committed carrying minimum_ceiling_units; nothing is clamped
+and no reservation in flight is rewritten. The console's task budgets view runs this same
+statement.
 
 ### GET /decisions
 
@@ -495,8 +507,8 @@ they are the spend a skipped or underestimated preflight did not prevent.
 
 ### GET /budget and PUT /budget
 
-The per-customer running balance, a ceiling separate from the task one and the only ceiling with an
-endpoint. PUT takes customer_id and limit_units, where limit_units is required and may be null,
+The per-customer running balance, a ceiling separate from the task one. PUT takes customer_id and
+limit_units, where limit_units is required and may be null,
 meaning no limit; an absent field would have to mean "change nothing", and a write that silently
 does nothing is how a typo looks like a success. Neither verb returns 404: an unknown customer is
 created. The ceiling may be set below what is already used and reserved, nothing is rewritten, no
@@ -539,7 +551,7 @@ check = client.preflight(
     estimated_units=250,          # what this call is worth, in your units. This is reserved.
     customer_id="acct_42",        # optional, defaults to "default"
     task_ref="job-142",           # the ceiling is bound to this string
-    task_ceiling=5000,            # fixed by the FIRST preflight of a new task_ref
+    task_ceiling=5000,            # opens the job on its FIRST preflight; the console can change it
     idempotency_key="job-142-3",  # stable across retries
 )
 

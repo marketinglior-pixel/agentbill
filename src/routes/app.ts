@@ -7,7 +7,8 @@ import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
-import { isId } from '../lib/ids.js'
+import { isId, INT4_MAX } from '../lib/ids.js'
+import { setTaskCeiling } from '../lib/task-ceiling.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 
 // /app is the console: the only browser surface a registered user has. It is
@@ -26,6 +27,12 @@ import { KEY_COMMANDS } from '../ui/panels.js'
 // id (not the key), signed with a secret derived from ADMIN_SECRET. Revoking
 // or expiring the key kills the session on the next request. Nothing here
 // updates last_seen_ip, so opening the console never trips the IP alert.
+//
+// It makes exactly one kind of write (2026-09-10): a job's ceiling, through
+// POST /app/tasks, the same statement PUT /tasks/:task_ref/ceiling runs. It
+// arrived because the empty state below used to send a reader back to their
+// editor to set a budget, and the founder, dogfooding, said that was the
+// product's whole problem. Every other number here is still read-only.
 // This page loads no script at all: a live key is rendered into it, and the
 // CSP below has no script-src. The chart's hover layer is CSS.
 
@@ -88,6 +95,7 @@ export async function appRoute(app: FastifyInstance) {
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
     const view = typeof q?.view === 'string' && Object.hasOwn(VIEWS, q.view) ? (q.view as ViewKey) : DEFAULT_VIEW
     const filter = readFilter(q)
+    const flash = readFlash(q)
     const viewer = await loadSession(request)
 
     // The sample console is the only place a prospect can see what the product
@@ -101,7 +109,38 @@ export async function appRoute(app: FastifyInstance) {
     }
 
     const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter }))
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, flash }))
+  })
+
+  // The console's one write: open a job with a ceiling, or change one. A plain
+  // HTML form, because this page ships no script (see APP_CSP). The rule and
+  // the statement are in src/lib/task-ceiling.ts, shared with the API route,
+  // and the outcome travels back on the query string the way login errors do:
+  // ?saved=<task_ref> on success, ?err=<code>&ref=<task_ref> otherwise, both
+  // validated again on the way in before anything is rendered.
+  app.post('/app/tasks', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    // No session, or a session that died with its key: the tasks view, which
+    // is the login page for an anonymous visitor. Nothing was written.
+    if (!viewer) return reply.redirect('/app?view=tasks', 303)
+
+    const body = request.body as Record<string, unknown>
+    const ref = typeof body?.task_ref === 'string' ? body.task_ref.trim() : ''
+    const agent = typeof body?.agent_id === 'string' ? body.agent_id.trim() : ''
+    const raw = typeof body?.ceiling_units === 'string' ? body.ceiling_units.trim() : ''
+    const to = (extra: string) => reply.redirect(`/app?view=tasks&${extra}`, 303)
+    const back = (code: string) => to(`err=${code}${isId(ref) ? `&ref=${encodeURIComponent(ref)}` : ''}`)
+
+    if (!isId(ref)) return back('ref')
+    if (agent && !isId(agent)) return back('agent')
+    // Digits only, then the int4 bound the column and the API both enforce.
+    // Number('1e3') is 1000 and Number('') is 0; neither is a ceiling anyone typed.
+    if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return back('ceiling')
+
+    const result = await setTaskCeiling(viewer.accountId, ref, Number(raw), agent || null)
+    if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.minimum}`)
+    return to(`saved=${encodeURIComponent(ref)}${result.row.taskCreated ? '&created=1' : ''}`)
   })
 
   // The canonical-host redirect preserves a trailing slash; without this the
@@ -353,6 +392,20 @@ function readFilter(q: Record<string, unknown>): Filter {
 // ---------------------------------------------------------------------------
 
 type Series = { day: string; blocks: number; units: number; refused: number }
+/** What POST /app/tasks left on the query string for the tasks view to say. */
+type Flash = { saved?: string; created?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below'; ref?: string; min?: number }
+const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below'])
+
+function readFlash(q: Record<string, unknown>): Flash | null {
+  const f: Flash = {}
+  if (isId(q?.saved)) f.saved = q.saved as string
+  if (q?.created === '1') f.created = true
+  if (typeof q?.err === 'string' && FLASH_ERRS.has(q.err)) f.err = q.err as Flash['err']
+  if (isId(q?.ref)) f.ref = q.ref as string
+  if (typeof q?.min === 'string' && /^[0-9]{1,10}$/.test(q.min)) f.min = Number(q.min)
+  return Object.keys(f).length ? f : null
+}
+
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
@@ -1127,6 +1180,23 @@ ${MARK_CSS}
   .fine { color: var(--dim); margin-top: var(--s4); }
   /* Outranks .login p, which is what kept the card bottom-heavy. */
   .login .fine { margin-bottom: 0; }
+  /* The tasks view's form (POST /app/tasks) and the inline save on a row. */
+  .setc { padding: var(--s4); }
+  .setf { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr) minmax(0, 1fr) auto; gap: var(--s3); align-items: end; }
+  .setf input { margin-bottom: 0; }
+  .setf .btn { width: auto; padding: var(--s3) var(--s5); white-space: nowrap; }
+  .setc .fine { margin-top: var(--s3); max-width: 78ch; }
+  .setc .ok { color: var(--green); margin-bottom: var(--s3); }
+  .setc .err { margin-bottom: var(--s3); }
+  .bfoot { flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+  .bset { display: flex; align-items: center; gap: var(--s2); }
+  .bset label { display: inline; margin: 0; }
+  .bset input { width: 9ch; margin: 0; min-height: 34px; padding: 4px var(--s2); font-size: var(--fs-micro); }
+  .bset .btn-out { min-height: 34px; padding: 4px var(--s3); font-size: var(--fs-micro); cursor: pointer; }
+  @media (max-width: ${BP.lg}px) {
+    .setf { grid-template-columns: minmax(0, 1fr); }
+    .setf .btn { width: 100%; }
+  }
   nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 var(--s5); }
   a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
     outline: 2px solid var(--green); outline-offset: 2px; }
@@ -1338,7 +1408,7 @@ function handoffPage(tier: string, to: string): string {
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -1572,7 +1642,7 @@ function activityTable(series: Series[]): string {
   </table></div>`
 }
 
-function taskRow(p: Page, t: TaskRow): string {
+function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   const ceiling = Number(t.ceilingUnits)
   const used = Number(t.usedUnits)
   const reserved = Number(t.reservedUnits)
@@ -1603,16 +1673,59 @@ function taskRow(p: Page, t: TaskRow): string {
       </div>
       <div class="bfoot">
         <span>${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}</span>
+        ${editable ? `<form method="POST" action="/app/tasks" class="bset" autocomplete="off">
+          <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
+          <label for="ceil-${i}">ceiling</label>
+          <input id="ceil-${i}" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />
+          <button class="btn-out" type="submit">Save</button>
+        </form>` : ''}
         <span>${rel(t.updatedAt)}</span>
       </div>
     </div>`
 }
 
 function tasksBlock(p: Page, tasks: TaskRow[]): string {
+  const editable = p.view === 'tasks' && !p.demo
   if (tasks.length === 0) {
-    return `<div class="frame"><p class="nothing">No task budgets yet. Pass <code>task_ref</code> and <code>task_ceiling</code> on a preflight call and the job shows up here, burning down live.</p></div>`
+    // One job is one budget, and the budget can be set here before any code
+    // runs. The old text sent a reader back to their editor to pass two
+    // arguments, which was the console admitting it could not do the one thing
+    // a person opening it wanted from it.
+    const where = editable
+      ? 'Name a job above and give it a ceiling in units'
+      : `<a href="${href(p, 'tasks')}">Name a job and give it a ceiling in units</a>`
+    return `<div class="frame"><p class="nothing">No jobs yet. One job is one budget. ${where}, then have your code preflight with that <code>task_ref</code>; it appears here and burns down live. A job opened from code, with <code>task_ref</code> and <code>task_ceiling</code> on its first preflight, appears the same way.</p></div>`
   }
-  return `<div class="frame">${tasks.map((t) => taskRow(p, t)).join('')}</div>`
+  return `<div class="frame">${tasks.map((t, i) => taskRow(p, t, i, editable)).join('')}</div>`
+}
+
+const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
+  ref: () => 'The job name (task_ref) is 1 to 128 characters with no control characters.',
+  ceiling: () => 'The ceiling is a whole number of units, 1 or more.',
+  agent: () => 'The agent label is 1 to 128 characters with no control characters.',
+  below: (f) => `<code>${esc(f.ref ?? '')}</code> already has <b>${num(f.min ?? 0)}</b> units committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min ?? 0)} or more, or wait for the reservations to settle or expire.`,
+}
+
+/** The form that opens a job or changes its ceiling. Tasks view only, and
+ *  never under sample data, where a save would write to the real account
+ *  behind a page that says nothing on it is real. */
+function ceilingForm(p: Page): string {
+  const f = p.flash
+  const said = !f ? ''
+    : f.saved ? `<p class="ok">Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}. Every preflight that names this task_ref uses it from the next call.</p>`
+    : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
+    : ''
+  const keep = f?.err && f.ref ? esc(f.ref) : ''
+  return `<div class="frame setc">
+    ${said}
+    <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
+      <div><label for="t-ref">Job (task_ref)</label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
+      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
+      <div><label for="t-agent">Agent (optional)</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
+      <button class="btn" type="submit">Set ceiling</button>
+    </form>
+    <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses: your code can open a job with <code>task_ceiling</code> on its first call, and cannot change it once the job exists. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
+  </div>`
 }
 
 const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
@@ -1780,7 +1893,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         <div>
           <h3>Per task</h3>
           <div class="param">task_ref + task_ceiling · one ceiling for one job</div>
-          <p>Every call and tool that shares a <code>task_ref</code> is checked against one ceiling, fixed by the first preflight of that task; later <code>task_ceiling</code> values are ignored. A task preflight has never seen must carry a ceiling or the call is rejected with <code>task_ceiling_required</code>. Refused with <code>task_ceiling_exceeded</code>. A record that lands past the ceiling after the call ran is kept as a leak, not hidden.</p>
+          <p>Every call and tool that shares a <code>task_ref</code> is checked against one ceiling. The job is opened with it, on the first preflight that passes <code>task_ceiling</code> or on the <a href="${href(p, 'tasks')}">task budgets</a> view; after that the last save in the console is the ceiling in force, and a <code>task_ceiling</code> from code is not applied. A preflight for a job that does not exist yet, sent without a ceiling, is rejected with <code>task_ceiling_required</code>. Refused with <code>task_ceiling_exceeded</code>. A record that lands past the ceiling after the call ran is kept as a leak, not hidden.</p>
         </div>
         <div class="live">
           <span><b>${num(live)}</b> ${live === 1 ? 'task' : 'tasks'} under a ceiling now</span>
@@ -1790,7 +1903,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         </div>
       </div>
     </div>
-    <p class="note">Every ceiling above is set by the calling code, and read here. Nothing on this page edits one. <code>GET /budget?customer_id=</code> returns a customer's balance and creates it if it is new; <code>PUT /budget</code> sets that customer's ceiling. The per-request and per-task ceilings are arguments to the call itself and have no endpoint.</p>`
+    <p class="note">The per-request ceiling is an argument to the call itself and has no endpoint. A customer's ceiling is set from the API: <code>GET /budget?customer_id=</code> returns the balance and creates the customer if it is new, <code>PUT /budget</code> sets it. A job's ceiling is the one number this console edits, on the <a href="${href(p, 'tasks')}">task budgets</a> view or with <code>PUT /tasks/:task_ref/ceiling</code>.</p>`
 }
 
 function onboarding(p: Page): string {
@@ -1861,7 +1974,8 @@ function activityView(p: Page, rangeLabel: string): string {
 }
 
 function tasksView(p: Page): string {
-  return `${tasksBlock(p, p.d.tasks)}
+  return `${p.demo ? '' : ceilingForm(p)}
+    ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
     <p class="note">${p.d.taskCount > p.d.tasks.length ? `The ${num(p.d.tasks.length)} most recently touched of ${num(p.d.taskCount)} tasks.` : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, most recently touched first.`} The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
 }
