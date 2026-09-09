@@ -87,6 +87,30 @@ c = await cust()
 ok('reserved matches approvals only', c.reservedUnits === 5, `got ${c.reservedUnits}`)
 ok('invariant: reserved == SUM(open rows)', c.reservedUnits === await openSum(c.id))
 
+// ------------------------------------------- quota alerts: once per threshold per period
+// The claim lives in account_quota_alerts (migration 009). Delivery is
+// fire-and-forget, so each check waits for the async write to land.
+console.log('\n[2c] quota alerts claim once per threshold per period')
+const settle = (ms) => new Promise(r => setTimeout(r, ms))
+const claims = async () => (await sql`
+  SELECT threshold FROM account_quota_alerts WHERE account_id = ${ACCT} ORDER BY threshold`).map(r => r.threshold)
+await settle(400)
+// [2] above refused 20 concurrent calls at the limit. That burst IS the 100% event,
+// and the assertion is that twenty refusals produced one row, not twenty.
+ok('20 concurrent refusals claimed the 100% alert exactly once', (await claims()).join(',') === '100', `got [${await claims()}]`)
+await reset()   // leaves account_quota_alerts alone on purpose: same period, the 100 row must survive
+await sql`UPDATE accounts SET monthly_calls = 749 WHERE id = ${ACCT}`
+await pre({ agent_id: 'r', estimated_units: 1 })   // lands on 750, which is 75% of 1000
+await pre({ agent_id: 'r', estimated_units: 1 })   // 751 crosses nothing
+await settle(400)
+ok('call 750 claims 75%, call 751 claims nothing', (await claims()).join(',') === '75,100', `got [${await claims()}]`)
+await sql`UPDATE accounts SET monthly_calls = 899 WHERE id = ${ACCT}`
+await Promise.all(Array.from({ length: 10 }, () => pre({ agent_id: 'r', estimated_units: 1 })))   // 900..909
+await settle(400)
+ok('90% claimed exactly once under a 10-call burst', (await claims()).join(',') === '75,90,100', `got [${await claims()}]`)
+const [row75] = await sql`SELECT monthly_calls FROM account_quota_alerts WHERE account_id = ${ACCT} AND threshold = 75`
+ok('the 75% row records the count that crossed it', row75?.monthlyCalls === 750, `got ${row75?.monthlyCalls}`)
+
 // ------------------------------------------- blocked call reserves nothing, burns no quota
 console.log('\n[2b] a blocked call rolls everything back')
 await reset()
@@ -474,14 +498,24 @@ console.log('\n[6] a customer ceiling can be set, raised and lowered')
 // reservations settle or expire.
 await reset()
 
+// This section runs on its own key. The suite fires ~100 authenticated requests
+// through KEY inside the limiter's 60-second window, which is exactly the
+// per-key cap in src/lib/rate-limiter.ts, and this is the last section, so it
+// was the one that started answering 429 when [2c] added a dozen calls above.
+// A fresh key is a fresh bucket; it is also what a customer would do. Mint it
+// through the real endpoint rather than seeding it, so the harness cannot
+// depend on a key the server never issued.
+const KEY6 = (await post('/keys/generate', { label: 'harness-section-6' })).body.api_key
+if (typeof KEY6 !== 'string' || !KEY6.startsWith('agb_')) throw new Error('[6] could not mint its key')
+
 const put = (body) => fetch(`${API}/budget`, {
   method: 'PUT',
-  headers: { 'Authorization': `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+  headers: { 'Authorization': `Bearer ${KEY6}`, 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 }).then(async r => ({ status: r.status, body: await r.json() }))
 
 const getBudget = (ref) => fetch(`${API}/budget?customer_id=${encodeURIComponent(ref)}`, {
-  headers: { 'Authorization': `Bearer ${KEY}` },
+  headers: { 'Authorization': `Bearer ${KEY6}` },
 }).then(async r => ({ status: r.status, body: await r.json() }))
 
 // Set a ceiling on a customer that has never made a call.

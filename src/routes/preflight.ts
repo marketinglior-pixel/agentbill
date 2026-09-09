@@ -5,6 +5,7 @@ import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
 import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
+import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
 
 const PreflightBody = z.object({
   agent_id: zId(),
@@ -321,6 +322,16 @@ export async function preflightRoute(app: FastifyInstance) {
                   ...err.detail,
                 }
 
+        // The first refusal of the period is the moment the customer needs to
+        // hear about, because the wire stays quiet on purpose. Once per period,
+        // enforced in the database; see quota-alert.ts.
+        if (err.reason === 'plan_limit_exceeded' && planLimit !== null) {
+          alertQuota(request.log, {
+            accountId, plan: account.plan, limit: planLimit, threshold: 100,
+            monthlyCalls: Number(err.detail.monthly_calls ?? planLimit),
+          })
+        }
+
         // The transaction is already rolled back; these writes are outside it
         // on purpose, or the record of the refusal would roll back with it.
         recordDecision(request.log, {
@@ -336,6 +347,18 @@ export async function preflightRoute(app: FastifyInstance) {
       }
 
       throw err
+    }
+
+    // Did this call cross 75% or 90% of the plan quota? The count came back
+    // from the locked UPDATE, so exactly one call sees each integer.
+    if (planLimit !== null) {
+      const crossed = thresholdCrossed(result.monthlyCalls, planLimit)
+      if (crossed) {
+        alertQuota(request.log, {
+          accountId, plan: account.plan, limit: planLimit, threshold: crossed,
+          monthlyCalls: result.monthlyCalls,
+        })
+      }
     }
 
     const row = result.row
