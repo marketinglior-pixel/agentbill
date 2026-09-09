@@ -1,6 +1,6 @@
 # agentbill
 
-Hard budget ceilings for AI agents. Preflight blocks the call before it runs, not after the bill arrives. One ceiling per task that every call consults, on units you define, no proxy in your request path.
+One spend ceiling per agent job, consulted before the call goes out. Bound to a task_ref, not to a calendar month: every call that shares the task_ref consults the same ceiling, on units you define, with no proxy in your request path.
 
 ```bash
 npm install agentbill
@@ -13,8 +13,8 @@ The SDK reads `AGENTBILL_API_KEY` from the environment. Get a key at [agentbill.
 ```typescript
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-// Units are yours to define. Here 1 unit = 1 cent: this job dies at $5,
-// across every call and tool that shares job-142. A blocked call throws
+// Units are yours to define. This job gets 500 of them, across every call
+// and tool that shares job-142. A refused call throws
 // TaskCeilingExceededError, so the expensive work never starts.
 await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
 
@@ -30,9 +30,9 @@ Every refusal shows up on your receipt at [agentbill.dev/app](https://agentbill.
 
 Monthly caps let agents burn through a budget in hours. AgentBill adds a preflight check: the agent asks permission before it runs, not after it has already spent the money.
 
-- A blocked call throws before any work starts
+- A refused call throws before any work starts
 - Task budgets: one hard ceiling across every call and tool a job makes
-- Per-request ceiling: block any single call that would cost too much
+- Per-request ceiling: refuse any single call whose estimate exceeds it
 - Idempotent recording: safe to call from retried or parallel workflows
 - Free tier: 1,000 preflight calls a month, no credit card required
 
@@ -44,7 +44,7 @@ Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, def
 
 Check every budget before the call runs, so the expensive call never happens.
 
-**One rule, identical in the Python SDK: it throws when your spend rule stopped the run, and returns a result when AgentBill's own billing did.**
+**One rule, identical in the Python SDK: it throws when your spend rule refused the call, and returns a result when AgentBill's own billing did.**
 
 | Refusal | What you get |
 |---|---|
@@ -63,7 +63,7 @@ The last two mean *our* quota ran out, not that your budget did. AgentBill runni
 | `agentId` | string | required | Agent or task type identifier, used for attribution |
 | `customerId` | string | `"default"` | Your internal customer ID |
 | `estimatedUnits` | number | `1` | Expected units for this call |
-| `ceiling` | number | none | Per-request ceiling: block when `estimatedUnits` exceeds it |
+| `ceiling` | number | none | Per-request ceiling: refuse when `estimatedUnits` exceeds it |
 | `taskRef` | string | none | Cross-call job budget: many calls, one hard ceiling |
 | `taskCeiling` | number | none | Required on the first preflight of a new `taskRef` |
 | `idempotencyKey` | string | none | Same key, same decision, one reservation. Without it a retry reserves a second time |
@@ -95,7 +95,7 @@ import { ChatAnthropic } from '@langchain/anthropic'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
 
 async function runAgent(customerId: string, input: string) {
-  // one job, one ceiling: this run dies at 500 units no matter how many calls it makes
+  // one job, one ceiling: this run gets 500 units no matter how many calls it makes
   await preflight({ customerId, agentId: 'assistant', taskRef: `job-${customerId}`, taskCeiling: 500, estimatedUnits: 5 })
 
   const agent = createReactAgent({ llm: new ChatAnthropic({ model: 'claude-3-5-haiku-latest' }), tools: [] })
@@ -113,10 +113,10 @@ async function runAgent(customerId: string, input: string) {
 - [GitHub](https://github.com/marketinglior-pixel/agentbill)
 - [Python SDK (PyPI)](https://pypi.org/project/agentbill-sdk/)
 
-## Task budgets: "this job dies at $5"
+## Task budgets: "this job gets 500 units"
 
 A task groups many calls, across providers and tools, under one hard
-cross-call ceiling, blocked before the money is spent.
+cross-call ceiling, consulted before the call goes out.
 
 ```ts
 import { preflight, record, getTask, TaskCeilingExceededError } from 'agentbill'
@@ -158,7 +158,7 @@ await preflight({
 })
 ```
 
-Same key, same decision, one reservation. A retry that lands while the original is still being decided throws with `preflight_in_progress`, which is not a block and reserves nothing: wait a moment and try again.
+Same key, same decision, one reservation. A retry that lands while the original is still being decided throws with `preflight_in_progress`, which is not a refusal and reserves nothing: wait a moment and try again.
 
 **A run that never comes back.** If the process dies between `preflight` and `record`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `reservationExpiresAt`.
 

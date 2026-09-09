@@ -43,14 +43,15 @@ export class CeilingExceededError extends Error {
   readonly estimatedUnits?: number
   readonly ceiling?: number
   constructor(estimatedUnits?: number, ceiling?: number, message?: string) {
-    super(message ?? `Run blocked: estimated ${estimatedUnits} units exceeds ceiling of ${ceiling}.`)
+    super(message ?? `Refused (ceiling_exceeded): estimated ${estimatedUnits} units exceeds the per-request ceiling of ${ceiling}.`)
     this.name = 'CeilingExceededError'
     this.estimatedUnits = estimatedUnits
     this.ceiling = ceiling
   }
 }
 
-/** The cross-call budget for this task is spent. The job dies here. */
+/** The cross-call ceiling for this task is spent: preflight refused this call before it ran.
+ *  Nothing of yours was stopped; your code decides what the job does next. */
 export class TaskCeilingExceededError extends Error {
   readonly taskRef: string
   readonly taskCeiling?: number
@@ -58,7 +59,7 @@ export class TaskCeilingExceededError extends Error {
   readonly taskRemainingUnits?: number
   constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number) {
     super(
-      `Task '${taskRef}' blocked: ${taskUsedUnits}/${taskCeiling} units used, ` +
+      `Refused (task_ceiling_exceeded): task '${taskRef}' is at ${taskUsedUnits}/${taskCeiling} units and ` +
       `${taskRemainingUnits} remaining is not enough for this call.`
     )
     this.name = 'TaskCeilingExceededError'
@@ -84,7 +85,7 @@ export interface MeterOptions<TArgs extends Record<string, unknown>, TResult> {
   customerIdFrom?: keyof TArgs & string
   /** Billable units per call. Pass a function to derive from the result. Default: 1 */
   units?: UnitsResolver<TResult>
-  /** If true, check budget BEFORE running the function. Blocks immediately if exhausted. */
+  /** If true, check budget BEFORE running the function. Throws BudgetExhaustedError immediately if the balance is spent. */
   preflight?: boolean
   /** Static metadata attached to every event (not billed). */
   metadata?: Record<string, unknown>
@@ -216,7 +217,7 @@ export interface PreflightOptions {
   agentId: string
   customerId?: string
   estimatedUnits?: number
-  /** Per-request ceiling: block when estimatedUnits exceeds it. */
+  /** Per-request ceiling: refuse when estimatedUnits exceeds it. */
   ceiling?: number
   /** Cross-call job budget: many calls, one hard ceiling. */
   taskRef?: string
@@ -248,11 +249,11 @@ export interface PreflightResult {
 /**
  * Check every budget BEFORE the call runs, so the expensive call never happens.
  *
- * Throws when YOUR spend rule stopped the run: CeilingExceededError,
+ * Throws when YOUR spend rule refused the call: CeilingExceededError,
  * TaskCeilingExceededError, BudgetExhaustedError.
  *
  * Returns `approved: false` with `upgradeUrl` set when AGENTBILL'S OWN BILLING
- * stopped it (`free_tier_exceeded`, `plan_limit_exceeded`), because our quota
+ * refused it (`free_tier_exceeded`, `plan_limit_exceeded`), because our quota
  * must never crash your agent.
  */
 export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
@@ -271,7 +272,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     throw new AgentBillError(String(data.message ?? 'task_ceiling required for a new task_ref'))
   }
   if (res.status === 409) {
-    // Never a block, and nothing was reserved: the original request holds the
+    // Never a refusal, and nothing was reserved: the original request holds the
     // key and its decision is one write away.
     throw new AgentBillError(String(data.message ?? 'preflight_in_progress, retry in a moment'))
   }
@@ -297,7 +298,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     // free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw.
     //
     // One rule, and it is the same in both SDKs as of 0.4.0 / 0.6.0: throw
-    // when YOUR spend rule stopped the run, return a result when AGENTBILL'S
+    // when YOUR spend rule refused the call, return a result when AGENTBILL'S
     // OWN BILLING did. Those two mean our quota ran out, not that your budget
     // did. Throwing would let an AgentBill billing state crash your production
     // agent, making us a single point of failure in your critical path, which
@@ -397,7 +398,7 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
  * )
  *
  * @example
- * // Pre-flight: block before LLM call if budget is exhausted
+ * // Pre-flight: refuse before the LLM call if the balance is spent
  * const runAgent = meter(fn, {
  *   event: 'research_run',
  *   customerIdFrom: 'customerId',

@@ -13,7 +13,7 @@ from agentbill.meter import meter, BudgetExhaustedError
 
 call_count = 0
 
-# limit_test is already BLOCKED (used=3, limit=3)
+# limit_test is already at its limit (used=3, limit=3)
 @meter(event="preflight_test", customer_id="limit_test", units=1, preflight=True)
 def expensive_agent(task: str) -> str:
     global call_count
@@ -24,12 +24,12 @@ def expensive_agent(task: str) -> str:
 
 print("=" * 50)
 print("Pre-flight budget check test")
-print("Customer: limit_test (blocked, used=3/3)")
+print("Customer: limit_test (at limit, used=3/3)")
 print("=" * 50)
 
 try:
     expensive_agent("analyze this document")
-    print("\nFAIL: should have been blocked before running!")
+    print("\nFAIL: should have been refused before running!")
 except BudgetExhaustedError as e:
     print(f"\n✅  BudgetExhaustedError caught BEFORE agent ran")
     print(f"    Message: {e}")

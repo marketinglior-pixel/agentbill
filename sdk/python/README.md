@@ -25,8 +25,9 @@ from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-# 1 unit = 1 cent here, so this job dies at $5 across every call,
-# tool and retry that passes the same task_ref.
+# You decide what a unit is worth. This job gets 500 units across every
+# call, tool and retry that passes the same task_ref; the call that would
+# cross that ceiling is refused before it runs.
 @client.gate(agent_id="researcher", task_ref="job-142",
              task_ceiling=500, estimated_units=12)
 def run_agent(topic: str) -> str:
@@ -117,7 +118,7 @@ except TaskCeilingExceededError as e:
     alert_ops(f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units")
 ```
 
-**One rule, identical in the Node SDK: it raises when your spend rule stopped the run, and returns a result when AgentBill's own billing did.**
+**One rule, identical in the Node SDK: it raises when your spend rule refused the call, and returns a result when AgentBill's own billing did.**
 
 | Refusal | What you get |
 |---|---|
@@ -155,7 +156,7 @@ invented data.
 
 ---
 
-## Task budgets: "this job dies at $5"
+## Task budgets: "this job gets 500 units"
 
 The same mechanism as the Quick start, with the two pieces that section left out: what the refusal
 carries, and how to read a job's burn-down while it runs. The ceiling is fixed on the first
@@ -205,7 +206,7 @@ try:
         idempotency_key="job-142:summarize",   # stable across retries
     )
 except PreflightInProgressError:
-    ...  # the original is still being decided. Not a block, nothing reserved.
+    ...  # the original is still being decided. Not a refusal, nothing reserved.
 ```
 
 Same key, same decision, one reservation.
@@ -223,8 +224,8 @@ Settle every run, including the ones that fail. `record(..., success=False)` rel
 ```typescript
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-// Reads AGENTBILL_API_KEY. The run dies at 500 units across every call
-// that passes job-142, however many that turns out to be.
+// Reads AGENTBILL_API_KEY. job-142 gets 500 units across every call
+// that passes it, however many that turns out to be.
 try {
   await preflight({ agentId: 'researcher', taskRef: 'job-142',
                     taskCeiling: 500, estimatedUnits: 12 })
