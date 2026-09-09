@@ -99,7 +99,7 @@ import { createRequire } from 'node:module'
 // it does not intercept throws instead of reaching the network.
 const { MockAgent, setGlobalDispatcher } = createRequire(${JSON.stringify(join(WORK, 'node_modules/agentbill/package.json'))})('undici')
 const canned = (path) => {
-  if (path.startsWith('/preflight')) return { approved: true, reason: null, estimated_units: 1, remaining_units: 999, task_ref: 'job-142', task_remaining_units: 488 }
+  if (path.startsWith('/preflight')) return { approved: true, reason: null, estimated_units: 1, remaining_units: 999, task_ref: 'job-142', task_ceiling: 500, task_remaining_units: 488 }
   if (path.startsWith('/events')) return { event_id: 'evt_ci', status: 'recorded', customer_created: false, customer_remaining_units: 999, task_used_units: 12, task_remaining_units: 488, task_exceeded: false }
   if (path.startsWith('/tasks')) return { task_ref: 'job-142', agent_id: 'researcher', ceiling_units: 500, used_units: 12, reserved_units: 0, remaining_units: 488, exceeded: false }
   if (path.startsWith('/budget')) return { customer_id: 'default', limit: 1000, used: 1, remaining: 999, is_blocked: false }

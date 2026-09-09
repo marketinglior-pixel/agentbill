@@ -65,7 +65,7 @@ The last two mean *our* quota ran out, not that your budget did. AgentBill runni
 | `estimatedUnits` | number | `1` | Expected units for this call |
 | `ceiling` | number | none | Per-request ceiling: refuse when `estimatedUnits` exceeds it |
 | `taskRef` | string | none | Cross-call job budget: many calls, one hard ceiling |
-| `taskCeiling` | number | none | Required on the first preflight of a new `taskRef` |
+| `taskCeiling` | number | none | Opens a new `taskRef`; required then unless the job was opened first from the console or `PUT /tasks/:task_ref/ceiling`. Not applied once the job exists |
 | `idempotencyKey` | string | none | Same key, same decision, one reservation. Without it a retry reserves a second time |
 
 Returns `{ approved, reason, estimatedUnits, remainingUnits, reservationExpiresAt?, taskRef?, taskRemainingUnits?, upgradeUrl? }`.

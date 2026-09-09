@@ -108,9 +108,11 @@ export async function tasksRoute(app: FastifyInstance) {
   //
   //   The last successful save here is the ceiling preflight uses. Code may
   //   still open a job with task_ceiling when no row exists; once a row exists,
-  //   code cannot change it and this endpoint can. Every preflight answers with
-  //   the ceiling in force as task_ceiling, so a value that was not applied is
-  //   visible, not silent.
+  //   a task_ceiling on preflight is not applied, and the ceiling changes only
+  //   through this endpoint or the console form. An approved answer and a
+  //   task_ceiling_exceeded refusal carry the ceiling in force as
+  //   task_ceiling, so a value that was not applied is visible on the calls
+  //   that consulted it.
   //
   // A ceiling may not go under used + reserved: that is a 409 carrying the
   // smallest value that would be accepted. Reservations in flight are never

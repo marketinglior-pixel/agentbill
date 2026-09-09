@@ -61,7 +61,8 @@ def preflight(
             several providers and tools shares a single ceiling. Pass the same
             task_ref on every call in the job.
         task_ceiling: Total units the whole task may spend. Required on the first
-            preflight of a new task_ref, ignored on later calls.
+            preflight of a new task_ref, or open the job first in the console; not
+            applied on later calls.
         idempotency_key: Makes a retried preflight safe. Without it a retry
             reserves a second time. Same key, same decision, one reservation.
     """
@@ -196,7 +197,7 @@ def _refusal_message(reason: str, data: dict) -> str:
     if reason == "task_ceiling_required":
         return (
             "Refused (task_ceiling_required): this task_ref is unknown. Pass task_ceiling "
-            "on the first preflight of a new task."
+            "on the first preflight of a new task, or open the job first in the console."
         )
     if reason == "budget_exhausted":
         return "Refused (budget_exhausted): this customer's balance is spent."

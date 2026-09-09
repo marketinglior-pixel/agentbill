@@ -112,7 +112,8 @@ class TaskCeilingExceededError(Exception):
         )
 
 class TaskCeilingRequiredError(Exception):
-    """A new task_ref needs task_ceiling on its first preflight."""
+    """A task_ref that has not been opened yet needs task_ceiling on its first
+    preflight (or open it first from the console / PUT /tasks/:task_ref/ceiling)."""
 
 
 def _raise_for_status(resp: requests.Response) -> None:
@@ -161,7 +162,8 @@ class AgentBillClient:
 
         task_ref groups many calls (across providers and tools) under one hard
         cross-call ceiling: "this job gets 50 units, across every call". Pass task_ceiling on
-        the first call for a new task_ref; later calls only need task_ref.
+        the first call for a new task_ref (or open the job first in the console); later calls
+        only need task_ref, and a task_ceiling on them is not applied.
 
         idempotency_key makes a retried preflight safe. Without it a retry
         reserves a second time, so the mechanism meant to prevent waste is the

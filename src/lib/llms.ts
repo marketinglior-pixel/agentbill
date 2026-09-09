@@ -277,8 +277,9 @@ settle its reservation; the sweeper reclaims it when it expires. Settle from the
   write). A preflight for a job that does not exist, sent without a ceiling, is 422
   task_ceiling_required.
 - Once the job exists, a task_ceiling from code is not applied, so a retry cannot raise the ceiling
-  it was meant to respect. The console's last save is the ceiling in force. Nothing is silent: every
-  preflight answers with the ceiling that decided it, as task_ceiling, approved or refused.
+  it was meant to respect. The last save through the endpoint or the console is the ceiling in force.
+  An approved answer and a task_ceiling_exceeded refusal carry the ceiling that decided them as
+  task_ceiling; the other refusals are decided before the job's row is consulted.
 - The row is unique on (account_id, task_ref), which is why processes, machines, providers and
   agent_ids converge on one ceiling by sending one string.
 - The check and the reservation are one conditional UPDATE, so two calls arriving together cannot
@@ -354,7 +355,7 @@ The differentiator is not that the check happens before the call. It is that the
 you choose, so unrelated processes converge on one number without coordinating with each other.
 
 \`\`\`python
-# process A, on one machine, opens the job and fixes its ceiling
+# process A, on one machine, opens the job with its ceiling
 client.preflight(agent_id="planner", task_ref="job-142",
                  task_ceiling=500, estimated_units=40)
 
@@ -370,7 +371,7 @@ client.preflight(agent_id="writer", task_ref="job-142", estimated_units=400)
 \`\`\`
 
 task_budgets is unique on (account_id, task_ref). Three processes, three agent_ids, one row. The
-ceiling was fixed by A, and C is refused against it because C asked, not because anything
+ceiling was opened by A, and C is refused against it because C asked, not because anything
 intercepted it.
 
 ## The reservation lifecycle
@@ -446,7 +447,7 @@ customer "default".
 \`\`\`json
 {"approved": true, "reason": null, "estimated_units": 250, "remaining_units": 750,
  "reservation_expires_at": "2026-09-08T12:00:00.000Z",
- "task_ref": "job-142", "task_remaining_units": 4750}
+ "task_ref": "job-142", "task_ceiling": 5000, "task_remaining_units": 4750}
 \`\`\`
 
 \`\`\`json
@@ -492,7 +493,7 @@ its task_ref with a task_ceiling, or from PUT /tasks/:task_ref/ceiling.
 
 Opens a job with a ceiling or changes one. Body: ceiling_units (required, positive integer) and
 agent_id (optional, read only when this call opens the job). Returns the task as GET does plus
-task_created. The console's last save is the ceiling in force; code can open a job with one and cannot change it after. A ceiling under used_units +
+task_created. The last save through the endpoint or the console is the ceiling in force; a task_ceiling sent on a later preflight is not applied. A ceiling under used_units +
 reserved_units is 409 ceiling_below_committed carrying minimum_ceiling_units; nothing is clamped
 and no reservation in flight is rewritten. The console's task budgets view runs this same
 statement.

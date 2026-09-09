@@ -221,7 +221,9 @@ export interface PreflightOptions {
   ceiling?: number
   /** Cross-call job budget: many calls, one hard ceiling. */
   taskRef?: string
-  /** Required on the first preflight of a new taskRef. */
+  /** Opens a new taskRef with this ceiling. Required then, unless the job was
+   *  opened first from the console or PUT /tasks/:task_ref/ceiling; not applied
+   *  once the job exists. */
   taskCeiling?: number
   /**
    * Makes a retried preflight safe. Without it a retry reserves a second time,

@@ -9,6 +9,7 @@ import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { isId, INT4_MAX } from '../lib/ids.js'
 import { setTaskCeiling } from '../lib/task-ceiling.js'
+import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 
 // /app is the console: the only browser surface a registered user has. It is
@@ -109,7 +110,8 @@ export async function appRoute(app: FastifyInstance) {
     }
 
     const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, flash }))
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter,
+                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash) }))
   })
 
   // The console's one write: open a job with a ceiling, or change one. A plain
@@ -130,17 +132,23 @@ export async function appRoute(app: FastifyInstance) {
     const agent = typeof body?.agent_id === 'string' ? body.agent_id.trim() : ''
     const raw = typeof body?.ceiling_units === 'string' ? body.ceiling_units.trim() : ''
     const to = (extra: string) => reply.redirect(`/app?view=tasks&${extra}`, 303)
-    const back = (code: string) => to(`err=${code}${isId(ref) ? `&ref=${encodeURIComponent(ref)}` : ''}`)
+    const fail = (code: string) => to(`err=${code}${isId(ref) ? `&ref=${encodeURIComponent(ref)}` : ''}`)
 
-    if (!isId(ref)) return back('ref')
-    if (agent && !isId(agent)) return back('agent')
+    // The same 100/min bucket the API applies to this key, so the console is
+    // not a less-limited path to the same table than the endpoint.
+    if (!checkRateLimit(viewer.apiKey).allowed) return fail('rate')
+    if (!isId(ref)) return fail('ref')
+    if (agent && !isId(agent)) return fail('agent')
     // Digits only, then the int4 bound the column and the API both enforce.
     // Number('1e3') is 1000 and Number('') is 0; neither is a ceiling anyone typed.
-    if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return back('ceiling')
+    if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return fail('ceiling')
 
     const result = await setTaskCeiling(viewer.accountId, ref, Number(raw), agent || null)
     if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.minimum}`)
-    return to(`saved=${encodeURIComponent(ref)}${result.row.taskCreated ? '&created=1' : ''}`)
+    // An agent label typed for a job that already existed was not applied
+    // (the label is read only when a save opens the job); say so.
+    const kept = agent && !result.row.taskCreated ? '&agent=kept' : ''
+    return to(`saved=${encodeURIComponent(ref)}${result.row.taskCreated ? '&created=1' : ''}${kept}`)
   })
 
   // The canonical-host redirect preserves a trailing slash; without this the
@@ -393,17 +401,40 @@ function readFilter(q: Record<string, unknown>): Filter {
 
 type Series = { day: string; blocks: number; units: number; refused: number }
 /** What POST /app/tasks left on the query string for the tasks view to say. */
-type Flash = { saved?: string; created?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below'; ref?: string; min?: number }
-const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below'])
+type Flash = { saved?: string; created?: boolean; agentKept?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below' | 'rate'; ref?: string; min?: number }
+const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below', 'rate'])
 
+/** Shape only. readFlash accepts what a redirect from POST /app/tasks would
+ *  carry; verifyFlash below decides what may be shown. */
 function readFlash(q: Record<string, unknown>): Flash | null {
   const f: Flash = {}
   if (isId(q?.saved)) f.saved = q.saved as string
   if (q?.created === '1') f.created = true
+  if (q?.agent === 'kept') f.agentKept = true
   if (typeof q?.err === 'string' && FLASH_ERRS.has(q.err)) f.err = q.err as Flash['err']
   if (isId(q?.ref)) f.ref = q.ref as string
   if (typeof q?.min === 'string' && /^[0-9]{1,10}$/.test(q.min)) f.min = Number(q.min)
   return Object.keys(f).length ? f : null
+}
+
+/**
+ * A task_ref on the query string is text anyone can put in a link. It is only
+ * echoed inside a status line when a job with that name exists on THIS
+ * account, and the committed number for err=below comes from that row, not
+ * from the URL. Otherwise the line is generic. Same discipline as loginPage,
+ * which reflects codes and never free text. One row read, only when a flash
+ * names a task.
+ */
+async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | null> {
+  if (!f) return null
+  const name = f.saved ?? f.ref
+  if (!name) return f
+  const [row] = await sql`
+    SELECT used_units, reserved_units FROM task_budgets
+    WHERE account_id = ${accountId} AND task_ref = ${name}
+  `
+  if (!row) return { ...f, saved: f.saved ? '' : undefined, ref: undefined, min: undefined }
+  return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
 }
 
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
@@ -1022,7 +1053,7 @@ ${MARK_CSS}
   .brow:last-child { border-bottom: none; }
   .bhead { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
            margin-bottom: 8px; }
-  .btask { font-family: var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .btask { font-family: var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .btask a { color: var(--text); }
   .bagent { color: var(--dim); font-family: var(--sans); }
   .bnum { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums;
@@ -1188,6 +1219,9 @@ ${MARK_CSS}
   .setc .fine { margin-top: var(--s3); max-width: 78ch; }
   .setc .ok { color: var(--green); margin-bottom: var(--s3); }
   .setc .err { margin-bottom: var(--s3); }
+  .setc .ok, .setc .err, .nothing { overflow-wrap: anywhere; }
+  .setc p code, .nothing code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+  .setf label code { text-transform: none; letter-spacing: 0; font-family: var(--mono); color: var(--muted); margin-left: 4px; }
   .bfoot { flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
   .bset { display: flex; align-items: center; gap: var(--s2); }
   .bset label { display: inline; margin: 0; }
@@ -1703,7 +1737,10 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
   ref: () => 'The job name (task_ref) is 1 to 128 characters with no control characters.',
   ceiling: () => 'The ceiling is a whole number of units, 1 or more.',
   agent: () => 'The agent label is 1 to 128 characters with no control characters.',
-  below: (f) => `<code>${esc(f.ref ?? '')}</code> already has <b>${num(f.min ?? 0)}</b> units committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min ?? 0)} or more, or wait for the reservations to settle or expire.`,
+  rate: () => 'Too many saves in one minute for this key. Wait a moment and try again.',
+  below: (f) => f.ref && f.min != null
+    ? `<code>${esc(f.ref)}</code> already has <b>${num(f.min)}</b> units committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min)} or more, or wait for the reservations to settle or expire.`
+    : 'That ceiling is under what the job has already committed: spent, plus reserved by calls in flight. Set it at or above that number, or wait for the reservations to settle or expire.',
 }
 
 /** The form that opens a job or changes its ceiling. Tasks view only, and
@@ -1712,19 +1749,19 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
 function ceilingForm(p: Page): string {
   const f = p.flash
   const said = !f ? ''
-    : f.saved ? `<p class="ok">Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}. Every preflight that names this task_ref uses it from the next call.</p>`
+    : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
     : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const keep = f?.err && f.ref ? esc(f.ref) : ''
   return `<div class="frame setc">
     ${said}
     <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
-      <div><label for="t-ref">Job (task_ref)</label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
+      <div><label for="t-ref">Job <code>task_ref</code></label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
       <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
-      <div><label for="t-agent">Agent (optional)</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
+      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
       <button class="btn" type="submit">Set ceiling</button>
     </form>
-    <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses: your code can open a job with <code>task_ceiling</code> on its first call, and cannot change it once the job exists. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
+    <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
 }
 

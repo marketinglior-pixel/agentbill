@@ -6,6 +6,7 @@ import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
+import { CONSOLE_AGENT } from '../lib/task-ceiling.js'
 
 const PreflightBody = z.object({
   agent_id: zId(),
@@ -227,12 +228,13 @@ export async function preflightRoute(app: FastifyInstance) {
         if (task_ref) {
           if (task_ceiling != null) {
             // The first call for a new task_ref opens it with this ceiling.
-            // Once the row exists, a task_ceiling from code is not applied:
-            // the console (PUT /tasks/:task_ref/ceiling, or the form on /app)
-            // is what changes it, and its last save is the ceiling in force.
-            // So a retry cannot raise the number it was meant to respect, and
-            // nothing is silent either: the response below carries the ceiling
-            // that decided, as task_ceiling, approved or refused.
+            // Once the row exists, a task_ceiling sent here is not applied:
+            // the ceiling changes only through PUT /tasks/:task_ref/ceiling or
+            // the console form, and the last save is the one in force. So a
+            // retry of THIS call cannot raise the number it was meant to
+            // respect. An approved answer and a task_ceiling_exceeded refusal
+            // carry the ceiling that decided them as task_ceiling; the other
+            // refusals are decided before this row is consulted.
             await tx`
               INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units)
               VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling})
@@ -240,9 +242,17 @@ export async function preflightRoute(app: FastifyInstance) {
             `
           }
 
+          // A job opened from the console or the API without an agent label
+          // carries the placeholder CONSOLE_AGENT. The first agent that spends
+          // under it claims the label, in the same conditional UPDATE as the
+          // reserve, so attribution (GET /tasks?agent_id=, the refusals filter,
+          // the leak decision) names the agent that ran and not the form. An
+          // agent literally named "console" is relabelled by the next one to
+          // spend; that is the cost of not adding a column for the flag.
           const taskReserved = await tx`
             UPDATE task_budgets
             SET reserved_units = reserved_units + ${reserveUnits},
+                agent_id       = CASE WHEN agent_id = ${CONSOLE_AGENT} THEN ${agent_id} ELSE agent_id END,
                 updated_at     = now()
             WHERE account_id = ${accountId}
               AND task_ref = ${task_ref}
