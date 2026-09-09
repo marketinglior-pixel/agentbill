@@ -82,7 +82,35 @@ export const REFUSAL = {
   message:
     `Task '${TASK_REF}' blocked: ${REFUSED.used}/${REFUSED.ceiling} units used, `
     + `${REFUSED.remaining} remaining is not enough for this call.`,
+  taskRef: TASK_REF,
+  used: REFUSED.used,
+  ceiling: REFUSED.ceiling,
+  remaining: REFUSED.remaining,
 } as const
+
+/**
+ * The body POST /preflight answers when the hero's own call is refused.
+ *
+ * The hero sample asks for the plan's first call (PLAN[0], 12 units) and the
+ * frame shows what that call gets back on the iteration where 8 units remain.
+ * Field names and order mirror the task_ceiling_exceeded branch of
+ * src/routes/preflight.ts: approved, reason, estimated_units, task_ref, then
+ * the detail (task_ceiling, task_used_units, task_remaining_units). There is no
+ * message field on the wire; the SDK builds its exception text client-side.
+ * If this and preflight.ts ever disagree, preflight.ts is right.
+ */
+const HERO_BODY = {
+  approved: false,
+  reason: 'task_ceiling_exceeded',
+  estimated_units: PLAN[0][1],
+  task_ref: TASK_REF,
+  task_ceiling: REFUSED.ceiling,
+  task_used_units: REFUSED.used,
+  task_remaining_units: REFUSED.remaining,
+} as const
+export function heroRefusalBody(): Record<string, unknown> {
+  return { ...HERO_BODY }
+}
 
 
 /** Total the plan asks for. Rendered, never typed: it is sum(PLAN). */
@@ -126,8 +154,15 @@ function restingRequest(): string {
 
 /** Playground CSS. Include once, after theme BASE and the page's .wrap rule. */
 export const PLAYGROUND_CSS = `
-  .pg-sec { padding-block: 76px 0; }
-  .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 62ch; margin-top: 12px; }
+  /* The one grid break on the page. Every other section is a 1080px column on
+     the page ground; this one is full bleed on its own ground, because it is
+     where the product runs. --band-hi / --band-lo are page-local, declared in
+     the homepage's :root. */
+  .pg-sec { padding-block: var(--s8) var(--s8);
+            background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
+            border-block: 1px solid var(--border2); box-shadow: var(--edge); }
+  .pg-sec h2 { color: var(--white); max-width: 22ch; }
+  .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 60ch; margin-top: var(--s3); }
 
   .pg { margin-top: 30px; border: 1px solid var(--border); background: var(--surface);
         border-radius: var(--r-frame); overflow: hidden; }
@@ -135,9 +170,9 @@ export const PLAYGROUND_CSS = `
   .pg-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 24px;
             padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface2); }
   .pg-field { display: flex; align-items: center; gap: 10px; }
-  .pg-key { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em;
+  .pg-key { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.16em;
             text-transform: uppercase; color: var(--dim); }
-  .pg-val { font-family: var(--mono); font-size: 15px; color: var(--text); }
+  .pg-val { font-family: var(--mono); font-size: var(--fs-body); color: var(--text); }
   .pg-sl { -webkit-appearance: none; appearance: none; width: 150px; height: 2px;
            background: var(--border2); outline: none; cursor: pointer; }
   .pg-sl::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
@@ -148,7 +183,7 @@ export const PLAYGROUND_CSS = `
            box-shadow: 0 0 0 1px var(--green); }
   .pg-sl:disabled { opacity: 0.4; cursor: not-allowed; }
   .pg-actions { margin-left: auto; display: flex; gap: 10px; }
-  .pg-btn { font-family: var(--sans); font-size: 14.5px; font-weight: 600; padding: 9px 20px;
+  .pg-btn { font-family: var(--sans); font-size: var(--fs-small); font-weight: 600; padding: 9px 20px;
             border-radius: var(--r-control); cursor: pointer; border: 1px solid var(--border-strong);
             background: transparent; color: var(--text); transition: border-color 0.15s; }
   .pg-btn:hover:not(:disabled) { border-color: var(--text); }
@@ -163,16 +198,16 @@ export const PLAYGROUND_CSS = `
   .pg-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pg-left { border-right: 1px solid var(--border); padding: 20px; }
   .pg-right { padding: 20px; background: var(--bg-deep); display: flex; flex-direction: column; }
-  .pg-h { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.18em;
+  .pg-h { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.18em;
           text-transform: uppercase; color: var(--dim); display: flex;
           justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 
   .pg-budget { margin-bottom: 20px; }
   .pg-nums { display: flex; justify-content: space-between; align-items: baseline;
              font-family: var(--mono); margin-bottom: 9px; }
-  .pg-used { font-size: 30px; color: var(--text); transition: color 0.2s; }
+  .pg-used { font-size: var(--fs-figure); color: var(--text); transition: color 0.2s; }
   .pg-used.over { color: var(--red); }
-  .pg-ceil { font-size: 14px; color: var(--dim); }
+  .pg-ceil { font-size: var(--fs-small); color: var(--dim); }
   .pg-track { height: 6px; background: var(--border2); position: relative; overflow: hidden; }
   .pg-fill { height: 100%; width: 0; background: var(--green);
              transition: width 0.45s cubic-bezier(0.22,1,0.36,1), background 0.2s; }
@@ -194,7 +229,7 @@ export const PLAYGROUND_CSS = `
              border-bottom: 1px solid var(--border); }
   .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
   .pg-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 68px; gap: 12px; align-items: baseline;
-            font-family: var(--mono); font-size: 14.5px; padding: 7px 0;
+            font-family: var(--mono); font-size: var(--fs-small); padding: 7px 0;
             border-bottom: 1px solid var(--border-soft); }
   /* Only a row that CHANGES state animates. At rest every row is already there,
      so entry animation would be ten rows sliding in for no reason. */
@@ -211,35 +246,35 @@ export const PLAYGROUND_CSS = `
   .pg-row.blocked .ar, .pg-row.blocked .nm, .pg-row.blocked .un, .pg-row.blocked .cum { color: var(--red); }
   .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; }
   .pg-ask b { color: var(--muted); font-weight: 500; }
-  .pg-note { font-family: var(--mono); font-size: 13.5px; color: var(--red); padding-top: 11px;
+  .pg-note { font-family: var(--mono); font-size: var(--fs-small); color: var(--red); padding-top: 11px;
              animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   .pg-note.calm { color: var(--dim); }
-  .pg-empty { font-family: var(--mono); font-size: 14px; color: var(--dim); padding-top: 8px; }
+  .pg-empty { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); padding-top: 8px; }
 
-  .pg-json { font-family: var(--mono); font-size: 14.5px; line-height: 1.75; white-space: pre;
+  .pg-json { font-family: var(--mono); font-size: var(--fs-small); line-height: 1.75; white-space: pre;
              overflow-x: auto; flex: 1; color: var(--dim); }
   .pg-json .k { color: var(--muted); }
   .pg-json .s, .pg-json .n { color: var(--code); }
   .pg-json .t { color: var(--green); }
   .pg-json .f { color: var(--red); font-weight: 700; }
   .pg-json .nl { color: var(--dim); }
-  .pg-status { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em;
+  .pg-status { font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: 0.14em;
                text-transform: uppercase; padding: 5px 11px; border-radius: var(--r-chip); border: 1px solid; }
   .pg-status.ok { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
   .pg-status.no { color: var(--red); border-color: var(--fail-line); background: var(--fail-bg); }
   .pg-status.idle { color: var(--dim); border-color: var(--border2); }
   .pg-throw { margin-top: 16px; border: 1px solid var(--red); background: var(--fail-bg);
-              padding: 12px 14px; font-family: var(--mono); font-size: 14px; color: var(--red);
+              padding: 12px 14px; font-family: var(--mono); font-size: var(--fs-small); color: var(--red);
               animation: pg-pop 0.3s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-pop { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
   .pg-throw b { display: block; font-weight: 700; margin-bottom: 3px; }
-  .pg-throw span { color: var(--muted); font-size: 13px; }
+  .pg-throw span { color: var(--muted); font-size: var(--fs-small); }
 
   .pg-foot { border-top: 1px solid var(--border); padding: 15px 20px; display: flex;
              flex-wrap: wrap; gap: 12px 24px; align-items: center; background: var(--surface2); }
-  .pg-rule { font-family: var(--mono); font-size: 13px; color: var(--dim); }
+  .pg-rule { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); }
   .pg-rule b { color: var(--muted); font-weight: 400; }
-  .pg-disc { margin-left: auto; font-family: var(--mono); font-size: 12.5px; color: var(--dim);
+  .pg-disc { margin-left: auto; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              text-align: right; line-height: 1.5; }
 
   @media (max-width: 820px) {
@@ -276,10 +311,12 @@ export const PLAYGROUND_CSS = `
 
 /** The section markup. Drop it straight after the hero. */
 export function playgroundSection(): string {
-  return `  <section class="wrap pg-sec" id="playground">
+  return `  <section class="pg-sec" id="playground">
+    <div class="wrap">
+    <p class="eyebrow">Try it &middot; runs in your browser</p>
     <h2>Run an agent into its ceiling.</h2>
-    <p class="pg-lede">Set a ceiling for the whole job. Run the agent. The call that would break
-    the budget never goes out. You get back the same response body your SDK gets.</p>
+    <p class="pg-lede">Set a ceiling for the whole job and run the agent. The call that would cross
+    it gets <span class="mono-in">approved: false</span>, with the same body your SDK gets.</p>
 
     <div class="pg">
       <div class="pg-bar">
@@ -326,6 +363,7 @@ ${plannedRows()}
         executes it in your browser, against no account.<br />
         Same rule and same response body as <a href="/docs#api-reference">POST /preflight</a>.</div>
       </div>
+    </div>
     </div>
   </section>`
 }
