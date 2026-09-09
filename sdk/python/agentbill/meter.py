@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import json
 import os
 import uuid
 from typing import Any, Callable, Optional, TypeVar, Union
@@ -58,6 +59,57 @@ class AgentBillError(Exception):
     By default the decorator raises this so your agent doesn't bill
     silently on server errors. Override this by wrapping the call.
     """
+
+
+class AuthenticationError(AgentBillError):
+    """AgentBill did not accept the API key: the server answered HTTP 401.
+
+    Not a refusal. No ceiling was consulted and nothing was reserved; the
+    request never got that far. The server's own reason and sentence are kept
+    on the exception, so a wrong key on a first run reads as what it is
+    instead of a bare `401 Client Error`:
+
+        AuthenticationError: AgentBill rejected the API key (unauthorized):
+        Invalid API key. Check the key you are sending: it starts with agb_
+        and was shown once at https://agentbill.dev/register. ...
+
+    `error` is the server's reason: unauthorized, key_revoked or key_expired.
+    `message` is the server's sentence, verbatim. Subclasses AgentBillError,
+    so an existing `except AgentBillError` still catches it.
+    """
+    def __init__(self, error: str = "unauthorized", message: str = "", status_code: int = 401) -> None:
+        self.error = error
+        self.message = message
+        self.status_code = status_code
+        text = f"AgentBill rejected the API key ({error}): {message or 'the server sent no message.'}"
+        if error == "unauthorized":
+            # The server's sentence for a revoked or expired key already says
+            # what to do next; for a plain bad key it does not.
+            text += (
+                " Check the key you are sending: it starts with agb_ and was shown once at "
+                "https://agentbill.dev/register. Lost it? https://agentbill.dev/recover gets you back in."
+            )
+        super().__init__(text)
+
+
+def _raise_if_unauthorized(status_code: int, body_text: str) -> None:
+    """Turn a 401 into AuthenticationError, keeping the server's error and message.
+
+    Every call path in the package goes through this before it gives up on a
+    response. Until 0.6.3 the client let requests.raise_for_status() speak,
+    which drops the body, and the meter reported an "unexpected status 401".
+    """
+    if status_code != 401:
+        return
+    error, message = "unauthorized", ""
+    try:
+        data = json.loads(body_text)
+        if isinstance(data, dict):
+            error = str(data.get("error") or error)
+            message = str(data.get("message") or "")
+    except ValueError:
+        message = (body_text or "")[:200]
+    raise AuthenticationError(error, message, status_code)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +180,7 @@ def _build_payload(customer_id: str, event: str, units: int, metadata: dict | No
 def _handle_response(resp: httpx.Response, customer_id: str) -> None:
     if resp.status_code == 200:
         return
+    _raise_if_unauthorized(resp.status_code, resp.text)
     if resp.status_code == 402:
         data = resp.json()
         raise BudgetExhaustedError(customer_id, data.get("message", ""))
@@ -156,6 +209,7 @@ def _preflight_sync(customer_id: str) -> None:
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
         )
+    _raise_if_unauthorized(resp.status_code, resp.text)
     if resp.status_code != 200:
         raise AgentBillError(f"AgentBill /budget returned {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
@@ -172,6 +226,7 @@ async def _preflight_async(customer_id: str) -> None:
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
         )
+    _raise_if_unauthorized(resp.status_code, resp.text)
     if resp.status_code != 200:
         raise AgentBillError(f"AgentBill /budget returned {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
