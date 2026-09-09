@@ -1,4 +1,4 @@
-from .meter import meter, BudgetExhaustedError, AgentBillError
+from .meter import meter, BudgetExhaustedError, AgentBillError, AuthenticationError
 from .client import (
     AgentBillClient,
     CeilingExceededError,
@@ -14,6 +14,7 @@ from .client import (
 __all__ = [
     "meter",
     "AgentBillError",
+    "AuthenticationError",
     "AgentBillClient",
     "CeilingExceededError",
     "BudgetExhaustedError",

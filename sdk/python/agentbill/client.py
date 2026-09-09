@@ -1,6 +1,6 @@
 import functools
 import requests
-from .meter import BudgetExhaustedError, AgentBillError  # one class for both code paths
+from .meter import BudgetExhaustedError, AgentBillError, AuthenticationError, _raise_if_unauthorized
 from dataclasses import dataclass
 from typing import Optional
 
@@ -114,12 +114,35 @@ class TaskCeilingExceededError(Exception):
 class TaskCeilingRequiredError(Exception):
     """A new task_ref needs task_ceiling on its first preflight."""
 
+
+def _raise_for_status(resp: requests.Response) -> None:
+    """resp.raise_for_status(), except that a 401 keeps the server's message.
+
+    requests' own HTTPError says "401 Client Error: Unauthorized for url: ..."
+    and drops the body, which is where {"error": "unauthorized", "message":
+    "Invalid API key."} was. A wrong key is the common first-run failure, and
+    it was the one failure in this file with no sentence of its own.
+    """
+    _raise_if_unauthorized(resp.status_code, resp.text)
+    resp.raise_for_status()
+
+
 class AgentBillClient:
     def __init__(self, api_key: str, ceiling: Optional[int] = None, base_url: str = BASE_URL):
         if not api_key or not api_key.strip():
             raise ValueError(
                 "AgentBill API key is missing.\n"
                 "Get your free key (1,000 calls/month) at: https://agentbill.fly.dev/register"
+            )
+        # A key with a non-ASCII character in it cannot be an AgentBill key and
+        # cannot be sent: the Authorization header is latin-1, and the failure
+        # surfaced twelve frames deep in http.client as a UnicodeEncodeError
+        # (2026-09-09, a placeholder pasted through). Say so here instead.
+        if not api_key.isascii():
+            raise ValueError(
+                "AgentBill API key contains a non-ASCII character, so it cannot be sent as an "
+                "Authorization header. Keys are ASCII and start with agb_. Check what was pasted, "
+                "quotes and placeholders included."
             )
         self.api_key = api_key
         self.ceiling = ceiling
@@ -171,7 +194,7 @@ class AgentBillClient:
                 raise TaskCeilingRequiredError(data.get("message", "task_ceiling required for a new task_ref"))
         if resp.status_code == 409:
             raise PreflightInProgressError(idempotency_key or "")
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data = resp.json()
 
         result = PreflightResult(
@@ -237,7 +260,7 @@ class AgentBillClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=5,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return resp.json()
 
     def get_task(self, task_ref: str) -> TaskStatus:
@@ -247,7 +270,7 @@ class AgentBillClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=5,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data = resp.json()
         return TaskStatus(
             task_ref=data["task_ref"],
@@ -278,7 +301,7 @@ class AgentBillClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=5,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data = resp.json()
 
         return CheckpointResult(
@@ -305,7 +328,7 @@ class AgentBillClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=5,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data = resp.json()
 
         return StepResult(

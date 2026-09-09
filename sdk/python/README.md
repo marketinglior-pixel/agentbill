@@ -142,6 +142,16 @@ if not check.approved:
 > still exported so your imports keep working, but nothing raises them any more. If you were
 > catching them, check `result.approved` instead. The other three are unchanged.
 
+A wrong key is neither a refusal nor a quota state. The server answers 401 and every call in the
+SDK raises `AuthenticationError`, which carries the server's `error` (`unauthorized`,
+`key_revoked` or `key_expired`) and its `message`, verbatim, followed by where the key came from
+and how to get back in. It subclasses `AgentBillError`.
+
+> **Added in 0.6.3.** Until then a 401 surfaced as a bare `requests` `HTTPError: 401 Client
+> Error` with the server's sentence dropped, and a key with a non-ASCII character in it died as a
+> `UnicodeEncodeError` inside `http.client`. The client now rejects the second at construction,
+> before any request is made.
+
 ### 4. Watch the console
 
 Open `https://agentbill.dev/app` and paste your API key:
