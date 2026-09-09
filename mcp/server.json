@@ -3,12 +3,12 @@
   "name": "io.github.marketinglior-pixel/agentbill-mcp",
   "title": "AgentBill",
   "description": "Billing infrastructure for AI agents. Preflight spend checks + post-execution usage billing.",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "agentbill-mcp",
-      "version": "0.1.1",
+      "version": "0.2.1",
       "transport": {
         "type": "stdio"
       }
