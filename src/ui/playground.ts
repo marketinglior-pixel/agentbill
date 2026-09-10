@@ -139,12 +139,28 @@ function plannedRows(): string {
   }).join('\n')
 }
 
-/** The request body for the first call, painted the way the response is. */
+/**
+ * The request body for the first call, painted the way the response is.
+ *
+ * No task_ceiling, and that is not an omission. The slider above this panel is
+ * this section's console: the reader sets the ceiling there before pressing
+ * Run, and reset() disables it for the duration, so the ceiling is set before
+ * the code runs exactly as it is on /app. A task_ceiling in this body would
+ * say the call carries its own budget, contradicting the slider a few pixels
+ * above it, /register's step 3, and the hero.
+ *
+ * It was also dead on the wire in this very file: preflight() below decides on
+ * `task.ceiling`, the value the slider wrote, and never reads o.taskCeiling.
+ * The argument was passed and ignored, which is what preflight.ts does once
+ * the job exists, but here it happened by accident rather than by design.
+ *
+ * The ceiling is still shown, twice: on the slider, and in every response body
+ * as the server's own statement of the ceiling in force.
+ */
 function restingRequest(): string {
   const fields: ReadonlyArray<readonly [string, string, string]> = [
     ['agent_id', '"researcher"', 's'],
     ['task_ref', `"${TASK_REF}"`, 's'],
-    ['task_ceiling', String(DEFAULT_CEILING), 'n'],
     ['estimated_units', String(PLAN[0][1]), 'n'],
   ]
   return '{\n' + fields.map(([k, v, cls], i) =>
@@ -488,8 +504,11 @@ const PLAYGROUND_SRC = `
   function step(){
     if (idx >= PLAN.length) { finish('done. the job stayed inside its budget.'); return }
     var name = PLAN[idx][0], units = PLAN[idx][1];
+    // No taskCeiling: the slider set it before the run, so the call names the
+    // job and says nothing about the budget. preflight() decides on
+    // task.ceiling and never read this argument anyway.
     var res = preflight({ agentId:'researcher', taskRef:TASK_REF,
-                          taskCeiling:task.ceiling, estimatedUnits:units });
+                          estimatedUnits:units });
 
     // Convert the row that is already there. No append, no layout shift.
     var row = el('log').querySelector('.pg-row[data-i="' + idx + '"]');
