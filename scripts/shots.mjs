@@ -27,6 +27,15 @@ const PAGES = [
   ['pricing', '/pricing'],
   ['docs', '/docs'],
   ['register', '/register'],
+  // The same route twice, on purpose. /register ships the signup form and the
+  // post-key screen as two siblings in one response, and the second is hidden
+  // by CSS until the submit handler reveals it, so a reader spends their first
+  // minute on a screen this gate had never seen: history.replaceState writes
+  // the #done in the URL and nothing reads it back, and the clipping detector
+  // skips a display:none subtree. A second entry measures BOTH. Revealing it
+  // on the first entry instead would hide the form and swap the coverage
+  // rather than add to it, which looks identical in this output.
+  ['register-done', '/register'],
   ['console-demo', '/app?demo=1'],
   ['blog', '/blog'],
   ['about', '/about'],
@@ -106,7 +115,11 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       // that is not a key. Nothing signs in and nothing is registered: this
       // script's default BASE_URL is production, and a screenshot is not worth
       // a session there.
-      if (name === 'register') {
+      // The post-key screen, revealed the way the page reveals it. Nothing
+      // signs in and nothing registers: this script's default BASE_URL is
+      // production and a screenshot is not worth a session there, so the key
+      // is key-shaped and is not a key.
+      if (name === 'register-done') {
         await page.evaluate(() => {
           const k = 'agb_' + '0'.repeat(48)
           document.getElementById('key-display').textContent = k

@@ -83,7 +83,10 @@ const fs=require('fs');
 const src=fs.readFileSync('src/ui/steps.ts','utf8');
 const m=src.match(/export function taskSnippet[\s\S]*?return \\\`([\s\S]*?)\\\`\n\}/);
 if(!m){process.stderr.write('taskSnippet template not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
-const built=m[1].replace(/\\\$\{agentId\}/g,'researcher').replace(/\\\$\{taskRef\}/g,'job-1');
+const agent=(src.match(/export const SAMPLE_AGENT = '([^']*)'/)||[])[1];
+const ref=(src.match(/export const SAMPLE_REF = '([^']*)'/)||[])[1];
+if(!agent||!ref){process.stderr.write('SAMPLE_AGENT / SAMPLE_REF not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
+const built=m[1].replace(/\\\$\{agentId\}/g,agent).replace(/\\\$\{taskRef\}/g,ref);
 const reg=fs.readFileSync('src/routes/register.ts','utf8').match(/<pre class=\"ns-pre\">([\s\S]*?)<\/pre>/);
 if(!reg){process.stderr.write('no ns-pre block in src/routes/register.ts\n');process.stdout.write('1');process.exit(0)}
 const lit=reg[1];

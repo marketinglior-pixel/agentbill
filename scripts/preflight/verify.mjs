@@ -910,6 +910,19 @@ await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 
 const quoted8 = await nav8('/app?view=tasks', { headers: { cookie: cookie8 } }).then(r => r.text())
 ok('[onboarding] a job name carrying a quote does not go inside the sample',
    quoted8.includes('cannot hold inline') && !quoted8.includes('task_ref=&quot;say &quot;hi&quot;'), 'the quote reached the sample')
+// A failed save must never come back proposing a name. verifyFlash strips
+// f.ref whenever no row carries that name, which is exactly a failed save on a
+// NEW job, and the first version of this screen then fell through to whatever
+// other job the account had. Fixing the ceiling and pressing Save rewrote THAT
+// job's budget, and nothing on screen said the name had changed.
+await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-existing&ceiling_units=5' })
+const retarget8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-brand-new&ceiling_units=1e3' })
+ok('[onboarding] a bad ceiling on a new job name is refused before any write',
+   retarget8.headers.get('location') === '/app?view=tasks&err=ceiling&ref=job-brand-new', `${retarget8.headers.get('location')}`)
+const after8 = await nav8('/app?view=tasks&err=ceiling&ref=job-brand-new', { headers: { cookie: cookie8 } }).then(r => r.text())
+const field8 = (after8.match(/<input id="t-ref"[^>]*value="([^"]*)"/) ?? [])[1]
+ok('[onboarding] and the name field does not come back holding a different job',
+   field8 === '', `the field offered "${field8}" for a save the reader did not make`)
 // The microcopy bans, measured on the VISIBLE text and not the markup: every
 // one of these words appears inside the CSS of every page on the site
 // (display:block, flex-wrap), so a grep over HTML can only ever be noise.
