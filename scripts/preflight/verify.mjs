@@ -869,6 +869,60 @@ ok('[console] the tasks view empty state points at the form above it', emptyTask
 const emptyOverview8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
 ok('[console] the overview empty state links to the tasks view instead', emptyOverview8.includes('No jobs yet') && emptyOverview8.includes('view=tasks">Name a job'))
 
+// ------------------------------------------------- 8b: the onboarding path
+//
+// Ticket 2026-09-10: an account has to reach a first understandable preflight
+// on a job the holder created, without anyone helping and without reading a
+// blog. Nothing here existed before, and the first run it replaces was a raw
+// curl asking for 5 units against a per-request ceiling of 1: a refusal
+// manufactured on a job the reader never opened.
+//
+// reset() above leaves preflight_decisions behind, so the account it calls
+// clean is not virgin and overviewView never rendered its first run at all.
+// That is why this gate could not see the screen it is about until now.
+await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
+const virgin8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[onboarding] the first run is three steps and a form, not a curl that manufactures a refusal',
+   virgin8.includes('class="setf3"') && virgin8.includes('Three steps put a row on this page')
+     && !virgin8.includes('"ceiling":1'), 'the virgin overview did not render the steps')
+// Locked path, item 4: "one job = one budget" is read first, the wire name second.
+const iBudget8 = virgin8.indexOf('One job is one budget')
+const iRef8 = virgin8.indexOf('task_ref')
+ok('[onboarding] "one job is one budget" is read before the name task_ref',
+   iBudget8 > -1 && iRef8 > -1 && iBudget8 < iRef8, `budget at ${iBudget8}, task_ref at ${iRef8}`)
+ok('[onboarding] and the page says whose decision the refusal is',
+   virgin8.includes('Your code decides what the job does next'))
+// The sample is task_ref-only on purpose: the ceiling is set before the code
+// runs, and a task_ceiling sent after the job exists is not applied.
+const snipAt8 = virgin8.indexOf('<div class="snip">')
+const snip8 = snipAt8 === -1 ? '' : virgin8.slice(snipAt8, virgin8.indexOf('</div>', snipAt8))
+ok('[onboarding] the sample preflights with task_ref and carries no task_ceiling',
+   snip8.includes('task_ref=&quot;') && !snip8.includes('task_ceiling'), snip8.slice(0, 120))
+// After a save the sample is the reader's own job, read off the row.
+await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5' })
+const mine8 = await nav8('/app?view=tasks&saved=job-mine&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[onboarding] a saved job puts its own name in the lines the reader pastes',
+   mine8.includes('task_ref=&quot;job-mine&quot;') && mine8.includes('units left: 4'), 'no personalised sample')
+// A name that cannot sit inside a Python string falls back rather than
+// rendering a block that does not parse. esc() is HTML escaping: &quot;
+// renders in the browser as the character that closes the string.
+await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: `task_ref=${encodeURIComponent('say "hi"')}&ceiling_units=5` })
+const quoted8 = await nav8('/app?view=tasks', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[onboarding] a job name carrying a quote does not go inside the sample',
+   quoted8.includes('cannot hold inline') && !quoted8.includes('task_ref=&quot;say &quot;hi&quot;'), 'the quote reached the sample')
+// The microcopy bans, measured on the VISIBLE text and not the markup: every
+// one of these words appears inside the CSS of every page on the site
+// (display:block, flex-wrap), so a grep over HTML can only ever be noise.
+const visible8 = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<script[\s\S]*?<\/script>/g, ' ')
+  .replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ')
+const register8 = await fetch(`${API}/register`).then(r => r.text())
+const login8b = await fetch(`${API}/app`).then(r => r.text())
+for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
+                            ['/register', register8], ['the console login card', login8b]]) {
+  const hits = visible8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
+  ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

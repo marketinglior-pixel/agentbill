@@ -98,8 +98,17 @@ trusts the reader, hates decoration.
     panel alike; at the ceiling it is `--held`.
   - **Limits is a read-only ladder** of the four rules in the order
     `preflight.ts` evaluates them, each with where it is set, what refuses it,
-    and the live counts. Nothing on the console edits a ceiling, and the page
-    says so. A form for a setting the API does not have would be a lie.
+    and the live counts. **Corrected 2026-09-10.** This read "Nothing on the
+    console edits a ceiling, and the page says so. A form for a setting the API
+    does not have would be a lie." Both halves stopped being true when
+    `PUT /tasks/:task_ref/ceiling` and the console's form shipped together
+    (`7b2e6c1`), and the onboarding path now makes that form the first thing a
+    new account meets. The rule it was protecting still holds and is worth
+    keeping in these words: **the console never invents a control the API does
+    not have.** A job's ceiling is the one number it edits, through the same
+    statement the endpoint runs (`src/lib/task-ceiling.ts`); a customer's
+    ceiling and the per-request ceiling have no form here, because one is
+    `PUT /budget` and the other is an argument to the call itself.
   - The sample-data banner sits at the top of the main column, inside the
     frame a screenshot would carry; the account card under sample data shows
     the sample plan, because a real quota above invented tiles was the one
@@ -279,9 +288,11 @@ of that reasoning.
 - `.pg-fill` animates `width`. Functional progress bar; `transform: scaleX`
   would be correct and also needs the ghost overlay reworked.
 - The `--space-*` and `--radius-*` scales exist and are not yet applied
-  everywhere: 86 hardcoded `font-size` literals remain, down from 152 (the
+  everywhere: **50** hardcoded `font-size` literals remain, down from 152 (the
   console rewrite retired its 49, and `--fs-figure` joined the scale for the
-  tile number). The
+  tile number). **Corrected 2026-09-10: this line said 86 against a real count
+  and a `scripts/ratchet/baseline.json` of 50, so the document was three
+  rewrites behind the gate that enforces it.** The
   ratchet in `scripts/ratchet` stops the count rising; a block retires its own
   values when it is next rewritten. Raw hexes below `:root` are at **zero** and
   the ratchet holds them there.

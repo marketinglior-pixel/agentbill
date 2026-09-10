@@ -12,6 +12,7 @@ import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../l
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
+import { STEP_1, STEP_2, STEP_3, REQUIRED_LINE } from '../ui/steps.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -335,8 +336,14 @@ export async function registerRoute(app: FastifyInstance) {
               white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
     /* p code, not bare code: the copy pill inside a step is also a <code>,
        and the chip ground on it drew a box inside a box. */
+    /* overflow-wrap, because these chips carry the longest unbreakable tokens
+       on the page: Refused (task_ceiling_exceeded) and TaskCeilingRequiredError
+       are single words to the line breaker. At 320px the step body is about
+       166px and they measure 187, which pushed the panel 3px past its own
+       overflow:hidden and cut the header. Found by npm run shots the first run
+       after the post-key screen entered the gate. */
     .ns p code, .success > p code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
-               padding: 1px 5px; border-radius: 3px; }
+               padding: 1px 5px; border-radius: 3px; overflow-wrap: anywhere; }
     /* The shared pill keeps its command on one line and scrolls it. Step 2's
        command carries the reader's whole key, and a key that scrolls out of a
        320px column is a key half-copied by hand. Here it wraps instead, and
@@ -345,6 +352,24 @@ export async function registerRoute(app: FastifyInstance) {
        break at 390px. fit-content keeps the short pill hugging its text. */
     .ns .cp { margin-top: 8px; width: fit-content; max-width: 100%; padding-block: var(--s2); flex-wrap: wrap; }
     .ns .cp code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
+    /* The two rows that carry no ordinal. A bullet, not a numeral, because the
+       numerals on this screen belong to the three steps and a reader counting
+       "1, 2, 1, 2, 3" reads five steps. */
+    .keep .ns-num { font-size: var(--fs-body); line-height: 1; }
+    /* Second and third paragraph inside a step: the sample's caption above it
+       and the wrong-order note below it. Without this they sit flush against
+       the code block on both sides. */
+    .ns p + p { margin-top: 10px; }
+    .ns p + .ns-pre { margin-top: 6px; }
+    /* The one action on this panel that leaves the page. It sits under the
+       steps rather than beside them: at 320 a button and a sentence on one row
+       break the sentence mid-word. */
+    .ns-go { padding: 14px 18px 16px; border-top: 1px solid var(--border-soft); display: grid; gap: 10px; justify-items: start; }
+    .ns-go p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+    .btn-go { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; background: var(--green);
+              color: var(--green-ink); border-radius: 8px; font-size: var(--fs-small); font-weight: 700;
+              text-decoration: none; transition: filter .15s; }
+    @media (hover: hover) { .btn-go:hover { filter: brightness(1.06); text-decoration: none; } }
 
     @media (max-width: 900px) {
       .reg { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
@@ -436,39 +461,69 @@ ${siteNav('/register', { cta: false })}
           <button class="btn-copy" id="copy-key" type="button">Copy</button>
         </div>
       </div>
-      <!-- What the key is, and what the next preflight does, in the words the
-           reader will meet in their own terminal. The two code spans are the
-           wire answer and the SDK's exception text; nothing here says that
-           anything of theirs is stopped, because nothing is: their code
-           catches the exception and decides. -->
-      <p>You have a free account: 1,000 preflight calls a month, no card. A preflight checks one
-         call against the ceiling you gave its <code>task_ref</code>, before that call goes out.
-         Past the ceiling it answers <code>approved: false</code>, the SDK raises
-         <code>Refused (task_ceiling_exceeded)</code>, and your code decides what the job does next.</p>
+      <!-- Two things this page can finish, and no ordinal on either: the
+           numerals belong to the three steps below and must not compete with
+           them. The key line carries the key itself, filled in by the script
+           above, because a gap in a copyable line is how a key became
+           agb_agb_... and a 401 on the first run (2026-09-09). -->
       <div class="panel">
-        <div class="panel-h"><span>Install</span><span>four steps, one action each</span></div>
+        <div class="panel-h"><span>Keep these two</span><span>the SDK, and the key in your environment</span></div>
+        <div class="steps keep">
+          <div class="ns"><span class="ns-num">&middot;</span><div><p>Install the SDK.</p>${copyPill('install-py', INSTALL_PY)}</div></div>
+          <div class="ns"><span class="ns-num">&middot;</span><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
+        </div>
+      </div>
+      <!-- The path, in the order the console runs it: the ceiling is set
+           before any code names the job. That order is what lets step 3 send
+           the job's name and nothing about the budget. The same three
+           sentences render inside the console (src/ui/steps.ts), where steps
+           1 and 2 are the form the reader actually fills in. -->
+      <div class="panel">
+        <div class="panel-h"><span>Three steps</span><span>on one screen in your console</span></div>
         <div class="steps">
-          <div class="ns"><span class="ns-num">1</span><div><p>Install the SDK.</p>${copyPill('install-py', INSTALL_PY)}</div></div>
-          <div class="ns"><span class="ns-num">2</span><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
-          <div class="ns"><span class="ns-num">3</span><div><p>Preflight before the call, record after it. The first preflight of a new <code>task_ref</code> opens it with its ceiling: here <code>job-1</code> gets 10 units across every call that names it. It changes later only in the console or through <code>PUT /tasks/:task_ref/ceiling</code>; a <code>task_ceiling</code> on a later preflight is not applied.</p><pre class="ns-pre">import os
-from agentbill import AgentBillClient
+          <div class="ns"><span class="ns-num">1</span><div><p>${STEP_1}</p></div></div>
+          <div class="ns"><span class="ns-num">2</span><div><p>${STEP_2}</p></div></div>
+          <div class="ns"><span class="ns-num">3</span><div><p>${STEP_3}</p>
+            <p>Three calls: open the client, ask, record. Your console hands these back with your own job name in them.</p><!--
+            Written out, not interpolated from taskSnippet(). scripts/snippets
+            harvests every pre under src/routes and executes it against the
+            PUBLISHED SDK, and it classifies any pre containing a template
+            interpolation as "dynamic" with empty code, which drops it from the
+            gate in silence. This is the repo's one EXECUTED task_ref-only
+            sample, so it has to be literal. The hygiene gate asserts it is
+            byte-identical to taskSnippet(), which is what the console renders
+            with the reader's own job name; neither can move without the other.
+         --><pre class="ns-pre">import os
+from agentbill import AgentBillClient, TaskCeilingExceededError
 
 key = os.environ["AGENTBILL_API_KEY"]
 client = AgentBillClient(api_key=key)
 
-client.preflight(
-    agent_id="researcher",
-    task_ref="job-1",
-    task_ceiling=10,
-    estimated_units=3,
-)
-# your model call runs here
-client.record(
-    agent_id="researcher",
-    task_ref="job-1",
-    units=3,
-)</pre></div></div>
-          <div class="ns"><span class="ns-num">4</span><div><p>Open <a href="/app">your console</a> and paste the key. <code>job-1</code> is under Recent tasks at 3 / 10, and Task budgets in the rail lists every task burning down. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p></div></div>
+try:
+    result = client.preflight(
+        agent_id="researcher",
+        task_ref="job-1",
+    )
+    print("approved:", result.approved)
+    print("units left:", result.task_remaining_units)
+    # your model call runs here
+    client.record(
+        agent_id="researcher",
+        task_ref="job-1",
+        units=1,
+    )
+except TaskCeilingExceededError as refused:
+    print(refused)</pre>
+            <p>${REQUIRED_LINE}</p></div></div>
+        </div>
+        <div class="ns-go">
+          <!-- A new tab, deliberately. This screen is client-side only: the
+               success state is display:none on a cold load and nothing reads
+               the #done hash, so navigating away in this tab destroys a key
+               that is shown once, and the form's second submit only mails a
+               /recover link. -->
+          <a class="btn-go" href="/app" target="_blank" rel="noopener">Open the console &rarr;</a>
+          <p>The console asks for the key once. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p>
         </div>
       </div>
     </div>

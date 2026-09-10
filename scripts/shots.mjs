@@ -93,6 +93,28 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
     try {
       const res = await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: 45000 })
       const status = res ? res.status() : 0
+      // The post-key screen has never been in this gate, and it is the screen
+      // a new account spends its first minute on. It is not addressable: it is
+      // one div in every /register response, hidden by CSS, and revealed only
+      // by the submit handler; the #done in the URL is written by
+      // history.replaceState and read by nothing. So loading /register#done
+      // shows the empty form, and the clipping detector below skips a
+      // display:none subtree, which is why a 320px regression there would ship
+      // unseen.
+      //
+      // Revealed here the way the page reveals it, with a key-shaped string
+      // that is not a key. Nothing signs in and nothing is registered: this
+      // script's default BASE_URL is production, and a screenshot is not worth
+      // a session there.
+      if (name === 'register') {
+        await page.evaluate(() => {
+          const k = 'agb_' + '0'.repeat(48)
+          document.getElementById('key-display').textContent = k
+          document.getElementById('key-export').textContent = 'export AGENTBILL_API_KEY=' + k
+          document.getElementById('form-state').style.display = 'none'
+          document.getElementById('success-state').style.display = 'flex'
+        })
+      }
       await page.waitForTimeout(600)
       const file = `${OUT}/${vp}-${name}.png`
       await page.screenshot({ path: file, fullPage: true })
