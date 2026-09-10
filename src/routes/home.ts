@@ -571,6 +571,16 @@ ${siteNav('/')}
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
     </div>
 
+    <!-- Neither sample passes task_ceiling, and that is not an omission.
+         The frame's last line is "run 42 of the retry loop", so job-142
+         already exists, and preflight.ts does not apply a task_ceiling once
+         it does: the field would be read by a visitor as the way a ceiling is
+         set while doing nothing at all. It is also the order the onboarding
+         replaced, about one screen from /register's step 3 saying the call
+         carries the job's name and nothing about the budget. The comment now
+         names where the 500 came from, and the answer below still shows
+         task_ceiling because the server really sends it. Opening a job from
+         code keeps its documentation in /docs and in the prose below. -->
     <div class="code-block">
       <div class="code-head">${langTabs([['python', 'Python'], ['node', 'Node']], 'python', 'Language of the sample')}<span>the whole integration</span></div>
       <div class="code-body">
@@ -580,11 +590,11 @@ client = AgentBillClient(
     api_key="agb_your_key")
 
 <span class="cmt"># You decide what a unit is worth.</span>
-<span class="cmt"># job-142 gets 500 of them, across</span>
-<span class="cmt"># every call passing this task_ref.</span>
+<span class="cmt"># job-142 has a ceiling of 500, set</span>
+<span class="cmt"># in the console. Every call passing</span>
+<span class="cmt"># this task_ref burns the same one.</span>
 client.preflight(agent_id="researcher",
                  task_ref="job-142",
-                 task_ceiling=500,
                  estimated_units=12)
 
 <span class="cmt"># your provider call goes here</span>
@@ -601,11 +611,11 @@ client.record(agent_id="researcher",
 
 <span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
 <span class="cmt">// You decide what a unit is worth.</span>
-<span class="cmt">// job-142 gets 500 of them, across</span>
-<span class="cmt">// every call passing this taskRef.</span>
+<span class="cmt">// job-142 has a ceiling of 500, set</span>
+<span class="cmt">// in the console. Every call passing</span>
+<span class="cmt">// this taskRef burns the same one.</span>
 await preflight({ agentId: 'researcher',
                   taskRef: 'job-142',
-                  taskCeiling: 500,
                   estimatedUnits: 12 })
 
 <span class="cmt">// your provider call goes here</span>
