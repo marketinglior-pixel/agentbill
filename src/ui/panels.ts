@@ -48,6 +48,24 @@ export const PANEL_CSS = `
  * The whole request path, as a shape. Field names and the two response
  * bodies mirror the task-budget branch of src/routes/preflight.ts; if they
  * ever disagree, preflight.ts is right and this is a bug.
+ *
+ * The request deliberately does NOT carry task_ceiling, and putting it back
+ * would undo a shipped decision rather than fix an omission.
+ *
+ * It is a real optional field: preflight.ts opens a new task_ref with it, and
+ * /docs documents that in four places, which is where it belongs. But it is
+ * applied only while the job does not exist yet, and since the onboarding
+ * ticket of 2026-09-10 the ceiling is set before the code runs. On /register
+ * this panel sits about 400px from step 3 of that path, which says in so many
+ * words that the call sends the job's name and nothing about the budget. A
+ * request block showing the opposite is the retired order printed as code
+ * next to the prose that replaced it, and a reader believes the code.
+ *
+ * So the request is the shape after the job has a ceiling: name the job, say
+ * what this one call is worth, and let the answer carry the ceiling in force.
+ * Both response bodies keep task_ceiling because the server really sends it
+ * (preflight.ts:272 and :405), and 500 - 12 = 488 only reads if the panel says
+ * where the 500 came from, which is what the footer is now for.
  */
 export function requestPanel(): string {
   return `<div class="panel">
@@ -55,7 +73,6 @@ export function requestPanel(): string {
         <div class="req"><span class="k">request</span>
 { "agent_id": "researcher",
   "task_ref": "job-142",
-  "task_ceiling": 500,
   "estimated_units": 12 }
 
 <span class="k">approved</span>
@@ -70,7 +87,7 @@ export function requestPanel(): string {
   "task_ref": "job-142",
   "task_ceiling": 500,
   "task_remaining_units": 8 }</div>
-        <div class="panel-f">Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
+        <div class="panel-f">The ceiling is already on the job, so this call says nothing about the budget. Your code calls this, then calls your provider. Nothing of ours sits between the two.</div>
       </div>`
 }
 
