@@ -10,7 +10,7 @@ import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { isId, INT4_MAX } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
 import {
-  STEP_1, STEP_2, STEP_3, REQUIRED_LINE, REFUSAL_RECIPE,
+  STEP_1, STEP_2, STEP_3, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, taskSnippet, inlineSafeRef,
 } from '../ui/steps.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
@@ -38,8 +38,13 @@ import { KEY_COMMANDS } from '../ui/panels.js'
 // arrived because the empty state below used to send a reader back to their
 // editor to set a budget, and the founder, dogfooding, said that was the
 // product's whole problem. Every other number here is still read-only.
-// This page loads no script at all: a live key is rendered into it, and the
-// CSP below has no script-src. The chart's hover layer is CSS.
+// This page loads no script at all and the CSP below has no script-src; the
+// chart's hover layer is CSS. Corrected 2026-09-10: that sentence used to
+// justify itself with "a live key is rendered into it", which stopped being
+// true in this commit. The first run's curl was the last full key on the
+// page; every key rendered here now is masked (first 8, last 4). The
+// script-free rule stands on its own, and it is what lets the onboarding form
+// below be a plain POST.
 
 const COOKIE = 'agentbill_app'
 const MAX_AGE = 7 * 24 * 3_600
@@ -1199,6 +1204,13 @@ ${MARK_CSS}
   .empty { padding: var(--s5); border-style: dashed; border-color: var(--border2); box-shadow: none; }
   .empty h2 { margin: 0 0 var(--s2); }
   .empty p { color: var(--muted); margin-bottom: var(--s3); max-width: 70ch; }
+  /* The flash lines are direct children of .empty on the first-run screen, and
+     .empty p (0,1,1) outranks .err (0,1,0) while .setc .ok never matches
+     there, so a save confirmation and a validation error both rendered in
+     --muted: the two lines on the screen whose whole job is to be noticed.
+     Scoped rather than bumped, so the .setc copies keep deciding their own. */
+  .empty > .ok { color: var(--green); overflow-wrap: anywhere; }
+  .empty > .err { color: var(--red); overflow-wrap: anywhere; }
   .empty ol { margin: 0 0 var(--s3) 1.2em; color: var(--muted); }
   .empty ol li { margin-bottom: 6px; }
   .empty pre { margin: var(--s2) 0 var(--s3); white-space: pre-wrap; word-break: break-all; }
@@ -1798,7 +1810,16 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
  *  spent something the reader has done the walkthrough, and this goes back to
  *  being the compact editor it is for everyone else. */
 function ceilingForm(p: Page): string {
-  const started = p.d.tasks.some((t) => Number(t.usedUnits) > 0 || Number(t.reservedUnits) > 0)
+  // "Nothing has been spent on this account" is a whole-account claim, and
+  // p.d.tasks is a page: ORDER BY updated_at DESC LIMIT 20. Asking .some() of
+  // it answers a different question, and on an account with more than twenty
+  // jobs whose twenty most recently touched all happen to be unspent it
+  // answers wrong, replacing the ceiling editor with the new-account
+  // walkthrough on a page whose own footer says how many tasks there are.
+  // taskCount is the unpaged total, so requiring the page to BE the whole set
+  // makes the claim true for every account rather than for the common one.
+  const wholeSet = p.d.taskCount <= p.d.tasks.length
+  const started = !wholeSet || p.d.tasks.some((t) => Number(t.usedUnits) > 0 || Number(t.reservedUnits) > 0)
   if (!started) return threeSteps(p, unstartedJob(p), { heading: false })
   const f = p.flash
   const said = !f ? ''
@@ -2023,9 +2044,24 @@ function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): s
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
     : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
-  // Error first: a failed save must give the reader their own typed name back,
-  // never the suggestion, or a mistyped ceiling silently renames their job.
-  const refValue = f?.err && f.ref ? esc(f.ref) : job ? esc(job.taskRef) : SAMPLE_REF
+  // A failed save NEVER proposes a name. It gives back the one the reader
+  // typed when that name is a job on this account, and otherwise an empty
+  // field they must fill in.
+  //
+  // Falling through to `job` here was a data-loss bug, and the first version
+  // of this line had it. verifyFlash strips f.ref whenever no task_budgets row
+  // carries that name, which is exactly a failed save on a NEW job: the reader
+  // types "invoice-run" with a bad ceiling, the redirect carries
+  // err=ceiling&ref=invoice-run, verifyFlash finds no row and drops the name,
+  // and the field then came back reading some OTHER job. Fixing the number and
+  // pressing Set ceiling rewrote that job's budget while "invoice-run" was
+  // never created, with nothing on screen saying the name had changed.
+  //
+  // The empty branch is deliberate over echoing the raw query value: `ref` is
+  // text anyone can put in a link, and this file's echo discipline is that an
+  // unverified name is never rendered back. `required` on the input means an
+  // empty field cannot be submitted by accident.
+  const refValue = f?.err ? (f.ref ? esc(f.ref) : '') : job ? esc(job.taskRef) : SAMPLE_REF
   // A name carrying a quote or a backslash cannot sit inside the Python string
   // literal below: esc() is HTML escaping, and &quot; renders in the browser as
   // the character that closes the string.
@@ -2035,10 +2071,11 @@ function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): s
   const ceiling = job ? Number(job.ceilingUnits) : 0
 
   const done = job
-    ? `<p>Here it is with your job in it. It runs as pasted, once <code>pip install agentbill-sdk</code> has run and the key is in your environment.</p>
-       ${safe ? '' : `<p class="fine">Your job name carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Use <code>${esc(job.taskRef)}</code> in its place.</p>`}
+    ? `<p>${safe
+        ? 'Here it is with your job in it. It runs as pasted, once <code>pip install agentbill-sdk</code> has run and the key is in your environment.'
+        : `Here it is, once <code>pip install agentbill-sdk</code> has run and the key is in your environment. Change the job name before you run it: yours carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Put <code>${esc(job.taskRef)}</code> in both places, or the call names a job you do not have and the SDK raises <code>TaskCeilingRequiredError</code>.`}</p>
        <div class="snip">${esc(taskSnippet(snipRef, snipAgent))}</div>
-       <p class="fine">On the next call that prints <span class="out">approved: True | units left: ${num(Math.max(0, ceiling - 1))}</span>, because a call that says nothing about its worth counts as one unit. ${REFUSAL_RECIPE}</p>`
+       <p class="fine">On the next call that prints <span class="out">approved: True</span> and <span class="out">units left: ${num(Math.max(0, ceiling - 1))}</span>, because a call that says nothing about its worth counts as one unit. Run it ${num(ceiling)} ${ceiling === 1 ? 'time' : 'times'} and the one after is refused.</p>`
     : `<p>Save the job above and this page hands these lines back with your own job name in them. Run <code>pip install agentbill-sdk</code> first, and put the key in your environment.</p>
        <div class="snip">${esc(taskSnippet())}</div>`
 

@@ -116,8 +116,3 @@ except TaskCeilingExceededError as refused:
     print(refused)`
 }
 
-/** What a reader does to see the refusal on purpose, once the first call worked.
- *  Verified against setTaskCeiling: a ceiling equal to used + reserved saves,
- *  and the next call then has no room to reserve. */
-export const REFUSAL_RECIPE =
-  'Want to see the refusal now? Set this job\u2019s ceiling to the number of units it has already used and run the lines again.'

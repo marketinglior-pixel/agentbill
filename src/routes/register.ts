@@ -523,7 +523,10 @@ except TaskCeilingExceededError as refused:
                that is shown once, and the form's second submit only mails a
                /recover link. -->
           <a class="btn-go" href="/app" target="_blank" rel="noopener">Open the console &rarr;</a>
-          <p>The console asks for the key once. <a href="/docs">Docs</a>, or <a href="/faq">the questions page</a>.</p>
+          <!-- Also a new tab, for the same reason as the button above it: this
+               screen exists only in this tab's DOM, so any same-tab navigation
+               from here loses a key that is shown once. -->
+          <p>The console asks for the key once. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
         </div>
       </div>
     </div>
