@@ -65,6 +65,36 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   });")
 gate "home.ts: one python, one node sample, no phantom block" "1:1:2" "$n"
 
+# The onboarding sample exists twice on purpose, and this is what stops the two
+# copies drifting.
+#
+# /register#done carries it as a literal <pre>, because scripts/snippets only
+# executes a literal: any ${...} inside a pre is classified "dynamic" with empty
+# code and leaves the gate in silence. The console carries the SAME lines built
+# by taskSnippet() in src/ui/steps.ts, with the reader's own job name in them,
+# so that copy cannot be a literal. One is executed and the other is the one a
+# reader actually pastes, which is the wrong way round to leave unchecked.
+#
+# The register block was already dropped from CI once, during the commit that
+# added this gate: it was written as ${taskSnippet()} and the inventory went
+# from python to dynamic with nobody noticing but a hand-run of extract.mjs.
+n=$(node -e "
+const fs=require('fs');
+const src=fs.readFileSync('src/ui/steps.ts','utf8');
+const m=src.match(/export function taskSnippet[\s\S]*?return \\\`([\s\S]*?)\\\`\n\}/);
+if(!m){process.stderr.write('taskSnippet template not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
+const built=m[1].replace(/\\\$\{agentId\}/g,'researcher').replace(/\\\$\{taskRef\}/g,'job-1');
+const reg=fs.readFileSync('src/routes/register.ts','utf8').match(/<pre class=\"ns-pre\">([\s\S]*?)<\/pre>/);
+if(!reg){process.stderr.write('no ns-pre block in src/routes/register.ts\n');process.stdout.write('1');process.exit(0)}
+const lit=reg[1];
+if(lit.trim()===built.trim()){process.stdout.write('0');process.exit(0)}
+process.stderr.write('    register.ts <pre> and taskSnippet() have drifted:\n');
+const a=lit.trim().split('\n'), b=built.trim().split('\n');
+for(let i=0;i<Math.max(a.length,b.length);i++) if(a[i]!==b[i]) process.stderr.write('      line '+(i+1)+'\n        register: '+JSON.stringify(a[i])+'\n        steps.ts: '+JSON.stringify(b[i])+'\n');
+process.stdout.write('1');
+")
+gate "register's sample is byte-identical to taskSnippet()" 0 "$n"
+
 
 # Every inline script the site emits must PARSE.
 #

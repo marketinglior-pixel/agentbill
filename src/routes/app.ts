@@ -8,7 +8,11 @@ import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { isId, INT4_MAX } from '../lib/ids.js'
-import { setTaskCeiling } from '../lib/task-ceiling.js'
+import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import {
+  STEP_1, STEP_2, STEP_3, REQUIRED_LINE, REFUSAL_RECIPE,
+  LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, taskSnippet, inlineSafeRef,
+} from '../ui/steps.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 
@@ -800,16 +804,26 @@ export function decisionLine(r: DecisionRow): string {
   let body: Record<string, unknown> = {}
   try { body = JSON.parse(r.snapshot) as Record<string, unknown> } catch { /* verbatim below */ }
   if (typeof body.message === 'string') return body.message
-  const asked = r.estimatedUnits == null ? null : num(Number(r.estimatedUnits))
   const ceil = r.ceilingUnits == null ? null : num(Number(r.ceilingUnits))
   const used = r.usedUnits == null ? null : num(Number(r.usedUnits))
+  // A call that names no estimated_units is not an unknown quantity: preflight
+  // reserves `estimated_units ?? 1`, so it asked for one unit and the ceiling
+  // decided against one unit. This used to print "Asked ? units", and the
+  // onboarding sample is exactly the call that produces it: the console's own
+  // step 2 tells a reader "a call that says nothing counts as one unit", and
+  // the first refusal they saw then contradicted it with a question mark.
+  const n = r.estimatedUnits == null ? 1 : Number(r.estimatedUnits)
+  const asked = `${num(n)} ${n === 1 ? 'unit' : 'units'}`
   switch (r.reason) {
-    case 'ceiling_exceeded': return `Asked ${asked ?? '?'} units against a per-request ceiling of ${ceil ?? '?'}.`
-    case 'task_ceiling_exceeded': return `Asked ${asked ?? '?'} units with the task at ${used ?? '?'} of ${ceil ?? '?'}.`
-    case 'budget_exhausted': return `Asked ${asked ?? '?'} units; the customer had ${typeof body.remaining_units === 'number' ? num(body.remaining_units) : '0'} remaining.`
+    case 'ceiling_exceeded': return `Asked ${asked} against a per-request ceiling of ${ceil ?? '?'}.`
+    case 'task_ceiling_exceeded': return `Asked ${asked} with the task at ${used ?? '?'} of ${ceil ?? '?'}.`
+    case 'budget_exhausted': return `Asked ${asked}; the customer had ${typeof body.remaining_units === 'number' ? num(body.remaining_units) : '0'} remaining.`
     case 'free_tier_exceeded':
     case 'plan_limit_exceeded': return `${used ?? '?'} of ${ceil ?? '?'} preflight calls this month; the plan quota is spent.`
-    case 'task_overrun_recorded': return `Recorded ${asked ?? '?'} units after the call ran; the task stands at ${used ?? '?'} of ${ceil ?? '?'}.`
+    // Not `asked`: this row is a record(), where the number is what was
+    // settled and has no default. A missing one stays unknown rather than
+    // claiming one unit was recorded.
+    case 'task_overrun_recorded': return `Recorded ${r.estimatedUnits == null ? '?' : num(Number(r.estimatedUnits))} units after the call ran; the task stands at ${used ?? '?'} of ${ceil ?? '?'}.`
     default: return r.reason
   }
 }
@@ -1231,6 +1245,35 @@ ${MARK_CSS}
     .setf { grid-template-columns: minmax(0, 1fr); }
     .setf .btn { width: 100%; }
   }
+
+  /* The three-step first run. One column at every width: these rows are read
+     in order, and a step that sits beside its neighbour is not a step. */
+  .ns3 { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: var(--s3); align-items: start;
+         padding: var(--s4) 0; border-top: 1px solid var(--border-soft); }
+  .setf3 { display: block; }
+  .setf3 .ns3:first-child { border-top: 1px solid var(--border-soft); }
+  .ns3-n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); padding-top: 3px; }
+  .ns3 > div > p { color: var(--muted); max-width: 74ch; }
+  .ns3 label { display: block; margin-top: var(--s3); margin-bottom: 0; }
+  .ns3 .hint { display: block; font-family: var(--mono); font-size: var(--fs-label); color: var(--dim); margin: 2px 0 6px; }
+  .ns3 .hint code { font-family: var(--mono); color: var(--dim); }
+  .ns3 input { max-width: 32ch; }
+  .ns3 details { margin-top: var(--s3); }
+  .ns3 details input { margin-top: var(--s2); }
+  .ns3 .btn { margin-top: var(--s4); width: auto; padding: var(--s3) var(--s5); }
+  .ns3 .fine { margin-top: var(--s3); max-width: 78ch; }
+  .ns3 p code, .ns3 .fine code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+  /* A div, never a pre: scripts/snippets/extract.mjs harvests every pre under
+     src/routes and executes it, and this block carries an interpolated job
+     name, so it would be recorded as "dynamic" with empty code and quietly
+     drop out of the gate. Its static twin on /register#done is the copy CI
+     actually runs; the two are built by taskSnippet() so they cannot drift.
+     Same convention as .cmds elsewhere in this file. */
+  .snip { margin-top: var(--s3); background: var(--bg-deep); border: 1px solid var(--border);
+          border-radius: var(--r-control); padding: var(--s3); font-family: var(--mono);
+          font-size: var(--fs-micro); color: var(--code-ink); line-height: 1.6;
+          white-space: pre-wrap; overflow-wrap: anywhere; }
+  .seedemo { margin-top: var(--s4); }
   nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 var(--s5); }
   a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
     outline: 2px solid var(--green); outline-offset: 2px; }
@@ -1404,7 +1447,7 @@ function loginPage(err: string, next = ''): string {
       <input id="api_key" name="api_key" type="password" placeholder="agb_..." autofocus required />
       <button class="btn" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
     </form>
-    <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and dies with the key. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
+    <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and ends when the key is revoked. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
     <p class="fine">No longer have the key? <a href="/recover">Get back in</a> with the email you registered with.</p>
   </div>
 </body>
@@ -1745,8 +1788,18 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
 
 /** The form that opens a job or changes its ceiling. Tasks view only, and
  *  never under sample data, where a save would write to the real account
- *  behind a page that says nothing on it is real. */
+ *  behind a page that says nothing on it is real.
+ *
+ *  Until anything has been spent on this account the form is the three-step
+ *  path instead, the same component and the same words the overview's first
+ *  run shows, because POST /app/tasks always lands here (the redirect at the
+ *  top of this file is unconditional) and a reader who has just saved their
+ *  first job arrives needing step 3, not a bare pair of inputs. Once a job has
+ *  spent something the reader has done the walkthrough, and this goes back to
+ *  being the compact editor it is for everyone else. */
 function ceilingForm(p: Page): string {
+  const started = p.d.tasks.some((t) => Number(t.usedUnits) > 0 || Number(t.reservedUnits) > 0)
+  if (!started) return threeSteps(p, unstartedJob(p), { heading: false })
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
@@ -1943,28 +1996,91 @@ function limitsBlock(p: Page, rangeLabel: string): string {
     <p class="note">The per-request ceiling is an argument to the call itself and has no endpoint. A customer's ceiling is set from the API: <code>GET /budget?customer_id=</code> returns the balance and creates the customer if it is new, <code>PUT /budget</code> sets it. A job's ceiling is the one number this console edits, on the <a href="${href(p, 'tasks')}">task budgets</a> view or with <code>PUT /tasks/:task_ref/ceiling</code>.</p>`
 }
 
-function onboarding(p: Page): string {
-  const key = p.v.apiKey
-  const curlBlock = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" -d '{"agent_id":"first-run","estimated_units":5,"ceiling":1}'`
-  const curlTask1 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","task_ceiling":5,"estimated_units":3}'`
-  const curlTask2 = `curl -s -X POST https://agentbill.dev/preflight -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" -d '{"agent_id":"researcher","task_ref":"job-1","estimated_units":3}'`
+/**
+ * The onboarding path: three numbered steps, and steps 1 and 2 are the form.
+ *
+ * This replaced a first run that led with a raw curl asking for 5 units
+ * against a per-request ceiling of 1. That taught two wrong things at once. It
+ * manufactured a refusal on a job the reader never created, and it hit
+ * `ceiling`, the per-request argument, rather than the job ceiling this
+ * console exists to set. A reader who followed it learned the code-opens-the-
+ * job order that the ceiling form (2026-09-10) reversed.
+ *
+ * The words are in src/ui/steps.ts, shared with /register#done, so the screen
+ * that hands over the key and the screen that does the work cannot describe
+ * the same path in different terms.
+ *
+ * `job` is the reader's own row once one exists and nothing has been spent
+ * under it. It is what turns step 3 from a sample into their sample: the name
+ * they typed, rendered into lines that run as pasted. It comes from d.tasks
+ * (ORDER BY updated_at DESC) and never from the query string; the one place a
+ * task_ref off the URL is echoed is the flash line, and verifyFlash already
+ * proves that name against a row on this account before it renders.
+ */
+function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): string {
+  const f = p.flash
+  const said = !f ? ''
+    : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
+    : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
+    : ''
+  // Error first: a failed save must give the reader their own typed name back,
+  // never the suggestion, or a mistyped ceiling silently renames their job.
+  const refValue = f?.err && f.ref ? esc(f.ref) : job ? esc(job.taskRef) : SAMPLE_REF
+  // A name carrying a quote or a backslash cannot sit inside the Python string
+  // literal below: esc() is HTML escaping, and &quot; renders in the browser as
+  // the character that closes the string.
+  const safe = job ? inlineSafeRef(job.taskRef) : true
+  const snipRef = job && safe ? job.taskRef : SAMPLE_REF
+  const snipAgent = job && job.agentId !== CONSOLE_AGENT && inlineSafeRef(job.agentId) ? job.agentId : SAMPLE_AGENT
+  const ceiling = job ? Number(job.ceilingUnits) : 0
+
+  const done = job
+    ? `<p>Here it is with your job in it. It runs as pasted, once <code>pip install agentbill-sdk</code> has run and the key is in your environment.</p>
+       ${safe ? '' : `<p class="fine">Your job name carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Use <code>${esc(job.taskRef)}</code> in its place.</p>`}
+       <div class="snip">${esc(taskSnippet(snipRef, snipAgent))}</div>
+       <p class="fine">On the next call that prints <span class="out">approved: True | units left: ${num(Math.max(0, ceiling - 1))}</span>, because a call that says nothing about its worth counts as one unit. ${REFUSAL_RECIPE}</p>`
+    : `<p>Save the job above and this page hands these lines back with your own job name in them. Run <code>pip install agentbill-sdk</code> first, and put the key in your environment.</p>
+       <div class="snip">${esc(taskSnippet())}</div>`
+
   return `<div class="empty frame">
-      <h2>Nothing here yet, and that is the honest state.</h2>
-      <p>A refusal only happens when a call is checked first. This one asks for 5 units against a ceiling of 1, so it is refused before anything runs.</p>
-      <ol>
-        <li>Paste it in a terminal. It carries your key.</li>
-        <li>Reload this page. The refusal is the first row.</li>
-      </ol>
-      <pre>${esc(curlBlock)}</pre>
-      <p>You get back <span class="out">{"approved":false,"reason":"ceiling_exceeded",…}</span> and the overview fills in.</p>
-      <details>
-        <summary>A real one: a job with a ceiling of 5 units across calls</summary>
-        <p style="margin-top:10px">The first call opens the task with its ceiling and reserves 3. The second asks for 3 more, 3 + 3 &gt; 5, and is refused. The ceiling holds across every call and tool that shares the task_ref.</p>
-        <pre>${esc(curlTask1)}</pre>
-        <pre>${esc(curlTask2)}</pre>
-      </details>
-      <p style="margin:16px 0 0"><a href="${href(p, 'overview', { demo: true })}">Show me the console with sample data &rarr;</a></p>
+      ${opts.heading ? '<h2>Nothing here yet, and that is the honest state.</h2>' : ''}
+      ${said}
+      <p>Three steps put a row on this page, and the first two are on this screen.</p>
+      <form method="POST" action="/app/tasks" class="setf3" autocomplete="off">
+        <div class="ns3"><span class="ns3-n">1</span><div>
+          <p>${STEP_1}</p>
+          <label for="t-ref">${LABEL_REF}</label><span class="hint">${HINT_REF}</span>
+          <input id="t-ref" name="task_ref" maxlength="128" value="${refValue}" required />
+        </div></div>
+        <div class="ns3"><span class="ns3-n">2</span><div>
+          <p>${STEP_2}</p>
+          <label for="t-ceil">${LABEL_CEIL}</label><span class="hint">${HINT_CEIL}</span>
+          <input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required />
+          <details><summary>Add an agent label, optional</summary>
+            <input id="t-agent" name="agent_id" maxlength="128" placeholder="researcher" />
+            <p class="fine">Read only when a save opens the job. Leave it blank and the job is listed as <code>console</code> until an approved call names one.</p>
+          </details>
+          <button class="btn" type="submit">Set ceiling</button>
+        </div></div>
+      </form>
+      <div class="ns3"><span class="ns3-n">3</span><div>
+        <p>${STEP_3}</p>
+        ${done}
+        <p class="fine">${REQUIRED_LINE}</p>
+      </div></div>
+      <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins.</p>
+      ${opts.heading ? `<p class="seedemo"><a href="${href(p, 'overview', { demo: true })}">Show me the console with sample data &rarr;</a></p>` : ''}
     </div>`
+}
+
+/** The job step 3 personalises: the most recently touched one, and only while
+ *  nothing has been spent or reserved under it. It retires itself the moment
+ *  the reader's own code calls us, which is exactly when the row above it
+ *  starts carrying the answer instead. */
+function unstartedJob(p: Page): TaskRow | null {
+  const t = p.d.tasks[0]
+  if (!t) return null
+  return Number(t.usedUnits) === 0 && Number(t.reservedUnits) === 0 ? t : null
 }
 
 // ---------------------------------------------------------------------------
@@ -1977,7 +2093,7 @@ function overviewView(p: Page, rangeLabel: string): string {
                  Object.keys(d.byReason).length === 0 && d.series.every((s) => s.units === 0 && s.blocks === 0) &&
                  d.decisions.length === 0 && !p.filter.task && !p.filter.agent
   if (virgin) {
-    return `${onboarding(p)}
+    return `${threeSteps(p, unstartedJob(p), { heading: true })}
     <h2 id="limits">What refuses a call on this account, today <span>in the order preflight checks it</span></h2>
     ${limitsBlock(p, rangeLabel)}`
   }
