@@ -18,27 +18,33 @@ A monthly cap does not catch that, because a loop that burns $140 over one weeke
 move a monthly number, and a monthly number low enough to catch it takes every agent you run down
 with it until the 1st.
 
-## The fix: name the job, give it a ceiling
+## The fix: name the job, give it a ceiling, then ask before each call
+
+Give the job a name and a ceiling in the console at [agentbill.dev/app](https://agentbill.dev/app),
+or with `PUT /tasks/:task_ref/ceiling`. Then every call names the job and says what this one call
+is worth, and nothing about the budget:
 
 ```python
-from agentbill import AgentBillClient
+from agentbill import AgentBillClient, TaskCeilingExceededError
 
 client = AgentBillClient(api_key="agb_your_key")
 
-# You decide what a unit is worth. This job gets 500 units across every
-# call, tool and retry that passes the same task_ref; the call that would
-# cross that ceiling is refused before it runs.
-@client.gate(agent_id="researcher", task_ref="job-142",
-             task_ceiling=500, estimated_units=12)
-def run_agent(topic: str) -> str:
-    return call_your_llm(topic)
+try:
+    # job-142 already has its ceiling. Ask, run, settle.
+    client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
+    result = call_your_llm("quarterly report")
+    client.record(agent_id="researcher", task_ref="job-142", units=12)
+except TaskCeilingExceededError as refused:
+    # approved: false. Your code decides what the job does next.
+    print(refused)
 ```
 
 That's it. On every call AgentBill now:
 - Reserves the units **before** your provider call goes out, in the same statement that checks
   them, so ten parallel calls cannot all be approved for the last 8 units
 - Refuses with `TaskCeilingExceededError` once the job's total would cross its ceiling
-- Records what the run actually used, and releases the reservation without billing if it raised
+- Settles what the run actually used on `record()`; `record(..., success=False)` releases the
+  reservation without billing, and the `gate` decorator further down does both for you
 
 `task_ref` is the whole idea: a second agent, a different tool and a retried step all pass the same
 one, and they are all checked against a single ceiling. `agent_id` is a label for attribution and
@@ -69,19 +75,18 @@ AGENTBILL_API_KEY=your_key_here
 ### 2. Put the ceiling on the job
 
 Two parameters do the work. `task_ref` is your name for this run, and every call that passes it is
-checked against the same ceiling. `task_ceiling` is that ceiling, in units you define, fixed by the
-first preflight of a new run, or by the console or `PUT /tasks/:task_ref/ceiling` before it starts; a
-`task_ceiling` on a later preflight is not applied, so a retry cannot raise the ceiling it was
-meant to respect.
+checked against the same ceiling. The ceiling itself is set in units you define, in the console or
+with `PUT /tasks/:task_ref/ceiling` before the run starts; passing `task_ceiling` on the first
+preflight of a new run opens the job from code instead, the alternate. A `task_ceiling` on a later
+preflight is not applied, so a retry cannot raise the ceiling it was meant to respect.
 
 ```python
 from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-# Explicit: preflight before, record after.
-client.preflight(agent_id="researcher", task_ref="job-142",
-                 task_ceiling=500, estimated_units=12)
+# Explicit: preflight before, record after. job-142 already has its ceiling.
+client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
 
 result = call_your_llm("quarterly report")
 
@@ -90,7 +95,8 @@ client.record(agent_id="researcher", task_ref="job-142", units=12)
 
 ```python
 # Or let the decorator do both. On an exception it settles with success=False,
-# which releases the reservation instead of billing it.
+# which releases the reservation instead of billing it. task_ceiling here opens
+# the job from code, the alternate to the console; once the job exists it is not applied.
 @client.gate(agent_id="researcher", task_ref="job-142",
              task_ceiling=500, estimated_units=12)
 def run_agent(topic: str) -> str:
@@ -115,7 +121,7 @@ from agentbill import TaskCeilingExceededError
 try:
     result = run_agent("quarterly report")
 except TaskCeilingExceededError as e:
-    # Stop the loop, alert, degrade, your call.
+    # Your code decides: retry later, degrade, alert.
     alert_ops(f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units")
 ```
 
@@ -179,7 +185,7 @@ from agentbill import AgentBillClient, TaskCeilingExceededError
 
 client = AgentBillClient(api_key="agb_...")
 
-# First call creates the task with its ceiling
+# The alternate to the console: open the job from code, with task_ceiling on its first call
 client.preflight("researcher", estimated_units=2,
                  task_ref="job-42", task_ceiling=50)
 
@@ -222,7 +228,7 @@ except PreflightInProgressError:
 
 Same key, same decision, one reservation.
 
-**A run that never comes back.** If the process dies between `preflight()` and `record()`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `check.reservation_expires_at`.
+**A run that never comes back.** If the process crashes between `preflight()` and `record()`, the units stay reserved: nothing else can spend them, and the remaining budget reads smaller than it is, until a sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `check.reservation_expires_at`.
 
 Note the direction. An abandoned reservation makes the ceiling tighter, never looser. The gate does not open by accident.
 
@@ -247,7 +253,7 @@ try {
 } catch (e) {
   if (e instanceof TaskCeilingExceededError) {
     // e.taskRef, e.taskCeiling, e.taskUsedUnits
-    stopTheLoop(e.taskRef)
+    handleRefusal(e.taskRef)
   }
 }
 ```
@@ -366,7 +372,7 @@ For atomic tasks, it is one decorator.
 Your agent code
      │
      ▼
-client.gate(task_ref=..., task_ceiling=...)   ← or preflight()/record() by hand
+client.preflight(task_ref=...) then client.record(...)   ← or the gate decorator
      │
      ├─ POST /preflight → reserve the units in the same statement that checks them
      │     │
@@ -412,7 +418,7 @@ worth after the fact, with `units` as a function of the result.
 | `customer_id` | `str` | none | Fixed customer identifier |
 | `customer_id_from` | `str` | none | Name of a function parameter to read customer_id from |
 | `units` | `int \| callable` | `1` | Units per call, or a function `(result) -> int` returning 0 to skip billing |
-| `task_ref` | `str` | none | Attributes the event to a task budget opened by `client.preflight(task_ref=..., task_ceiling=...)` |
+| `task_ref` | `str` | none | Attributes the event to a task budget: a job opened in the console, by `PUT /tasks/:task_ref/ceiling`, or by a first `client.preflight(task_ref=..., task_ceiling=...)` |
 | `metadata` | `dict` | none | Static key-value pairs attached to every event |
 
 > **`preflight=True` on `@meter` is not the task ceiling.** It calls `GET /budget` and refuses only

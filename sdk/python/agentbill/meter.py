@@ -284,8 +284,9 @@ def meter(
         preflight:        If True, check budget BEFORE running the function. Raises
                           BudgetExhaustedError immediately if the customer's balance is spent,
                           preventing any expensive LLM calls from being made.
-        task_ref:         Attribute this event to a cross-call task budget created
-                          via AgentBillClient.preflight(task_ref=..., task_ceiling=...).
+        task_ref:         Attribute this event to a cross-call task budget: a job opened in
+                          the console, by PUT /tasks/:task_ref/ceiling, or by a first
+                          AgentBillClient.preflight(task_ref=..., task_ceiling=...).
 
     Raises:
         BudgetExhaustedError: Customer has 0 remaining units (HTTP 402).

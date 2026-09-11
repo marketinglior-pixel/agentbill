@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbill-sdk"
-version = "0.6.3"
+version = "0.6.4"
 description = "One spend ceiling per agent job, enforced before the call goes out. Bound to a task_ref, not to a calendar month."
 readme = "README.md"
 license = { text = "MIT" }
