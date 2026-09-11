@@ -12,7 +12,13 @@ const ipHits = new Map<string, number[]>()
 const recoverIpHits = new Map<string, number[]>()
 const emailSends = new Map<string, number>()
 
-const IP_LIMIT = 5
+// 12, not 5 (2026-09-12). A workshop, a team behind one office NAT or a
+// classroom is one address to this counter, and five keys an hour meant the
+// sixth person in the room was refused. Twelve lets about ten keys through
+// with room for a typo or two; a malformed body still burns no slot, and the
+// limiter itself stays, because an unbounded /register is an enumeration
+// sweep waiting to happen.
+const IP_LIMIT = 12
 const RECOVER_IP_LIMIT = 10
 const IP_WINDOW_MS = 60 * 60 * 1000
 const EMAIL_COOLDOWN_MS = 60 * 60 * 1000

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
-import { PANEL_CSS, requestPanel } from '../ui/panels.js'
+import { PANEL_CSS } from '../ui/panels.js'
 import { sql } from '../db/index.js'
 import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
@@ -150,6 +150,10 @@ const reg = inlineScript(`  let apiKey = ''
       // copies is the line they run, not a template with a gap in it. A gap is
       // how a key became agb_agb_... and a 401 on the first run (2026-09-09).
       document.getElementById('key-export').textContent = 'export AGENTBILL_API_KEY=' + apiKey
+      // The one action on this screen signs the reader in with this key, so
+      // the next screen is the three steps and not a login card asking for
+      // the string they are looking at. Same-origin POST, form-action 'self'.
+      document.getElementById('key-field').value = apiKey
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
@@ -210,48 +214,26 @@ export async function registerRoute(app: FastifyInstance) {
       scriptHashes: [REGISTER_HASH, COPY_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
       css: `${CHROME_CSS}${PANEL_CSS}${COPY_CSS}
-    /* Hallmark · genre: modern-minimal · macrostructure: Split Studio (pitch + product | form)
+    /* Hallmark · genre: modern-minimal · macrostructure: One Column (the form is the page)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
-     * enrichment: none, the request panel is real */
+     * enrichment: none. Restyled 2026-09-12 with pressplaced.com as the craft
+     * reference: one column, air, one thing to do. The request panel and the
+     * three reassurance rows that sat beside the form are gone; a reader who
+     * wants the argument has the homepage one click back. */
 
     :root { --shell: 1080px; }
-    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
 
-    /* Three grid items, two columns. The form is the whole right column so it
-       starts at the top beside the headline; the proof panel sits under the
-       pitch. On one column the order becomes pitch, form, proof: the form is
-       what a phone arriving from a paid click came for. */
-    /* auto 1fr: the form spans both rows, and without explicit tracks the grid
-       shared its height between them, which floated the request panel some
-       150px below the pitch. The first row now fits the pitch and the second
-       takes the rest. */
-    .reg { padding-block: 56px 88px; display: grid; gap: 40px 56px; align-items: start;
-           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-           grid-template-rows: auto 1fr;
-           grid-template-areas: "pitch form" "proof form"; }
-    .pitch { grid-area: pitch; } .proof { grid-area: proof; } .form-col { grid-area: form; }
+    /* One column, 560 wide, centred on the shell. The head, then the card. */
+    .reg { max-width: 560px; margin: 0 auto; padding-block: var(--s9) 96px; }
+    .pitch { margin-bottom: var(--s6); }
 
-    h1 { color: var(--white); font-size: clamp(30px, 3.2vw, 40px); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
-    .lede { font-size: var(--fs-lede); color: var(--muted); margin: 20px 0 28px; max-width: 44ch; line-height: 1.6; }
-    .facts { list-style: none; display: grid; gap: 14px; max-width: 50ch; }
-    /* Under the form the list follows the legal note directly, and two blocks of
-       small muted type with nothing between them read as one paragraph. */
-    .form-col .facts { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border-soft); }
-    .facts li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; align-items: baseline;
-                color: var(--muted); font-size: var(--fs-small); line-height: 1.6; }
-    /* Two grounds, two rungs. .facts li is --muted, so its term goes to
-       --text; .trust is --dim, so its term goes to --muted. Both were the
-       accent, which reads as a link: "Terms of Service" and "Privacy Policy"
-       are green AND underlined about ninety pixels above "free tier" in the
-       same column. One of these terms is the word "refused", which on the
-       homepage is a green console chip, so the accent was carrying two
-       different meanings on one word. (Both read "blocked" until 2026-09-07;
-       "blocked" is now reserved for the SDK's own exception text, which still
-       says it, so our prose and the artifact cannot be mistaken for each
-       other.) */
-    .facts b { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
-               color: var(--text); font-weight: 500; }
-    .trust { margin-top: 28px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+    h1 { color: var(--white); font-size: var(--fs-h1-sub); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
+    /* The lede is setup language, not a pitch: what happens once, what the
+       ceiling is on, what comes back, whose decision it is. */
+    .lede { font-size: var(--fs-lede); color: var(--muted); margin: 18px 0 0; max-width: 46ch; line-height: 1.6; }
+    .lede code { font-family: var(--mono); font-size: .9em; color: var(--text); }
+    .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
     .trust b { color: var(--muted); font-weight: 500; }
 
     /* Form. Inputs and the button share one 44px floor; state changes move
@@ -259,7 +241,7 @@ export async function registerRoute(app: FastifyInstance) {
        The whole column sits on the panel frame the rest of the site leads
        with, so the thing to fill in reads as one object, not loose fields. */
     .form-card { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-                 border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s5); }
+                 border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s6); }
     .form-h h2 { color: var(--white); margin-bottom: 6px; font-size: var(--fs-h3); }
     .form-h p { color: var(--muted); font-size: var(--fs-small); margin-bottom: var(--s5); }
     .form { display: grid; gap: 16px; }
@@ -349,15 +331,12 @@ export async function registerRoute(app: FastifyInstance) {
     .ns-go { padding: 14px 18px 16px; border-top: 1px solid var(--border-soft); display: grid; gap: 10px; justify-items: start; }
     .ns-go p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     .btn-go { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; background: var(--green);
-              color: var(--green-ink); border-radius: 8px; font-size: var(--fs-small); font-weight: 700;
-              text-decoration: none; transition: filter .15s; }
+              color: var(--green-ink); border: 0; border-radius: 8px; font-family: var(--sans); font-size: var(--fs-small);
+              font-weight: 700; text-decoration: none; cursor: pointer; transition: filter .15s; }
     @media (hover: hover) { .btn-go:hover { filter: brightness(1.06); text-decoration: none; } }
 
     @media (max-width: 900px) {
-      .reg { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
-             grid-template-areas: "pitch" "form" "proof"; gap: 36px;
-             padding-block: 40px 64px; }
-      .lede { margin-bottom: 20px; }
+      .reg { padding-block: var(--s7) var(--s8); }
       .form-card { padding: var(--s4); }
     }
 `,
@@ -366,17 +345,14 @@ export async function registerRoute(app: FastifyInstance) {
 ${siteNav('/register', { cta: false })}
 <main>
 
-<div class="reg wrap row-close">
+<div class="reg wrap">
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
-    <p class="lede">Start with 1,000 free preflight calls per month. Two calls, preflight before and record after, and a job that would cross its ceiling is refused.</p>
+    <p class="lede">Key once. Ceiling on one <code>task_ref</code>. Preflight returns <code>approved: false</code> when that job is out. Your code decides.</p>
     <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
   </div>
 
-  <div class="proof">${requestPanel()}</div>
-
-  <div class="form-col">
-    <div class="form-card">
+  <div class="form-card">
     <div id="form-state">
       <div class="form-h">
         <h2>Get your API key</h2>
@@ -419,16 +395,6 @@ ${siteNav('/register', { cta: false })}
         <p class="form-note">By registering you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email. Just a key.</p>
         <p class="form-note">Already registered and no longer have the key? <a href="/recover">Get back in</a>.</p>
       </form>
-
-      <!-- Under the button, not beside it. The right column stopped 410px above
-           the left and the page terminated ragged on the one surface that has to
-           convert; moving the reassurance here balances the columns and puts it
-           where the reader is deciding rather than where they have already been. -->
-    <ul class="facts">
-      <li><b>free tier</b><span>1,000 preflight calls a month, per account. No card, no expiry.</span></li>
-      <li><b>refused</b><span>Before the call goes out, not after the bill. The ceiling is consulted first.</span></li>
-      <li><b>any provider</b><span>One ceiling per task. You pass what each call is worth; we never look at your provider bill.</span></li>
-    </ul>
     </div>
 
     <div class="success" id="success-state">
@@ -455,9 +421,9 @@ ${siteNav('/register', { cta: false })}
            the console's three steps numbered 1/2/3 below it: five actions,
            numbering starting on the third, terminal work first and the console
            link last. Dogfood run 3 ended right here with "I do not understand
-           what I need to do". The sequence now has one owner, the console
-           (src/ui/steps.ts), which numbers every step from 1 and puts the two
-           that need no terminal before the install. -->
+           what I need to do". The sequence has one owner, the console's start
+           screen (src/ui/steps.ts, src/routes/app.ts), and the button below
+           signs the reader into it. -->
       <div class="panel">
         <div class="panel-h"><span>The same key, as the line that stores it</span><span>run it in the shell your code will use</span></div>
         <div class="steps">
@@ -466,19 +432,24 @@ ${siteNav('/register', { cta: false })}
       </div>
       <div class="panel">
         <div class="ns-go">
-          <!-- A new tab, deliberately. This screen is client-side only: the
-               success state is display:none on a cold load and nothing reads
-               the #done hash, so navigating away in this tab destroys a key
-               that is shown once, and the form's second submit only mails a
-               /recover link. -->
-          <a class="btn-go" href="/app" target="_blank" rel="noopener">Open the console &rarr;</a>
-          <!-- Also a new tab, for the same reason as the button above it: this
+          <!-- A form, not a link, and a new tab, deliberately. The form POSTs
+               this key to /app/session, the same request the console's login
+               card makes, so the next screen is step 1 of 3 and not a card
+               asking for the string on this one. The new tab is because this
+               screen is client-side only: the success state is display:none
+               on a cold load and nothing reads the #done hash, so navigating
+               away in this tab destroys a key that is shown once. -->
+          <form method="POST" action="/app/session" target="_blank" id="go-form">
+            <input type="hidden" name="api_key" id="key-field" value="" />
+            <input type="hidden" name="next" value="/app?view=start" />
+            <button class="btn-go" type="submit">Open the console &rarr;</button>
+          </form>
+          <!-- Also new tabs, for the same reason as the button above: this
                screen exists only in this tab's DOM, so any same-tab navigation
                from here loses a key that is shown once. -->
-          <p>It asks for the key once, then walks you from a job name to your first preflight in three numbered steps. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
+          <p>It signs you in with this key and opens your first refusal in three steps: a job and its ceiling, the lines to run, the refusal they produce. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
         </div>
       </div>
-    </div>
     </div>
   </div>
 </div>
