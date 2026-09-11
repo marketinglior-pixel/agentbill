@@ -65,7 +65,7 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   });")
 gate "home.ts: one python, one node sample, no phantom block" "1:1:2" "$n"
 
-# The console's pre-save first run carries the repo's one executed task_ref-only
+# The console's start screen (pre-save) carries the repo's one executed task_ref-only
 # sample as a literal, beside exactly one interpolated pre (the refusal body
 # viewer), and nothing else. It moved here from /register#done on 2026-09-11,
 # and the same day a comment that spelled the tag name with angle brackets
@@ -83,7 +83,7 @@ gate "app.ts: one python literal, one dynamic pre, no phantom block" "1:1:2" "$n
 # The onboarding sample exists twice on purpose, and this is what stops the two
 # copies drifting.
 #
-# The console's pre-save first run carries it as a literal <pre class="snip">,
+# The console's start screen, before a save, carries it as a literal <pre class="snip">,
 # because scripts/snippets only executes a literal: any ${...} inside a pre is
 # classified "dynamic" with empty code and leaves the gate in silence. After a
 # save the console carries the SAME lines built by taskSnippet() in
@@ -104,8 +104,11 @@ const m=src.match(/export function taskSnippet[\s\S]*?return \\\`([\s\S]*?)\\\`\
 if(!m){process.stderr.write('taskSnippet template not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
 const agent=(src.match(/export const SAMPLE_AGENT = '([^']*)'/)||[])[1];
 const ref=(src.match(/export const SAMPLE_REF = '([^']*)'/)||[])[1];
-if(!agent||!ref){process.stderr.write('SAMPLE_AGENT / SAMPLE_REF not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
-const built=m[1].replace(/\\\$\{agentId\}/g,agent).replace(/\\\$\{taskRef\}/g,ref);
+const ceil=(src.match(/export const SAMPLE_CEILING = ([0-9]+)/)||[])[1];
+if(!agent||!ref||!ceil){process.stderr.write('SAMPLE_AGENT / SAMPLE_REF / SAMPLE_CEILING not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
+// The plus-one first, or the plain ceiling would eat the head of it.
+const built=m[1].replace(/\\\$\{ceiling \+ 1\}/g,String(Number(ceil)+1)).replace(/\\\$\{ceiling\}/g,ceil)
+  .replace(/\\\$\{agentId\}/g,agent).replace(/\\\$\{taskRef\}/g,ref);
 const reg=fs.readFileSync('src/routes/app.ts','utf8').match(/<pre class=\"snip\">([\s\S]*?)<\/pre>/);
 if(!reg){process.stderr.write('no literal pre.snip block in src/routes/app.ts\n');process.stdout.write('1');process.exit(0)}
 const lit=reg[1];
