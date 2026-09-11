@@ -161,9 +161,11 @@ class AgentBillClient:
         """Check every budget BEFORE the call runs.
 
         task_ref groups many calls (across providers and tools) under one hard
-        cross-call ceiling: "this job gets 50 units, across every call". Pass task_ceiling on
-        the first call for a new task_ref (or open the job first in the console); later calls
-        only need task_ref, and a task_ceiling on them is not applied.
+        cross-call ceiling: "this job gets 50 units, across every call". Give the job its
+        ceiling first, in the console or with PUT /tasks/:task_ref/ceiling; every call then
+        passes task_ref and nothing about the budget. Passing task_ceiling on the first call of
+        a new task_ref opens the job from code instead, the alternate; on later calls it is not
+        applied.
 
         idempotency_key makes a retried preflight safe. Without it a retry
         reserves a second time, so the mechanism meant to prevent waste is the
