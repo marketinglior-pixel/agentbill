@@ -41,7 +41,7 @@ Get an API key: https://agentbill.dev/register. Free, no card. Both SDKs default
 
 ## Quick Start
 
-The ceiling belongs to the job. Open it with `task_ceiling` on the first preflight of a new `task_ref`, or before any code runs with `PUT /tasks/:task_ref/ceiling` or the console. Once the job exists a `task_ceiling` on preflight is not applied, so a retry cannot quietly raise the ceiling it was meant to respect; the last save through the endpoint or the console is the one in force.
+The ceiling belongs to the job, and it is set before the code runs: in the console at [agentbill.dev/app](https://agentbill.dev/app) (three steps from a new key to a first refusal) or with `PUT /tasks/:task_ref/ceiling`. The code then names the job and nothing about the budget. A `task_ceiling` on the first preflight of a new `task_ref` opens the job from code instead; once the job exists it is not applied, so a retry cannot quietly raise the ceiling it was meant to respect, and the last save through the endpoint or the console is the one in force.
 
 ```python
 from agentbill import AgentBillClient, TaskCeilingExceededError
@@ -54,8 +54,7 @@ def research_step(query):
             agent_id="researcher",     # attribution label, not a budget
             estimated_units=10,        # reserved now, settled by record()
             customer_id="cust_abc",
-            task_ref="job_4417",       # the same job, in every process
-            task_ceiling=500,          # opens the job; the console or PUT can change it later
+            task_ref="job_4417",       # the same job, in every process; its ceiling is already set
         )
     except TaskCeilingExceededError as e:
         # e.task_ref, e.task_ceiling, e.task_used_units, e.task_remaining_units
@@ -73,7 +72,7 @@ def research_step(query):
     return answer
 ```
 
-Every later call in the run passes `task_ref` and nothing else about the budget. It does not need to know the ceiling or what the calls before it spent, which is what lets a second agent in a second process share one number:
+Every call in the run passes `task_ref` and nothing else about the budget. It does not need to know the ceiling or what the calls before it spent, which is what lets a second agent in a second process share one number:
 
 ```python
 client.preflight(agent_id="writer", task_ref="job_4417", estimated_units=250)
@@ -86,7 +85,7 @@ import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
 export async function researchStep(query: string) {
   try {
-    await preflight({ agentId: 'researcher', estimatedUnits: 10, taskRef: 'job_4417', taskCeiling: 500 })
+    await preflight({ agentId: 'researcher', estimatedUnits: 10, taskRef: 'job_4417' })
   } catch (e) {
     if (e instanceof TaskCeilingExceededError) return partialResult()
     throw e
@@ -104,7 +103,7 @@ export async function researchStep(query: string) {
 
 ```python
 @client.gate(agent_id="researcher", estimated_units=10,
-             task_ref="job_4417", task_ceiling=500)
+             task_ref="job_4417")       # the job's ceiling is already set
 def summarize(doc):
     return call_the_expensive_model(doc)
 ```

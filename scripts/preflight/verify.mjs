@@ -883,18 +883,20 @@ ok('[console] the overview empty state links to the tasks view instead', emptyOv
 await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
 const virgin8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
 ok('[onboarding] the first run is three numbered steps and a form, not a curl that manufactures a refusal',
-   virgin8.includes('class="setf3"') && virgin8.includes('Three steps put a row on this page')
+   virgin8.includes('class="setf3"') && virgin8.includes('Three steps to your first refusal')
      && !virgin8.includes('"ceiling":1'), 'the virgin overview did not render the steps')
 // Ticket 2026-09-11, after dogfood run 3 ended on /register#done with "I do
 // not understand what I need to do". The install is INSIDE the numbered
-// sequence, after the two steps that need no terminal, and before the sample
-// it makes runnable. Order is asserted on the rendered page, not the source.
+// sequence, after the step that needs no terminal, and before the sample it
+// makes runnable. The cold-path ticket the same evening made the refusal the
+// third step, so name and units share the first; the order is unchanged and
+// is asserted on the rendered page, not the source.
 const iName8 = virgin8.indexOf('Name this job')
 const iUnits8 = virgin8.indexOf('How many units is this job worth')
 const iPip8 = virgin8.indexOf('pip install agentbill-sdk')
 const iAsk8 = virgin8.indexOf('Ask before each call')
 const iSample8 = virgin8.search(/<pre class="snip">/)
-ok('[onboarding] the install opens step 3: after the job name and the units, before the ask and the sample',
+ok('[onboarding] the install opens step 2: after the job name and the units, before the ask and the sample',
    iName8 > -1 && iUnits8 > iName8 && iPip8 > iUnits8 && iAsk8 > iPip8 && iSample8 > iAsk8,
    `name ${iName8}, units ${iUnits8}, pip ${iPip8}, ask ${iAsk8}, sample ${iSample8}`)
 ok('[onboarding] the sequence is numbered 1 to 3 on one screen, the count UX v1 locked, and nothing on it is a bullet',
@@ -928,16 +930,50 @@ const snipAt8 = virgin8.search(/<pre class="snip">/)
 const snip8 = snipAt8 === -1 ? '' : virgin8.slice(snipAt8, virgin8.indexOf('</pre>', snipAt8))
 ok('[onboarding] the sample preflights with task_ref and carries no task_ceiling',
    snip8.includes('task_ref="job-1"') && !snip8.includes('task_ceiling'), snip8.slice(0, 120))
-// After a save the sample is the reader's own job, read off the row.
-await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5' })
-const mine8 = await nav8('/app?view=tasks&saved=job-mine&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] a saved job puts its own name in the lines the reader pastes',
-   mine8.includes('task_ref=&quot;job-mine&quot;') && mine8.includes('units left: 4'), 'no personalised sample')
+// One paste is one run is one refusal: the sample loops one call past the
+// ceiling it was written for, and the ceiling is what ends the loop. Before
+// 2026-09-12 it made one call and asked the reader to run it N+1 times.
+ok('[onboarding] the sample loops one call past the ceiling, so one run is one refusal',
+   snip8.includes('for _ in range(4)') && snip8.includes('ceiling of 3'), snip8.slice(0, 200))
+// The start screen is its own view, off the rail, and where /register#done
+// signs a new key in. Its form posts back to itself; the tasks view's editor
+// posts nothing and lands where it always has.
+const startView8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[start] ?view=start is the same three steps, off the rail, and its form posts back to itself',
+   startView8.includes('Three steps to your first refusal') && startView8.includes('name="back" value="start"')
+     && !startView8.includes('<span>Start</span>'), 'the start view did not render the steps')
+const saveStart8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5&back=start' })
+ok('[start] a save from the start screen lands back on the start screen',
+   saveStart8.status === 303 && saveStart8.headers.get('location') === '/app?view=start&saved=job-mine&created=1', `${saveStart8.headers.get('location')}`)
+// After a save the sample is the reader's own job, read off the row, with
+// the row's ceiling in the loop bound.
+const mine8 = await nav8('/app?view=start&saved=job-mine&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[onboarding] a saved job puts its own name and ceiling in the lines the reader pastes',
+   mine8.includes('task_ref=&quot;job-mine&quot;') && mine8.includes('range(6)') && mine8.includes('ceiling of 5'), 'no personalised sample')
+ok('[start] before any call, step 3 says nothing is here yet and how to get there',
+   mine8.includes('Nothing here yet') && mine8.includes('reload this page'), 'step 3 resting state missing')
+const saveElse8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5&back=%2Fevil' })
+ok('[start] back is an allowlist of two, not an echo',
+   saveElse8.headers.get('location') === '/app?view=tasks&saved=job-mine', `${saveElse8.headers.get('location')}`)
+// The refusal the screen exists to show. Five reservations of one unit fill a
+// ceiling of five; the sixth is refused, and step 3 then carries the row and
+// the persisted body, while the overview stops being the start screen.
+for (let i = 0; i < 5; i++) await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
+const sixth8 = await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
+ok('[start] the sixth call on a ceiling of 5 is refused', sixth8.body.approved === false && sixth8.body.reason === 'task_ceiling_exceeded', JSON.stringify(sixth8.body))
+const afterRefuse8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[start] step 3 shows the refusal with the body the code received',
+   afterRefuse8.includes('Refused. Asked 1 unit') && afterRefuse8.includes('&quot;reason&quot;: &quot;task_ceiling_exceeded&quot;')
+     && afterRefuse8.includes('Open the console'), 'step 3 did not show the refusal')
+const overviewAfter8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
+ok('[start] after the first refusal the overview is the dashboard, and the start screen stays reachable',
+   overviewAfter8.includes('class="kpis"') && !overviewAfter8.includes('Three steps to your first refusal')
+     && afterRefuse8.includes('class="setf3"'), 'the overview did not become the dashboard')
 // A name that cannot sit inside a Python string falls back rather than
 // rendering a block that does not parse. esc() is HTML escaping: &quot;
 // renders in the browser as the character that closes the string.
 await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: `task_ref=${encodeURIComponent('say "hi"')}&ceiling_units=5` })
-const quoted8 = await nav8('/app?view=tasks', { headers: { cookie: cookie8 } }).then(r => r.text())
+const quoted8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
 ok('[onboarding] a job name carrying a quote does not go inside the sample',
    quoted8.includes('cannot hold inline') && !quoted8.includes('task_ref=&quot;say &quot;hi&quot;'), 'the quote reached the sample')
 // A failed save must never come back proposing a name. verifyFlash strips
@@ -953,6 +989,11 @@ const after8 = await nav8('/app?view=tasks&err=ceiling&ref=job-brand-new', { hea
 const field8 = (after8.match(/<input id="t-ref"[^>]*value="([^"]*)"/) ?? [])[1]
 ok('[onboarding] and the name field does not come back holding a different job',
    field8 === '', `the field offered "${field8}" for a save the reader did not make`)
+const afterStart8 = await nav8('/app?view=start&err=ceiling&ref=job-brand-new', { headers: { cookie: cookie8 } }).then(r => r.text())
+const fieldStart8 = (afterStart8.match(/<input id="t-ref"[^>]*value="([^"]*)"/) ?? [])[1]
+const ceilStart8 = (afterStart8.match(/<input id="t-ceil"[^>]*value="([^"]*)"/) ?? [])[1]
+ok('[start] the same rule on the start screen: neither field comes back holding a different job',
+   fieldStart8 === '' && ceilStart8 === '', `name "${fieldStart8}", ceiling "${ceilStart8}"`)
 // The microcopy bans, measured on the VISIBLE text and not the markup: every
 // one of these words appears inside the CSS of every page on the site
 // (display:block, flex-wrap), so a grep over HTML can only ever be noise.
@@ -960,6 +1001,31 @@ const visible8 = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<scr
   .replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ')
 const register8 = await fetch(`${API}/register`).then(r => r.text())
 const login8b = await fetch(`${API}/app`).then(r => r.text())
+// The fold, 2026-09-12. One demo beside the headline, one action, and the
+// caption that says what the ceiling is and is not without a word about
+// anyone else. The brochure rows (keys, the console overview) are gone from
+// the cold path.
+const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('</header>'))
+ok('[fold] the dual-state demo sits beside the headline: a month window with room, this job refused',
+   fold8.includes('class="demo"') && fold8.includes('still under the cap') && fold8.includes('<b>approved: false</b>')
+     && fold8.indexOf('class="demo"') > fold8.indexOf('A ceiling on this job'), 'no demo in the fold')
+ok('[fold] the caption says what the ceiling is and is not, and claims nothing about anyone else',
+   fold8.includes('job ceiling &middot; not a month window &middot; not a proxy') && !/\b(only|first|nobody)\b/i.test(visible8(hero8)))
+ok('[fold] one primary action in the hero, and the brochure rows are gone',
+   (hero8.match(/class="btn btn-lg"/g) ?? []).length === 1 && !hero8.includes('btn-ghost')
+     && !fold8.includes('Keys you can revoke') && !fold8.includes('What the ceiling saved you from'))
+// /register, 2026-09-12: setup language above one form, nothing under it
+// that pitches, and a key screen whose one action signs the key into the
+// start screen rather than sending the reader to a login card.
+ok('[register] the lede is setup language and nothing under the form pitches',
+   register8.includes('Key once.') && register8.includes('Your code decides.') && !register8.includes('One decorator')
+     && !register8.includes('class="facts"') && !register8.includes('the entire integration surface'))
+ok('[register] the key screen signs the key into the start screen, same origin, new tab',
+   register8.includes('action="/app/session"') && register8.includes('name="next" value="/app?view=start"') && register8.includes('id="key-field"'))
+const toStart8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dstart` })
+ok('[register] /app/session honours next=/app?view=start', toStart8.status === 303 && toStart8.headers.get('location') === '/app?view=start', `${toStart8.headers.get('location')}`)
+const toElse8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dkeys` })
+ok('[register] and drops any other view', toElse8.status === 303 && toElse8.headers.get('location') === '/app', `${toElse8.headers.get('location')}`)
 // The key screen does one job. Until 2026-09-11 it also carried the install
 // command as an unnumbered bullet above the console's numbered steps, so the
 // first instruction a new key holder read was to open a terminal, and the one
@@ -975,6 +1041,7 @@ ok('[onboarding] /register keeps the key, the export line it fills, and one acti
    register8.includes('id="key-display"') && register8.includes('id="key-export"')
      && register8.includes('Open the console'))
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
+                            ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
                             ['/register', register8], ['the console login card', login8b]]) {
   const hits = visible8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
