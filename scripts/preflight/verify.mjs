@@ -17,6 +17,7 @@
 
 import postgres from 'postgres'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
+import { ipOrigin } from '../../dist/lib/ip-origin.js'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
 const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
@@ -233,6 +234,99 @@ ok('an unknown prefix reports key_not_found, not already_revoked',
    missing.status === 400 && missing.body.error === 'key_not_found', JSON.stringify(missing.body))
 
 ok('the replacement key from the rotation is untouched', await alive(rot.body.api_key) === 200)
+
+// ------------------------------------- 5: the IP alert counts networks, not addresses
+// On 2026-09-11 the owner of one account received roughly eleven "new IP
+// detected" mails a minute, for two days, about a key nobody had stolen.
+//
+// The alert compared the request against a single column, last_seen_ip, and
+// mailed on any difference. That is a one-slot memory, so two addresses in
+// rotation alert on EVERY request: A is not B, then B is not A, forever. And
+// two addresses are always in rotation — macOS holds a stable `secured` IPv6
+// address plus one or more `temporary` privacy addresses on the same /64 and
+// picks between them per connection. Measured on the founder's laptop that day,
+// 100 consecutive requests to production: 28 changes, nothing moved.
+//
+// The unit is now the origin (the /64, or the IPv4 address) and the memory is a
+// UNIQUE claim row per origin, so every assertion below is a count of rows and
+// of alerts, not of requests. The three HOME_ addresses are the real ones read
+// off that laptop with ifconfig.
+console.log('\n[5] IP alerts claim once per network')
+
+const HOME_A = '2a00:a041:e327:b500:5033:89cf:1791:b686'   // temporary
+const HOME_B = '2a00:a041:e327:b500:5173:edf9:1a7d:7a95'   // temporary, deprecated
+const HOME_C = '2a00:a041:e327:b500:1c9c:2cbc:a2e3:ff6f'   // autoconf secured
+const CAFE   = '2a02:169:3f00:1::1'
+const OFFICE = '203.0.113.77'
+
+ok('three addresses of one laptop are one origin',
+   ipOrigin(HOME_A) === ipOrigin(HOME_B) && ipOrigin(HOME_B) === ipOrigin(HOME_C),
+   `${ipOrigin(HOME_A)} ${ipOrigin(HOME_B)} ${ipOrigin(HOME_C)}`)
+ok('the neighbouring /64 is NOT that origin',
+   ipOrigin('2a00:a041:e327:b501::1') !== ipOrigin(HOME_A))
+ok('an IPv4-mapped address keeps its own v4 identity',
+   ipOrigin('::ffff:203.0.113.9') === '203.0.113.9', ipOrigin('::ffff:203.0.113.9'))
+ok('a non-address has no origin', ipOrigin('not-an-ip') === null)
+
+const ipGen = await post('/keys/generate', { label: 'ip-origin-test' })
+const ipKey = ipGen.body.api_key
+const ipKeyId = (await sql`SELECT id FROM developer_api_keys WHERE api_key = ${ipKey}`)[0].id
+
+// fly-client-ip is what clientIp() trusts first, and behind Fly the proxy
+// overwrites whatever a caller sent. Here there is no proxy, so it is the lever.
+const from = (ip) => fetch(`${API}/keys`, {
+  headers: { 'Authorization': `Bearer ${ipKey}`, 'fly-client-ip': ip },
+}).then(r => r.status)
+
+const rowsFor = () => sql`
+  SELECT origin, alerted_at FROM api_key_ip_origins WHERE api_key_id = ${ipKeyId} ORDER BY id`
+const counts = async () => {
+  const r = await rowsFor()
+  return { origins: r.length, alerts: r.filter(x => x.alertedAt !== null).length }
+}
+
+// The exact shape that produced the flood: one laptop, one network, address
+// churning underneath. The old code sent 29 mails for this; the claim sends 0,
+// and the first origin a key is ever seen from is not a change at all.
+for (let i = 0; i < 30; i++) await from([HOME_A, HOME_B, HOME_C][i % 3])
+await settle(600)
+let ipc = await counts()
+ok('30 requests across 3 rotating addresses claim ONE origin', ipc.origins === 1, JSON.stringify(ipc))
+ok('and alert nobody, because it is the first network', ipc.alerts === 0, JSON.stringify(ipc))
+
+// A real move. This is the signal the alert exists for and it must survive.
+await from(CAFE)
+await settle(600)
+ipc = await counts()
+ok('a genuinely new network claims a second origin', ipc.origins === 2, JSON.stringify(ipc))
+ok('and alerts exactly once', ipc.alerts === 1, JSON.stringify(ipc))
+
+// Flapping between two KNOWN networks is the same one-slot trap one level up.
+for (let i = 0; i < 20; i++) await from(i % 2 ? HOME_A : CAFE)
+await settle(600)
+ipc = await counts()
+ok('20 flaps between two known networks add no rows', ipc.origins === 2, JSON.stringify(ipc))
+ok('and send nothing further', ipc.alerts === 1, JSON.stringify(ipc))
+
+// Same assertion the quota alerts make: N concurrent callers, one claim. The
+// INSERT ... ON CONFLICT is the only thing that can decide this.
+await Promise.all(Array.from({ length: 20 }, () => from(OFFICE)))
+await settle(800)
+ipc = await counts()
+ok('20 concurrent requests from one new network claim it once', ipc.origins === 3, JSON.stringify(ipc))
+ok('and alert exactly once', ipc.alerts === 2, JSON.stringify(ipc))
+
+// The backstop: distinct networks are not themselves a bound. A key sprayed
+// from a botnet stops at ALERTS_PER_DAY instead of mailing per source /64.
+for (const n of ['2001:db8:1::9', '2001:db8:2::9', '2001:db8:3::9']) { await from(n); await settle(300) }
+await settle(400)
+ipc = await counts()
+ok('the daily cap is reached at 5 alerts', ipc.alerts === 5, JSON.stringify(ipc))
+await from('2001:db8:4::9')
+await settle(600)
+ipc = await counts()
+ok('a 6th new network is still recorded', ipc.origins === 7, JSON.stringify(ipc))
+ok('but is not mailed once the cap is reached', ipc.alerts === 5, JSON.stringify(ipc))
 
 // ---------------------------------------------------------------------------
 // Opaque ids. Every one of these was a 500 on 2026-09-07, and eleven of them

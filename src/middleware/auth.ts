@@ -2,8 +2,10 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { isIP } from 'node:net'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
+import { ipOrigin } from '../lib/ip-origin.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { Resend } from 'resend'
+import type { FastifyBaseLogger } from 'fastify'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -42,23 +44,96 @@ export const publicRoute = () => ({ config: { public: true } })
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
-async function sendIpAlert(email: string, apiKey: string, oldIp: string, newIp: string) {
+/**
+ * At most this many alerts per key per rolling day, whatever arrives.
+ *
+ * The claim table below already bounds the steady state to one mail per network
+ * ever, so this never fires for a normal account. It exists because "bounded by
+ * how many distinct networks appear" is not actually a bound: a key sprayed
+ * from a botnet would otherwise mail its owner once per source /64, and the
+ * sixth of those tells them nothing the first five did not.
+ */
+const ALERTS_PER_DAY = 5
+
+async function sendIpAlert(email: string, apiKey: string, origin: string, ip: string) {
   if (!resend) return
   const masked = apiKey.slice(0, 8) + '...'
   await resend.emails.send({
     from: FROM,
     to: email,
-    subject: `AgentBill: new IP detected on your API key`,
+    subject: `AgentBill: your API key was used from a new network`,
+    // origin is built from parsed integers by ipOrigin(), and ip is guarded by
+    // isIP(), so neither can carry markup into this body.
     html: `
-      <p>Your API key <strong>${masked}</strong> was just used from a new IP address.</p>
-      <p><strong>Previous IP:</strong> ${isIP(oldIp) ? oldIp : 'unparseable'}<br/>
-         <strong>New IP:</strong> ${isIP(newIp) ? newIp : 'unparseable'}</p>
+      <p>Your API key <strong>${masked}</strong> was just used from a network it has not been used from before.</p>
+      <p><strong>Network:</strong> ${origin}<br/>
+         <strong>Address:</strong> ${isIP(ip) ? ip : 'unparseable'}</p>
+      <p>You will not get this message again for this network, however often the
+         key is used from it.</p>
       <p>If this was you, ignore this message. If not, revoke the key immediately:</p>
       <pre>curl -X POST https://agentbill.dev/keys/revoke \\
   -H "Authorization: Bearer &lt;your key&gt;"</pre>
       <p><a href="https://agentbill.dev/app">Open your receipt</a></p>
     `,
   })
+}
+
+/**
+ * Alert the owner the first time a key is used from a network, and never again
+ * for that network.
+ *
+ * This replaced `clientIp !== last_seen_ip`, which was a one-slot memory and so
+ * alerted on every request as soon as two addresses were in rotation — and two
+ * addresses are always in rotation, because a macOS host keeps a stable and one
+ * or more temporary IPv6 addresses on its /64 and picks between them per
+ * connection. See src/lib/ip-origin.ts for the measurement, and migration 011
+ * for what the claim row means.
+ *
+ * Order matters twice here. The INSERT is the claim, so of N concurrent
+ * requests carrying the same new origin exactly one proceeds; and alerted_at is
+ * taken BEFORE the send, so N concurrent requests carrying N different new
+ * origins cannot each read a daily count that excludes the others.
+ */
+async function noteIpOrigin(
+  keyId: string,
+  email: string,
+  apiKey: string,
+  ip: string,
+  log: FastifyBaseLogger,
+) {
+  const origin = ipOrigin(ip)
+  if (!origin) return
+
+  const claimed = await sql`
+    INSERT INTO api_key_ip_origins (api_key_id, origin, last_ip)
+    VALUES (${keyId}, ${origin}, ${ip})
+    ON CONFLICT (api_key_id, origin) DO NOTHING
+    RETURNING id
+  `
+  // A network this key has been used from before. The overwhelming majority of
+  // requests land here, and land here without sending anything.
+  if (claimed.length === 0) return
+
+  const [ctx] = await sql`
+    SELECT count(*)::int AS origins,
+           count(*) FILTER (WHERE alerted_at > NOW() - INTERVAL '24 hours')::int AS recent
+    FROM api_key_ip_origins
+    WHERE api_key_id = ${keyId}
+  `
+
+  // The first network a key is ever used from is not a change, so it is not an
+  // alert. This is what the old `if (previousIp)` guard was for, and it is also
+  // why deploying this mails nobody: the table starts empty, so every live key's
+  // next request claims its first origin in silence.
+  if (!ctx || Number(ctx.origins) <= 1) return
+
+  if (Number(ctx.recent) >= ALERTS_PER_DAY) {
+    log.warn({ keyId, origin }, 'ip alert suppressed: daily cap reached')
+    return
+  }
+
+  await sql`UPDATE api_key_ip_origins SET alerted_at = NOW() WHERE id = ${claimed[0]!.id}`
+  await sendIpAlert(email, apiKey, origin, ip)
 }
 
 export function registerAuth(app: FastifyInstance) {
@@ -115,7 +190,7 @@ export function registerAuth(app: FastifyInstance) {
     // different hosts in production. The clock that writes the timestamp is the
     // clock that must read it.
     const rows = await sql`
-      SELECT k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, a.email,
+      SELECT k.id, k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, a.email,
              (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
              (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired
       FROM developer_api_keys k
@@ -152,18 +227,23 @@ export function registerAuth(app: FastifyInstance) {
 
     const previousIp = rows[0].lastSeenIp as string | null
 
-    // Update last seen IP (fire and forget, non-blocking)
+    // Update last seen IP (fire and forget, non-blocking). This is what the
+    // console's keys view renders, and since 2026-09-11 that is all it is: it
+    // used to also be the entire memory behind the alert below, which is why
+    // the alert could not tell a rotating privacy address from a new machine.
     if (clientIp && clientIp !== previousIp) {
       sql`
         UPDATE developer_api_keys
         SET last_seen_ip = ${clientIp}
         WHERE api_key = ${token}
       `.catch(() => {})
+    }
 
-      // Alert on IP change only if a previous IP exists (skip on first use)
-      if (previousIp) {
-        sendIpAlert(rows[0].email as string, token, previousIp, clientIp).catch(() => {})
-      }
+    // Fire and forget like the write above, but logged rather than swallowed:
+    // the failure mode being fixed here was invisible for two days.
+    if (clientIp) {
+      noteIpOrigin(rows[0].id as string, rows[0].email as string, token, clientIp, request.log)
+        .catch((err) => request.log.warn({ err }, 'ip origin check failed'))
     }
 
     request.accountId = rows[0].accountId as string
