@@ -13,7 +13,7 @@
 -- eleven mails a minute to one account owner for two days. The account was
 -- never compromised; the alert had no way to say so.
 --
--- So the row is per ORIGIN (the /64, or the IPv4 address — src/lib/ip-origin.ts)
+-- So the row is per ORIGIN (the /64, or the IPv4 address; src/lib/ip-origin.ts)
 -- and UNIQUE on it, which makes INSERT ... ON CONFLICT DO NOTHING the only
 -- claim that can win. Same shape as account_quota_alerts (009) and for the same
 -- two reasons: there are two machines, and a restart must not re-send.
