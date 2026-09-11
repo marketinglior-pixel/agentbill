@@ -10,11 +10,12 @@ import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { isId, INT4_MAX } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
 import {
-  STEP_1, STEP_2, STEP_3, REQUIRED_LINE,
+  STEP_1, STEP_2, STEP_INSTALL, STEP_ASK, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, taskSnippet, inlineSafeRef,
 } from '../ui/steps.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
+import { INSTALL_PY } from '../ui/site.js'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -1275,12 +1276,19 @@ ${MARK_CSS}
   .ns3 .btn { margin-top: var(--s4); width: auto; padding: var(--s3) var(--s5); }
   .ns3 .fine { margin-top: var(--s3); max-width: 78ch; }
   .ns3 p code, .ns3 .fine code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
-  /* A div, never a pre: scripts/snippets/extract.mjs harvests every pre under
-     src/routes and executes it, and this block carries an interpolated job
-     name, so it would be recorded as "dynamic" with empty code and quietly
-     drop out of the gate. Its static twin on /register#done is the copy CI
-     actually runs; the two are built by taskSnippet() so they cannot drift.
-     Same convention as .cmds elsewhere in this file. */
+  /* One class, two tags, on purpose. scripts/snippets/extract.mjs harvests
+     every pre element under src/routes and executes it, and records an
+     interpolated one as "dynamic" with empty code, which drops it from the
+     gate in silence. So the personalised sample (the reader's job name inside
+     it) and the install line are divs, and the pre-save sample, a literal, is
+     the one pre element: it is the copy CI actually runs, and the hygiene gate
+     holds it byte-identical to taskSnippet(). Same convention as .cmds here.
+
+     The tag name is spelled without angle brackets in this comment and the one
+     beside the sample, on purpose. The harvester's regex reads a bare tag in a
+     comment as an opening tag and swallows the file to the next closing one,
+     which took this very sample out of CI for one commit on 2026-09-11 and
+     showed up only as python 38 -> 37 in the inventory. */
   .snip { margin-top: var(--s3); background: var(--bg-deep); border: 1px solid var(--border);
           border-radius: var(--r-control); padding: var(--s3); font-family: var(--mono);
           font-size: var(--fs-micro); color: var(--code-ink); line-height: 1.6;
@@ -1820,7 +1828,7 @@ function ceilingForm(p: Page): string {
   // makes the claim true for every account rather than for the common one.
   const wholeSet = p.d.taskCount <= p.d.tasks.length
   const started = !wholeSet || p.d.tasks.some((t) => Number(t.usedUnits) > 0 || Number(t.reservedUnits) > 0)
-  if (!started) return threeSteps(p, unstartedJob(p), { heading: false })
+  if (!started) return onboardingSteps(p, unstartedJob(p), { heading: false })
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
@@ -2018,7 +2026,8 @@ function limitsBlock(p: Page, rangeLabel: string): string {
 }
 
 /**
- * The onboarding path: three numbered steps, and steps 1 and 2 are the form.
+ * The onboarding path: four numbered steps. Steps 1 and 2 are the form, step 3
+ * is the install, step 4 is the ask and the sample it makes runnable.
  *
  * This replaced a first run that led with a raw curl asking for 5 units
  * against a per-request ceiling of 1. That taught two wrong things at once. It
@@ -2027,18 +2036,22 @@ function limitsBlock(p: Page, rangeLabel: string): string {
  * console exists to set. A reader who followed it learned the code-opens-the-
  * job order that the ceiling form (2026-09-10) reversed.
  *
- * The words are in src/ui/steps.ts, shared with /register#done, so the screen
- * that hands over the key and the screen that does the work cannot describe
- * the same path in different terms.
+ * The words are in src/ui/steps.ts, and since 2026-09-11 this is the ONLY
+ * surface that renders them. /register#done used to render the same three
+ * steps under numerals 1/2/3 beneath an unnumbered install bullet, which made
+ * "step 1" the third thing to do and put the terminal before the console;
+ * dogfood run 3 ended on that screen with "I do not understand what I need to
+ * do". The key screen now hands over the key and offers one action, this
+ * page. One owner of the sequence means one numbering.
  *
  * `job` is the reader's own row once one exists and nothing has been spent
- * under it. It is what turns step 3 from a sample into their sample: the name
+ * under it. It is what turns step 4 from a sample into their sample: the name
  * they typed, rendered into lines that run as pasted. It comes from d.tasks
  * (ORDER BY updated_at DESC) and never from the query string; the one place a
  * task_ref off the URL is echoed is the flash line, and verifyFlash already
  * proves that name against a row on this account before it renders.
  */
-function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): string {
+function onboardingSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): string {
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
@@ -2070,19 +2083,48 @@ function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): s
   const snipAgent = job && job.agentId !== CONSOLE_AGENT && inlineSafeRef(job.agentId) ? job.agentId : SAMPLE_AGENT
   const ceiling = job ? Number(job.ceilingUnits) : 0
 
+  // Two containers for one sample, and the tag is the point. The personalised
+  // copy carries the reader's job name, so it is interpolated and MUST be a
+  // div: scripts/snippets/extract.mjs executes every pre element under
+  // src/routes and records an interpolated one as "dynamic" with empty code,
+  // which drops it from the gate in silence. The pre-save copy below is a
+  // literal, so it CAN be a pre, and it has to be: it is the repo's one executed
+  // task_ref-only sample. It lived on /register#done until 2026-09-11; the
+  // hygiene gate asserts it is byte-identical to taskSnippet(), so the copy CI
+  // runs and the copy a reader pastes cannot drift apart.
   const done = job
     ? `<p>${safe
-        ? 'Here it is with your job in it. It runs as pasted, once <code>pip install agentbill-sdk</code> has run and the key is in your environment.'
-        : `Here it is, once <code>pip install agentbill-sdk</code> has run and the key is in your environment. Change the job name before you run it: yours carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Put <code>${esc(job.taskRef)}</code> in both places, or the call names a job you do not have and the SDK raises <code>TaskCeilingRequiredError</code>.`}</p>
+        ? 'Here it is with your job in it. It runs as pasted.'
+        : `Here it is. Change the job name before you run it: yours carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Put <code>${esc(job.taskRef)}</code> in both places, or the call names a job you do not have and the SDK raises <code>TaskCeilingRequiredError</code>.`}</p>
        <div class="snip">${esc(taskSnippet(snipRef, snipAgent))}</div>
        <p class="fine">On the next call that prints <span class="out">approved: True</span> and <span class="out">units left: ${num(Math.max(0, ceiling - 1))}</span>, because a call that says nothing about its worth counts as one unit. Run it ${num(ceiling)} ${ceiling === 1 ? 'time' : 'times'} and the one after is refused.</p>`
-    : `<p>Save the job above and this page hands these lines back with your own job name in them. Run <code>pip install agentbill-sdk</code> first, and put the key in your environment.</p>
-       <div class="snip">${esc(taskSnippet())}</div>`
+    : `<p>Save the job above and this step hands these lines back with your own job name in them.</p>
+       <pre class="snip">import os
+from agentbill import AgentBillClient, TaskCeilingExceededError
+
+key = os.environ["AGENTBILL_API_KEY"]
+client = AgentBillClient(api_key=key)
+
+try:
+    result = client.preflight(
+        agent_id="researcher",
+        task_ref="job-1",
+    )
+    print("approved:", result.approved)
+    print("units left:", result.task_remaining_units)
+    # your model call runs here
+    client.record(
+        agent_id="researcher",
+        task_ref="job-1",
+        units=1,
+    )
+except TaskCeilingExceededError as refused:
+    print(refused)</pre>`
 
   return `<div class="empty frame">
       ${opts.heading ? '<h2>Nothing here yet, and that is the honest state.</h2>' : ''}
       ${said}
-      <p>Three steps put a row on this page, and the first two are on this screen.</p>
+      <p>${SEQUENCE_INTRO}</p>
       <form method="POST" action="/app/tasks" class="setf3" autocomplete="off">
         <div class="ns3"><span class="ns3-n">1</span><div>
           <p>${STEP_1}</p>
@@ -2101,8 +2143,13 @@ function threeSteps(p: Page, job: TaskRow | null, opts: { heading: boolean }): s
         </div></div>
       </form>
       <div class="ns3"><span class="ns3-n">3</span><div>
-        <p>${STEP_3}</p>
+        <p>${STEP_INSTALL}</p>
+        <div class="snip">${INSTALL_PY}</div>
+      </div></div>
+      <div class="ns3"><span class="ns3-n">4</span><div>
+        <p>${STEP_ASK}</p>
         ${done}
+        <p class="fine">${KEY_ENV_LINE}</p>
         <p class="fine">${REQUIRED_LINE}</p>
       </div></div>
       <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins.</p>
@@ -2130,7 +2177,7 @@ function overviewView(p: Page, rangeLabel: string): string {
                  Object.keys(d.byReason).length === 0 && d.series.every((s) => s.units === 0 && s.blocks === 0) &&
                  d.decisions.length === 0 && !p.filter.task && !p.filter.agent
   if (virgin) {
-    return `${threeSteps(p, unstartedJob(p), { heading: true })}
+    return `${onboardingSteps(p, unstartedJob(p), { heading: true })}
     <h2 id="limits">What refuses a call on this account, today <span>in the order preflight checks it</span></h2>
     ${limitsBlock(p, rangeLabel)}`
   }
