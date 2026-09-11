@@ -907,6 +907,18 @@ ok('[onboarding] "one job is one budget" is read before the name task_ref',
    iBudget8 > -1 && iRef8 > -1 && iBudget8 < iRef8, `budget at ${iBudget8}, task_ref at ${iRef8}`)
 ok('[onboarding] and the page says whose decision the refusal is',
    virgin8.includes('Your code decides what the job does next'))
+// The same rule, on the surface it was never asserted on. #33 fixed the order
+// on /register#done and the homepage fold kept the old one: "Preflight says no
+// when this job is out of units" opened the only explanation above the fold
+// with our endpoint's name, to a reader who does not have one yet. Nothing in
+// this harness looked at / at all, which is why it survived the pass that
+// found it three screens away. The check compares INDEXES and not presence,
+// because presence was already true of the copy it replaces.
+const fold8 = await fetch(`${API}/`).then(r => r.text())
+const iWork8 = fold8.indexOf('asks whether this job has units left')
+const iPre8 = fold8.search(/\bpreflight\b/i)
+ok('[fold] the concept is read before the name preflight',
+   iWork8 > -1 && iPre8 > -1 && iWork8 < iPre8, `concept at ${iWork8}, preflight at ${iPre8}`)
 // The sample is task_ref-only on purpose: the ceiling is set before the code
 // runs, and a task_ceiling sent after the job exists is not applied.
 // Before a save the sample is a literal <pre>, the one copy CI executes; the

@@ -245,10 +245,10 @@ export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: `AgentBill · ${HEADLINE}`,
-      description: 'A ceiling on this job, not on the month. Preflight says no when this job is out of the units you define. Your code decides what next. Free tier, API key in 30 seconds, no card.',
+      description: 'A ceiling on this job, not on the month. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next. Free tier, API key in 30 seconds, no card.',
       path: '/',
       og: {
-        description: 'A ceiling on this job, not on the month. Preflight says no when this job is out of units. Your code decides what next.',
+        description: 'A ceiling on this job, not on the month. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next.',
       },
       // The product entity lives in ui/ld.ts and is emitted identically here
       // and on /pricing under one @id. It used to be typed in both files and
@@ -552,8 +552,9 @@ ${siteNav('/')}
   <header class="hero wrap">
     <div>
       <h1>${HEADLINE}.</h1>
-      <p class="sub">Preflight says no when this job is out of units. Your code decides
-      what next.</p>
+      <p class="sub">One call before the work asks whether this job has units left, and
+      preflight is that call. When this job is out, the answer is no and your code
+      decides what next.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="btn-ghost btn-lg" href="/docs">Read the docs</a>
