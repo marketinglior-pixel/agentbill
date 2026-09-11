@@ -6,7 +6,7 @@ import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFU
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoConsole, decisionLine } from './app.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
-import { PANEL_CSS, requestPanel, KEY_COMMANDS } from '../ui/panels.js'
+import { PANEL_CSS } from '../ui/panels.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { TABS_CSS, TABS_JS, TABS_HASH, langTabs } from '../ui/tabs.js'
 import { TIERS_CSS, tierCards, SAME_FEATURES } from '../ui/tiers.js'
@@ -24,14 +24,20 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // Restructured 2026-09-09 for scan speed, measured against a stopwatch and
 // not against taste: problem, demo, benefits, pricing, close, in that order,
 // and each stop is a short head beside a product surface rather than an
-// argument. The hero says what the product is in one line and how it works
-// in one sentence; the playground sits directly under it as the page's one
-// full-bleed band; the provider-cap argument is three sourced cards instead
-// of an essay; each benefit row is an eyebrow, a head, two sentences and a
-// panel; the tiers are the same four cards /pricing renders; and the list of
-// what the product does not do is kept, compressed to one line per item.
+// argument. The fold was rebuilt 2026-09-12 with pressplaced.com as the craft
+// reference: the hero is the headline, the locked sentence under it, one
+// button, and ONE explanatory demo (dualState below) in the place a code
+// frame used to be. The frame moved one screen down, into the request-path
+// row, where a reader who has understood the demo meets the integration. The
+// playground sits directly under the hero as the page's one full-bleed band;
+// the provider-cap argument is three sourced cards instead of an essay; each
+// benefit row is an eyebrow, a head, two sentences and a panel; the tiers
+// are the same four cards /pricing renders; and the list of what the product
+// does not do is kept, compressed to one line per item. The keys row and the
+// console-overview row came out the same day: a reader on the cold path
+// meets a dashboard after a refusal, not before one.
 // Nothing here is a logo wall, a count or a testimonial: there is nobody to
-// name yet, and design.md records why the install line stands in that slot.
+// name yet.
 
 const esc = (s: unknown) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -99,105 +105,10 @@ function refusalPanel(): string {
 }
 
 /**
- * The key lifecycle: the two sample keys the console lists, in the status
- * vocabulary keys.ts computes, and the three endpoints that move a key
- * through it. Statuses are re-derived here from the same fields keys.ts reads
- * (revoked_at, expires_at); the sample holds two active keys, one with an
- * expiry, and the panel says so rather than inventing a revoked one.
- */
-function keysPanel(): string {
-  const now = Date.now()
-  const rows = demoConsole().keys.map((k) => {
-    const days = k.expiresAt ? Math.round((k.expiresAt.getTime() - now) / 86_400_000) : null
-    const status = k.revokedAt ? 'revoked' : days != null && days <= 0 ? 'expired' : 'active'
-    return `
-        <div class="key">
-          <div class="key-top">
-            <span class="ref">${esc(k.label ?? 'key')}</span>
-            <span class="agent">${esc(k.apiKey.slice(0, 12))}&hellip;</span>
-            <span class="chip ${status === 'active' ? 'flow' : 'fail'}">${status}</span>
-          </div>
-          <div class="key-meta">${days != null ? `expires in ${num(days)}d` : 'no expiry'}
-            <span class="dimtxt">&middot; last seen from ${esc(k.lastSeenIp ?? 'nowhere yet')}</span></div>
-        </div>`
-  }).join('')
-  const cmds = KEY_COMMANDS.map(([ep, what]) => `
-        <div class="cmd"><b>${esc(ep)}</b><span>${esc(what)}</span></div>`).join('')
-  return `<div class="panel">
-        <div class="panel-h"><span>Keys</span><span>revoke, rotate, expire</span></div>
-        ${rows}
-        <div class="cmds">${cmds}
-        </div>
-        <div class="panel-f">Sample keys, the same ones the demo console lists. Neither authenticates anything.</div>
-      </div>`
-}
-
-/**
- * The console's overview, reduced: three tiles summed over the same thirty
- * day series the console draws, the refusals by day under them, and every
- * customer by share of spend. The tiles are sums over the series, never
- * typed, so this panel and the console cannot disagree; the window is named
- * in each label, the way the console names it.
- */
-function consolePanel(): string {
-  const d = demoConsole()
-  const blocked = d.series.reduce((a, x) => a + x.blocks, 0)
-  const refused = d.series.reduce((a, x) => a + x.refused, 0)
-  const avgAsk = blocked ? Math.round(refused / blocked) : 0
-  const max = Math.max(1, ...d.series.map((s) => s.blocks))
-  const bars = d.series.map((s) => s.blocks > 0
-    ? `<i style="height:${Math.max(6, Math.round((s.blocks / max) * 100))}%"></i>`
-    : '<i class="zero"></i>').join('')
-  const total = d.customerTotal
-  const customers = [...d.customers].sort((a, b) => b.usedUnits - a.usedUnits).map((c) => {
-    const share = total > 0 ? Math.round((c.usedUnits / total) * 100) : 0
-    const atLimit = c.limitUnits != null && c.usedUnits >= c.limitUnits
-    return `
-          <div class="cust">
-            <span class="ref">${esc(c.customerRef)}</span>
-            <span class="cust-n">${num(c.usedUnits)}<span class="dimtxt"> units</span></span>
-            <span class="sbar" aria-hidden="true"><i class="${atLimit ? 'held' : ''}" style="width:${Math.max(2, share)}%"></i></span>
-            <span class="cust-s">${share}%</span>
-          </div>`
-  }).join('')
-  return `<div class="panel con">
-        <div class="panel-h"><span>Console &middot; overview</span><span>sample account, last 30 days</span></div>
-        <div class="con-grid">
-          <div class="con-l">
-            <div class="tiles">
-              <div class="tile">
-                <div class="tile-l">Refused &middot; 30d</div>
-                <div class="tile-v held">${num(blocked)}</div>
-                <div class="tile-f">calls that never ran</div>
-              </div>
-              <div class="tile">
-                <div class="tile-l">Units refused &middot; 30d</div>
-                <div class="tile-v">${num(refused)}</div>
-                <div class="tile-f">${num(avgAsk)} units per refused call</div>
-              </div>
-              <div class="tile">
-                <div class="tile-l">Live tasks &middot; now</div>
-                <div class="tile-v">${num(d.taskLive)}</div>
-                <div class="tile-f">${d.taskNear ? `${num(d.taskNear)} within a fifth of the ceiling` : 'all under their ceilings'}</div>
-              </div>
-            </div>
-            <div class="tile-l">Refused, by day &middot; 30d</div>
-            <div class="spark" aria-hidden="true">${bars}</div>
-          </div>
-          <div class="con-r">
-            <div class="tile-l">Customers by share of spend &middot; all time</div>
-            ${customers}
-            <div class="con-note">${num(d.overruns)} call recorded past a ceiling, kept as a leak. The one number here that should be zero.</div>
-          </div>
-        </div>
-        <div class="panel-f">Sample account, the same rows the demo console shows. Refused is calls; units refused is what they asked for, not a dollar figure.</div>
-      </div>`
-}
-
-/**
- * The answer under the hero's code frame: the body POST /preflight sends when
- * the sample's own call is refused, painted the way the playground paints a
- * response. The object comes from playground.ts, which owns the run's numbers.
+ * The wire body POST /preflight sends when the sample's own call is refused,
+ * painted the way the playground paints a response. Under the code frame and
+ * inside the fold's job card, from one object: playground.ts owns the run's
+ * numbers, so the two places and the playground cannot disagree.
  */
 function heroAnswer(): string {
   const body = heroRefusalBody()
@@ -208,6 +119,55 @@ function heroAnswer(): string {
     return `<span class="k">"${k}"</span>: ${val}`
   })
   return `{ ${fields.join(', ')} }`
+}
+
+/**
+ * The month-window sample on the fold's first card, as a share of a window.
+ * A percentage and not a count, on purpose: this product has no month meter
+ * to read, and a number of units or dollars on that card would be a claim
+ * about a meter we do not run. The card says "sample" in its own frame.
+ */
+const MONTH_SAMPLE_PCT = 4
+
+/**
+ * The fold's one demo: two meters on one account at one moment. The month
+ * window has room and nothing fires. This job is out, and the body under it
+ * is what POST /preflight answered, from heroRefusalBody(). The two cards are
+ * the whole argument of the page in the time it takes to read two chips:
+ * a ceiling on this job, not on the month.
+ *
+ * The caption under it says what the ceiling is and is not, and stops there.
+ * It does not say nobody else has one; a session or run ceiling can be
+ * built by hand on any gateway, and the claims rules do not allow the word
+ * "only" on a surface nobody can check.
+ */
+function dualState(): string {
+  const body = heroRefusalBody()
+  const used = Number(body.task_used_units ?? 0)
+  const ceil = Number(body.task_ceiling ?? 1)
+  const ask = Number(body.estimated_units ?? 1)
+  const pct = Math.min(100, (used / ceil) * 100)
+  return `<figure class="demo">
+      <div class="dcard month">
+        <div class="dhead"><span>Month window &middot; the organization</span><span class="dtag">sample</span></div>
+        <div class="dbody">
+          <div class="dline"><b>${MONTH_SAMPLE_PCT}%</b> of the month used</div>
+          <div class="track" aria-hidden="true"><i class="used" style="width:${MONTH_SAMPLE_PCT}%"></i></div>
+          <div class="dfoot"><span class="chip flow">still under the cap</span><span class="dwhen">resets on the 1st</span></div>
+        </div>
+      </div>
+      <div class="dlink"><span>same account, same minute</span></div>
+      <div class="dcard job">
+        <div class="dhead"><span>This job</span><span class="dref">task_ref <b>${esc(String(body.task_ref))}</b></span></div>
+        <div class="dbody">
+          <div class="dline"><b>${num(used)}</b> of ${num(ceil)} units &middot; this call asks ${num(ask)}</div>
+          <div class="track" aria-hidden="true"><i class="used held" style="width:${pct.toFixed(1)}%"></i></div>
+          <div class="dfoot"><span class="chip held">refused</span><span class="dwhen">out of units &middot; <b>approved: false</b></span></div>
+          <code class="co-json">${heroAnswer()}</code>
+        </div>
+      </div>
+      <figcaption class="dcap">job ceiling &middot; not a month window &middot; not a proxy</figcaption>
+    </figure>`
 }
 
 /**
@@ -264,9 +224,11 @@ export async function homeRoute(app: FastifyInstance) {
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: design.md (paper, type and accent are theme.ts) · design-system: design.md · designed-as-app
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
-     * order: hero, playground band, three sourced cards, five rows (the fifth wide), four tier cards,
-     *        the not-list, the close · one grid break, the playground band
-     * pre-emit critique: P5 H5 E4 S5 R5 V4 */
+     * order: hero (copy beside the dual-state demo), playground band, three sourced cards,
+     *        three rows (ceilings, the request path with the code frame, the receipt),
+     *        four tier cards, the not-list, the close · one grid break, the playground band
+     * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action; nothing of its
+     *        product, palette or claims · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
     :root { --shell: 1080px;
             /* Page-local: the playground band's ground and the code-comment ink.
@@ -290,24 +252,59 @@ export async function homeRoute(app: FastifyInstance) {
        than as a word in a sentence. No chip ground: this is body copy. */
     .mono-in { font-family: var(--mono); font-size: .92em; color: var(--text); font-weight: 500; }
 
-    /* Hero: a diptych. One line of what it is and one sentence of how it works
-       on the left, the whole integration on the right. Centred against each
-       other because this is one row, not a sibling of other rows; the diptychs
-       below align start, per design.md. */
-    .hero { padding-block: var(--s8) var(--s8); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            gap: var(--gap); align-items: center; }
-    h1 { color: var(--white); max-width: 15ch; }
-    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 42ch; line-height: 1.55; }
+    /* Hero: a diptych. One line of what it is, one sentence of how it works
+       and one button on the left; the dual-state demo on the right. Centred
+       against each other because this is one row, not a sibling of other
+       rows; the diptychs below align start, per design.md. The block padding
+       is the page's largest on purpose: the reference reads because of what
+       is NOT next to its headline. */
+    .hero { padding-block: 96px 104px; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 10fr);
+            gap: 80px; align-items: center; }
+    h1 { color: var(--white); max-width: 12ch; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 40ch; line-height: 1.55; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-    /* The hero pair runs one size up from the site's buttons. The ghost gives
-       back the pixel its border adds so the two sit at one height. */
-    .btn-lg { padding: 14px 26px; font-size: var(--fs-body); border-radius: 10px; }
-    .btn-ghost.btn-lg { padding: 13px 25px; }
-    .hero-install { margin-top: var(--s5); }
+    /* One primary action on the fold, one size up from the site's buttons. */
+    .btn-lg { padding: 15px 28px; font-size: var(--fs-body); border-radius: 10px; }
     .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
     .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
     .trust b { color: var(--muted); font-weight: 500; }
+
+    /* The dual-state demo. Two cards on the panel frame every product surface
+       uses, staggered the way the reference stacks its pair: the month card
+       narrower and quieter, the job card wider, lower and carrying the
+       answer. The stagger is width and margin, not a transform, so nothing
+       moves and nothing is drawn over anything. */
+    .demo { margin: 0; min-width: 0; display: grid; }
+    .dcard { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
+             border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); overflow: hidden; min-width: 0; }
+    .dcard.month { width: 82%; }
+    .dcard.job { width: 94%; margin-inline-start: auto; }
+    .dhead { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: 10px 16px;
+             border-bottom: 1px solid var(--border); background: var(--surface2); box-shadow: var(--edge);
+             font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+    .dhead .dref { text-transform: none; letter-spacing: 0; }
+    .dhead .dref b { color: var(--text); font-weight: 500; }
+    /* "sample" at the chip register, inside the frame, so a screenshot of the
+       card carries the label with it. */
+    .dtag { font-size: var(--fs-chip); letter-spacing: .1em; border: 1px solid var(--border2); border-radius: var(--r-chip);
+            padding: 1px 6px; color: var(--dim); }
+    .dbody { padding: 16px 16px 18px; display: grid; gap: 10px; }
+    .dline { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .dline b { color: var(--text); font-weight: 500; }
+    .dfoot { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+    .dfoot .chip { margin-left: 0; }
+    .dwhen { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+    .dwhen b { color: var(--red); font-weight: 700; }
+    .demo .co-json { margin-top: 4px; padding: 12px 14px; background: var(--bg-deep); border: 1px solid var(--border);
+                     border-radius: var(--r-control); font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65; }
+    /* Between the cards: the one fact that makes them one picture. A tick, then
+       the label, at the month card's left edge. */
+    .dlink { display: flex; align-items: center; gap: var(--s3); padding: 8px 0 8px 18px;
+             font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+    .dlink::before { content: ""; width: 1px; height: 22px; background: var(--border-strong); }
+    .dcap { margin-top: 14px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); text-align: right;
+            letter-spacing: .02em; }
 
     /* The code frame. Its label bar carries the language tabs on the left and
        the caption on the right; the bar keeps the 44px floor every control on
@@ -343,9 +340,13 @@ export async function homeRoute(app: FastifyInstance) {
     .co-json .f { color: var(--red); font-weight: 700; }
     .co-n { margin-top: 8px; color: var(--dim); }
     .co-n b { color: var(--muted); font-weight: 500; }
+    /* The install line, under the request-path row's text, following the
+       language tab in the frame beside it so the pill and the sample always
+       name the same package. */
+    .row-install { margin-top: 22px; }
 
-    /* The hero's docs link is a route; the playground is one scroll down. The
-       nav is sticky, so the anchor lands beneath it rather than under it. */
+    /* The playground is one scroll down and the nav is sticky, so the anchor
+       lands beneath it rather than under it. */
     #playground { scroll-margin-top: calc(var(--banner-height) + var(--s4)); }
 
     /* Sections. Uneven on purpose: the argument opens generously, the rows sit
@@ -389,14 +390,6 @@ export async function homeRoute(app: FastifyInstance) {
        and the refusals panel rendered 150px wide beside its own paragraph. */
     .dip.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
     .dip.flip .dip-text { order: 2; }
-    /* The wide row. The fifth row is the console, which is a workbench and
-       wants the shell's full width: its head sits in the row's own columns
-       (eyebrow and head left, argument right) and the panel spans both beneath. */
-    .dip.wide { grid-template-columns: minmax(0, 1fr); row-gap: var(--s6); }
-    .dip.wide .dip-text { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-                          gap: var(--gap); align-items: start; padding-top: 0; }
-    .dip.wide .dip-text h2 { margin-bottom: 0; }
-    .dip.wide .dip-text p { margin-top: 4px; max-width: 58ch; }
     .dip h2 { color: var(--white); margin-bottom: var(--s4); max-width: 14ch; }
     .dip p { color: var(--muted); line-height: 1.7; max-width: 44ch; }
     .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
@@ -408,14 +401,13 @@ export async function homeRoute(app: FastifyInstance) {
 
     /* Panel contents. The frame (.panel) comes from ui/panels.ts; what goes
        inside is this page's, in the console's own vocabulary. */
-    .task, .key { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
+    .task { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
     .task:last-of-type { border-bottom: 0; }
-    .task-top, .ref-top, .key-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-    .key-top { margin-bottom: 6px; }
+    .task-top, .ref-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
     .ref { font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
     .agent { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
-    .task-nums, .key-meta { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted);
-                            font-variant-numeric: tabular-nums; }
+    .task-nums { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted);
+                 font-variant-numeric: tabular-nums; }
     .task-nums { margin-top: 8px; }
     .task-nums b { color: var(--text); font-weight: 500; }
     .dimtxt { color: var(--dim); }
@@ -437,45 +429,6 @@ export async function homeRoute(app: FastifyInstance) {
     .ref-row:last-of-type { border-bottom: 0; }
     .ref-row .chip { margin-left: 0; }
     .ref-msg { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
-
-    /* The key endpoints, under the key rows: a ledger, not a table. */
-    .cmds { padding: 6px 18px 10px; }
-    .cmd { display: grid; grid-template-columns: minmax(0, 11em) minmax(0, 1fr); gap: var(--s3);
-           padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-small); }
-    .cmd:last-child { border-bottom: 0; }
-    .cmd b { font-family: var(--mono); font-weight: 500; color: var(--text); white-space: nowrap; }
-    .cmd span { color: var(--muted); line-height: 1.55; }
-
-    /* The console panel. Two columns inside the frame, the split the console
-       itself draws between activity and customers. Tiles are the console's
-       tiles: a tracked label, the figure, one line of footnote. */
-    .con-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
-    .con-l { padding: 18px 20px 20px; }
-    .con-r { padding: 18px 20px 20px; border-left: 1px solid var(--border); background: var(--bg-deep); }
-    .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); margin-bottom: var(--s5); }
-    .tile { min-width: 0; }
-    .tile-l { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em; text-transform: uppercase;
-              color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tile-v { font-family: var(--display); font-size: var(--fs-figure); font-weight: 700; letter-spacing: -0.02em;
-              line-height: 1.1; color: var(--text); margin-top: 6px; font-variant-numeric: tabular-nums; }
-    .tile-v.held { color: var(--green); }
-    .tile-f { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-top: 6px; line-height: 1.5; }
-    .spark { display: flex; align-items: flex-end; gap: 3px; height: 64px; margin-top: 10px;
-             border-bottom: 1px solid var(--border); padding-bottom: 1px; }
-    .spark i { flex: 1 1 0; min-width: 0; display: block; background: var(--green); border-radius: 1px 1px 0 0; }
-    .spark i.zero { height: 2px; background: var(--surface3); }
-    .cust { display: grid; grid-template-columns: minmax(0, 1fr) auto 72px 3.2em; gap: var(--s3); align-items: center;
-            padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
-    .cust:first-of-type { margin-top: 6px; }
-    .cust-n { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); font-variant-numeric: tabular-nums;
-              white-space: nowrap; }
-    .sbar { display: block; height: 8px; background: var(--surface3); border-radius: var(--r-pill); overflow: hidden; }
-    .sbar i { display: block; height: 100%; background: var(--flow); border-radius: var(--r-pill); }
-    .sbar i.held { background: var(--green); }
-    .cust-s { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); text-align: right;
-              font-variant-numeric: tabular-nums; }
-    .con-note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--fail-ink); line-height: 1.55;
-                margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
 
     /* Pricing: the four cards /pricing renders, from ui/tiers.ts. */
     .pricing h2 { color: var(--white); margin-bottom: var(--s2); max-width: 22ch; }
@@ -503,9 +456,10 @@ export async function homeRoute(app: FastifyInstance) {
     .final-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
     @media (max-width: ${BP.lg}px) {
-      .hero, .dip, .dip.flip, .dip.wide .dip-text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .hero, .dip, .dip.flip { grid-template-columns: minmax(0, 1fr); gap: 40px; }
       .hero { align-items: start; padding-block: var(--s7) var(--s7); }
-      .dip.wide .dip-text { gap: 0; }
+      /* One column: the stagger has no second column to play against. */
+      .dcard.month, .dcard.job { width: 100%; margin-inline-start: 0; }
       .dip.flip .dip-text { order: 0; }
       .dip-text { padding-top: 0; }
       .dip { padding-block: 36px 36px; }
@@ -514,8 +468,6 @@ export async function homeRoute(app: FastifyInstance) {
       .pricing { padding-block: 80px 0; }
       .sub { max-width: 54ch; }
       .src-grid { grid-template-columns: minmax(0, 1fr); }
-      .con-grid { grid-template-columns: minmax(0, 1fr); }
-      .con-r { border-left: 0; border-top: 1px solid var(--border); }
     }
     @media (max-width: ${BP.md}px) {
       .nots { grid-template-columns: minmax(0, 1fr); }
@@ -534,13 +486,7 @@ export async function homeRoute(app: FastifyInstance) {
       /* The caption in the label bar yields to the tabs at 390px; the tabs
          carry the meaning and the caption repeats the section under it. */
       .code-head > span { display: none; }
-      .tiles { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-      /* A tracked label that cannot fit a 150px tile wraps here rather than
-         losing its window to an ellipsis. */
-      .tile-l { white-space: normal; overflow: visible; text-overflow: clip; }
-      .cust { grid-template-columns: minmax(0, 1fr) auto 3.2em; }
-      .cust .sbar { display: none; }
-      .cmd { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      .dhead { flex-direction: column; gap: 2px; }
       .final-row { display: grid; grid-template-columns: minmax(0, 1fr); }
     }
 `,
@@ -550,91 +496,17 @@ ${siteNav('/')}
 <main>
 
   <header class="hero wrap">
-    <div>
+    <div class="hero-copy">
       <h1>${HEADLINE}.</h1>
       <p class="sub">One call before the work asks whether this job has units left, and
       preflight is that call. When this job is out, the answer is no and your code
       decides what next.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
-        <a class="btn-ghost btn-lg" href="/docs">Read the docs</a>
-      </div>
-      <!-- The step that needs no account. The references all put proof beside the
-           primary action; this product has two external signups, so a logo wall is
-           unavailable and inventing one would break the claims rules. The install
-           line is the honest equivalent: something the reader can act on now. It
-           follows the language tab in the code frame, so the pill and the sample
-           always name the same package. -->
-      <div class="hero-install">
-        <div data-lang="python">${copyPill('install-py', INSTALL_PY)}</div>
-        <div data-lang="node" hidden>${copyPill('install-node', 'npm install agentbill')}</div>
       </div>
       <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
     </div>
-
-    <!-- Neither sample passes task_ceiling, and that is not an omission.
-         The frame's last line is "run 42 of the retry loop", so job-142
-         already exists, and preflight.ts does not apply a task_ceiling once
-         it does: the field would be read by a visitor as the way a ceiling is
-         set while doing nothing at all. It is also the order the onboarding
-         replaced, about one screen from /register's step 3 saying the call
-         carries the job's name and nothing about the budget. The comment now
-         names where the 500 came from, and the answer below still shows
-         task_ceiling because the server really sends it. Opening a job from
-         code keeps its documentation in /docs and in the prose below. -->
-    <div class="code-block">
-      <div class="code-head">${langTabs([['python', 'Python'], ['node', 'Node']], 'python', 'Language of the sample')}<span>the whole integration</span></div>
-      <div class="code-body">
-        <pre id="code-python" role="tabpanel" aria-labelledby="tab-python" data-lang="python">from agentbill import AgentBillClient
-
-client = AgentBillClient(
-    api_key="agb_your_key")
-
-<span class="cmt"># You decide what a unit is worth.</span>
-<span class="cmt"># job-142 has a ceiling of 500, set</span>
-<span class="cmt"># in the console. Every call passing</span>
-<span class="cmt"># this task_ref burns the same one.</span>
-client.preflight(agent_id="researcher",
-                 task_ref="job-142",
-                 estimated_units=12)
-
-<span class="cmt"># your provider call goes here</span>
-
-<span class="cmt"># settle, or the units stay held</span>
-<span class="cmt"># until the reservation expires.</span>
-client.record(agent_id="researcher",
-              task_ref="job-142",
-              units=12)
-
-<span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
-        <pre id="code-node" role="tabpanel" aria-labelledby="tab-node" data-lang="node" hidden>import { preflight, record }
-  from 'agentbill'
-
-<span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
-<span class="cmt">// You decide what a unit is worth.</span>
-<span class="cmt">// job-142 has a ceiling of 500, set</span>
-<span class="cmt">// in the console. Every call passing</span>
-<span class="cmt">// this taskRef burns the same one.</span>
-await preflight({ agentId: 'researcher',
-                  taskRef: 'job-142',
-                  estimatedUnits: 12 })
-
-<span class="cmt">// your provider call goes here</span>
-
-<span class="cmt">// settle, or the units stay held</span>
-<span class="cmt">// until the reservation expires.</span>
-await record({ agentId: 'researcher',
-               taskRef: 'job-142',
-               units: 12 })
-
-<span class="out-dim">// run 42 of the retry loop:</span></pre>
-      </div>
-      <div class="code-out">
-        <div class="co-l"><span>POST /preflight</span><span class="no">200 &middot; refused</span></div>
-        <code class="co-json">${heroAnswer()}</code>
-        <p class="co-n">The SDK raises <b>${REFUSAL.name}</b>. Your code decides what happens next.</p>
-      </div>
-    </div>
+    ${dualState()}
   </header>
 
 ${playgroundSection()}
@@ -675,8 +547,76 @@ ${playgroundSection()}
         us, no provider keys held. If we are unreachable, the SDK raises inside your process and your
         code decides.</p>
         <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
+        <!-- The step that needs no account, following the language tab in the
+             frame beside it so the pill and the sample always name the same
+             package. -->
+        <div class="row-install">
+          <div data-lang="python">${copyPill('install-py', INSTALL_PY)}</div>
+          <div data-lang="node" hidden>${copyPill('install-node', 'npm install agentbill')}</div>
+        </div>
       </div>
-      ${requestPanel()}
+
+      <!-- Neither sample passes task_ceiling, and that is not an omission.
+           The frame's last line is "run 42 of the retry loop", so job-142
+           already exists, and preflight.ts does not apply a task_ceiling once
+           it does: the field would be read by a visitor as the way a ceiling is
+           set while doing nothing at all. It is also the order the onboarding
+           replaced. The comment names where the 500 came from, and the answer
+           below still shows task_ceiling because the server really sends it.
+           Opening a job from code keeps its documentation in /docs. -->
+      <div class="code-block">
+        <div class="code-head">${langTabs([['python', 'Python'], ['node', 'Node']], 'python', 'Language of the sample')}<span>the whole integration</span></div>
+        <div class="code-body">
+          <pre id="code-python" role="tabpanel" aria-labelledby="tab-python" data-lang="python">from agentbill import AgentBillClient
+
+client = AgentBillClient(
+    api_key="agb_your_key")
+
+<span class="cmt"># You decide what a unit is worth.</span>
+<span class="cmt"># job-142 has a ceiling of 500, set</span>
+<span class="cmt"># in the console. Every call passing</span>
+<span class="cmt"># this task_ref burns the same one.</span>
+client.preflight(agent_id="researcher",
+                 task_ref="job-142",
+                 estimated_units=12)
+
+<span class="cmt"># your provider call goes here</span>
+
+<span class="cmt"># settle, or the units stay held</span>
+<span class="cmt"># until the reservation expires.</span>
+client.record(agent_id="researcher",
+              task_ref="job-142",
+              units=12)
+
+<span class="out-dim">&gt;&gt;&gt; run 42 of the retry loop:</span></pre>
+          <pre id="code-node" role="tabpanel" aria-labelledby="tab-node" data-lang="node" hidden>import { preflight, record }
+  from 'agentbill'
+
+<span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
+<span class="cmt">// You decide what a unit is worth.</span>
+<span class="cmt">// job-142 has a ceiling of 500, set</span>
+<span class="cmt">// in the console. Every call passing</span>
+<span class="cmt">// this taskRef burns the same one.</span>
+await preflight({ agentId: 'researcher',
+                  taskRef: 'job-142',
+                  estimatedUnits: 12 })
+
+<span class="cmt">// your provider call goes here</span>
+
+<span class="cmt">// settle, or the units stay held</span>
+<span class="cmt">// until the reservation expires.</span>
+await record({ agentId: 'researcher',
+               taskRef: 'job-142',
+               units: 12 })
+
+<span class="out-dim">// run 42 of the retry loop:</span></pre>
+        </div>
+        <div class="code-out">
+          <div class="co-l"><span>POST /preflight</span><span class="no">200 &middot; refused</span></div>
+          <code class="co-json">${heroAnswer()}</code>
+          <p class="co-n">The SDK raises <b>${REFUSAL.name}</b>. Your code decides what happens next.</p>
+        </div>
+      </div>
     </div>
 
     <div class="dip row-close">
@@ -689,33 +629,6 @@ ${playgroundSection()}
         <a class="chip-link" href="/app?demo=1&amp;view=refusals">See the refusals &rarr;</a>
       </div>
       ${refusalPanel()}
-    </div>
-
-    <div class="dip flip row-close">
-      <div class="dip-text">
-        <p class="eyebrow">Keys</p>
-        <h2>Keys you can revoke in one call.</h2>
-        <p>Revoke, and the key is refused on its next request. Rotate, and the old key works for
-        24 hours, then revokes itself. Labels, expiry in days, 100 requests a minute per key, and an
-        email when a key is used from a new address. Your provider keys never touch us.</p>
-        <a class="chip-link" href="/app?demo=1&amp;view=keys">See the keys view &rarr;</a>
-      </div>
-      ${keysPanel()}
-    </div>
-
-    <div class="dip wide row-close">
-      <div class="dip-text">
-        <div>
-          <p class="eyebrow">Console</p>
-          <h2>What the ceiling saved you from, as rows.</h2>
-        </div>
-        <div>
-          <p>Calls refused and units refused over a window, the tasks burning down now, every customer
-          by share of spend, and the one number that should be zero.</p>
-          <a class="chip-link" href="/app?demo=1">Open the sample console &rarr;</a>
-        </div>
-      </div>
-      ${consolePanel()}
     </div>
   </section>
 
