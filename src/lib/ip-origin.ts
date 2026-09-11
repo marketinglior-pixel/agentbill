@@ -16,7 +16,7 @@ import { isIP } from 'node:net'
  *     28 changes between consecutive requests
  *
  * Twenty-eight per cent of requests "changed address" without anything moving.
- * Anything that treats a /128 as an identity — an alert, a rate-limit bucket —
+ * Anything that treats a /128 as an identity (an alert, a rate-limit bucket)
  * is counting that noise.
  *
  * Returns null for something that is not an address, so a caller can tell
@@ -43,12 +43,12 @@ export function ipOrigin(ip: string): string | null {
 /**
  * An IPv6 address as its eight numeric groups, `::` expanded and any dotted
  * IPv4 tail folded into the low two. isIP() has already said this parses, so
- * this is normalisation and not validation — but it returns null rather than
+ * this is normalisation and not validation, but it returns null rather than
  * guessing, because the result is written to the database and rendered into an
  * email, and a half-parsed address is worse than none.
  */
 function hextets(ip: string): number[] | null {
-  let s = ip.split('%')[0] ?? ''   // fe80::1%en0 — a zone is not part of the address
+  let s = ip.split('%')[0] ?? ''   // fe80::1%en0: a zone is not part of the address
 
   const dotted = /(?:^|:)((?:\d{1,3}\.){3}\d{1,3})$/.exec(s)
   if (dotted) {

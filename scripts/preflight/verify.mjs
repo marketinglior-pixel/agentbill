@@ -242,7 +242,7 @@ ok('the replacement key from the rotation is untouched', await alive(rot.body.ap
 // The alert compared the request against a single column, last_seen_ip, and
 // mailed on any difference. That is a one-slot memory, so two addresses in
 // rotation alert on EVERY request: A is not B, then B is not A, forever. And
-// two addresses are always in rotation — macOS holds a stable `secured` IPv6
+// two addresses are always in rotation. macOS holds a stable `secured` IPv6
 // address plus one or more `temporary` privacy addresses on the same /64 and
 // picks between them per connection. Measured on the founder's laptop that day,
 // 100 consecutive requests to production: 28 changes, nothing moved.

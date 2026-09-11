@@ -83,7 +83,7 @@ async function sendIpAlert(email: string, apiKey: string, origin: string, ip: st
  * for that network.
  *
  * This replaced `clientIp !== last_seen_ip`, which was a one-slot memory and so
- * alerted on every request as soon as two addresses were in rotation — and two
+ * alerted on every request as soon as two addresses were in rotation, and two
  * addresses are always in rotation, because a macOS host keeps a stable and one
  * or more temporary IPv6 addresses on its /64 and picks between them per
  * connection. See src/lib/ip-origin.ts for the measurement, and migration 011
