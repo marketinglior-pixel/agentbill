@@ -196,10 +196,10 @@ from agentbill import AgentBillClient, TaskCeilingExceededError
 
 client = AgentBillClient(api_key="agb_your_key")
 
-# 1 unit = 1 cent here, so job-142 has $5 across every call that passes
-# the same task_ref, however many that turns out to be.
-client.preflight(agent_id="researcher", task_ref="job-142",
-                 task_ceiling=500, estimated_units=12)
+# job-142 already has its ceiling, set in the console at agentbill.dev/app or
+# with PUT /tasks/job-142/ceiling. The call names the job and what this one
+# call is worth, and nothing about the budget.
+client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
 
 # ... your provider call goes here ...
 
@@ -223,6 +223,8 @@ Or let the decorator do both. It records on return and, on an exception, records
 which releases the reservation without spending it:
 
 \`\`\`python
+# task_ceiling here opens the job from code, the alternate to the console;
+# once the job exists it is not applied.
 @client.gate(agent_id="researcher", task_ref="job-142",
              task_ceiling=500, estimated_units=12)
 def run_agent(topic: str) -> str:
@@ -235,8 +237,8 @@ def run_agent(topic: str) -> str:
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
 // Reads AGENTBILL_API_KEY from the environment. There is no client object.
-await preflight({ agentId: 'researcher', taskRef: 'job-142',
-                  taskCeiling: 500, estimatedUnits: 12 })
+// job-142 already has its ceiling, set in the console or with PUT /tasks/job-142/ceiling.
+await preflight({ agentId: 'researcher', taskRef: 'job-142', estimatedUnits: 12 })
 
 // ... your provider call goes here ...
 
@@ -355,9 +357,9 @@ The differentiator is not that the check happens before the call. It is that the
 you choose, so unrelated processes converge on one number without coordinating with each other.
 
 \`\`\`python
-# process A, on one machine, opens the job with its ceiling
-client.preflight(agent_id="planner", task_ref="job-142",
-                 task_ceiling=500, estimated_units=40)
+# job-142 got its ceiling of 500 in the console (or from PUT /tasks/job-142/ceiling).
+# Process A, on one machine, passes only the job's name and what its call is worth.
+client.preflight(agent_id="planner", task_ref="job-142", estimated_units=40)
 
 # process B, on another machine, a different agent, a different provider.
 # It passes no ceiling and needs to know nothing about what A spent.
@@ -486,8 +488,8 @@ as an overrun rather than as a save.
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
 remaining_units, exceeded, created_at, updated_at. The list accepts agent_id and limit (default 50,
-max 200). An unknown ref is 404 task_not_found; a task exists from the first preflight that passed
-its task_ref with a task_ceiling, or from PUT /tasks/:task_ref/ceiling.
+max 200). An unknown ref is 404 task_not_found; a task exists from the console or from
+PUT /tasks/:task_ref/ceiling, or from a first preflight that passed its task_ref with a task_ceiling.
 
 ### PUT /tasks/:task_ref/ceiling
 
@@ -552,7 +554,8 @@ check = client.preflight(
     estimated_units=250,          # what this call is worth, in your units. This is reserved.
     customer_id="acct_42",        # optional, defaults to "default"
     task_ref="job-142",           # the ceiling is bound to this string
-    task_ceiling=5000,            # opens the job on its FIRST preflight; the console can change it
+    task_ceiling=5000,            # the alternate opener: read only while no job row exists. The
+                                  # console or PUT is the default, and then this field is omitted.
     idempotency_key="job-142-3",  # stable across retries
 )
 

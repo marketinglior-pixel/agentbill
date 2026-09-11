@@ -227,7 +227,7 @@ export const PLAYGROUND_CSS = `
   .pg-track { height: 6px; background: var(--border2); position: relative; overflow: hidden; }
   .pg-fill { height: 100%; width: 0; background: var(--green);
              transition: width 0.45s cubic-bezier(0.22,1,0.36,1), background 0.2s; }
-  .pg-fill.blocked { background: var(--red); }
+  .pg-fill.refused { background: var(--red); }
   .pg-ghost { position: absolute; top: 0; height: 100%; opacity: 0; transition: opacity 0.25s;
               background: repeating-linear-gradient(45deg, var(--red) 0 3px, transparent 3px 7px); }
   .pg-ghost.on { opacity: 0.85; }
@@ -249,7 +249,7 @@ export const PLAYGROUND_CSS = `
             border-bottom: 1px solid var(--border-soft); }
   /* Only a row that CHANGES state animates. At rest every row is already there,
      so entry animation would be ten rows sliding in for no reason. */
-  .pg-row.ran, .pg-row.blocked { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
+  .pg-row.ran, .pg-row.refused { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-slip { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
   .pg-row .ar { color: var(--green); }
   .pg-row .nm { color: var(--muted); }
@@ -258,8 +258,8 @@ export const PLAYGROUND_CSS = `
   /* At rest the whole row is quiet: this is a plan, not a result. */
   .pg-row.planned { opacity: .55; }
   .pg-row.planned .ar { color: var(--dim); }
-  .pg-row.blocked { border-bottom-color: var(--red); opacity: 1; }
-  .pg-row.blocked .ar, .pg-row.blocked .nm, .pg-row.blocked .un, .pg-row.blocked .cum { color: var(--red); }
+  .pg-row.refused { border-bottom-color: var(--red); opacity: 1; }
+  .pg-row.refused .ar, .pg-row.refused .nm, .pg-row.refused .un, .pg-row.refused .cum { color: var(--red); }
   .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; }
   .pg-ask b { color: var(--muted); font-weight: 500; }
   .pg-note { font-family: var(--mono); font-size: var(--fs-small); color: var(--red); padding-top: 11px;
@@ -464,15 +464,15 @@ const PLAYGROUND_SRC = `
     return out + '}';
   }
 
-  function bars(blockedBy){
+  function bars(refusedBy){
     var pct = Math.min(100, task.used / task.ceiling * 100);
     el('used').textContent = task.used.toLocaleString('en-US');
     el('fill').style.width = pct + '%';
-    if (blockedBy != null) {
+    if (refusedBy != null) {
       el('ghost').style.left = pct + '%';
-      el('ghost').style.width = Math.max(Math.min(100 - pct, blockedBy / task.ceiling * 100), 4) + '%';
+      el('ghost').style.width = Math.max(Math.min(100 - pct, refusedBy / task.ceiling * 100), 4) + '%';
       el('ghost').classList.add('on');
-      el('fill').classList.add('blocked');
+      el('fill').classList.add('refused');
       el('used').classList.add('over');
     }
   }
@@ -495,7 +495,7 @@ const PLAYGROUND_SRC = `
     el('throw').innerHTML = '';
     el('count').textContent = '0 calls';
     el('status').className = 'pg-status idle'; el('status').textContent = 'request';
-    el('fill').style.width = '0'; el('fill').classList.remove('blocked');
+    el('fill').style.width = '0'; el('fill').classList.remove('refused');
     el('ghost').classList.remove('on'); el('ghost').style.width = '0';
     el('used').textContent = '0'; el('used').classList.remove('over');
     el('ceil').disabled = false; el('run').disabled = false; el('run').textContent = 'Run agent';
@@ -513,7 +513,7 @@ const PLAYGROUND_SRC = `
     // Convert the row that is already there. No append, no layout shift.
     var row = el('log').querySelector('.pg-row[data-i="' + idx + '"]');
     if (row) {
-      row.className = 'pg-row ' + (res.approved ? 'ran' : 'blocked');
+      row.className = 'pg-row ' + (res.approved ? 'ran' : 'refused');
       row.querySelector('.ar').innerHTML = res.approved ? '&rarr;' : '&#10005;';
     }
     if (idx === 0) el('ask').style.visibility = 'hidden';
@@ -539,6 +539,10 @@ const PLAYGROUND_SRC = `
     el('ask').style.visibility = 'hidden';
     el('throw').innerHTML = '<div class="pg-throw"><b>throw TaskCeilingExceededError</b>'
       + '<span>the SDK throws here, so the expensive call never starts</span></div>';
+    // The event NAME keeps its old spelling on purpose: it is the key /pulse
+    // has stored since the playground shipped, and renaming it would split one
+    // series into two. Nothing a reader sees carries the word; the row and
+    // bar classes say "refused", like every other surface.
     pulse('playground_blocked', task.ceiling);
     finish(null);
   }

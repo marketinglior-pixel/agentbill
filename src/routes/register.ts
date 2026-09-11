@@ -369,7 +369,7 @@ ${siteNav('/register', { cta: false })}
 <div class="reg wrap row-close">
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
-    <p class="lede">Start with 1,000 free preflight calls per month. One decorator. Runaway runs refused. Ship.</p>
+    <p class="lede">Start with 1,000 free preflight calls per month. Two calls, preflight before and record after, and a job that would cross its ceiling is refused.</p>
     <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
   </div>
 
@@ -475,7 +475,7 @@ ${siteNav('/register', { cta: false })}
           <!-- Also a new tab, for the same reason as the button above it: this
                screen exists only in this tab's DOM, so any same-tab navigation
                from here loses a key that is shown once. -->
-          <p>It asks for the key once, then walks you from a job name to your first preflight in four numbered steps. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
+          <p>It asks for the key once, then walks you from a job name to your first preflight in three numbered steps. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
         </div>
       </div>
     </div>

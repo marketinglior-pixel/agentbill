@@ -91,7 +91,7 @@ export async function tasksRoute(app: FastifyInstance) {
     if (!row) {
       return reply.code(404).send({
         error: 'task_not_found',
-        message: `No task with task_ref "${taskRef}". A task is opened by the first preflight that passes task_ref + task_ceiling, or by PUT /tasks/:task_ref/ceiling.`,
+        message: `No task with task_ref "${taskRef}". A job is opened in the console or by PUT /tasks/:task_ref/ceiling, or by a first preflight that passes task_ref + task_ceiling.`,
       })
     }
 
@@ -128,7 +128,7 @@ export async function tasksRoute(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(422).send({
         error: 'validation_error',
-        message: 'Body needs ceiling_units (a positive integer). agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job.',
+        message: 'Body needs ceiling_units (a positive integer): the same number preflight calls task_ceiling, named ceiling_units here and on GET /tasks. agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job.',
         details: parsed.error.issues,
       })
     }

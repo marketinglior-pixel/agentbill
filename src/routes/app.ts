@@ -1275,6 +1275,8 @@ ${MARK_CSS}
   .ns3 details input { margin-top: var(--s2); }
   .ns3 .btn { margin-top: var(--s4); width: auto; padding: var(--s3) var(--s5); }
   .ns3 .fine { margin-top: var(--s3); max-width: 78ch; }
+  /* Step 3 carries two paragraphs with the install line between them. */
+  .ns3 .snip + p { margin-top: var(--s4); }
   .ns3 p code, .ns3 .fine code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
   /* One class, two tags, on purpose. scripts/snippets/extract.mjs harvests
      every pre element under src/routes and executes it, and records an
@@ -2026,8 +2028,8 @@ function limitsBlock(p: Page, rangeLabel: string): string {
 }
 
 /**
- * The onboarding path: four numbered steps. Steps 1 and 2 are the form, step 3
- * is the install, step 4 is the ask and the sample it makes runnable.
+ * The onboarding path: three numbered steps. Steps 1 and 2 are the form; step 3
+ * is the install and then the ask, with the sample it makes runnable under it.
  *
  * This replaced a first run that led with a raw curl asking for 5 units
  * against a per-request ceiling of 1. That taught two wrong things at once. It
@@ -2045,7 +2047,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
  * page. One owner of the sequence means one numbering.
  *
  * `job` is the reader's own row once one exists and nothing has been spent
- * under it. It is what turns step 4 from a sample into their sample: the name
+ * under it. It is what turns step 3 from a sample into their sample: the name
  * they typed, rendered into lines that run as pasted. It comes from d.tasks
  * (ORDER BY updated_at DESC) and never from the query string; the one place a
  * task_ref off the URL is echoed is the flash line, and verifyFlash already
@@ -2145,8 +2147,6 @@ except TaskCeilingExceededError as refused:
       <div class="ns3"><span class="ns3-n">3</span><div>
         <p>${STEP_INSTALL}</p>
         <div class="snip">${INSTALL_PY}</div>
-      </div></div>
-      <div class="ns3"><span class="ns3-n">4</span><div>
         <p>${STEP_ASK}</p>
         ${done}
         <p class="fine">${KEY_ENV_LINE}</p>
