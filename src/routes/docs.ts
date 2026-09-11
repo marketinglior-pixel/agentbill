@@ -76,7 +76,7 @@ const quickStartLd = {
       '@type': 'HowToStep',
       position: 3,
       name: 'Step 3, Give the job a ceiling',
-      text: 'Pass the same task_ref on every call the job makes. They are all checked against one ceiling, set on the first preflight of a new task or in the console. It changes later only through the console or PUT /tasks/:task_ref/ceiling; a task_ceiling on a later preflight is not applied.',
+      text: 'Give the job a name and a ceiling in the console, or with PUT /tasks/:task_ref/ceiling, then pass that name as task_ref on every call the job makes. Every call is checked against that one ceiling. It changes only through the console or the endpoint; a task_ceiling on a later preflight is not applied.',
       url: `${ORIGIN}/docs#step-ceiling`,
     },
   ],
@@ -106,19 +106,19 @@ export async function docsRoute(app: FastifyInstance) {
   <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
 
   <h3 id="step-ceiling">Step 3, Give the job a ceiling</h3>
-  <p>Pass the same <span class="inline">task_ref</span> on every call the job makes. They are all
-  checked against one ceiling, set on the first preflight of a new task or in the console. It
-  changes later only through the console or <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>;
-  a <span class="inline">task_ceiling</span> on a later preflight is not applied.</p>
+  <p>Give the job a name and a ceiling in <a href="/app">the console</a>, or with
+  <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>, then pass that name as
+  <span class="inline">task_ref</span> on every call the job makes. Every call is checked against that
+  one ceiling. It changes only through the console or the endpoint; a
+  <span class="inline">task_ceiling</span> on a later preflight is not applied.</p>
   <div class="code"><pre>
 from agentbill import AgentBillClient
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># 1 unit = 1 cent here, so job-142 has $5 across every call</span>
-<span class="comment"># that passes the same task_ref, however many that turns out to be.</span>
-client.preflight(agent_id="researcher", task_ref="job-142",
-                 task_ceiling=500, estimated_units=12)
+<span class="comment"># job-142 already has its ceiling, set in the console. The call names the</span>
+<span class="comment"># job and what this one call is worth, and nothing about the budget.</span>
+client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
 <span class="comment"># a refused call raised TaskCeilingExceededError above; nothing to check here</span>
 
 <span class="comment"># ... run your agent here ...</span>
@@ -151,13 +151,14 @@ client.record(agent_id="researcher", task_ref="job-142", units=12)
   <h3>Per-task ceiling</h3>
   <p>One job, one ceiling, held across every call and every tool that passes the same
   <span class="inline">task_ref</span>. This is the one that is not bound to a calendar month and not
-  to an identity, and that is the whole point: a budget that resets tomorrow does not stop the loop
-  running tonight.</p>
+  to an identity, and that is the whole point: a budget that resets tomorrow refuses nothing the
+  loop is doing tonight.</p>
 
-  <p>Open the job with a ceiling: pass <span class="inline">task_ceiling</span> on the first preflight
-  of a new <span class="inline">task_ref</span>, or set it first with
-  <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a> or on the console's task budgets view.
-  A preflight for a job that does not exist yet, sent without a ceiling, is rejected with
+  <p>Give the job its ceiling before the code runs, on the console's task budgets view or with
+  <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>; after that every call carries
+  <span class="inline">task_ref</span> and nothing about the budget. Opening it from code also works,
+  as the alternate: pass <span class="inline">task_ceiling</span> on the first preflight of a new
+  <span class="inline">task_ref</span>. A preflight for a job that does not exist yet, sent without a ceiling, is rejected with
   <span class="inline">task_ceiling_required</span>. Once the job exists, a
   <span class="inline">task_ceiling</span> on preflight is not applied, so a retry cannot raise the
   ceiling it was supposed to respect; the last save through the console or the endpoint is the
@@ -172,9 +173,8 @@ from agentbill import AgentBillClient, TaskCeilingExceededError
 
 client = AgentBillClient(api_key="agb_your_key")
 
-<span class="comment"># First call of the job opens it with a ceiling of 500 (or set one first in the console).</span>
-client.preflight(agent_id="researcher", task_ref="job-142",
-                 task_ceiling=500, estimated_units=300)
+<span class="comment"># job-142 has a ceiling of 500, set in the console. Researcher takes 300 of it.</span>
+client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=300)
 
 try:
     <span class="comment"># A different agent, same job: 300 + 250 &gt; 500, refused before it runs.</span>
@@ -268,19 +268,34 @@ WHERE account_id = :account
     <tr><td>estimated_units</td><td>int <span class="tag">optional</span></td><td>Expected units for this run. Used for ceiling check. Default: 1.</td></tr>
     <tr><td>ceiling</td><td>int <span class="tag">optional, on AgentBillClient(...)</span></td><td>Set on the client, not per call: every preflight is refused if estimated_units exceeds it.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Groups many calls under one cross-call budget. Pass the same task_ref on every call in the job. See <a href="/docs/task-budgets">task budgets</a>.</td></tr>
-    <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>Total units the whole task may spend. Opens a new task_ref with that ceiling, and is required then unless the job was opened first with <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>. Not applied once the job exists; an approved answer and a task_ceiling_exceeded refusal carry the ceiling in force as task_ceiling.</td></tr>
+    <tr><td>task_ceiling</td><td>int <span class="tag">optional</span></td><td>The alternate way to open a job: a first preflight of a new task_ref that carries task_ceiling opens it with that ceiling. The default is to open the job first in the console or with <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>, after which the call needs task_ref only. Not applied once the job exists; an approved answer and a task_ceiling_exceeded refusal carry the ceiling in force as task_ceiling.</td></tr>
   </table>
 
   <p>Every identifier above (agent_id, customer_id, task_ref, and idempotency_key) is 1 to 128 characters and may not contain control characters. A value that breaks either rule is a 422 with <span class="inline">validation_error</span>, never a 500.</p>
 
-  <p>Returns:</p>
+  <p>Returns, for a call on a job that has a ceiling:</p>
   <div class="code"><pre>
 {
   "approved": true,
-  "remaining_units": 990,
-  "estimated_units": 10
+  "reason": null,
+  "estimated_units": 12,
+  "remaining_units": null,
+  "reservation_expires_at": "2026-09-11T12:00:00.000Z",
+  "task_ref": "job-142",
+  "task_ceiling": 500,
+  "task_remaining_units": 488
 }
   </pre></div>
+
+  <p><strong>Two scopes, two names.</strong> <span class="inline">remaining_units</span> is the
+  customer's balance, and it is <span class="inline">null</span> while the customer has no limit,
+  which is the default. <span class="inline">task_remaining_units</span> is the job's, and it is the
+  one that counts down under a task ceiling. On <span class="inline">GET /tasks</span> the job's own
+  balance is called <span class="inline">remaining_units</span>, because that endpoint has only the one
+  scope, and <span class="inline">exceeded</span> there is true only when a record landed past the
+  ceiling after the fact: a job at its ceiling with nothing leaked reads
+  <span class="inline">remaining_units: 0</span> and <span class="inline">exceeded: false</span>, and
+  its next preflight is refused.</p>
 
   <p>When refused:</p>
   <div class="code"><pre>
@@ -365,15 +380,13 @@ curl -X PUT https://agentbill.dev/budget \\
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
   <div class="code"><pre>
-<span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to</span>
-<span class="comment">// define; here 1 unit = 1 cent.</span>
+<span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to define.</span>
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-<span class="comment">// Before each call: 1 unit = 1 cent here, so this job has $5 across</span>
-<span class="comment">// every call that shares job-142.</span>
+<span class="comment">// job-142 already has its ceiling, set in the console. Before each call,</span>
+<span class="comment">// name the job and what this call is worth, and nothing about the budget.</span>
 <span class="comment">// A refused call throws TaskCeilingExceededError, so the expensive work never starts.</span>
-await preflight({ agentId: 'researcher', taskRef: 'job-142',
-                 taskCeiling: 500, estimatedUnits: 12 })
+await preflight({ agentId: 'researcher', taskRef: 'job-142', estimatedUnits: 12 })
 
 <span class="comment">// ... your LLM or tool call ...</span>
 

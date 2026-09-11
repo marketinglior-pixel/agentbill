@@ -882,8 +882,8 @@ ok('[console] the overview empty state links to the tasks view instead', emptyOv
 // That is why this gate could not see the screen it is about until now.
 await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
 const virgin8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] the first run is four numbered steps and a form, not a curl that manufactures a refusal',
-   virgin8.includes('class="setf3"') && virgin8.includes('Four steps put a row on this page')
+ok('[onboarding] the first run is three numbered steps and a form, not a curl that manufactures a refusal',
+   virgin8.includes('class="setf3"') && virgin8.includes('Three steps put a row on this page')
      && !virgin8.includes('"ceiling":1'), 'the virgin overview did not render the steps')
 // Ticket 2026-09-11, after dogfood run 3 ended on /register#done with "I do
 // not understand what I need to do". The install is INSIDE the numbered
@@ -894,12 +894,12 @@ const iUnits8 = virgin8.indexOf('How many units is this job worth')
 const iPip8 = virgin8.indexOf('pip install agentbill-sdk')
 const iAsk8 = virgin8.indexOf('Ask before each call')
 const iSample8 = virgin8.search(/<pre class="snip">/)
-ok('[onboarding] the install is step 3: after the job name and the units, before the ask and the sample',
+ok('[onboarding] the install opens step 3: after the job name and the units, before the ask and the sample',
    iName8 > -1 && iUnits8 > iName8 && iPip8 > iUnits8 && iAsk8 > iPip8 && iSample8 > iAsk8,
    `name ${iName8}, units ${iUnits8}, pip ${iPip8}, ask ${iAsk8}, sample ${iSample8}`)
-ok('[onboarding] the sequence is numbered 1 to 4 on one screen, and nothing on it is a bullet',
-   ['1', '2', '3', '4'].every((n) => virgin8.includes(`<span class="ns3-n">${n}</span>`))
-     && !virgin8.includes('<span class="ns3-n">5</span>') && !virgin8.includes('ns3-n">&middot;'))
+ok('[onboarding] the sequence is numbered 1 to 3 on one screen, the count UX v1 locked, and nothing on it is a bullet',
+   ['1', '2', '3'].every((n) => virgin8.includes(`<span class="ns3-n">${n}</span>`))
+     && !virgin8.includes('<span class="ns3-n">4</span>') && !virgin8.includes('ns3-n">&middot;'))
 // Locked path, item 4: "one job = one budget" is read first, the wire name second.
 const iBudget8 = virgin8.indexOf('One job is one budget')
 const iRef8 = virgin8.indexOf('task_ref')
