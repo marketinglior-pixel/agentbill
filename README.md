@@ -177,7 +177,7 @@ A call is one `POST /preflight`. The counter resets on the 1st of each calendar 
 
 Read this section before the pitch, not after.
 
-- **It does not stop your run.** `preflight()` answers `approved: false` or raises. Your code decides what happens next. Nothing here can terminate a process it never sat in front of.
+- **It does not reach into a running job.** `preflight()` answers `approved: false` or raises. Your code decides what happens next. Nothing here can terminate a process it never sat in front of.
 - **It is not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider credentials held by us.
 - **No automatic metering.** Tokens, tool calls and GPU time are invisible to AgentBill. Units move only when your code calls `/preflight`, `/events` or `/step`, and they count against a job only when the call carries the same `task_ref`.
 - **It never reads a provider invoice** and never turns units into dollars. There is no currency field anywhere in the API.

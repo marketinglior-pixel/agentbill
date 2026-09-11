@@ -16,6 +16,7 @@ import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
+import { sessionCookieFor } from './app.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -330,6 +331,13 @@ export async function registerRoute(app: FastifyInstance) {
        break the sentence mid-word. */
     .ns-go { padding: 14px 18px 16px; border-top: 1px solid var(--border-soft); display: grid; gap: 10px; justify-items: start; }
     .ns-go p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+    /* Docs and the questions page, at the footnote register. They used to sit
+       in the sentence under the button as two more links, one line below the
+       one action on the screen; the 2026-09-11 audit read that as the exit a
+       reader takes instead of the three steps. */
+    .ns-go .aside { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+    .ns-go .aside a { color: var(--dim); text-decoration: underline; }
+    .ns-go .aside a:hover { color: var(--text); }
     .btn-go { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; background: var(--green);
               color: var(--green-ink); border: 0; border-radius: 8px; font-family: var(--sans); font-size: var(--fs-small);
               font-weight: 700; text-decoration: none; cursor: pointer; transition: filter .15s; }
@@ -432,22 +440,27 @@ ${siteNav('/register', { cta: false })}
       </div>
       <div class="panel">
         <div class="ns-go">
-          <!-- A form, not a link, and a new tab, deliberately. The form POSTs
-               this key to /app/session, the same request the console's login
-               card makes, so the next screen is step 1 of 3 and not a card
-               asking for the string on this one. The new tab is because this
-               screen is client-side only: the success state is display:none
-               on a cold load and nothing reads the #done hash, so navigating
-               away in this tab destroys a key that is shown once. -->
-          <form method="POST" action="/app/session" target="_blank" id="go-form">
+          <!-- A form, not a link, and it moves THIS tab. The form POSTs this
+               key to /app/session, the same request the console's login card
+               makes, so the next screen is step 1 of 3 and not a card asking
+               for the string on this one. Until 2026-09-12 it opened a new
+               tab, to keep a key that is shown once on screen; the dogfood
+               re-verify of 2026-09-11 read that as a button that does nothing,
+               because the URL it was watching never moved. So the tab moves,
+               and the sentence under the button says to run the export line
+               first. The 201 that created the account already carries the
+               session cookie (the POST handler below), so the header's Console
+               link is this account too, whichever account this browser had
+               signed into before. -->
+          <form method="POST" action="/app/session" id="go-form">
             <input type="hidden" name="api_key" id="key-field" value="" />
             <input type="hidden" name="next" value="/app?view=start" />
             <button class="btn-go" type="submit">Open the console &rarr;</button>
           </form>
-          <!-- Also new tabs, for the same reason as the button above: this
-               screen exists only in this tab's DOM, so any same-tab navigation
-               from here loses a key that is shown once. -->
-          <p>It signs you in with this key and opens your first refusal in three steps: a job and its ceiling, the lines to run, the refusal they produce. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
+          <p>It signs you in with this key and opens your first refusal in three steps: a job and its ceiling, the lines to run, the refusal they produce. Run the export line above first: this screen is not shown again.</p>
+          <!-- New tabs here, because a reader who opens a reference wants to
+               keep the key on screen, and a footnote, not a second action. -->
+          <p class="aside">Reference, when you need it: <a href="/docs" target="_blank" rel="noopener">docs</a> &middot; <a href="/faq" target="_blank" rel="noopener">questions</a>.</p>
         </div>
       </div>
     </div>
@@ -527,12 +540,13 @@ ${REGISTER_JS}${COPY_JS}
         }
 
         const apiKey = generateApiKey()
-        await tx`
+        const [key] = await tx`
           INSERT INTO developer_api_keys (account_id, api_key, label)
           VALUES (${account.id}, ${apiKey}, 'default')
+          RETURNING id
         `
 
-        return { type: 'created' as const, apiKey, accountId: account.id as string }
+        return { type: 'created' as const, apiKey, accountId: account.id as string, keyId: key.id as string }
       })
 
       if (result.type === 'existing') {
@@ -553,6 +567,14 @@ ${REGISTER_JS}${COPY_JS}
         .then((ok) => { if (!ok) request.log.error({ email }, 'welcome email was not accepted by Resend') })
         .catch((err) => request.log.error({ err }, 'welcome email threw'))
 
+      // The browser that made this request is signed into the console as this
+      // key from here on: the cookie /app/session mints, on the same name and
+      // path, so it overwrites a session another account left in this browser.
+      // Without it (re-verified 2026-09-11) a fresh register followed by the
+      // header's Console link opened whichever account had signed in last on
+      // that browser. curl gets the header too and ignores it.
+      const cookie = sessionCookieFor(result.keyId)
+      if (cookie) reply.header('Set-Cookie', cookie)
       return reply.code(201).send({
         api_key: result.apiKey,
         message: 'Account created. Store your API key. It will not be shown again. A link to get back in if you lose it is on its way to your inbox.',

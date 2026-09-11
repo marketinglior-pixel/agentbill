@@ -4,7 +4,6 @@ import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL, heroRefusalBody } from '../ui/playground.js'
 import { pixelSnippet } from '../lib/pixel.js'
-import { demoConsole, decisionLine } from './app.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { PANEL_CSS } from '../ui/panels.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
@@ -30,79 +29,21 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // frame used to be. The frame moved one screen down, into the request-path
 // row, where a reader who has understood the demo meets the integration. The
 // playground sits directly under the hero as the page's one full-bleed band;
-// the provider-cap argument is three sourced cards instead of an essay; each
-// benefit row is an eyebrow, a head, two sentences and a panel; the tiers
-// are the same four cards /pricing renders; and the list of what the product
-// does not do is kept, compressed to one line per item. The keys row and the
-// console-overview row came out the same day: a reader on the cold path
-// meets a dashboard after a refusal, not before one.
-// Nothing here is a logo wall, a count or a testimonial: there is nobody to
-// name yet.
+// the provider-cap argument is three sourced cards instead of an essay; ONE
+// row carries the integration, the code frame beside the console-first order
+// the ceiling is set in; the tiers are the same four cards /pricing renders;
+// and the list of what the product does not do is four lines. The keys row
+// and the console-overview row came out on 2026-09-12; the task-budgets row
+// and the refusals row followed the same day, after the full-team dogfood
+// read everything under the demo as a second brochure. A reader on the cold
+// path meets those panels in the console, after a refusal, not before one.
+// Nothing here is a logo wall, a count or a testimonial, and the page does
+// not say why: a sentence about who has agreed to what is a claim about
+// other people, and the claims rules have no way to check it.
 
 const esc = (s: unknown) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const num = (n: number) => n.toLocaleString('en-US')
-
-/** Task budgets burning down: the first three rows of the demo console. */
-function taskPanel(): string {
-  const rows = demoConsole().tasks.slice(0, 3).map((t) => {
-    // Same two tests the console applies in app.ts: the chip reads the settled
-    // number, the bar colour reads settled plus in-flight. Keep them identical.
-    const ratio = (t.usedUnits + t.reservedUnits) / t.ceilingUnits
-    const leaked = t.usedUnits > t.ceilingUnits
-    const held = t.usedUnits >= t.ceilingUnits
-    const chip = leaked
-      ? '<span class="chip fail">leaked</span>'
-      : held
-        ? '<span class="chip held">ceiling hit</span>'
-        : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
-    const barCls = leaked ? ' fail' : ratio >= 1 ? ' held' : ratio >= 0.8 ? ' near' : ''
-    const usedPct = Math.min(100, (t.usedUnits / t.ceilingUnits) * 100)
-    const resPct = Math.min(100 - usedPct, (t.reservedUnits / t.ceilingUnits) * 100)
-    return `
-        <div class="task">
-          <div class="task-top">
-            <span class="ref">${esc(t.taskRef)}</span>
-            <span class="agent">${esc(t.agentId)}</span>
-            ${chip}
-          </div>
-          <div class="track" aria-hidden="true">
-            <i class="used${barCls}" style="width:${usedPct.toFixed(1)}%"></i>
-            <i class="res" style="width:${resPct.toFixed(1)}%"></i>
-          </div>
-          <div class="task-nums"><b>${num(t.usedUnits)}</b> / ${num(t.ceilingUnits)} units${
-            t.reservedUnits ? ` <span class="dimtxt">&middot; ${num(t.reservedUnits)} reserved</span>` : ''}</div>
-        </div>`
-  }).join('')
-  return `<div class="panel">
-        <div class="panel-h"><span>Task budgets</span><span>one job, many calls, one ceiling</span></div>
-        ${rows}
-        <div class="panel-f">Sample rows, the same ones the demo console shows. Units are an integer you define.</div>
-      </div>`
-}
-
-/**
- * Three refusals from three agents. The sentence on each row is composed by
- * the console's own decisionLine() from the columns the refusal carries, so
- * this panel and the console's refusals view read the same words.
- */
-function refusalPanel(): string {
-  const rows = demoConsole().decisions.filter((d) => d.blocked && d.taskRef).slice(0, 3).map((d) => `
-        <div class="ref-row">
-          <div class="ref-top">
-            <span class="agent">${esc(d.agentId ?? '')}</span>
-            <span class="ref">${esc(d.taskRef ?? '')}</span>
-            <span class="chip held">refused</span>
-            <span class="ask">asked ${num(d.estimatedUnits ?? 0)}</span>
-          </div>
-          <div class="ref-msg">${esc(decisionLine(d))}</div>
-        </div>`).join('')
-  return `<div class="panel">
-        <div class="panel-h"><span>Refusals</span><span>what the agent got back</span></div>
-        ${rows}
-        <div class="panel-f">Sample rows. Three agents, three tasks, one rule. "Asked" is units, not a dollar figure.</div>
-      </div>`
-}
 
 /**
  * The wire body POST /preflight sends when the sample's own call is refused,
@@ -225,8 +166,8 @@ export async function homeRoute(app: FastifyInstance) {
      * theme: design.md (paper, type and accent are theme.ts) · design-system: design.md · designed-as-app
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
      * order: hero (copy beside the dual-state demo), playground band, three sourced cards,
-     *        three rows (ceilings, the request path with the code frame, the receipt),
-     *        four tier cards, the not-list, the close · one grid break, the playground band
+     *        one row (the request path with the code frame, console-first),
+     *        four tier cards, a four-line not-list, the close · one grid break, the playground band
      * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action; nothing of its
      *        product, palette or claims · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
@@ -375,21 +316,16 @@ export async function homeRoute(app: FastifyInstance) {
     .src a:hover { color: var(--text); text-decoration-color: var(--text); }
     .src-note { margin-top: var(--s4); font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); max-width: 70ch; }
 
-    /* Rows. Text on one side, the product on the other, direction alternating.
-       A gutter, no rule: the two halves are one argument, not two cards. Every
-       row is closed by a hairline (.row-close), because an open-bottomed unequal
-       row reads as an unfinished column; text top aligns with panel top, with a
-       4px optical nudge putting the head's cap height on the panel's label bar. */
+    /* The row. Text on one side, the product on the other. One row since
+       2026-09-12, and still written as a row recipe so a second one, if it
+       ever earns its place, is not a new component. A gutter, no rule: the two
+       halves are one argument, not two cards. The row is closed by a hairline
+       (.row-close), because an open-bottomed unequal row reads as an
+       unfinished column; text top aligns with panel top, with a 4px optical
+       nudge putting the head's cap height on the panel's label bar. */
     .dip { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap);
            align-items: start; padding-block: 48px 48px; }
     .dip-text { padding-top: 4px; }
-    /* order: 2 reorders the DOM item but not the track, so the flipped row
-       mirrors its tracks too, or its panel lands 161px narrower than its siblings.
-       Two classes outrank one: the collapse rule under --lg names .dip.flip as
-       well, or this row keeps its two tracks on a phone. It did, in production,
-       and the refusals panel rendered 150px wide beside its own paragraph. */
-    .dip.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
-    .dip.flip .dip-text { order: 2; }
     .dip h2 { color: var(--white); margin-bottom: var(--s4); max-width: 14ch; }
     .dip p { color: var(--muted); line-height: 1.7; max-width: 44ch; }
     .chip-link { display: inline-flex; align-items: center; gap: 0.5em; margin-top: 22px; min-height: 44px;
@@ -399,44 +335,30 @@ export async function homeRoute(app: FastifyInstance) {
     .chip-link:hover { border-color: var(--text); }
     .chip-link:active { transform: translateY(1px); }
 
-    /* Panel contents. The frame (.panel) comes from ui/panels.ts; what goes
-       inside is this page's, in the console's own vocabulary. */
-    .task { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
-    .task:last-of-type { border-bottom: 0; }
-    .task-top, .ref-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-    .ref { font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
-    .agent { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
-    .task-nums { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted);
-                 font-variant-numeric: tabular-nums; }
-    .task-nums { margin-top: 8px; }
-    .task-nums b { color: var(--text); font-weight: 500; }
-    .dimtxt { color: var(--dim); }
+    /* The demo's meter and chips, in the console's own vocabulary: the same
+       class names and the same colour tests app.ts applies, so the fold cannot
+       paint a state the console would not. Two states are all the fold shows,
+       a month with room and a job that is out; the near/fail/reserved states
+       left with the task-budgets and refusals panels on 2026-09-12. */
     .track { height: 8px; background: var(--surface3); border-radius: var(--r-pill); overflow: hidden; display: flex; }
     .track i { display: block; height: 100%; }
     .track i.used { background: var(--flow); }
-    .track i.used.near { background: var(--amber); }
     .track i.used.held { background: var(--green); }
-    .track i.used.fail { background: var(--red); }
-    .track i.res { background: var(--res); }
     .chip { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em; text-transform: uppercase;
             padding: 3px 9px; border-radius: var(--r-chip); border: 1px solid; margin-left: auto; }
     .chip.held { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
-    .chip.fail { color: var(--fail-ink); border-color: var(--fail-line); background: var(--fail-bg); }
-    .chip.near { color: var(--amber); border-color: var(--near-line); background: var(--near-bg); }
     .chip.flow { color: var(--muted); border-color: var(--border2); background: var(--surface3); }
-    .ask { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); font-variant-numeric: tabular-nums; }
-    .ref-row { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
-    .ref-row:last-of-type { border-bottom: 0; }
-    .ref-row .chip { margin-left: 0; }
-    .ref-msg { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
 
     /* Pricing: the four cards /pricing renders, from ui/tiers.ts. */
     .pricing h2 { color: var(--white); margin-bottom: var(--s2); max-width: 22ch; }
     .price-links { margin-top: var(--s5); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-    /* What it does not do: one line per item, two columns, on hairlines. The
-       list is the honest substitute for the proof this page cannot show, so it
-       stays; one line per item keeps it to a glance instead of a scroll. */
+    /* What it does not do: four items, one line each, two columns, on
+       hairlines. Cut from ten on 2026-09-12. The four that stay are the ones a
+       reader can check against this page (no proxy, no dollars, approved:
+       false, refused not reversed); the rest are in the README and on /about,
+       and a line about who has agreed to be named is gone for good: it was a
+       sentence about other people. */
     .not-for h2 { color: var(--white); margin-bottom: var(--s2); }
     .nots { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--gap);
             margin-top: var(--s5); }
@@ -456,11 +378,10 @@ export async function homeRoute(app: FastifyInstance) {
     .final-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
     @media (max-width: ${BP.lg}px) {
-      .hero, .dip, .dip.flip { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+      .hero, .dip { grid-template-columns: minmax(0, 1fr); gap: 40px; }
       .hero { align-items: start; padding-block: var(--s7) var(--s7); }
       /* One column: the stagger has no second column to play against. */
       .dcard.month, .dcard.job { width: 100%; margin-inline-start: 0; }
-      .dip.flip .dip-text { order: 0; }
       .dip-text { padding-top: 0; }
       .dip { padding-block: 36px 36px; }
       section { padding-block: 64px 0; }
@@ -526,27 +447,16 @@ ${playgroundSection()}
   <section class="wrap rows">
     <div class="dip row-close">
       <div class="dip-text">
-        <p class="eyebrow">Per-task ceilings</p>
-        <h2>One job, many calls, one ceiling.</h2>
-        <p>Give the job a ceiling in the console, or pass <span class="mono-in">task_ceiling</span> on
-        its first call, and the same <span class="mono-in">task_ref</span> on every call after it.
-        Every call is checked against that one number, in units you define. Once the job exists a
-        <span class="mono-in">task_ceiling</span> on a later call is not applied; the ceiling changes only
-        in the console or through <span class="mono-in">PUT /tasks/:task_ref/ceiling</span>.</p>
-        <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch budgets burn down &rarr;</a>
-      </div>
-      ${taskPanel()}
-    </div>
-
-    <div class="dip flip row-close">
-      <div class="dip-text">
         <p class="eyebrow">No proxy</p>
         <h2>Two calls. Nothing in your request path.</h2>
-        <p><span class="mono-in">preflight</span> before your provider call,
-        <span class="mono-in">record</span> after it. No base URL to change, no traffic routed through
-        us, no provider keys held. If we are unreachable, the SDK raises inside your process and your
-        code decides.</p>
-        <a class="chip-link" href="/docs#reservation">How the reservation works &rarr;</a>
+        <p>Set the job's ceiling once, in the console or with
+        <span class="mono-in">PUT /tasks/:task_ref/ceiling</span> and
+        <span class="mono-in">ceiling_units</span> in the body. Then the code names the job and nothing
+        about its budget: <span class="mono-in">preflight</span> with the same
+        <span class="mono-in">task_ref</span> before your provider call, <span class="mono-in">record</span>
+        after it. No base URL to change, no traffic routed through us, no provider keys held. If we are
+        unreachable, the SDK raises inside your process and your code decides.</p>
+        <a class="chip-link" href="/app?demo=1&amp;view=tasks">Watch a job burn down &rarr;</a>
         <!-- The step that needs no account, following the language tab in the
              frame beside it so the pill and the sample always name the same
              package. -->
@@ -619,17 +529,6 @@ await record({ agentId: 'researcher',
       </div>
     </div>
 
-    <div class="dip row-close">
-      <div class="dip-text">
-        <p class="eyebrow">The receipt</p>
-        <h2>Every refusal is written down.</h2>
-        <p>Each <span class="mono-in">approved: false</span> is persisted with the body the agent
-        received, per agent and per task. A record that lands past a ceiling because preflight was
-        skipped is kept as a leak, not hidden.</p>
-        <a class="chip-link" href="/app?demo=1&amp;view=refusals">See the refusals &rarr;</a>
-      </div>
-      ${refusalPanel()}
-    </div>
   </section>
 
   <section class="wrap pricing" id="pricing">
@@ -645,27 +544,15 @@ await record({ agentId: 'researcher',
   <section class="wrap not-for">
     <h2>What AgentBill does not do</h2>
     <ul class="nots">
-      <li><b>Stop your run.</b> Preflight answers <span class="mono-in">approved: false</span> and the
-      SDK raises. Your code decides what happens next.</li>
-      <li><b>Read your provider bill.</b> No access to your provider account, no invoice, no dollar
-      estimate. Units are yours to define, and units refused is not money.</li>
-      <li><b>See a call that never asks.</b> No proxy, so an uninstrumented tool or a retry buried in a
-      library is invisible to the ceiling.</li>
-      <li><b>Bind a caller.</b> The ceiling is keyed on
-      <span class="mono-in">(account_id, task_ref)</span>. A loop that opens a new
+      <li><b>Sit in your request path.</b> No proxy, no base URL to change, no provider keys held. A call
+      that never asks, or a retry buried in a library, is invisible to the ceiling.</li>
+      <li><b>Read your provider bill.</b> No invoice, no dollar estimate. Units are yours to define, and
+      units refused is not money.</li>
+      <li><b>Reach into a running job.</b> Preflight answers <span class="mono-in">approved: false</span>
+      and the SDK raises. Your code decides what happens next.</li>
+      <li><b>Undo what already ran.</b> Calls are refused, not reversed, and the ceiling is keyed on
+      <span class="mono-in">(account_id, task_ref)</span>: a loop that opens a new
       <span class="mono-in">task_ref</span> gets a new ceiling.</li>
-      <li><b>Unwind a workflow.</b> Calls are refused, not reversed. Refusing the next call does not
-      undo the ones that already ran.</li>
-      <li><b>Guarantee the TTL fits your job.</b> A reservation not settled inside 60 minutes is
-      reclaimed by a sweeper while your call may still be running.</li>
-      <li><b>Publish a latency SLO.</b> There is none. The free tier is ${num(PLAN_LIMITS.free)} calls
-      with no card, enough to measure the added latency on your own workload.</li>
-      <li><b>Replace observability or payments.</b> No tracing, no invoices, no money moved. Polar bills
-      you for AgentBill; nothing bills anyone on your behalf.</li>
-      <li><b>Give your ops team a no-code dashboard.</b> There is a console. The product is an SDK and
-      one endpoint.</li>
-      <li><b>Show a logo wall or a testimonial.</b> Nobody has agreed to be named yet. The install line,
-      the free tier and the response bodies above are what is checkable.</li>
     </ul>
   </section>
 
