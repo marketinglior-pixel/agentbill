@@ -536,9 +536,11 @@ GET /keys, POST /keys/generate, POST /keys/rotate (issues a new key and keeps th
 for 24 hours), POST /keys/revoke (stops authenticating on the next request; the check is one
 predicate on the database clock, so no app-to-database skew can keep a dead key alive). POST
 /webhook-config sets one https URL per account. POST /register is public and takes email, plus
-optional name, use_case and stack; a new account gets its key in the response body once, and an
-email that already has an account is sent its key rather than shown it. GET /health is liveness and
-carries the deployed commit; GET /health/db touches the database and answers 503 when it is down.
+optional name, use_case and stack; a new account gets its key in the response body once, and the
+201 also carries the console's session cookie for that key, so the browser that registered is
+signed in at /app. An email that already has an account is sent a single-use link to get back in,
+never the key. GET /health is liveness and carries the deployed commit; GET /health/db touches the
+database and answers 503 when it is down.
 
 ${REFUSALS}
 

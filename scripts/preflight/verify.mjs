@@ -1020,7 +1020,7 @@ ok('[fold] one primary action in the hero, and the brochure rows are gone',
 ok('[register] the lede is setup language and nothing under the form pitches',
    register8.includes('Key once.') && register8.includes('Your code decides.') && !register8.includes('One decorator')
      && !register8.includes('class="facts"') && !register8.includes('the entire integration surface'))
-ok('[register] the key screen signs the key into the start screen, same origin, new tab',
+ok('[register] the key screen signs the key into the start screen, same origin, this tab',
    register8.includes('action="/app/session"') && register8.includes('name="next" value="/app?view=start"') && register8.includes('id="key-field"'))
 const toStart8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dstart` })
 ok('[register] /app/session honours next=/app?view=start', toStart8.status === 303 && toStart8.headers.get('location') === '/app?view=start', `${toStart8.headers.get('location')}`)
@@ -1040,6 +1040,63 @@ ok('[onboarding] /register teaches no sequence: no install command, no numbered 
 ok('[onboarding] /register keeps the key, the export line it fills, and one action',
    register8.includes('id="key-display"') && register8.includes('id="key-export"')
      && register8.includes('Open the console'))
+// P0 of 2026-09-12, from Alex's re-verify on 9fa5718. Two failures, one cause:
+// nothing on the register path touched the console session. A browser that
+// had signed into another account earlier showed THAT account when the new
+// key holder clicked the header's Console link, and the key screen's button
+// opened a new tab, which a tester following one tab read as a button that
+// does nothing. Now a 201 from POST /register carries the same Set-Cookie
+// /app/session mints, name and path identical so it overwrites whatever sat
+// there, and the button moves this tab.
+const goForm8 = (register8.match(/<form[^>]*id="go-form"[^>]*>/) ?? [''])[0]
+ok('[register] the key screen\'s form moves this tab: it has no target',
+   goForm8.includes('action="/app/session"') && !/\btarget=/.test(goForm8), goForm8)
+ok('[register] docs and the questions page are an aside under the button, not a second action',
+   !/<a[^>]*class="btn-go"/.test(register8) && !register8.includes('Docs</a>, or')
+     && register8.indexOf('class="btn-go"') < register8.indexOf('class="aside"')
+     && register8.slice(register8.indexOf('class="aside"')).includes('href="/docs"'))
+const email8 = `harness-register-${Date.now()}@example.invalid`
+const reg8 = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: email8 }) })
+const regBody8 = await reg8.json()
+const regCookie8 = reg8.headers.get('set-cookie') ?? ''
+ok('[register] a 201 carries the console session for the key it minted, on the login cookie\'s name and path',
+   reg8.status === 201 && typeof regBody8.api_key === 'string' && regCookie8.startsWith('agentbill_app=')
+     && /;\s*Path=\/app(;|$)/.test(regCookie8) && /HttpOnly/.test(regCookie8), `${reg8.status} ${regCookie8.slice(0, 40)}`)
+const attrs8 = (c) => c.split(';').slice(1).map((s) => s.trim()).sort().join('|')
+ok('[register] register and login mint the cookie from one recipe, or the second could not overwrite the first',
+   attrs8(regCookie8) === attrs8(login8.headers.get('set-cookie') ?? ''), `${regCookie8} vs ${login8.headers.get('set-cookie')}`)
+const asNew8 = await nav8('/app?view=start', { headers: { cookie: regCookie8.split(';')[0] } }).then(r => r.text())
+ok('[register] and that cookie opens the start screen as the account just created, not another',
+   asNew8.includes('Three steps to your first refusal') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
+   'the new session did not render the new account')
+// A row written while verifying is not data.
+const regAcct8 = (await sql`SELECT id FROM accounts WHERE email = ${email8}`)[0]
+if (regAcct8) {
+  await sql`DELETE FROM developer_api_keys WHERE account_id = ${regAcct8.id}`
+  await sql`DELETE FROM accounts WHERE id = ${regAcct8.id}`
+}
+ok('[register] the harness account is gone again', (await sql`SELECT count(*)::int AS n FROM accounts WHERE email = ${email8}`)[0].n === 0)
+
+// Under the fold, 2026-09-12. The request-path row is the one row; it teaches
+// the console/PUT order with the field the endpoint actually takes; nothing on
+// the page offers task_ceiling on a first call as a peer of that path; the
+// task-budgets and refusals panels are off the cold path; and the not-list is
+// four lines that say nothing about anyone else.
+ok('[home] the ceiling is taught console-first with ceiling_units, and task_ceiling is not a peer path',
+   fold8.includes('PUT /tasks/:task_ref/ceiling') && visible8(fold8).includes('ceiling_units')
+     && !/on\s+its first call/.test(fold8) && !/pass <span class="mono-in">task_ceiling/.test(fold8))
+ok('[home] the task-budgets and refusals panels are off the cold path',
+   !fold8.includes('what the agent got back') && !fold8.includes('one job, many calls, one ceiling') && !fold8.includes('class="ref-row"'))
+const notsAt8 = fold8.indexOf('class="nots"')
+const nots8 = notsAt8 === -1 ? '' : fold8.slice(notsAt8, fold8.indexOf('</ul>', notsAt8))
+ok('[home] the not-list is four lines, none about stopping a run or about who has agreed to anything',
+   (nots8.match(/<li>/g) ?? []).length === 4 && !fold8.includes('Stop your run') && !fold8.includes('Nobody has agreed')
+     && !/\bnobody\b/i.test(visible8(fold8)) && !/\b(stop|kill|block|dies)[a-z]*\b/i.test(visible8(nots8)),
+   `${(nots8.match(/<li>/g) ?? []).length} items`)
+ok('[start] the footer names the endpoint with the field it takes, and does not teach task_ceiling from code',
+   visible8(virgin8).includes('ceiling_units') && !/\btask_ceiling\b/.test(visible8(virgin8)))
+
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
                             ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
                             ['/register', register8], ['the console login card', login8b]]) {

@@ -201,10 +201,9 @@ export async function appRoute(app: FastifyInstance) {
     if (row.isRevoked) return reply.redirect(back('revoked', next), 303)
     if (row.isExpired) return reply.redirect(back('expired', next), 303)
 
-    reply.header(
-      'Set-Cookie',
-      `${COOKIE}=${mintToken(row.id as string, secret)}; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=${MAX_AGE}`,
-    )
+    const cookie = sessionCookieFor(row.id as string)
+    if (!cookie) return reply.redirect('/app?err=unavailable', 303)
+    reply.header('Set-Cookie', cookie)
     return reply.redirect(next || '/app', 303)
   })
 
@@ -268,6 +267,27 @@ function mintToken(keyId: string, secret: string): string {
   const exp = Math.floor(Date.now() / 1000) + MAX_AGE
   const payload = `${keyId}.${exp}`
   return `${payload}.${sign(payload, secret)}`
+}
+
+/**
+ * The Set-Cookie value that signs a browser into the console as `keyId`.
+ *
+ * One recipe, because two routes mint it: the login form above, and POST
+ * /register (src/routes/register.ts), whose 201 carries this header so the
+ * browser that just created an account IS that account on its next /app load.
+ * Same name, same Path, so it overwrites a cookie an earlier sign-in left in
+ * the browser instead of sitting beside it. That is the whole fix for the
+ * 2026-09-11 re-verify: a fresh register followed by the header's Console link
+ * opened a dogfood account from the day before, because nothing on the
+ * register path had ever touched the cookie.
+ *
+ * Null when this server has no session secret; the caller then sets nothing,
+ * and a 201 with no cookie is still a 201.
+ */
+export function sessionCookieFor(keyId: string): string | null {
+  const secret = sessionSecret()
+  if (!secret) return null
+  return `${COOKIE}=${mintToken(keyId, secret)}; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=${MAX_AGE}`
 }
 
 function verifyToken(token: string, secret: string): string | null {
@@ -2204,7 +2224,7 @@ except TaskCeilingExceededError as refused:
         <p>${STEP_REFUSE}</p>
         ${third}
       </div></div>
-      <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins.</p>
+      <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses, and it changes only here or through <code>PUT /tasks/:task_ref/ceiling</code> with <code>ceiling_units</code> in the body: last save wins. Your code names the job and nothing about its budget.</p>
       <p class="seedemo"><a href="${href(p, 'overview', { demo: true })}">Show me the console with sample data &rarr;</a></p>
     </div>`
 }
