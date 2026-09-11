@@ -19,33 +19,58 @@ trusts the reader, hates decoration.
 
 ## Macrostructure families
 
-- **Marketing (`/`, `/pricing`, `/register`):** Split Studio. Every claim sits
-  beside a panel that shows the product doing what the claim describes. The
-  panels render from the same data the console renders (`demoConsole()`,
+- **Marketing (`/`, `/pricing`):** Split Studio. Every claim sits beside a
+  panel that shows the product doing what the claim describes. The panels
+  render from the same data the console renders (`demoConsole()`,
   `PLAN_LIMITS`), never from copies. One deliberate grid break per page (on `/`
   it is the playground band).
 
-  The homepage (restructured for scan speed 2026-09-09, `src/routes/home.ts`)
-  reads in this order and nothing else: hero, the playground as a full-bleed
-  band directly under it, the provider-cap argument as three sourced cards,
-  five rows (per-task ceilings, the request path, refusals, keys, and the
-  console as `.dip.wide`, where the head keeps the row's columns and the panel
-  spans both beneath), the four tier cards, the not-list at one line per item,
-  and the close. Every row is an eyebrow (tracked mono, `.eyebrow`), an `h2`,
-  two sentences and a panel; the rows are top-level sections, so their heads
-  are `h2` at the section rung and no group heading governs them. The copy
-  budget that produced this: hero subhead under 25 words, a row under 45, the
-  not-list under 25 per item. The hero's code frame carries a Python / Node
-  tab strip (`src/ui/tabs.ts`): both samples are server-rendered and
-  CI-executed, JavaScript off shows Python, and the install pill follows the
-  tab so the pill and the sample always name the same package. The switch is
-  a state change, not motion. Under the code frame the answer is the wire
-  body the sample's own call gets back when 8 units remain, built by
-  `heroRefusalBody()` in `playground.ts` from the run's numbers, and the
-  exception name after it; the SDK's exception TEXT is not rendered on the
-  page; since agentbill-sdk 0.6.2 it reads "Refused (task_ceiling_exceeded): ..."
-  and `REFUSAL.message` in playground.ts mirrors that template. The hero's
-  second action is the docs route; the playground is one scroll down and
+  **`/register` is One Column (2026-09-12):** a head, a lede in setup
+  language (what happens once, what the ceiling is on, what comes back,
+  whose decision it is), and the form card, 560px on the shell. The request
+  panel and the three reassurance rows that sat beside the form are gone;
+  the form is the page. The post-key screen prints the key, prints it into
+  the export line, and its one action is a same-origin POST to
+  `/app/session` carrying that key with `next=/app?view=start`, so the next
+  screen is step 1 of 3 and not a login card asking for the string on this
+  one.
+
+  The homepage (restructured for scan speed 2026-09-09, fold rebuilt
+  2026-09-12, `src/routes/home.ts`) reads in this order and nothing else:
+  hero, the playground as a full-bleed band directly under it, the
+  provider-cap argument as three sourced cards, three rows (per-task
+  ceilings, the request path with the code frame, refusals), the four tier
+  cards, the not-list at one line per item, and the close. Every row is an
+  eyebrow (tracked mono, `.eyebrow`), an `h2`, two sentences and a panel; the
+  rows are top-level sections, so their heads are `h2` at the section rung
+  and no group heading governs them. The copy budget that produced this: hero
+  subhead under 25 words, a row under 45, the not-list under 25 per item.
+
+  **The fold (2026-09-12).** Craft reference: pressplaced.com, read for air,
+  one demo and one action; nothing of its product, palette or claims. The
+  hero is the locked headline, the locked sentence, ONE button, the trust
+  line, and beside them the dual-state demo (`dualState()`): two cards on
+  the panel frame, staggered by width and margin rather than transform. The
+  month card is a sample and says so in its frame; it shows a share of a
+  window, never a count, because this product has no month meter to read.
+  The job card shows the numbers from `heroRefusalBody()` and the wire body
+  under them, so the card, the code frame's answer and the playground cannot
+  disagree. The caption reads "job ceiling · not a month window · not a
+  proxy" and stops there: it does not claim no other ceiling exists. The
+  keys row and the console-overview row were removed the same day; a reader
+  on the cold path meets a dashboard after a refusal, not before.
+
+  The code frame moved from the hero into the request-path row. It carries a
+  Python / Node tab strip (`src/ui/tabs.ts`): both samples are server-rendered
+  and CI-executed, JavaScript off shows Python, and the install pill under the
+  row's text follows the tab so the pill and the sample always name the same
+  package. The switch is a state change, not motion. Under the code frame the
+  answer is the wire body the sample's own call gets back when 8 units
+  remain, built by `heroRefusalBody()` in `playground.ts` from the run's
+  numbers, and the exception name after it; the SDK's exception TEXT is not
+  rendered on the page; since agentbill-sdk 0.6.2 it reads
+  "Refused (task_ceiling_exceeded): ..." and `REFUSAL.message` in
+  playground.ts mirrors that template. The playground is one scroll down and
   needs no button to be found.
 
   The refusal band that used to sit between the hero and the playground is
@@ -75,10 +100,23 @@ trusts the reader, hates decoration.
   counts, the sample-data toggle, Docs, sign out or the one CTA) and a main
   column on the 1080 shell. Under `--lg` the same markup is a top bar and a
   horizontally scrolling view strip. The views are server-rendered by
-  `?view=` (overview, activity, tasks, refusals, customers, keys, limits), so
-  the rail's `aria-current` is a fact the server decided; the old "Jump to"
-  rail could never carry a current state because every section rendered
-  regardless. Rules that bind every view:
+  `?view=` (overview, activity, tasks, refusals, customers, keys, limits, and
+  `start`, which is not in the rail), so the rail's `aria-current` is a fact
+  the server decided; the old "Jump to" rail could never carry a current
+  state because every section rendered regardless.
+
+  **The start screen (2026-09-12, `startScreen()` in `app.ts`, words in
+  `src/ui/steps.ts`).** Three numbered steps to a refusal on this account: a
+  job and its ceiling (the form, no terminal), the install and the lines to
+  run (a bounded loop, one call past the ceiling, so one run is one refusal),
+  and the refusal itself, read from the account's own rows with the persisted
+  body. It renders at `?view=start`, where `/register#done` signs a new key
+  in, and it IS the overview until the account's first refusal
+  (`onboardingDue()`), because a dashboard of zeros is nothing to read. The
+  start form posts `back=start` and lands on itself; the tasks view's editor
+  posts nothing and lands where it always has. The ordinal is a ring, the
+  frame is solid, not the dashed empty-state frame: this is not an empty
+  state. Rules that bind every view:
   - **One clock per view.** The period control in the view header scopes every
     figure that carries a window, and each such tile names the window in its
     own label (`Refused · 30d`). A figure with no window says what it is
@@ -272,7 +310,8 @@ bar ("python · the whole integration"), never window chrome.
 ## What pages may differ on
 
 Macrostructure within their family. Shell width per family. Whether a grid
-break exists (marketing yes, content no).
+break exists (marketing yes, content no). `/register` runs 560px inside the
+1080 shell because it is one form.
 
 `/pricing` is the pricing variant of the marketing family. Until 2026-09-09 it
 was a spec-sheet table and its stamp said so; it is now the same four tier cards

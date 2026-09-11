@@ -10,19 +10,23 @@ npm install agentbill
 
 The SDK reads `AGENTBILL_API_KEY` from the environment. Get a key at [agentbill.dev/register](https://agentbill.dev/register): free, 1,000 preflight calls a month, no card.
 
+Give the job its ceiling first, in the console at [agentbill.dev/app](https://agentbill.dev/app) or with `PUT /tasks/:task_ref/ceiling`. Then the code names the job and nothing about the budget:
+
 ```typescript
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
 
-// Units are yours to define. This job gets 500 of them, across every call
-// and tool that shares job-142. A refused call throws
-// TaskCeilingExceededError, so the expensive work never starts.
-await preflight({ agentId: 'researcher', taskRef: 'job-142', taskCeiling: 500, estimatedUnits: 12 })
+// Units are yours to define. job-142 already has its ceiling, set in the
+// console; every call and tool that shares the taskRef draws on it. A refused
+// call throws TaskCeilingExceededError before the expensive work starts.
+await preflight({ agentId: 'researcher', taskRef: 'job-142', estimatedUnits: 12 })
 
 // ... your LLM or tool call ...
 
 // After the call: record what it actually cost
 await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 ```
+
+`taskCeiling` on a first preflight opens the job from code instead; once the job exists it is not applied, and the ceiling changes only through the console or the endpoint.
 
 Every refusal shows up on your receipt at [agentbill.dev/app](https://agentbill.dev/app), with the exact response the SDK received.
 
