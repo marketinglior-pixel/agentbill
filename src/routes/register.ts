@@ -11,8 +11,7 @@ import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
-import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
-import { STEP_1, STEP_2, STEP_3, REQUIRED_LINE } from '../ui/steps.js'
+import { HEADLINE, ORIGIN } from '../ui/site.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -306,8 +305,7 @@ export async function registerRoute(app: FastifyInstance) {
     .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
     /* --code-ink: design.md calls it "the base ink inside a code frame", and
        this is one. .panel carries the ground and border (panels.ts:14) and
-       .panel-h the label bar, and the sibling .ns-pre below already uses this
-       ink for the same reason. A long green mono string sitting beside a
+       .panel-h the label bar. A long green mono string sitting beside a
        bordered Copy button read like a link. */
     .key-value { padding: 14px 18px; font-family: var(--mono); font-size: 13px; color: var(--code-ink);
                  display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -322,18 +320,12 @@ export async function registerRoute(app: FastifyInstance) {
     .ns { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0;
           border-bottom: 1px solid var(--border-soft); align-items: start; }
     .ns:last-child { border-bottom: 0; }
-    /* A list ordinal is a marker, not an action, and these sit two words from
-       real green links inside .ns p (/app, /docs, /faq). --dim is this site's
-       floor for 12px mono: .ask, .tile-f and .st-ms already use it. */
-    .ns-num { font-family: var(--mono); font-size: 12px; color: var(--dim); padding-top: 2px; }
+    /* One row, no ordinal column: the only thing left in this frame is the
+       export line, and a 22px gutter beside a lone item reads as a missing
+       marker. A modifier on .ns on purpose, so the row keeps .ns's padding,
+       border and the .ns .cp wrapping rules below. */
+    .ns.solo { grid-template-columns: minmax(0, 1fr); }
     .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
-    /* break-all was right when the only block here was one unbroken curl line;
-       it shreds the Python sample in step 3 mid-identifier. overflow-wrap:
-       anywhere breaks a token only when it genuinely cannot fit, so the curl
-       still wraps and code still breaks at spaces. */
-    .ns-pre { margin-top: 8px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px;
-              padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--code-ink);
-              white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
     /* p code, not bare code: the copy pill inside a step is also a <code>,
        and the chip ground on it drew a box inside a box. */
     /* overflow-wrap, because these chips carry the longest unbreakable tokens
@@ -344,25 +336,15 @@ export async function registerRoute(app: FastifyInstance) {
        after the post-key screen entered the gate. */
     .ns p code, .success > p code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
                padding: 1px 5px; border-radius: 3px; overflow-wrap: anywhere; }
-    /* The shared pill keeps its command on one line and scrolls it. Step 2's
-       command carries the reader's whole key, and a key that scrolls out of a
-       320px column is a key half-copied by hand. Here it wraps instead, and
-       the button drops below the command when the two do not fit on one row:
-       sharing the row squeezed "pip install agentbill-sdk" into a mid-word
-       break at 390px. fit-content keeps the short pill hugging its text. */
+    /* The shared pill keeps its command on one line and scrolls it. The
+       export line carries the reader's whole key, and a key that scrolls out
+       of a 320px column is a key half-copied by hand. Here it wraps instead,
+       and the button drops below the command when the two do not fit on one
+       row. fit-content keeps the pill hugging its text. */
     .ns .cp { margin-top: 8px; width: fit-content; max-width: 100%; padding-block: var(--s2); flex-wrap: wrap; }
     .ns .cp code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
-    /* The two rows that carry no ordinal. A bullet, not a numeral, because the
-       numerals on this screen belong to the three steps and a reader counting
-       "1, 2, 1, 2, 3" reads five steps. */
-    .keep .ns-num { font-size: var(--fs-body); line-height: 1; }
-    /* Second and third paragraph inside a step: the sample's caption above it
-       and the wrong-order note below it. Without this they sit flush against
-       the code block on both sides. */
-    .ns p + p { margin-top: 10px; }
-    .ns p + .ns-pre { margin-top: 6px; }
-    /* The one action on this panel that leaves the page. It sits under the
-       steps rather than beside them: at 320 a button and a sentence on one row
+    /* The one action on this screen. Under the key, in its own frame, and the
+       button above the sentence: at 320 a button and a sentence on one row
        break the sentence mid-word. */
     .ns-go { padding: 14px 18px 16px; border-top: 1px solid var(--border-soft); display: grid; gap: 10px; justify-items: start; }
     .ns-go p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
@@ -461,61 +443,28 @@ ${siteNav('/register', { cta: false })}
           <button class="btn-copy" id="copy-key" type="button">Copy</button>
         </div>
       </div>
-      <!-- Two things this page can finish, and no ordinal on either: the
-           numerals belong to the three steps below and must not compete with
-           them. The key line carries the key itself, filled in by the script
-           above, because a gap in a copyable line is how a key became
-           agb_agb_... and a 401 on the first run (2026-09-09). -->
+      <!-- The same key again, as the line that stores it. This screen is the
+           only one that can render the key into a runnable line: the key is
+           shown once, and the console never sees it again. A gap in a copyable
+           line is how a key became agb_agb_... and a 401 on the first run
+           (2026-09-09), so the line carries the key itself, filled in by the
+           script above.
+
+           Nothing else is taught here, on purpose. Until 2026-09-11 this
+           screen also carried the install command as an unnumbered bullet and
+           the console's three steps numbered 1/2/3 below it: five actions,
+           numbering starting on the third, terminal work first and the console
+           link last. Dogfood run 3 ended right here with "I do not understand
+           what I need to do". The sequence now has one owner, the console
+           (src/ui/steps.ts), which numbers every step from 1 and puts the two
+           that need no terminal before the install. -->
       <div class="panel">
-        <div class="panel-h"><span>Keep these two</span><span>the SDK, and the key in your environment</span></div>
-        <div class="steps keep">
-          <div class="ns"><span class="ns-num">&middot;</span><div><p>Install the SDK.</p>${copyPill('install-py', INSTALL_PY)}</div></div>
-          <div class="ns"><span class="ns-num">&middot;</span><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
+        <div class="panel-h"><span>The same key, as the line that stores it</span><span>run it in the shell your code will use</span></div>
+        <div class="steps">
+          <div class="ns solo"><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
         </div>
       </div>
-      <!-- The path, in the order the console runs it: the ceiling is set
-           before any code names the job. That order is what lets step 3 send
-           the job's name and nothing about the budget. The same three
-           sentences render inside the console (src/ui/steps.ts), where steps
-           1 and 2 are the form the reader actually fills in. -->
       <div class="panel">
-        <div class="panel-h"><span>Three steps</span><span>on one screen in your console</span></div>
-        <div class="steps">
-          <div class="ns"><span class="ns-num">1</span><div><p>${STEP_1}</p></div></div>
-          <div class="ns"><span class="ns-num">2</span><div><p>${STEP_2}</p></div></div>
-          <div class="ns"><span class="ns-num">3</span><div><p>${STEP_3}</p>
-            <p>Three calls: open the client, ask, record. Your console hands these back with your own job name in them.</p><!--
-            Written out, not interpolated from taskSnippet(). scripts/snippets
-            harvests every pre under src/routes and executes it against the
-            PUBLISHED SDK, and it classifies any pre containing a template
-            interpolation as "dynamic" with empty code, which drops it from the
-            gate in silence. This is the repo's one EXECUTED task_ref-only
-            sample, so it has to be literal. The hygiene gate asserts it is
-            byte-identical to taskSnippet(), which is what the console renders
-            with the reader's own job name; neither can move without the other.
-         --><pre class="ns-pre">import os
-from agentbill import AgentBillClient, TaskCeilingExceededError
-
-key = os.environ["AGENTBILL_API_KEY"]
-client = AgentBillClient(api_key=key)
-
-try:
-    result = client.preflight(
-        agent_id="researcher",
-        task_ref="job-1",
-    )
-    print("approved:", result.approved)
-    print("units left:", result.task_remaining_units)
-    # your model call runs here
-    client.record(
-        agent_id="researcher",
-        task_ref="job-1",
-        units=1,
-    )
-except TaskCeilingExceededError as refused:
-    print(refused)</pre>
-            <p>${REQUIRED_LINE}</p></div></div>
-        </div>
         <div class="ns-go">
           <!-- A new tab, deliberately. This screen is client-side only: the
                success state is display:none on a cold load and nothing reads
@@ -526,7 +475,7 @@ except TaskCeilingExceededError as refused:
           <!-- Also a new tab, for the same reason as the button above it: this
                screen exists only in this tab's DOM, so any same-tab navigation
                from here loses a key that is shown once. -->
-          <p>The console asks for the key once. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
+          <p>It asks for the key once, then walks you from a job name to your first preflight in four numbered steps. <a href="/docs" target="_blank" rel="noopener">Docs</a>, or <a href="/faq" target="_blank" rel="noopener">the questions page</a>.</p>
         </div>
       </div>
     </div>

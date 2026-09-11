@@ -882,9 +882,24 @@ ok('[console] the overview empty state links to the tasks view instead', emptyOv
 // That is why this gate could not see the screen it is about until now.
 await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
 const virgin8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] the first run is three steps and a form, not a curl that manufactures a refusal',
-   virgin8.includes('class="setf3"') && virgin8.includes('Three steps put a row on this page')
+ok('[onboarding] the first run is four numbered steps and a form, not a curl that manufactures a refusal',
+   virgin8.includes('class="setf3"') && virgin8.includes('Four steps put a row on this page')
      && !virgin8.includes('"ceiling":1'), 'the virgin overview did not render the steps')
+// Ticket 2026-09-11, after dogfood run 3 ended on /register#done with "I do
+// not understand what I need to do". The install is INSIDE the numbered
+// sequence, after the two steps that need no terminal, and before the sample
+// it makes runnable. Order is asserted on the rendered page, not the source.
+const iName8 = virgin8.indexOf('Name this job')
+const iUnits8 = virgin8.indexOf('How many units is this job worth')
+const iPip8 = virgin8.indexOf('pip install agentbill-sdk')
+const iAsk8 = virgin8.indexOf('Ask before each call')
+const iSample8 = virgin8.search(/<pre class="snip">/)
+ok('[onboarding] the install is step 3: after the job name and the units, before the ask and the sample',
+   iName8 > -1 && iUnits8 > iName8 && iPip8 > iUnits8 && iAsk8 > iPip8 && iSample8 > iAsk8,
+   `name ${iName8}, units ${iUnits8}, pip ${iPip8}, ask ${iAsk8}, sample ${iSample8}`)
+ok('[onboarding] the sequence is numbered 1 to 4 on one screen, and nothing on it is a bullet',
+   ['1', '2', '3', '4'].every((n) => virgin8.includes(`<span class="ns3-n">${n}</span>`))
+     && !virgin8.includes('<span class="ns3-n">5</span>') && !virgin8.includes('ns3-n">&middot;'))
 // Locked path, item 4: "one job = one budget" is read first, the wire name second.
 const iBudget8 = virgin8.indexOf('One job is one budget')
 const iRef8 = virgin8.indexOf('task_ref')
@@ -894,10 +909,13 @@ ok('[onboarding] and the page says whose decision the refusal is',
    virgin8.includes('Your code decides what the job does next'))
 // The sample is task_ref-only on purpose: the ceiling is set before the code
 // runs, and a task_ceiling sent after the job exists is not applied.
-const snipAt8 = virgin8.indexOf('<div class="snip">')
-const snip8 = snipAt8 === -1 ? '' : virgin8.slice(snipAt8, virgin8.indexOf('</div>', snipAt8))
+// Before a save the sample is a literal <pre>, the one copy CI executes; the
+// hygiene gate holds it byte-identical to taskSnippet(). It is not escaped, so
+// the quote here is a real quote, not &quot;.
+const snipAt8 = virgin8.search(/<pre class="snip">/)
+const snip8 = snipAt8 === -1 ? '' : virgin8.slice(snipAt8, virgin8.indexOf('</pre>', snipAt8))
 ok('[onboarding] the sample preflights with task_ref and carries no task_ceiling',
-   snip8.includes('task_ref=&quot;') && !snip8.includes('task_ceiling'), snip8.slice(0, 120))
+   snip8.includes('task_ref="job-1"') && !snip8.includes('task_ceiling'), snip8.slice(0, 120))
 // After a save the sample is the reader's own job, read off the row.
 await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5' })
 const mine8 = await nav8('/app?view=tasks&saved=job-mine&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
@@ -930,6 +948,20 @@ const visible8 = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<scr
   .replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ')
 const register8 = await fetch(`${API}/register`).then(r => r.text())
 const login8b = await fetch(`${API}/app`).then(r => r.text())
+// The key screen does one job. Until 2026-09-11 it also carried the install
+// command as an unnumbered bullet above the console's numbered steps, so the
+// first instruction a new key holder read was to open a terminal, and the one
+// link that needs no terminal was last on the page. The sequence now has one
+// owner. What stays here is what only this page can do: print the key, and
+// print it into the export line, because a placeholder gap in that line is how
+// a key became agb_agb_ and a 401 (2026-09-09).
+ok('[onboarding] /register teaches no sequence: no install command, no numbered steps, no sample',
+   !register8.includes('pip install agentbill-sdk') && !register8.includes('Three steps')
+     && !register8.includes('Keep these two') && !register8.includes('class="ns-pre"')
+     && !register8.includes('Name this job'))
+ok('[onboarding] /register keeps the key, the export line it fills, and one action',
+   register8.includes('id="key-display"') && register8.includes('id="key-export"')
+     && register8.includes('Open the console'))
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
                             ['/register', register8], ['the console login card', login8b]]) {
   const hits = visible8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
