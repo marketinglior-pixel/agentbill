@@ -582,6 +582,49 @@ ok('a same-origin POST with a port and no Sec-Fetch-Site is not refused', await 
 ok('a cross-origin POST is still refused', await session({ Origin: 'https://evil.example' }) === 403)
 ok('Sec-Fetch-Site: cross-site is still refused', await session({ Origin: origin, 'Sec-Fetch-Site': 'cross-site' }) === 403)
 
+// ------------------------------- 5b: abuse counters bucket by network, not address
+// Same root cause as [5], one level up and with teeth. These counters keyed on
+// the raw address string, so on IPv6 a caller got a FRESH allowance every time
+// the OS picked a different privacy address out of the same /64, which it does
+// per connection. The limit that reads as 10 an hour was, for an IPv6 caller
+// willing to do nothing but wait for a rotation, not 10 an hour.
+//
+// /recover is the surface under test because its limiter runs before any
+// lookup, a refusal is a 429 and a pass is a 303, and an address that owns no
+// account creates nothing and sends nothing either way.
+console.log('\n[5b] rate-limit buckets are per network')
+
+const recover = (ip, email = 'nobody-limiter-test@example.com') =>
+  fetch(`${API}/recover`, {
+    method: 'POST', redirect: 'manual',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Origin': new URL(API).origin,
+      'fly-client-ip': ip,
+    },
+    body: `email=${encodeURIComponent(email)}`,
+  }).then((r) => r.status)
+
+// RECOVER_IP_LIMIT is 10 an hour. Spend exactly that from one address.
+const spent = []
+for (let i = 0; i < 10; i++) spent.push(await recover('2001:db8:aa::1'))
+ok('10 attempts from one address are all allowed', spent.every((s) => s === 303), `got [${spent}]`)
+ok('the 11th from that address is refused', await recover('2001:db8:aa::1') === 429)
+
+// The fix. A different /128 inside the SAME /64 is the same caller, and under
+// the old key it walked straight through with a full allowance.
+ok('a different address in the same /64 is the same bucket',
+   await recover('2001:db8:aa::2') === 429)
+ok('and so is a third one', await recover('2001:db8:aa:0:abcd:ef01:2345:6789') === 429)
+
+// The other half: collapsing must not over-collapse. A real neighbouring
+// network is a different caller and must still be served.
+ok('a different /64 is a different bucket', await recover('2001:db8:bb::1') === 303)
+
+// IPv4 is its own origin, so its behaviour is unchanged in both directions.
+ok('an IPv4 address gets its own bucket', await recover('198.51.100.10') === 303)
+ok('a second IPv4 address is a separate bucket', await recover('198.51.100.11') === 303)
+
 // ---------------------------------------------------------------- 6: PUT /budget
 console.log('\n[6] a customer ceiling can be set, raised and lowered')
 // Until this endpoint existed the only way to choose a customer's ceiling was

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { plain } from '../lib/ids.js'
 import { sql } from '../db/index.js'
-import { clientIp } from '../lib/client-ip.js'
+import { limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 
 // POST /pulse. One public, unauthenticated, fire-and-forget write, so the
@@ -75,7 +75,7 @@ export async function pulseRoute(app: FastifyInstance) {
     // problem, never the page's.
     const done = () => reply.code(204).send()
 
-    if (!allowPulse(clientIp(request))) return done()
+    if (!allowPulse(limiterKey(request))) return done()
 
     const parsed = PulseBody.safeParse(request.body ?? {})
     if (!parsed.success) return done()

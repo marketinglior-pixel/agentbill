@@ -6,7 +6,7 @@ import { sql } from '../db/index.js'
 import { publicRoute } from '../middleware/auth.js'
 import { sameOrigin } from './app.js'
 import { docsShell } from '../ui/docs.js'
-import { clientIp } from '../lib/client-ip.js'
+import { limiterKey } from '../lib/client-ip.js'
 import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { ORIGIN } from '../ui/site.js'
 
@@ -223,7 +223,7 @@ export async function recoverRoute(app: FastifyInstance) {
 
   app.post('/recover', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
-    if (!allowRecoverAttempt(clientIp(request))) {
+    if (!allowRecoverAttempt(limiterKey(request))) {
       return secure(reply).code(429).send(page('Too many attempts', `
   <h1>Too many attempts.</h1>
   <p class="lede">This address has asked for too many recovery links in the last hour.
