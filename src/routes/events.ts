@@ -2,21 +2,16 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
-import { Resend } from 'resend'
+import { mailOwner, ownerMailReady } from '../lib/mail.js'
 import { recordDecision } from '../lib/decisions.js'
 import { consumeReservations } from '../lib/reservations.js'
 
 const ALERT_THRESHOLD = 800
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const ownerAlertEmail = process.env.OWNER_ALERT_EMAIL
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, prevUsedUnits: number) {
-  if (!resend || !ownerAlertEmail) return
+  if (!ownerMailReady()) return
   if (prevUsedUnits >= ALERT_THRESHOLD || usedUnits < ALERT_THRESHOLD) return
-  await resend.emails.send({
-    from: FROM,
-    to: ownerAlertEmail,
+  await mailOwner({
     subject: `AgentBill: customer "${customerRef}" has used ${usedUnits} units`,
     html: `
       <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong>, past the ${ALERT_THRESHOLD}-unit alert threshold. This is a usage signal, not the account's plan quota, which is counted in preflight calls per month.</p>

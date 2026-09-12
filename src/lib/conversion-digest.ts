@@ -1,4 +1,4 @@
-import { Resend } from 'resend'
+import { mailOwner, ownerMailReady } from './mail.js'
 import { getAccountsWithSignals, conversionScore, isHot } from './conversion.js'
 
 // Visitor-supplied fields go into an email body; escape them.
@@ -9,14 +9,11 @@ const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g,
 // per UTC day at SEND_HOUR_UTC. No-op when Resend or the owner email is unset.
 
 const SEND_HOUR_UTC = 5 // 08:00 Israel
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const ownerEmail = process.env.OWNER_ALERT_EMAIL
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 let lastSentDay = ''
 
 async function sendDigest(): Promise<void> {
-  if (!resend || !ownerEmail) return
+  if (!ownerMailReady()) return
 
   const accounts = await getAccountsWithSignals()
   const dayAgo = Date.now() - 24 * 3_600_000
@@ -35,9 +32,7 @@ async function sendDigest(): Promise<void> {
     })
     .join('') || '<tr><td colspan="4">none yet</td></tr>'
 
-  await resend.emails.send({
-    from: FROM,
-    to: ownerEmail,
+  await mailOwner({
     subject: `AgentBill daily: ${newSignups.length} new signups, ${hot.length} hot accounts`,
     html: `
       <h3>New signups (24h): ${newSignups.length}</h3>

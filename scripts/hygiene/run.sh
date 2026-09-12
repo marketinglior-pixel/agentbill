@@ -42,6 +42,29 @@ for tag in 'rel="canonical"' 'rel="icon"' 'name="theme-color"' 'name="color-sche
   gate "only theme.ts emits $tag" 0 "$n" "$(grep -rn -- "$tag" src --include=*.ts 2>/dev/null | grep -v 'src/ui/theme.ts' | head -3)"
 done
 
+# One module sends mail, because a ceiling can only live somewhere every sender
+# has to pass through. Until 2026-09-12 there were nine Resend clients in src,
+# one per sender, each with the same three copy-pasted env reads, and the tenth
+# sender would have been written the same way with nothing to say otherwise.
+# src/lib/mail.ts owns the client and the two doors: mailOwner has no ceiling
+# (one address, ours, cannot bounce), mailUser carries the daily ceiling on the
+# one send whose recipient a stranger picks freely.
+#
+# Checked against a deliberate violation: a `new Resend(` planted in
+# src/routes/register.ts makes this gate read 1.
+n=$(grep -rn 'new Resend(' src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | wc -l | tr -d ' ')
+gate "only mail.ts builds a mailer" 0 "$n" "$(grep -rn 'new Resend(' src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | head -3)"
+#
+# `\.emails`, not `emails\.send(`. webhook-alert.ts split its call across two
+# lines (`void resend.emails` then `.send({`), so a single-line grep for
+# `emails.send(` counted nine sites where there were ten, and the tenth was
+# the one whose whole comment is about a branch that told nobody. A gate that
+# a line break defeats is not a gate.
+n=$(grep -rn '\.emails' src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | wc -l | tr -d ' ')
+gate "and only mail.ts calls the mailer" 0 "$n" "$(grep -rn '\.emails' src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | head -3)"
+n=$(grep -rn "from 'resend'" src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | wc -l | tr -d ' ')
+gate "and only mail.ts imports the mailer" 0 "$n" "$(grep -rn "from 'resend'" src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | head -3)"
+
 # The mark is one drawing. A second <span class="dot"> is a second drawing.
 n=$(grep -rn 'class="dot"' src 2>/dev/null | wc -l | tr -d ' ')
 gate "no second copy of the mark" 0 "$n"

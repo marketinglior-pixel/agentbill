@@ -322,6 +322,40 @@ for (const n of ['2001:db8:1::9', '2001:db8:2::9', '2001:db8:3::9']) { await fro
 await settle(400)
 ipc = await counts()
 ok('the daily cap is reached at 5 alerts', ipc.alerts === 5, JSON.stringify(ipc))
+
+
+// The cap counts per ACCOUNT, not per key, 2026-09-12. POST /keys/generate has
+// no per-account key cap, so a cap keyed on api_key_id handed every new key a
+// fresh allowance of five into the SAME mailbox: the flood of 2026-09-11 built
+// out of the one thing the cap was not counting. Mutating the `recent` subquery
+// back to `WHERE api_key_id = ...` makes this gate red.
+const [acctOfKey8] = await sql`SELECT account_id FROM developer_api_keys WHERE api_key = ${KEY}`
+const secondKey8 = 'agb_' + 'c'.repeat(48)
+await sql`
+  INSERT INTO developer_api_keys (account_id, api_key, label)
+  VALUES (${acctOfKey8.accountId ?? acctOfKey8.account_id}, ${secondKey8}, 'ip-cap-second-key')
+  ON CONFLICT DO NOTHING`
+const [k2] = await sql`SELECT id FROM developer_api_keys WHERE api_key = ${secondKey8}`
+// Two origins on the fresh key, so its own per-key count would permit an alert.
+for (const n of ['2001:db8:9a::1', '2001:db8:9b::1']) {
+  await sql`
+    INSERT INTO api_key_ip_origins (api_key_id, origin, last_ip)
+    VALUES (${k2.id}, ${n + '/64'}, ${n})
+    ON CONFLICT (api_key_id, origin) DO NOTHING`
+}
+const perAccount8 = (await sql`
+  SELECT (SELECT count(*)::int FROM api_key_ip_origins WHERE api_key_id = ${k2.id}) AS per_key,
+         (SELECT count(*)::int FROM api_key_ip_origins o
+            JOIN developer_api_keys k ON k.id = o.api_key_id
+           WHERE k.account_id = ${acctOfKey8.accountId ?? acctOfKey8.account_id}
+             AND o.alerted_at > NOW() - INTERVAL '24 hours') AS recent
+`)[0]
+ok('[ip-cap] a second key on the same account inherits the account\'s spent allowance, not a fresh one',
+   perAccount8.recent >= 5 && perAccount8.perKey === 2,
+   JSON.stringify(perAccount8))
+await sql`DELETE FROM api_key_ip_origins WHERE api_key_id = ${k2.id}`
+await sql`DELETE FROM developer_api_keys WHERE id = ${k2.id}`
+
 await from('2001:db8:4::9')
 await settle(600)
 ipc = await counts()
@@ -1276,6 +1310,63 @@ const decide8 = (rank) => rank < DAILY_CAP8 ? 'signup' : rank === DAILY_CAP8 ? '
 ok('[signup-alert] the cap sends 25 signups, then exactly one notice, then nothing',
    [...Array(30).keys()].map(decide8).join(',') ===
      `${Array(25).fill('signup').join(',')},one notice,${Array(4).fill('silent').join(',')}`)
+
+// The welcome ceiling, 2026-09-12, and the reason it is a rank and not a count.
+//
+// The count version was measured failing in BOTH directions in this exact
+// geometry (the row committed by one transaction, counted by a later
+// statement), and the dominant failure was UNDER-sending: a real signup reads a
+// number inflated by rows that committed after its own and loses its welcome
+// mail with room to spare. That is worse than overshoot, so the gate below
+// asserts the property that rules it out rather than the cap's arithmetic: the
+// rank of a row cannot be raised by a row that came later.
+//
+// Crossed for real against Postgres rather than evaluated as a pure function.
+// The previous gate above is a pure function over 30 integers, which is
+// presence, not effect.
+const PER_DAY8 = 50
+const PER_HOUR8 = 20
+// The exact query src/lib/mail.ts runs, so a change to one that is not made to
+// the other shows up here rather than in production.
+const ranks8 = async (email) => (await sql`
+  WITH me AS (SELECT created_at FROM accounts WHERE email = ${email})
+  SELECT (SELECT count(*)::int FROM accounts, me
+           WHERE accounts.created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+             AND accounts.created_at < me.created_at) AS day,
+         (SELECT count(*)::int FROM accounts, me
+           WHERE accounts.created_at >= date_trunc('hour', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+             AND accounts.created_at < me.created_at) AS hour
+  FROM me
+`)[0]
+const seeded8 = []
+for (let i = 0; i < 3; i++) {
+  const e = `harness-ceiling-${Date.now()}-${i}@example.invalid`
+  await sql`INSERT INTO accounts (email, plan) VALUES (${e}, 'free')`
+  seeded8.push({ email: e, ...(await ranks8(e)) })
+}
+ok('[mail] each welcome send owns one rank per window, and a later row never raises an earlier one',
+   seeded8.every((r, i) => i === 0 || (r.day === seeded8[i - 1].day + 1 && r.hour === seeded8[i - 1].hour + 1))
+     && (await ranks8(seeded8[0].email)).day === seeded8[0].day,
+   JSON.stringify(seeded8.map((r) => [r.day, r.hour])))
+// Both terms, and the announcement, are pure functions of those two ranks.
+const gated8 = (r) => r !== null && (r.day >= PER_DAY8 || r.hour >= PER_HOUR8)
+ok('[mail] the ceiling holds at each window value and nowhere earlier',
+   !gated8({ day: PER_DAY8 - 1, hour: PER_HOUR8 - 1 })
+     && gated8({ day: PER_DAY8, hour: 0 })
+     && gated8({ day: 0, hour: PER_HOUR8 })
+     && !gated8(null))
+// The hourly term is the one that makes a day's allowance unspendable in a
+// burst: without it, all 50 can go out inside ninety seconds, which is the
+// shape that took Gmail delivery from 66% to 17% in September.
+ok('[mail] a burst inside one hour is refused long before the daily term would notice',
+   gated8({ day: PER_HOUR8, hour: PER_HOUR8 }) && PER_HOUR8 < PER_DAY8)
+const announces8 = (r) => r.day === PER_DAY8 || (r.day < PER_DAY8 && r.hour === PER_HOUR8)
+ok('[mail] exactly one row in each window announces, so the notice does not depend on which machine served it',
+   [...Array(PER_DAY8 + 2).keys()].filter((d) => announces8({ day: d, hour: 0 })).length === 1
+     && [...Array(PER_HOUR8 + 2).keys()].filter((h) => announces8({ day: 0, hour: h })).length === 1)
+for (const r of seeded8) await sql`DELETE FROM accounts WHERE email = ${r.email}`
+ok('[mail] the seeded rows are gone again',
+   (await sql`SELECT count(*)::int AS n FROM accounts WHERE email LIKE 'harness-ceiling-%'`)[0].n === 0)
 
 // A row written while verifying is not data.
 for (const e of [email8, email8b]) {

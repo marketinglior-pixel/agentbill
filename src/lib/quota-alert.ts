@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify'
-import { Resend } from 'resend'
+import { mailUser, mailerReady } from './mail.js'
 import { sql } from '../db/index.js'
 import { ORIGIN } from '../ui/site.js'
 
@@ -29,8 +29,6 @@ import { ORIGIN } from '../ui/site.js'
 // Nothing here is awaited by the caller. A slow mailer on the preflight path
 // would be a latency regression on the one route where latency is the product.
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 export type QuotaThreshold = 75 | 90 | 100
 
@@ -117,18 +115,18 @@ async function deliver(log: FastifyBaseLogger, a: QuotaAlert): Promise<void> {
     log.warn({ accountId: a.accountId }, 'quota alert: account has no email')
     return
   }
-  if (!resend) {
+  if (!mailerReady()) {
     log.warn({ accountId: a.accountId }, 'quota alert: no mailer configured')
     return
   }
 
-  const res = await resend.emails.send({
-    from: FROM,
-    to: acc.email as string,
-    ...compose(a, acc.resetsOn as string),
-  })
-  if (res.error) {
-    log.error({ accountId: a.accountId, threshold: a.threshold, error: res.error }, 'quota alert: Resend refused the send')
+  // reason 'account': the recipient is the customer's own address and reaching
+  // this mail at all takes real usage to 75% of a plan quota, so it is counted
+  // and never refused. It is also the only warning a developer gets before
+  // their agent starts being refused.
+  const sent = await mailUser(log, 'account', acc.email as string, compose(a, acc.resetsOn as string))
+  if (!sent) {
+    log.error({ accountId: a.accountId, threshold: a.threshold }, 'quota alert: the send did not go out')
     return
   }
   await sql`UPDATE account_quota_alerts SET emailed = true WHERE id = ${claim.id}`

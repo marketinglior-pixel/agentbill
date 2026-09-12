@@ -77,3 +77,17 @@ export function markRecoverySent(email: string): void {
   emailSends.set(email, Date.now())
   prune(emailSends)
 }
+
+/**
+ * Release the mark when the send did not happen.
+ *
+ * The comment above has stated since this file was written that "a failed send
+ * must not block the next attempt", and until 2026-09-12 nothing could honour
+ * it: both call sites armed the mark before the send and there was no way to
+ * release it. One refusal by Resend, which is the state a degraded sending
+ * domain produces, silently cost that address an hour of recovery, on the one
+ * path whose whole job is to end a lockout.
+ */
+export function clearRecoveryMark(email: string): void {
+  emailSends.delete(email)
+}

@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify'
-import { Resend } from 'resend'
+import { mailOwner, ownerMailReady } from './mail.js'
 import { sql } from '../db/index.js'
 import { ORIGIN } from '../ui/site.js'
 
@@ -23,10 +23,17 @@ import { ORIGIN } from '../ui/site.js'
 // On 2026-09-11 an alert that compared one column mailed one account owner
 // roughly eleven times a minute for two days: 13,835 sends, 8,180 of them
 // bounced, and Gmail delivery for the whole domain fell from 66% to 17%, which
-// took genuine welcome mail down with it (ip-origin.ts, migration 011). The
-// lesson that survives is not about IP addresses. It is that a per-event owner
-// alert on a PUBLIC endpoint has to carry its own ceiling, because the thing
-// that decides how often it fires is a stranger.
+// took genuine welcome mail down with it (ip-origin.ts, migration 011).
+//
+// The mechanism is worth stating exactly, because the obvious reading is wrong.
+// The flooded account was revreclaim@gmail.com, a real deliverable mailbox, so
+// those bounces were overwhelmingly Gmail REFUSING VOLUME to an address that
+// exists, not hard bounces to an address that does not. What damaged the domain
+// was the rate, and the collateral was every other mail we send, because the
+// sending domain is shared. The lesson that survives is therefore not about IP
+// addresses and not about fake recipients: a per-event alert on a PUBLIC
+// endpoint has to carry its own ceiling, because the thing that decides how
+// often it fires is a stranger.
 //
 // /register is capped at 12 attempts an hour per network (register-limiter.ts),
 // and that is a per-network cap held in one machine's memory. It bounds one
@@ -42,9 +49,6 @@ import { ORIGIN } from '../ui/site.js'
 // account is INSERTed exactly once, by one statement, in one transaction
 // (register.ts), and this function is called on that one path, so "once per
 // account" is already true without a row to enforce it.
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const ownerEmail = process.env.OWNER_ALERT_EMAIL
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 /**
  * How many signup emails one UTC day may produce.
@@ -91,7 +95,7 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
   // leaves a line.
   log.info({ accountId: a.accountId, email: a.email, stack: a.stack, useCase: a.useCase }, 'new signup')
 
-  if (!resend || !ownerEmail) {
+  if (!ownerMailReady()) {
     log.warn({ accountId: a.accountId }, 'signup alert not sent: RESEND_API_KEY or OWNER_ALERT_EMAIL is unset')
     return
   }
@@ -135,9 +139,7 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
     // Silence, but say so once. Exactly one signup a day has rank DAILY_CAP, so
     // this is one notice however many follow it, and the next one is tomorrow.
     if (rank === DAILY_CAP) {
-      await resend.emails.send({
-        from: FROM,
-        to: ownerEmail,
+      await mailOwner({
         subject: `AgentBill: past ${DAILY_CAP} signups today, per signup mail is off until tomorrow`,
         html: `
           <p>This is account number ${esc(String(rank + 1))} created today, which is past the
@@ -152,9 +154,7 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
     return
   }
 
-  const res = await resend.emails.send({
-    from: FROM,
-    to: ownerEmail,
+  const sent = await mailOwner({
     subject: `AgentBill: new signup, ${a.email}`,
     html: `
       <table border="1" cellpadding="6" cellspacing="0">
@@ -183,6 +183,6 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
     `,
   })
 
-  if (res.error) log.error({ accountId: a.accountId, err: res.error }, 'signup alert was not accepted by Resend')
+  if (!sent) log.error({ accountId: a.accountId }, 'signup alert was not accepted by Resend')
   else log.info({ accountId: a.accountId }, 'signup alert sent')
 }

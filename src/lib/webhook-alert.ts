@@ -1,4 +1,4 @@
-import { Resend } from 'resend'
+import { mailOwner, ownerMailReady } from './mail.js'
 
 // A rejected webhook now reaches a person.
 //
@@ -31,9 +31,6 @@ import { Resend } from 'resend'
 // It logs whether or not email is configured. The point is that the branch
 // stops being silent; the email is how it travels when Resend is set up.
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const ownerEmail = process.env.OWNER_ALERT_EMAIL
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 /** One email per reason per hour. A sender that retries must not become a mailbox. */
 const COOLDOWN_MS = 60 * 60_000
@@ -89,17 +86,14 @@ export function alertRejectedWebhook(
   t.firstAt = now
   t.count = 0
 
-  if (!resend || !ownerEmail) return
+  if (!ownerMailReady()) return
 
   const rows = Object.entries(detail)
     .filter(([, v]) => v !== undefined && v !== '')
     .map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td><code>${esc(v)}</code></td></tr>`)
     .join('')
 
-  void resend.emails
-    .send({
-      from: FROM,
-      to: ownerEmail,
+  void mailOwner({
       subject: `AgentBill: a Polar webhook was rejected (${reason})`,
       html: `
         <p><b>${esc(URGENCY[reason])}</b></p>

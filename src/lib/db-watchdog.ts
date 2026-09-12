@@ -1,5 +1,5 @@
 import { sql } from '../db/index.js'
-import { Resend } from 'resend'
+import { mailOwner, ownerMailReady } from './mail.js'
 
 // The May-August 2026 outage lesson: /health said "ok" for months while the
 // database was dead, because it never touched the DB. This watchdog probes the
@@ -9,9 +9,6 @@ import { Resend } from 'resend'
 const CHECK_INTERVAL_MS = 5 * 60_000 // 5 minutes
 const FAILURES_BEFORE_ALERT = 3      // ~15 minutes of sustained failure
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const ownerEmail = process.env.OWNER_ALERT_EMAIL
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 let consecutiveFailures = 0
 let alertSent = false
@@ -30,13 +27,9 @@ export async function probeDb(): Promise<{ ok: boolean; latencyMs: number; error
 }
 
 async function sendAlert(subject: string, html: string): Promise<void> {
-  if (!resend || !ownerEmail) return
-  await resend.emails.send({
-    from: FROM,
-    to: ownerEmail,
-    subject,
-    html,
-  }).catch((err) => console.error('[db-watchdog] alert email failed:', err))
+  if (!ownerMailReady()) return
+  const sent = await mailOwner({ subject, html })
+  if (!sent) console.error('[db-watchdog] alert email failed')
 }
 
 async function tick(): Promise<void> {

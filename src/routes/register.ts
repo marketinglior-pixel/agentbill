@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
 import { head } from '../ui/theme.js'
@@ -7,7 +7,6 @@ import { PANEL_CSS } from '../ui/panels.js'
 import { sql } from '../db/index.js'
 import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
-import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
@@ -18,9 +17,8 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
 import { sessionCookieFor } from './app.js'
 import { alertNewSignup } from '../lib/signup-alert.js'
+import { mailUser } from '../lib/mail.js'
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 const SUPPORT_EMAIL = 'hello@agentbill.dev'
 
 /**
@@ -31,31 +29,30 @@ const SUPPORT_EMAIL = 'hello@agentbill.dev'
  * the account exists at all: someone who closed the tab had nothing, not even
  * proof of which address they had used. This is that record, and it names the
  * one route back.
+ *
+ * It is the ONLY send in the system whose recipient is free: anyone can type
+ * any address into /register, and this mails it. That is why it goes through
+ * mailUser with reason 'welcome', which is the one reason the daily ceiling in
+ * src/lib/mail.ts gates. Everything this mail says is also on the screen that
+ * showed the key, which is what makes a suppressed one survivable; the durable
+ * record in a mailbox is the part that is genuinely lost.
  */
-async function emailWelcome(email: string): Promise<boolean> {
-  if (!resend) return false
-  try {
-    const res = await resend.emails.send({
-      from: RESEND_FROM,
-      to: email,
-      subject: 'Your AgentBill account is ready',
-      html: `
+async function emailWelcome(log: FastifyBaseLogger, email: string, accountId: string): Promise<boolean> {
+  return mailUser(log, 'welcome', email, {
+    subject: 'Your AgentBill account is ready',
+    html: `
         <p>Your AgentBill account is open on the free tier. No card, nothing to confirm.</p>
         <p>Your API key was shown once in the browser when you registered, and it is not in this
            email on purpose: an API key that lives in a mailbox is a key anyone who reads that
-           mailbox has. Keep it in an environment variable.</p>
+           mailbox has. Keep it where your code reads it.</p>
         <p>The same key opens your console at <a href="${ORIGIN}/app">${ORIGIN}/app</a>.</p>
         <p>If you no longer have it, you can get back in at
-           <a href="${ORIGIN}/recover">${ORIGIN}/recover</a>. That link lets you see the current
-           key or replace it, after you prove you can read this address.</p>
+           <a href="${ORIGIN}/recover">${ORIGIN}/recover</a>. That link shows the current key, and
+           the line that sets it, after you prove you can read this address.</p>
         <p>The quickstart is at <a href="${ORIGIN}/docs">${ORIGIN}/docs</a>. Questions:
            ${SUPPORT_EMAIL}</p>
       `,
-    })
-    return !res.error
-  } catch {
-    return false
-  }
+  }, accountId)
 }
 
 // Existing account: never hand the key to an unauthenticated caller, that
@@ -69,13 +66,13 @@ async function emailWelcome(email: string): Promise<boolean> {
 // stranger drop a permanent bearer credential into someone's inbox, where it
 // then stayed. It now sends the same single-use link /recover sends, so there
 // is one recovery mechanism on the system rather than two.
-async function existingAccountReply(reply: any, email: string, accountId: string) {
+async function existingAccountReply(log: FastifyBaseLogger, reply: any, email: string, accountId: string) {
   const inbox = `This email already has an account. Check your inbox: we sent a link to get back in.`
   if (recoveryInCooldown(email)) {
     return reply.code(200).send({ status: 'existing_account_emailed', message: inbox })
   }
   markRecoverySent(email)
-  const emailed = await sendRecoveryLink(email, accountId)
+  const emailed = await sendRecoveryLink(log, email, accountId)
   if (emailed) {
     return reply.code(200).send({ status: 'existing_account_emailed', message: inbox })
   }
@@ -581,7 +578,7 @@ ${REGISTER_JS}${COPY_JS}
       `
 
       if (existing) {
-        return existingAccountReply(reply, email, existing.id as string)
+        return existingAccountReply(request.log, reply, email, existing.id as string)
       }
 
       // New account
@@ -623,15 +620,14 @@ ${REGISTER_JS}${COPY_JS}
             message: `This email already has an account. Email ${SUPPORT_EMAIL} to recover your key.`,
           })
         }
-        return existingAccountReply(reply, email, result.accountId)
+        return existingAccountReply(request.log, reply, email, result.accountId)
       }
 
       // Fire and forget. The key is already in the response, so a slow or
       // failing Resend must not hold up a signup or turn one into a 500. It is
       // logged instead, because silently not sending is how the old recovery
       // gap stayed invisible.
-      void emailWelcome(email)
-        .then((ok) => { if (!ok) request.log.error({ email }, 'welcome email was not accepted by Resend') })
+      void emailWelcome(request.log, email, result.accountId)
         .catch((err) => request.log.error({ err }, 'welcome email threw'))
 
       // The owner hears about it now, not in tomorrow's digest. Same fire and
@@ -658,7 +654,15 @@ ${REGISTER_JS}${COPY_JS}
       if (cookie) reply.header('Set-Cookie', cookie)
       return reply.code(201).send({
         api_key: result.apiKey,
-        message: 'Account created. Store your API key. It will not be shown again. A link to get back in if you lose it is on its way to your inbox.',
+        // Says what is true of the account, not of a send that has not happened
+        // yet. This used to assert "a link to get back in is on its way to your
+        // inbox", which was a promise made by the response about a fire-and-
+        // forget mail two lines above it: false whenever Resend refused it,
+        // false with no mailer configured, and false the moment the welcome
+        // ceiling in src/lib/mail.ts suppresses one. /recover is a standing
+        // route rather than a mail, so the sentence that replaces it is true
+        // whether or not anything was ever delivered.
+        message: 'Account created. Store your API key. It will not be shown again. If you lose it, agentbill.dev/recover gets you back in with this email address.',
       })
 
     } catch (err) {

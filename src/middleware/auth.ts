@@ -4,8 +4,8 @@ import { isIP } from 'node:net'
 import { clientIp as resolveClientIp } from '../lib/client-ip.js'
 import { ipOrigin } from '../lib/ip-origin.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
-import { Resend } from 'resend'
 import type { FastifyBaseLogger } from 'fastify'
+import { mailUser } from '../lib/mail.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -41,8 +41,6 @@ declare module 'fastify' {
  */
 export const publicRoute = () => ({ config: { public: true } })
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 
 /**
  * At most this many alerts per key per rolling day, whatever arrives.
@@ -55,12 +53,14 @@ const FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
  */
 const ALERTS_PER_DAY = 5
 
-async function sendIpAlert(email: string, apiKey: string, origin: string, ip: string) {
-  if (!resend) return
+// reason 'account': the recipient is an account's own email, so a stranger can
+// only aim this at an address that already registered, and breadth is bounded
+// by the account list. Counted, never refused: this is the notification that
+// says a key may have been taken, and a ceiling that can drop it would suppress
+// exactly the mail somebody needs most.
+async function sendIpAlert(log: FastifyBaseLogger, email: string, apiKey: string, origin: string, ip: string) {
   const masked = apiKey.slice(0, 8) + '...'
-  await resend.emails.send({
-    from: FROM,
-    to: email,
+  await mailUser(log, 'account', email, {
     subject: `AgentBill: your API key was used from a new network`,
     // origin is built from parsed integers by ipOrigin(), and ip is guarded by
     // isIP(), so neither can carry markup into this body.
@@ -114,11 +114,28 @@ async function noteIpOrigin(
   // requests land here, and land here without sending anything.
   if (claimed.length === 0) return
 
+  // `origins` is per KEY, because "is this a network this key has been seen
+  // from" is a question about the key. `recent` is per ACCOUNT, because the
+  // daily cap protects a MAILBOX, and every key on an account mails the same
+  // one.
+  //
+  // It was per key until 2026-09-12, and that was the same defect PR #45 fixed
+  // one level down: a counter keyed on something finer than the thing it is
+  // protecting is not a bound. POST /keys/generate has no per-account key cap
+  // and inserts unconditionally (keys.ts), so an account could mint keys and
+  // collect a fresh allowance of five alerts a day for each one, all of them
+  // landing in the same inbox. That is the shape of the flood this cap exists
+  // to prevent, rebuilt out of the one thing the cap was not counting.
+  //
+  // The direction is strictly tighter: one key on an account behaves exactly as
+  // before, and nothing that was allowed for a single-key account is now
+  // refused.
   const [ctx] = await sql`
-    SELECT count(*)::int AS origins,
-           count(*) FILTER (WHERE alerted_at > NOW() - INTERVAL '24 hours')::int AS recent
-    FROM api_key_ip_origins
-    WHERE api_key_id = ${keyId}
+    SELECT (SELECT count(*)::int FROM api_key_ip_origins WHERE api_key_id = ${keyId}) AS origins,
+           (SELECT count(*)::int FROM api_key_ip_origins o
+              JOIN developer_api_keys k ON k.id = o.api_key_id
+             WHERE k.account_id = (SELECT account_id FROM developer_api_keys WHERE id = ${keyId})
+               AND o.alerted_at > NOW() - INTERVAL '24 hours') AS recent
   `
 
   // The first network a key is ever used from is not a change, so it is not an
@@ -128,12 +145,12 @@ async function noteIpOrigin(
   if (!ctx || Number(ctx.origins) <= 1) return
 
   if (Number(ctx.recent) >= ALERTS_PER_DAY) {
-    log.warn({ keyId, origin }, 'ip alert suppressed: daily cap reached')
+    log.warn({ keyId, origin, recent: ctx.recent }, 'ip alert suppressed: daily cap reached for this account')
     return
   }
 
   await sql`UPDATE api_key_ip_origins SET alerted_at = NOW() WHERE id = ${claimed[0]!.id}`
-  await sendIpAlert(email, apiKey, origin, ip)
+  await sendIpAlert(log, email, apiKey, origin, ip)
 }
 
 export function registerAuth(app: FastifyInstance) {

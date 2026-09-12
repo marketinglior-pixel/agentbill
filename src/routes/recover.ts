@@ -1,14 +1,14 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { createHash, randomBytes } from 'crypto'
-import { Resend } from 'resend'
 import { sql } from '../db/index.js'
 import { publicRoute } from '../middleware/auth.js'
 import { sameOrigin } from './app.js'
 import { docsShell } from '../ui/docs.js'
 import { limiterKey } from '../lib/client-ip.js'
-import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
+import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent, clearRecoveryMark } from '../lib/register-limiter.js'
 import { ORIGIN } from '../ui/site.js'
+import { mailUser } from '../lib/mail.js'
 
 // Getting back into an account whose key is gone.
 //
@@ -33,8 +33,6 @@ import { ORIGIN } from '../ui/site.js'
 // bearer credential in a mailbox on a stranger's trigger, and it left it there
 // forever. Nothing in this file ever puts a key in an email.
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
 const SUPPORT_EMAIL = 'hello@agentbill.dev'
 
 /** Long enough to read the mail and click, short enough that a stale link in a
@@ -61,6 +59,38 @@ function generateApiKey(): string {
  * Returns the raw token, which exists in memory here and in one email, and is
  * never stored.
  */
+/**
+ * Has this account already been sent a recovery link in the last hour?
+ *
+ * Read from `account_recovery_tokens`, not from module memory, and that is the
+ * whole point of the function. `recoveryInCooldown` intends exactly this and
+ * delivers something weaker: its Map is per process, so with two Fly machines
+ * the real allowance is two an hour, and `auto_stop_machines = 'stop'` zeroes it
+ * on every cold start, which makes the true figure unbounded rather than 1.
+ *
+ * That matters because a STRANGER drives this mail. POST /register's
+ * existing-account branch, and POST /recover itself, both mail a recovery link
+ * to any address a stranger types, as long as that address already has an
+ * account. Breadth is bounded by the accounts table; depth per mailbox was
+ * bounded only by that leaky Map. Depth to a real mailbox is precisely the
+ * shape of the September incident, where about eleven messages a minute to one
+ * genuine Gmail address took the whole domain's delivery from 66% to 17%.
+ *
+ * This makes the intent true rather than adding a new ceiling, and the
+ * direction is important: nothing a legitimate locked-out owner could do
+ * before is refused now. They need one link, and one link is what this permits.
+ * The row is written by mintToken before the send, so a refused send still
+ * counts, which is deliberate: the thing being rationed is mail aimed at a
+ * mailbox, and an attempt that Resend rejected still aimed at it.
+ */
+async function recoveryMailedRecently(accountId: string): Promise<boolean> {
+  const [row] = await sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM account_recovery_tokens
+    WHERE account_id = ${accountId} AND created_at > NOW() - INTERVAL '1 hour'
+  `
+  return (row?.n ?? 0) > 0
+}
+
 async function mintToken(accountId: string): Promise<string> {
   const token = randomBytes(32).toString('base64url')
   await sql.begin(async (tx) => {
@@ -106,15 +136,18 @@ async function tokenIsLive(token: string): Promise<boolean> {
   return Boolean(row)
 }
 
-async function sendRecoveryEmail(email: string, token: string): Promise<boolean> {
-  if (!resend) return false
-  try {
-    const link = `${ORIGIN}/recover/${token}`
-    const res = await resend.emails.send({
-      from: RESEND_FROM,
-      to: email,
-      subject: 'Get back into your AgentBill account',
-      html: `
+async function sendRecoveryEmail(log: FastifyBaseLogger, email: string, token: string): Promise<boolean> {
+  const link = `${ORIGIN}/recover/${token}`
+  // reason 'account', not 'welcome': /recover answers identically for an
+  // unknown address and sends nothing (the POST handler returns before minting
+  // when no account matches), so the recipient of this mail always already owns
+  // an account and breadth is bounded by the account list rather than by us.
+  // It is counted and never refused, because this mail is the only way a
+  // locked-out owner gets back in, and a ceiling that can refuse it would turn
+  // a sweep by a stranger into a lockout for a customer.
+  return mailUser(log, 'account', email, {
+    subject: 'Get back into your AgentBill account',
+    html: `
         <p>Someone asked for a way back into the AgentBill account registered to this address.</p>
         <p><a href="${link}">Open this link</a> to see your current API key, or to replace it with a new one.</p>
         <p>It works once and expires in ${TTL_MINUTES} minutes. It carries no key of its own.</p>
@@ -122,11 +155,7 @@ async function sendRecoveryEmail(email: string, token: string): Promise<boolean>
            expires on its own, and your key has not changed.</p>
         <p>Questions: ${SUPPORT_EMAIL}</p>
       `,
-    })
-    return !res.error
-  } catch {
-    return false
-  }
+  })
 }
 
 /**
@@ -136,9 +165,13 @@ async function sendRecoveryEmail(email: string, token: string): Promise<boolean>
  * accepted the send; callers must not tell an unauthenticated visitor which it
  * was, because that answers whether the address has an account.
  */
-export async function sendRecoveryLink(email: string, accountId: string): Promise<boolean> {
+export async function sendRecoveryLink(log: FastifyBaseLogger, email: string, accountId: string): Promise<boolean> {
+  if (await recoveryMailedRecently(accountId)) {
+    log.info({ accountId }, 'recovery link not sent: one already went out within the hour')
+    return true
+  }
   const token = await mintToken(accountId)
-  return sendRecoveryEmail(email, token)
+  return sendRecoveryEmail(log, email, token)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,10 +280,26 @@ export async function recoverRoute(app: FastifyInstance) {
     markRecoverySent(email)
     void (async () => {
       try {
+        // The durable half of the same cooldown, and the one that actually
+        // holds: the Map above is per machine and is zeroed by a cold start.
+        if (await recoveryMailedRecently(account.id as string)) {
+          request.log.info({ accountId: account.id }, 'recovery link not sent: one already went out within the hour')
+          return
+        }
         const token = await mintToken(account.id as string)
-        const ok = await sendRecoveryEmail(email, token)
-        if (!ok) request.log.error({ email }, 'recovery email was not accepted by Resend')
+        const ok = await sendRecoveryEmail(request.log, email, token)
+        if (!ok) {
+          // The contract register-limiter.ts states in its own words: "a failed
+          // send must not block the next attempt (or claim an email that never
+          // went out)." Both call sites armed the mark before the send and
+          // neither cleared it, so one refusal by Resend, which is exactly the
+          // state a degraded sending domain produces, silently locked the
+          // address out of recovery for an hour.
+          clearRecoveryMark(email)
+          request.log.error({ email }, 'recovery email was not accepted by Resend')
+        }
       } catch (err) {
+        clearRecoveryMark(email)
         request.log.error({ err }, 'recovery link could not be minted')
       }
     })()
