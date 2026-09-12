@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { sql } from '../db/index.js'
 import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
-import { clientIp } from '../lib/client-ip.js'
+import { limiterKey } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
@@ -174,7 +174,7 @@ export async function appRoute(app: FastifyInstance) {
 
   app.post('/app/session', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
-    if (!allowLogin(clientIp(request))) return reply.redirect('/app?err=rate', 303)
+    if (!allowLogin(limiterKey(request))) return reply.redirect('/app?err=rate', 303)
     const secret = sessionSecret()
     if (!secret) return reply.redirect('/app?err=unavailable', 303)
 

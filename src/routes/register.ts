@@ -9,7 +9,7 @@ import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
 import { Resend } from 'resend'
 import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
-import { clientIp as resolveClientIp } from '../lib/client-ip.js'
+import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, ORIGIN } from '../ui/site.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
@@ -493,7 +493,7 @@ ${REGISTER_JS}${COPY_JS}
     // (found 2026-09-02). Fly sets fly-client-ip authoritatively and it cannot
     // be spoofed by the client; x-forwarded-for is the fallback off Fly.
     const clientIp = resolveClientIp(request)
-    if (!allowRegisterAttempt(clientIp)) {
+    if (!allowRegisterAttempt(limiterKey(request))) {
       request.log.warn({ clientIp }, 'register rate limited')
       return reply.code(429).send({
         error: 'rate_limited',
