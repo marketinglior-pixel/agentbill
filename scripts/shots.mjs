@@ -126,6 +126,11 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           document.getElementById('key-export').textContent = 'export AGENTBILL_API_KEY=' + k
           document.getElementById('form-state').style.display = 'none'
           document.getElementById('success-state').style.display = 'flex'
+          // The class the page itself adds on reveal. Without it this gate
+          // photographs a layout production never serves: the pitch above the
+          // key stays, and the geometry that made dogfood run 4 ask where the
+          // key goes is exactly what this script exists to catch.
+          document.querySelector('.reg').classList.add('done')
         })
       }
       await page.waitForTimeout(600)

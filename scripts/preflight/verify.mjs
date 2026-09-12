@@ -625,6 +625,45 @@ ok('a different /64 is a different bucket', await recover('2001:db8:bb::1') === 
 ok('an IPv4 address gets its own bucket', await recover('198.51.100.10') === 303)
 ok('a second IPv4 address is a separate bucket', await recover('198.51.100.11') === 303)
 
+// The page the reveal branch renders, 2026-09-12. Until today this was the one
+// surface in the product holding a plaintext key that said only "store it in an
+// environment variable" and left the reader to retype the line themselves, and
+// the console's own sentence sent them here for a line that was not here. It is
+// now the second place that can print `export AGENTBILL_API_KEY=<the key>` with
+// nothing to fill in, which is what makes /register#done survivable: that
+// screen is a client-side replaceState and its copy of the line cannot be
+// reloaded. Never covered before, on either the old copy or the new.
+// randomBytes(32).toString('base64url') is 43 chars, which is exactly what
+// TOKEN_RE demands (recover.ts:50); a hand-built string of the wrong length is
+// rejected before the token is ever looked up, and the gate would then pass or
+// fail for the wrong reason.
+const { createHash, randomBytes } = await import('node:crypto')
+const revealToken = randomBytes(32).toString('base64url')
+const [revealAcct] = await sql`SELECT id FROM accounts WHERE id = ${ACCT}`
+await sql`
+  INSERT INTO account_recovery_tokens (account_id, token_hash, expires_at)
+  VALUES (${revealAcct.id}, ${createHash('sha256').update(revealToken).digest('hex')}, NOW() + INTERVAL '10 minutes')
+`
+const revealRes = await fetch(`${API}/recover/${revealToken}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: API },
+  body: 'action=reveal',
+  redirect: 'manual',
+})
+const revealHtml = await revealRes.text()
+ok('[recover] the reveal page prints the live key', revealRes.status === 200 && revealHtml.includes(KEY),
+   `${revealRes.status}`)
+ok('[recover] and the export line that sets it, with the key already in it and no placeholder',
+   revealHtml.includes(`export AGENTBILL_API_KEY=${KEY}`)
+     && !/export AGENTBILL_API_KEY=(&lt;|\s|<)/.test(revealHtml))
+ok('[recover] and names the two ways in that need no terminal',
+   revealHtml.includes('AgentBillClient(api_key=...)') && revealHtml.includes('Authorization: Bearer')
+     && !revealHtml.includes('Store it in an environment variable, not in your code'))
+ok('[recover] a spent token cannot show it again',
+   (await fetch(`${API}/recover/${revealToken}`, { method: 'POST', redirect: 'manual',
+     headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: API },
+     body: 'action=reveal' })).status !== 200)
+
 // ---------------------------------------------------------------- 6: PUT /budget
 console.log('\n[6] a customer ceiling can be set, raised and lowered')
 // Until this endpoint existed the only way to choose a customer's ceiling was
@@ -1207,13 +1246,46 @@ const asNew8 = await nav8('/app?view=start', { headers: { cookie: regCookie8.spl
 ok('[register] and that cookie opens the start screen as the account just created, not another',
    asNew8.includes('Three steps to your first refusal') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
    'the new session did not render the new account')
+// The owner's signup alert, 2026-09-12. There is no Resend key in the harness,
+// so what is checked here is the DECISION, not a delivery: the daily cap is a
+// rank read from the accounts table (src/lib/signup-alert.ts), and the whole
+// guard rests on every signup owning a different integer. That is the property
+// an alert on a public endpoint needs, and the reason it is a rank rather than
+// "how many accounts exist in the last 24 hours": two signups arriving together
+// can both read the same count, and a rolling window can fall back under the
+// cap and be crossed twice. Proven on real Postgres with two real registers,
+// because the previous alert that mailed one owner 13,835 times in two days
+// also passed every test it had.
+const rankOf8 = async (email) => (await sql`
+  SELECT (SELECT count(*)::int FROM accounts
+           WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+             AND created_at < (SELECT created_at FROM accounts WHERE email = ${email})) AS rank
+`)[0].rank
+const email8b = `harness-register-${Date.now()}b@example.invalid`
+const reg8b = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: email8b }) })
+ok('[signup-alert] a second signup still gets its key: telling the owner cannot hold up a register',
+   reg8b.status === 201 && typeof (await reg8b.clone().json()).api_key === 'string', `${reg8b.status}`)
+const [rank8, rank8b] = [await rankOf8(email8), await rankOf8(email8b)]
+ok('[signup-alert] two signups on one day own two different ranks, and the later one is higher',
+   Number.isInteger(rank8) && rank8b === rank8 + 1, `${rank8} then ${rank8b}`)
+// The cap is an inequality over that rank, so the boundary is a pure function
+// of it: one signup a day is the first over the line and sends the one notice.
+const DAILY_CAP8 = 25
+const decide8 = (rank) => rank < DAILY_CAP8 ? 'signup' : rank === DAILY_CAP8 ? 'one notice' : 'silent'
+ok('[signup-alert] the cap sends 25 signups, then exactly one notice, then nothing',
+   [...Array(30).keys()].map(decide8).join(',') ===
+     `${Array(25).fill('signup').join(',')},one notice,${Array(4).fill('silent').join(',')}`)
+
 // A row written while verifying is not data.
-const regAcct8 = (await sql`SELECT id FROM accounts WHERE email = ${email8}`)[0]
-if (regAcct8) {
-  await sql`DELETE FROM developer_api_keys WHERE account_id = ${regAcct8.id}`
-  await sql`DELETE FROM accounts WHERE id = ${regAcct8.id}`
+for (const e of [email8, email8b]) {
+  const [acct] = await sql`SELECT id FROM accounts WHERE email = ${e}`
+  if (!acct) continue
+  await sql`DELETE FROM developer_api_keys WHERE account_id = ${acct.id}`
+  await sql`DELETE FROM accounts WHERE id = ${acct.id}`
 }
-ok('[register] the harness account is gone again', (await sql`SELECT count(*)::int AS n FROM accounts WHERE email = ${email8}`)[0].n === 0)
+ok('[register] the harness accounts are gone again',
+   (await sql`SELECT count(*)::int AS n FROM accounts WHERE email IN (${email8}, ${email8b})`)[0].n === 0)
 
 // Under the fold, 2026-09-12. The request-path row is the one row; it teaches
 // the console/PUT order with the field the endpoint actually takes; nothing on

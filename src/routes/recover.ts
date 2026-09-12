@@ -351,13 +351,34 @@ export async function recoverRoute(app: FastifyInstance) {
   })
 }
 
+/**
+ * The key, and the line that sets it, both with nothing left to fill in.
+ *
+ * The export line is here because of what /register cannot do. /register#done
+ * is a client-side replaceState over /register, so the prefilled line it shows
+ * is gone the moment the reader reloads or navigates, and the console will not
+ * print it: it masks every key it renders. Until 2026-09-12 the console told
+ * the reader to go and use "the export line on the screen that showed your
+ * key", which by then was a screen with no way back, and the only surface that
+ * could have ended that loop said "store it in an environment variable" and
+ * left the reader to retype it. This page already holds the plaintext key, so
+ * it costs one line to be the answer instead of a second pointer.
+ *
+ * Both blocks are complete on purpose. A gap in a line a reader copies is how a
+ * key became agb_agb_... and a 401 on a first run (2026-09-09).
+ */
 function keyPage(keys: { apiKey: string; label: string | null }[], note: string): string {
   return `
   <h1>Here is your key.</h1>
   <p class="lede">Copy it now. This page will not show it again, and the link you used is spent.
      ${note}</p>
   ${keys.map((k) => `<p class="keyout">${k.apiKey}</p>`).join('\n  ')}
-  <p>Store it in an environment variable, not in your code. The same value opens
-     <a href="/app">your console</a>.</p>
+  <p>Nothing here needs it pasted back in: your code is what sends it, with every call. In Python or
+     Node that means <code>AGENTBILL_API_KEY</code>, set in the terminal your code runs in, and this
+     line does it with the key already in place:</p>
+  ${keys.map((k) => `<p class="keyout">export AGENTBILL_API_KEY=${k.apiKey}</p>`).join('\n  ')}
+  <p>No terminal? Pass the key to <code>AgentBillClient(api_key=...)</code>, or send it as an
+     <code>Authorization: Bearer</code> header from whatever makes the call. The same value opens
+     <a href="/app">your console</a>, which asks for it once and then does not show it.</p>
   <p class="fine">Lost it again? <a href="/recover">Ask for another link</a>.</p>`
 }

@@ -89,14 +89,30 @@ export const STEP_REFUSE =
   'See the refusal. The lines above make one call more than the ceiling allows, so the last one is refused. Every refusal is written down with the body your code received, and yours appears here.'
 
 /**
- * Where the key comes from. The console cannot print it: the key is shown once,
- * on /register, and that screen is the only one that can render it into the
- * export line. So this is prose that points at that line, never a runnable
- * block with a gap in it; a gap is how a key became agb_agb_... and a 401 on a
- * first run (2026-09-09).
+ * Where the key comes from, and the one sentence on this screen that has to
+ * work for a reader who does not have a terminal.
+ *
+ * Until 2026-09-12 this read "the export line on the screen that showed your
+ * key, run in the same shell", and that pointer was dead: /register#done is a
+ * client-side replaceState over /register, so a reload renders the empty form
+ * and the prefilled line cannot be reached again by URL, reload or bookmark.
+ * Dogfood run 4 stood on that screen asking where the key goes, which is the
+ * reader this sentence was written for and the one it sent to a screen that no
+ * longer exists. /recover now prints the same prefilled line, so the pointer
+ * names a place instead of a memory.
+ *
+ * It also stops insisting on the shell. The console's sample reads the key from
+ * the environment, but the Python client takes it as an argument and the API
+ * takes it as a bearer header, and either is the only way in for a reader whose
+ * agent lives in a browser tool. Both are true of the code: see
+ * AgentBillClient's signature and the auth hook.
+ *
+ * Prose, never a runnable block: a gap in a copyable line is how a key became
+ * agb_agb_... and a 401 on a first run (2026-09-09), and the console has no
+ * key to fill a line with, because it masks every key it renders.
  */
 export const KEY_ENV_LINE =
-  'These lines read the key from <code>AGENTBILL_API_KEY</code>: the <code>export</code> line on the screen that showed your key, run in the same shell. Lost the key? <a href="/recover">/recover</a> gets you back in.'
+  'These lines read the key from <code>AGENTBILL_API_KEY</code>. Set it in the terminal you run them from: that is the <code>export</code> line you were given with the key, and <a href="/recover">/recover</a> shows both again. No terminal at all? Pass the key straight to <code>AgentBillClient(api_key=...)</code>, or send it yourself as an <code>Authorization: Bearer</code> header. This console never shows your key.'
 
 /**
  * The third answer, and the reason step 2 cannot stand alone. Step 1 skipped

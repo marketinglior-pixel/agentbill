@@ -17,6 +17,7 @@ import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
 import { sessionCookieFor } from './app.js'
+import { alertNewSignup } from '../lib/signup-alert.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 const RESEND_FROM = process.env.RESEND_FROM ?? 'AgentBill <onboarding@resend.dev>'
@@ -158,6 +159,14 @@ const reg = inlineScript(`  let apiKey = ''
       document.getElementById('form-state').style.display = 'none'
       const s = document.getElementById('success-state')
       s.style.display = 'flex'
+      // The pitch is a SIBLING of the form card, so revealing the key state
+      // never hid it: the reader kept the h1, the lede and a third "store it in
+      // your environment" above their own key, and the answer to "where does
+      // this go" started below the fold on a laptop. This class is what makes
+      // the post-key reading order start at the key. scripts/shots.mjs adds it
+      // too, or the one gate that sees this screen's geometry would photograph
+      // a layout production never serves.
+      document.querySelector('.reg').classList.add('done')
       // Give the success state a URL of its own and a title of its own, so Back
       // does not silently re-show the empty form and this state is something a
       // reader can tell they reached. replaceState, not a redirect to a route:
@@ -229,7 +238,13 @@ export async function registerRoute(app: FastifyInstance) {
     .reg { max-width: 560px; margin: 0 auto; padding-block: var(--s9) 96px; }
     .pitch { margin-bottom: var(--s6); }
 
-    h1 { color: var(--white); font-size: var(--fs-h1-sub); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
+    /* Scoped to .pitch, because every declaration here is about the marketing
+       headline: 14ch is what breaks "Give one job a ceiling." over two lines at
+       the size it is set in. Unscoped, it also caught the success state's own
+       h1 on 2026-09-12 and wrapped "Your API key is ready." after "API" at
+       22px, which is the selector-named-for-a-component trap: the rule reads
+       like "the h1 on this page" and this page now has two, in two states. */
+    .pitch h1 { color: var(--white); font-size: var(--fs-h1-sub); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
     /* The lede is setup language, not a pitch: what happens once, what the
        ceiling is on, what comes back, whose decision it is. */
     .lede { font-size: var(--fs-lede); color: var(--muted); margin: 18px 0 0; max-width: 46ch; line-height: 1.6; }
@@ -284,8 +299,31 @@ export async function registerRoute(app: FastifyInstance) {
 
     /* Success. Same panel frame as everywhere else on the site. */
     .success { display: none; flex-direction: column; gap: 20px; }
-    .success h2 { color: var(--white); }
+    /* Once the key is on screen the pitch above it has done its job, and it was
+       the reason the answer sat below the fold.
+       Measured in Chrome at 1440x735, a laptop window, success state revealed.
+       Before: the key at 654, the export line at 868, the one action at 1047,
+       so the last thing the reader saw was the key itself and every word about
+       where it goes was below the fold. Dogfood run 4 ended exactly there, on
+       "where do I paste it". After, with the pitch hidden and the two key
+       panels merged: the key at 355, the answer at 426, the export line at 572.
+       The action lands at 841 and cannot be lifted above 735 without deleting
+       something the reader needs; what changed is that nothing above it is
+       pitch, and the question is answered before the scroll rather than after.
+       The whole pitch goes, h1 included, because .done-h below replaces it. */
+    .reg.done .pitch { display: none; }
+    .success h2, .success .done-h { color: var(--white); }
+    .success .done-h { font-size: var(--fs-h3); line-height: 1.25; }
     .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
+    /* The answer, inside the frame that holds the key it is about. Same type as
+       the instructional rows below it (.ns p), and the panel's own 18px gutter,
+       so it reads as part of the key panel and not as a paragraph that drifted
+       into one. */
+    .success .where { padding: 12px 18px 0; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    /* The minority path, under the line it is an alternative to. --dim, because
+       a reader who has a terminal has already been served by the line above and
+       should be able to skip this on sight. */
+    .success .noterm { color: var(--dim); font-size: 12.5px; line-height: 1.6; margin-top: 8px; }
     /* --code-ink: design.md calls it "the base ink inside a code frame", and
        this is one. .panel carries the ground and border (panels.ts:14) and
        .panel-h the label bar. A long green mono string sitting beside a
@@ -357,7 +395,7 @@ ${siteNav('/register', { cta: false })}
   <div class="pitch">
     <h1>Give one job a ceiling.</h1>
     <p class="lede">Key once. Ceiling on one <code>task_ref</code>. Preflight returns <code>approved: false</code> when that job is out. Your code decides.</p>
-    <p class="trust"><b>key in 30 seconds</b> · shown once · store it in your environment</p>
+    <p class="trust"><b>key in 30 seconds</b> · shown once</p>
   </div>
 
   <div class="form-card">
@@ -406,23 +444,58 @@ ${siteNav('/register', { cta: false })}
     </div>
 
     <div class="success" id="success-state">
-      <h2>Your API key is ready.</h2>
-      <p>Copy it now. We won't show it again. Store it in your environment variables, not your code.
-         If you lose it, <a href="/recover">/recover</a> will get you back in with the email you
-         just used. We have sent that address a note saying so, with no key in it.</p>
+      <!-- An h1, because .reg.done hides the pitch that carries the page's
+           other one, so in each state exactly one h1 is visible: the pitch
+           while the form is up, this while the key is. -->
+      <h1 class="done-h">Your API key is ready.</h1>
+      <p>Copy it now. We won't show it again. If you lose it, <a href="/recover">/recover</a> shows it
+         again to whoever can read the email you just used.</p>
       <div class="panel">
         <div class="panel-h"><span>API key</span><span>shown once</span></div>
         <div class="key-value">
           <span id="key-display"></span>
           <button class="btn-copy" id="copy-key" type="button">Copy</button>
         </div>
+        <!-- The reader's question, answered in the frame that holds his key
+             rather than in a paragraph above it. Dogfood run 4 asked "where do
+             I paste it" while looking at this screen, and the first clause is
+             the honest answer: nowhere here. Until 2026-09-12 the screen said
+             "environment" or "shell" four times and never once named what the
+             key attaches to, so it answered a question about storage that
+             nobody had asked.
+
+             Both named destinations are true of this repo. AGENTBILL_API_KEY is
+             what the console's own lines read, and the Authorization header is
+             the only auth the API has (src/middleware/auth.ts), which makes it
+             the one way in for a reader whose agent lives in a browser tool and
+             who has no terminal to run the line below in. That reader is the
+             n8n and Make vertical, and this is the first onboarding copy on the
+             site that does not hand them a shell command.
+
+             "not your code" is gone. Our own /docs quick start passes the key
+             to AgentBillClient as a literal, so the screen was forbidding what
+             the next page instructs. -->
+        <p class="where">Nothing on this page needs the key pasted in: your code sends it, with every
+           call. In Python or Node that means <code>AGENTBILL_API_KEY</code>, and the line below sets
+           it in the terminal your code runs in.</p>
+        <div class="steps">
+          <div class="ns solo"><div>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}<p class="noterm">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p></div></div>
+        </div>
       </div>
-      <!-- The same key again, as the line that stores it. This screen is the
-           only one that can render the key into a runnable line: the key is
-           shown once, and the console never sees it again. A gap in a copyable
+      <!-- The same key again, as the line that sets it. A gap in a copyable
            line is how a key became agb_agb_... and a 401 on the first run
            (2026-09-09), so the line carries the key itself, filled in by the
            script above.
+
+           This used to say "this screen is the only one that can render the key
+           into a runnable line". That was never true of the system, only of the
+           site as it was built: the console holds the plaintext key on every
+           render (app.ts, the viewer object) and masks it by policy, and
+           /recover prints the whole key to anyone who can read the account's
+           mailbox. It is true of THIS screen that the key is shown once and
+           that a reader who leaves cannot reload their way back, which is why
+           2026-09-12 gave /recover the same prefilled line rather than another
+           paragraph about how to retype this one.
 
            Nothing else is taught here, on purpose. Until 2026-09-11 this
            screen also carried the install command as an unnumbered bullet and
@@ -432,12 +505,6 @@ ${siteNav('/register', { cta: false })}
            what I need to do". The sequence has one owner, the console's start
            screen (src/ui/steps.ts, src/routes/app.ts), and the button below
            signs the reader into it. -->
-      <div class="panel">
-        <div class="panel-h"><span>The same key, as the line that stores it</span><span>run it in the shell your code will use</span></div>
-        <div class="steps">
-          <div class="ns solo"><div><p>Put the key in your environment. This line already carries it.</p>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}</div></div>
-        </div>
-      </div>
       <div class="panel">
         <div class="ns-go">
           <!-- A form, not a link, and it moves THIS tab. The form POSTs this
@@ -457,7 +524,7 @@ ${siteNav('/register', { cta: false })}
             <input type="hidden" name="next" value="/app?view=start" />
             <button class="btn-go" type="submit">Open the console &rarr;</button>
           </form>
-          <p>It signs you in with this key and opens your first refusal in three steps: a job and its ceiling, the lines to run, the refusal they produce. Run the export line above first: this screen is not shown again.</p>
+          <p>It signs you in with this key, so the console does not ask you to paste it. There you name a job, give it a ceiling, and see the refusal your first run produces. It asks for the key by hand again when you sign out, on another browser, or a week from now. Copy the line above first: this screen is not shown again, and the console does not print your key.</p>
           <!-- New tabs here, because a reader who opens a reference wants to
                keep the key on screen, and a footnote, not a second action. -->
           <p class="aside">Reference, when you need it: <a href="/docs" target="_blank" rel="noopener">docs</a> &middot; <a href="/faq" target="_blank" rel="noopener">questions</a>.</p>
@@ -566,6 +633,20 @@ ${REGISTER_JS}${COPY_JS}
       void emailWelcome(email)
         .then((ok) => { if (!ok) request.log.error({ email }, 'welcome email was not accepted by Resend') })
         .catch((err) => request.log.error({ err }, 'welcome email threw'))
+
+      // The owner hears about it now, not in tomorrow's digest. Same fire and
+      // forget contract as the line above and for the same reason: this is the
+      // request that carries the key, and nothing about telling someone may be
+      // able to hold it up. The account row is already committed, so the alert
+      // reads its own counts from the table (src/lib/signup-alert.ts).
+      alertNewSignup(request.log, {
+        accountId: result.accountId,
+        email,
+        name,
+        stack,
+        useCase: use_case,
+        plan: 'free',
+      })
 
       // The browser that made this request is signed into the console as this
       // key from here on: the cookie /app/session mints, on the same name and
