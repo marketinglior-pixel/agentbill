@@ -303,8 +303,8 @@ export async function registerRoute(app: FastifyInstance) {
        so the last thing the reader saw was the key itself and every word about
        where it goes was below the fold. Dogfood run 4 ended exactly there, on
        "where do I paste it". After, with the pitch hidden and the two key
-       panels merged: the key at 355, the answer at 426, the export line at 572.
-       The action lands at 841 and cannot be lifted above 735 without deleting
+       panels merged: the key at 345, the answer at 415, the export line at 550.
+       The action lands at 777 and cannot be lifted above 735 without deleting
        something the reader needs; what changed is that nothing above it is
        pitch, and the question is answered before the scroll rather than after.
        The whole pitch goes, h1 included, because .done-h below replaces it. */
