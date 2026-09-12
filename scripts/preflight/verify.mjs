@@ -285,43 +285,125 @@ const counts = async () => {
   return { origins: r.length, alerts: r.filter(x => x.alertedAt !== null).length }
 }
 
+/**
+ * Read a counter once it has stopped moving, instead of sleeping a guess.
+ *
+ * Every assertion in this section used to be `await settle(300..800)` then read,
+ * and each one of them was a race, not just the one that lost. The alert write
+ * is dispatched fire-and-forget from the onRequest hook AFTER the response is
+ * sent (auth.ts), so the fetch resolving proves nothing about the row. On a warm
+ * database the write lands inside the sleep and the gate is green; on a cold one
+ * it does not. Reproduced 2026-09-12 on a fresh database: the daily-cap gate read
+ * `{"origins":6,"alerts":4}` and the same query moments later returned 5.
+ *
+ * `want` is an EARLY EXIT, not an expectation the wait enforces. Three ways out,
+ * and the assertion always runs on what was actually read:
+ *   - the counter reaches `want`      -> return at once, so a passing run is fast
+ *   - it goes quiet for QUIET_MS      -> return that, so a genuinely wrong value
+ *                                        is reported quickly instead of at the
+ *                                        deadline
+ *   - DEADLINE_MS elapses             -> return the last read, and let the gate
+ *                                        fail on it
+ *
+ * That is what keeps these gates able to fail. A wait that polled until it saw
+ * the number it wanted, and asserted that it had, would be a gate that can only
+ * ever pass: mutate ALERTS_PER_DAY to 4 and it would spin to the deadline and
+ * then assert 4 === 4 against a `want` it had already given up on. Proven by
+ * mutation both ways before this was trusted (see the header of this file).
+ */
+// The quiet window is a FAILURE-REPORTING LATENCY, not a correctness parameter,
+// and getting that backwards is what made the first version of this helper fail
+// on its own first run. A correct run never waits for it: the early exit fires
+// the moment the counter reaches `want`, and these counters only ever increase,
+// so they cannot pass through the wanted value and move on. Quiet only decides
+// how long a WRONG value takes to be reported. So it is set well above the
+// longest gap the write path can produce rather than trimmed for speed.
+//
+// The gap that proved it: the 20-concurrent-request gate reads {origins:3,
+// alerts:2}, and those are two separate writes. auth.ts claims the origin with
+// an INSERT, then SELECTs the context, then UPDATEs alerted_at. With 20 requests
+// in flight against a pool of 10, the winner's SELECT and UPDATE queue behind
+// nineteen losing claims, so `origins` hits 3 while `alerts` is still 1 and the
+// state sits there for longer than half a second. At QUIET_MS = 500 the helper
+// called that settled and the gate went red on a correct system.
+const QUIET_MS = 2_500
+const DEADLINE_MS = 20_000
+const POLL_MS = 50
+const same = (a, b) => a.origins === b.origins && a.alerts === b.alerts
+const reads = async (want, quietMs = QUIET_MS) => {
+  const started = Date.now()
+  let last = await counts()
+  let changedAt = Date.now()
+  while (!(want && same(last, want))) {
+    if (Date.now() - started >= DEADLINE_MS) break
+    await settle(POLL_MS)
+    const now = await counts()
+    if (same(now, last)) {
+      if (Date.now() - changedAt >= quietMs) break
+    } else {
+      last = now
+      changedAt = Date.now()
+    }
+  }
+  return last
+}
+
+/**
+ * The same wait with the early exit DELIBERATELY withheld, for the two gates
+ * whose claim is that nothing happened.
+ *
+ * `reads(want)` returning as soon as it sees `want` is right when the assertion
+ * is about a change: the state before the change differs from the state after
+ * it, so an immediate match means the change has landed. It is WRONG when the
+ * expected state is also the state we started in, because then "it already
+ * matches" and "nothing has happened yet" are the same reading, and a regression
+ * that added a row half a second later would be reported as the pass it is not.
+ * The flap gate below is exactly that shape: two origins and one alert, before
+ * and after.
+ *
+ * So those wait on quiet alone, and on a longer quiet, because quiet is the
+ * whole claim rather than a way of knowing a write has finished.
+ */
+const QUIET_NEGATIVE_MS = 1500
+const readsQuiet = () => reads(null, QUIET_NEGATIVE_MS)
+
 // The exact shape that produced the flood: one laptop, one network, address
 // churning underneath. The old code sent 29 mails for this; the claim sends 0,
 // and the first origin a key is ever seen from is not a change at all.
 for (let i = 0; i < 30; i++) await from([HOME_A, HOME_B, HOME_C][i % 3])
-await settle(600)
-let ipc = await counts()
+let ipc = await reads({ origins: 1, alerts: 0 })
 ok('30 requests across 3 rotating addresses claim ONE origin', ipc.origins === 1, JSON.stringify(ipc))
 ok('and alert nobody, because it is the first network', ipc.alerts === 0, JSON.stringify(ipc))
 
 // A real move. This is the signal the alert exists for and it must survive.
 await from(CAFE)
-await settle(600)
-ipc = await counts()
+ipc = await reads({ origins: 2, alerts: 1 })
 ok('a genuinely new network claims a second origin', ipc.origins === 2, JSON.stringify(ipc))
 ok('and alerts exactly once', ipc.alerts === 1, JSON.stringify(ipc))
 
 // Flapping between two KNOWN networks is the same one-slot trap one level up.
 for (let i = 0; i < 20; i++) await from(i % 2 ? HOME_A : CAFE)
-await settle(600)
-ipc = await counts()
+ipc = await readsQuiet()
 ok('20 flaps between two known networks add no rows', ipc.origins === 2, JSON.stringify(ipc))
 ok('and send nothing further', ipc.alerts === 1, JSON.stringify(ipc))
 
 // Same assertion the quota alerts make: N concurrent callers, one claim. The
 // INSERT ... ON CONFLICT is the only thing that can decide this.
 await Promise.all(Array.from({ length: 20 }, () => from(OFFICE)))
-await settle(800)
-ipc = await counts()
+ipc = await reads({ origins: 3, alerts: 2 })
 ok('20 concurrent requests from one new network claim it once', ipc.origins === 3, JSON.stringify(ipc))
 ok('and alert exactly once', ipc.alerts === 2, JSON.stringify(ipc))
 
 // The backstop: distinct networks are not themselves a bound. A key sprayed
 // from a botnet stops at ALERTS_PER_DAY instead of mailing per source /64.
-for (const n of ['2001:db8:1::9', '2001:db8:2::9', '2001:db8:3::9']) { await from(n); await settle(300) }
-await settle(400)
-ipc = await counts()
-ok('the daily cap is reached at 5 alerts', ipc.alerts === 5, JSON.stringify(ipc))
+for (const n of ['2001:db8:1::9', '2001:db8:2::9', '2001:db8:3::9']) await from(n)
+ipc = await reads({ origins: 6, alerts: 5 })
+// Names what it checks: five alerts have ACCUMULATED, which is the cap's value.
+// It is a precondition, not the enforcement test. Proven by mutation: disabling
+// the cap check entirely (`if (false && ...)` at auth.ts) leaves this line GREEN,
+// because six origins produce exactly five alerts whether or not a cap exists.
+// The gate that goes red is the next pair, on the seventh origin.
+ok('five alerts accumulate, which is the cap value', ipc.alerts === 5, JSON.stringify(ipc))
 
 
 // The cap counts per ACCOUNT, not per key, 2026-09-12. POST /keys/generate has
@@ -356,9 +438,20 @@ ok('[ip-cap] a second key on the same account inherits the account\'s spent allo
 await sql`DELETE FROM api_key_ip_origins WHERE api_key_id = ${k2.id}`
 await sql`DELETE FROM developer_api_keys WHERE id = ${k2.id}`
 
+// Two stages, because this pair makes a positive and a negative claim about the
+// same moment and they need opposite waits. auth.ts claims the origin with an
+// INSERT and only then decides whether to alert, so `origins` reaching 7 says
+// nothing yet about whether an alert is coming: quiet alone could settle on
+// {6,5} before the INSERT lands, and an early exit on {7,5} could return before
+// the UPDATE that a regression would write. So: get past the INSERT first, then
+// wait for quiet to see whether anything follows it.
+//
+// This is the pair that actually tests ENFORCEMENT. Proven by mutation on
+// 2026-09-13: with the cap check turned into dead code, the gate above stays
+// green and this one goes red at {"origins":7,"alerts":6}.
 await from('2001:db8:4::9')
-await settle(600)
-ipc = await counts()
+await reads({ origins: 7, alerts: 5 })
+ipc = await readsQuiet()
 ok('a 6th new network is still recorded', ipc.origins === 7, JSON.stringify(ipc))
 ok('but is not mailed once the cap is reached', ipc.alerts === 5, JSON.stringify(ipc))
 
