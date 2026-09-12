@@ -7,7 +7,7 @@ import { PANEL_CSS } from '../ui/panels.js'
 import { sql } from '../db/index.js'
 import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
-import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent } from '../lib/register-limiter.js'
+import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent, clearRecoveryMark } from '../lib/register-limiter.js'
 import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, ORIGIN } from '../ui/site.js'
@@ -76,6 +76,13 @@ async function existingAccountReply(log: FastifyBaseLogger, reply: any, email: s
   if (emailed) {
     return reply.code(200).send({ status: 'existing_account_emailed', message: inbox })
   }
+  // The other half of the contract register-limiter.ts states: "a failed send
+  // must not block the next attempt". /recover was given clearRecoveryMark on
+  // 2026-09-12 and this site was not, so a refused send here still cost the
+  // address an hour of recovery, on the branch a person reaches by trying to
+  // register again with an address they already used, which is exactly what
+  // somebody who has lost their key does.
+  clearRecoveryMark(email)
   return reply.code(409).send({
     error: 'account_exists',
     message: `This email already has an account, but the recovery mail could not be sent. Email ${SUPPORT_EMAIL} from that address and a person will sort it out.`,
