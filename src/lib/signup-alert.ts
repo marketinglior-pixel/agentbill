@@ -169,7 +169,16 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
       <p>They have a key and nothing else yet: no job, no ceiling, no call. The next thing that
          has to happen is the console's start screen, and until a job has a ceiling there is
          nothing for a preflight to be checked against.</p>
-      <p>The key is not in this email and cannot be: it is shown once, in their browser.</p>
+      <!-- "and cannot be" is what this said until it was read in a delivered
+           mail. It is true of this function, which is never handed the key, and
+           false of the system: POST /register holds it in the 201 body four
+           lines from the call that sends this, and chooses not to pass it. The
+           same overreach had already propagated through two other files as "the
+           console cannot print the key", when the console holds the plaintext
+           key on every render and masks it by policy. A claim about the product
+           has to be true of the product, not of the function it is written in. -->
+      <p>The key is not in this email: it is shown once, in their browser, and nothing sends it
+         anywhere else.</p>
       <p><a href="${ORIGIN}/admin">Open the dashboard</a></p>
     `,
   })
