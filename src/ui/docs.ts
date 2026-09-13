@@ -119,6 +119,10 @@ export const DOCS_CSS = `${CHROME_CSS}
                                      -webkit-mask-image: linear-gradient(90deg, black calc(100% - 48px), transparent); }
   .code.overflows pre { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .comment { color: var(--dim); }
+  /* Rendered output, not code. The class name is the one home.ts already uses,
+     and scripts/snippets/extract.mjs drops any line carrying a class="out-"
+     span, so a block of printed output is never parsed as a sample. */
+  .out-dim { color: var(--dim); }
   .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 8px; border-radius: 4px;
             font-size: 13px; color: var(--code); }
 

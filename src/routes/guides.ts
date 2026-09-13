@@ -54,11 +54,153 @@ function page(path: string, title: string, description: string, body: string) {
     <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
     <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
     <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
+    <a href="/docs/first-run">Every first-run failure, and its fix</a>
   </div>`,
   })
 }
 
 export async function guidesRoute(app: FastifyInstance) {
+
+  // Written 2026-09-14 out of a source sweep that asked one question: can a
+  // reader get from nothing to their first refusal without getting stuck?
+  //
+  // Every screen passed on its own. The path still broke, and it broke in the
+  // gap BETWEEN two screens, which is the one place no gate in this repo can
+  // look. Between the console's "pip install agentbill-sdk" and its "run the
+  // lines above" there was no answer anywhere, on any surface or in either SDK
+  // README, to: how do I run this, what do I do when pip is absent or PEP 668
+  // refuses, which Python, and what is the Windows line. The repo's own CI
+  // builds a venv (scripts/snippets/run.sh) and never showed the reader the
+  // three lines it uses.
+  //
+  // So this guide is deliberately not a second quick start. It is only the
+  // failures, and /docs links it from the closing paragraph of the quick start
+  // rather than from the middle, so a run that works never has to read it.
+  app.get('/docs/first-run', publicRoute(), async (_, reply) => {
+    return reply.type('text/html').send(page(
+      '/docs/first-run',
+      'Every first-run failure, and its fix',
+      'The errors between installing agentbill-sdk and seeing your first refusal: pip missing or externally managed, the Python version floor, how to run the sample, the key not reaching your code on Windows, and why a second run is refused from its first call.',
+      `
+  <h1>Every first-run failure, and its fix</h1>
+  <p class="lede">Each of these is a real failure on the path from
+  <a href="/docs#step-install">the quick start</a> to your first refusal, in roughly the order you
+  would meet it. Nothing here is needed by a run that works.</p>
+
+  <h2>pip is missing, or refuses to install</h2>
+  <p>The most common failure on the page, and it has two faces:
+  <span class="inline">pip: command not found</span> and
+  <span class="inline">error: externally-managed-environment</span>. On a current macOS or Linux the
+  interpreter may only answer to <span class="inline">python3</span>, and the system Python refuses
+  installs into itself (PEP 668). A virtual environment answers both at once, and it is what this
+  repo's own CI does before it runs every published sample:</p>
+  <div class="code"><pre>python3 -m venv .venv
+source .venv/bin/activate
+pip install agentbill-sdk</pre></div>
+  <p>On Windows the activate line is
+  <span class="inline">.venv\\Scripts\\activate</span>. Everything after this point assumes that
+  environment is active, which is also what makes
+  <span class="inline">python3 first_run.py</span> pick up the SDK you just installed.</p>
+
+  <h2>Could not find a version that satisfies the requirement</h2>
+  <p>The interpreter is too old. <b>agentbill-sdk needs Python 3.9 or newer.</b> Check with
+  <span class="inline">python3 --version</span> before looking anywhere else: the resolver error
+  names the package, not the cause, so it reads like a registry problem when it is not.</p>
+
+  <h2>How to actually run the sample</h2>
+  <p>The quick start hands you twenty lines of Python and the next sentence assumes you ran them.
+  Save them as a file and run that file:</p>
+  <div class="code"><pre>python3 first_run.py</pre></div>
+  <p>For Node the extra rule is the module system. The sample uses a top-level
+  <span class="inline">await</span>, so it has to be ES modules: save it as
+  <span class="inline">first-run.mjs</span> and run
+  <span class="inline">node first-run.mjs</span>, or add
+  <span class="inline">"type": "module"</span> to your package.json. Saved as
+  <span class="inline">.js</span> in a default project it fails with
+  <span class="inline">Cannot use import statement outside a module</span> before a single line runs.
+  The package being ESM is not enough: that is the dependency, and this rule is about your file.</p>
+
+  <h2>KeyError: AGENTBILL_API_KEY</h2>
+  <p>The sample reads the key from the environment on its fourth line, before a client exists, so
+  this is what you get when the variable is not set in the shell you ran from. It is not a fault in
+  the SDK and it carries no guidance, which is why it is here.</p>
+  <p>An environment variable lives in the shell that set it, and nowhere else: a new window, a new
+  tab, or a run launched from your editor will not have it. Either run the
+  <span class="inline">export</span> line again in this shell, or take the key out of the
+  environment entirely and pass it in:</p>
+  <div class="code"><pre>from agentbill import AgentBillClient
+
+client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
+  <p>That argument is Python only. The Node SDK exports functions rather than a client object and
+  reads <span class="inline">AGENTBILL_API_KEY</span> itself, so on a host with no shell you set the
+  variable in the platform's own config, or skip the SDK and send an
+  <span class="inline">Authorization: Bearer</span> header yourself.</p>
+
+  <h2>export is not recognized</h2>
+  <p>You are in PowerShell, and the line handed to you with the key is POSIX syntax. The same key
+  goes into <span class="inline">$env:AGENTBILL_API_KEY</span>, with the value in quotes. Nothing in
+  the product prints the Windows form yet; this is it.</p>
+
+  <h2>TaskCeilingRequiredError, or 422 task_ceiling_required</h2>
+  <p>You ran the code before the job had a ceiling. This is neither a yes nor a refusal: there is
+  nothing yet to check the call against, so the answer carries no
+  <span class="inline">approved</span> field at all. Give the job a ceiling on the console's start
+  screen or with <span class="inline">PUT /tasks/:task_ref/ceiling</span>, then run it again.</p>
+
+  <h2>It worked once, and the second run is refused immediately</h2>
+  <p>Correct, and it is the mechanism rather than a fault. <b>A job ceiling has no clock.</b> After
+  one run of the quick start, <span class="inline">job-1</span> has used 3 of 3, so the first
+  preflight of a second run is the call that would cross the ceiling. Nothing resets it at midnight
+  or at the start of a month, because a budget that resets tomorrow is exactly the thing a task
+  ceiling exists not to be.</p>
+  <p>Two ways on: raise the ceiling on that job, in the console or through
+  <span class="inline">PUT /tasks/:task_ref/ceiling</span>, or use a new job name and give it its
+  own ceiling.</p>
+
+  <h2>409 ceiling_below_committed</h2>
+  <p>A ceiling cannot be set under what the job has already used plus what is reserved by calls in
+  flight. The response carries <span class="inline">minimum_ceiling_units</span>, the smallest value
+  that would be accepted.</p>
+  <p>If that minimum is higher than the work you think you did, you have reservations that were
+  never settled, and the usual cause is a <span class="inline">record()</span> that was trimmed out
+  of the loop. Preflight reserves; record settles. Without the settle, units stay held for the
+  reservation TTL (60 minutes by default) and the job reads as having cost nothing while its
+  headroom shrinks. They come back on their own when the reservation expires. Always pass the same
+  <span class="inline">task_ref</span> to record that you passed to preflight: settlement matches on
+  exactly that pair, and a record without it consumes no reservation.</p>
+
+  <h2>A task_ceiling you passed was ignored</h2>
+  <p><span class="inline">task_ceiling</span> on a preflight is applied only by the call that opens
+  a job that does not exist yet. Once the job exists the value is dropped in silence, so a retry
+  cannot raise the ceiling it was written to respect. The ceiling in force is the last save through
+  the console or <span class="inline">PUT /tasks/:task_ref/ceiling</span>.</p>
+
+  <h2>A refusal is not an HTTP error</h2>
+  <p>Every refusal comes back as <b>HTTP 200</b> with
+  <span class="inline">approved: false</span>, because the request itself succeeded and the answer
+  was no. Branch on the field or catch the exception; a check on the status code will read every
+  refusal as a success.</p>
+  <p>Both SDKs then draw one line, and it is the same line in Python and Node. They <b>raise when
+  your own spend rule refused the call</b>
+  (<span class="inline">task_ceiling_exceeded</span>,
+  <span class="inline">ceiling_exceeded</span>,
+  <span class="inline">budget_exhausted</span>) and <b>return the result when AgentBill's own quota
+  refused it</b> (<span class="inline">free_tier_exceeded</span>,
+  <span class="inline">plan_limit_exceeded</span>), with
+  <span class="inline">upgrade_url</span> set. Our billing running out must never crash your agent,
+  so those two come back as a value you can act on rather than an exception you did not plan for.</p>
+
+  <h2>Getting back to the three-step screen</h2>
+  <p>The link to it disappears from the console once you have had a first refusal, because it is a
+  first-run screen. The address still works:
+  <span class="inline">agentbill.dev/app?view=start</span>. And if you no longer have the key at
+  all, <a href="/recover">/recover</a> shows the filled-in export line again to whoever can read the
+  email the account was registered with.</p>
+
+      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      `
+    ))
+  })
 
   app.get('/docs/task-budgets', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(

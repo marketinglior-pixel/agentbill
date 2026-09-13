@@ -51,7 +51,7 @@ const quickStartLd = {
   '@id': `${ORIGIN}/docs#quickstart`,
   name: 'Quick Start, 2 minutes',
   description:
-    'Install the SDK, get an API key, and give one job a ceiling that every call sharing its task_ref is checked against.',
+    'Get an API key, give one job a ceiling before any code runs, then install the SDK and ask before each call until the job is refused.',
   totalTime: 'PT2M',
   inLanguage: 'en-US',
   isPartOf: { '@id': `${ORIGIN}/docs#techarticle` },
@@ -61,23 +61,23 @@ const quickStartLd = {
     {
       '@type': 'HowToStep',
       position: 1,
-      name: 'Step 1, Install',
-      text: 'pip install agentbill-sdk',
-      url: `${ORIGIN}/docs#step-install`,
-    },
-    {
-      '@type': 'HowToStep',
-      position: 2,
-      name: 'Step 2, Get your API key',
-      text: 'Register at agentbill.dev/register, free, no credit card. Your key starts with agb_.',
+      name: 'Step 1, Get your API key',
+      text: 'Register at agentbill.dev/register, free, no credit card. Your key starts with agb_, it is shown once and never emailed, and the screen hands you a filled-in export AGENTBILL_API_KEY= line to copy.',
       url: `${ORIGIN}/docs#step-api-key`,
     },
     {
       '@type': 'HowToStep',
-      position: 3,
-      name: 'Step 3, Give the job a ceiling',
-      text: 'Give the job a name and a ceiling in the console, or with PUT /tasks/:task_ref/ceiling, then pass that name as task_ref on every call the job makes. Every call is checked against that one ceiling. It changes only through the console or the endpoint; a task_ceiling on a later preflight is not applied.',
+      position: 2,
+      name: 'Step 2, Give the job a ceiling',
+      text: 'Name the job and say what it is worth, on the console start screen or with PUT /tasks/:task_ref/ceiling. No terminal yet: a preflight for a job that has no ceiling is a 422 task_ceiling_required, because there is nothing to check the call against. Every call carrying that name is checked against that one ceiling, whatever agent or tool made it.',
       url: `${ORIGIN}/docs#step-ceiling`,
+    },
+    {
+      '@type': 'HowToStep',
+      position: 3,
+      name: 'Step 3, Install, then ask',
+      text: 'pip install agentbill-sdk, on Python 3.9 or newer. Then call preflight before each expensive call, passing the job name and nothing about the budget, and record after it to settle. The call past the ceiling is refused and the SDK raises TaskCeilingExceededError.',
+      url: `${ORIGIN}/docs#step-install`,
     },
   ],
 }
@@ -99,37 +99,79 @@ export async function docsRoute(app: FastifyInstance) {
 
   <h2>Quick Start, 2 minutes</h2>
 
-  <h3 id="step-install">Step 1, Install</h3>
-  <div class="code"><pre>pip install agentbill-sdk</pre></div>
+  <h3 id="step-api-key">Step 1, Get your API key</h3>
+  <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts
+  with <span class="inline">agb_</span>, it is shown once and never emailed, and the screen hands you
+  a filled-in <span class="inline">export AGENTBILL_API_KEY=</span> line to copy. The button under it
+  signs this tab into <a href="/app">the console</a>. Lost it? <a href="/recover">/recover</a> shows
+  that line again to whoever can read the email you registered with.</p>
 
-  <h3 id="step-api-key">Step 2, Get your API key</h3>
-  <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts with <span class="inline">agb_</span>.</p>
-
-  <h3 id="step-ceiling">Step 3, Give the job a ceiling</h3>
-  <p>Give the job a name and a ceiling in <a href="/app">the console</a>, or with
-  <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>, then pass that name as
-  <span class="inline">task_ref</span> on every call the job makes. Every call is checked against that
-  one ceiling. It changes only through the console or the endpoint; a
+  <h3 id="step-ceiling">Step 2, Give the job a ceiling</h3>
+  <p>Name the job and say what it is worth, on the console's start screen or with
+  <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>. <strong>No terminal yet, and that
+  order is the point:</strong> a preflight for a job that has no ceiling is a
+  <span class="inline">422 task_ceiling_required</span>, because there is nothing to check the call
+  against. Every call carrying that name is checked against that one ceiling, whatever agent or tool
+  made it. It changes only through the console or the endpoint; a
   <span class="inline">task_ceiling</span> on a later preflight is not applied.</p>
+  <p><strong>Keep the first ceiling small. Use 3.</strong> The sample below makes one call more than
+  the ceiling allows, so its last call is refused, and that refusal is the thing worth seeing.</p>
+
+  <h3 id="step-install">Step 3, Install, then ask</h3>
+  <div class="code"><pre>python3 -m venv .venv
+source .venv/bin/activate
+pip install agentbill-sdk</pre></div>
+  <p>Python 3.9 or newer. The last line on its own is enough wherever
+  <span class="inline">pip</span> is on your path and the interpreter is not externally managed; all
+  three work everywhere, which is why all three are printed here. On Windows the activate line is
+  <span class="inline">.venv\\Scripts\\activate</span>.</p>
+
+  <p>Save this as <span class="inline">first_run.py</span> and run it with
+  <span class="inline">python3 first_run.py</span>. It reads the key from the environment, so the
+  export line from step 1 has to have run in the same shell.</p>
   <div class="code"><pre>
-from agentbill import AgentBillClient
+import os
+from agentbill import AgentBillClient, TaskCeilingExceededError
 
-client = AgentBillClient(api_key="agb_your_key")
+key = os.environ["AGENTBILL_API_KEY"]
+client = AgentBillClient(api_key=key)
 
-<span class="comment"># job-142 already has its ceiling, set in the console. The call names the</span>
-<span class="comment"># job and what this one call is worth, and nothing about the budget.</span>
-client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
-<span class="comment"># a refused call raised TaskCeilingExceededError above; nothing to check here</span>
-
-<span class="comment"># ... run your agent here ...</span>
-result = run_my_agent()
-
-<span class="comment"># Settle, or the units stay held until the reservation expires</span>
-client.record(agent_id="researcher", task_ref="job-142", units=12)
+try:
+    <span class="comment"># one call more than the ceiling of 3</span>
+    for _ in range(4):
+        result = client.preflight(
+            agent_id="researcher",
+            task_ref="job-1",
+        )
+        print("approved:", result.approved,
+              "units left:", result.task_remaining_units)
+        <span class="comment"># your model call runs here</span>
+        client.record(
+            agent_id="researcher",
+            task_ref="job-1",
+            units=1,
+        )
+except TaskCeilingExceededError as refused:
+    print(refused)
   </pre></div>
 
+  <p>Three lines approve and count down, and the fourth is the answer this page exists for:</p>
+  <div class="code"><pre>
+<span class="out-dim">approved: True units left: 2</span>
+<span class="out-dim">approved: True units left: 1</span>
+<span class="out-dim">approved: True units left: 0</span>
+<span class="out-dim">Refused (task_ceiling_exceeded): task 'job-1' is at 3/3 units and 0 remaining is not enough for this call.</span>
+  </pre></div>
+
+  <p>Nothing of ours reached into the run. The SDK raised, your code caught it, and what happens next
+  is yours. The refusal is also written down: the console's
+  <a href="/app">refusals view</a> carries the literal body your code received.</p>
+
   <p class="closer">That is the whole integration. <span class="inline">agent_id</span> is a label the
-  console groups by; the ceiling is on the task, not on the agent. The free tier is 1,000 preflight
+  console groups by; the ceiling is on the task, not on the agent. Run it a second time and the first
+  call is refused, because the job spent 3 of 3 and a job ceiling has no clock to reset it: raise the
+  ceiling or use a new name. New to it, or something did not run?
+  <a href="/docs/first-run">Every first-run failure, and its fix</a>. The free tier is 1,000 preflight
   calls per month, per account.</p>
 
   <p>A call that passes no <span class="inline">customer_id</span> draws on a customer named
@@ -379,6 +421,16 @@ curl -X PUT https://agentbill.dev/budget \\
 
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
+  <p>The package is ESM and the sample below uses a top-level
+  <span class="inline">await</span>, which is the caller's file, not the dependency: saved as
+  <span class="inline">.js</span> in a project with no module type it fails with
+  <span class="inline">Cannot use import statement outside a module</span> before any of it runs.
+  Save it as <span class="inline">first-run.mjs</span>, or put
+  <span class="inline">"type": "module"</span> in your package.json. The key is read from
+  <span class="inline">AGENTBILL_API_KEY</span> and there is no argument for it: the Node SDK exports
+  functions rather than a client object, so on a host with no shell, set the variable in the
+  platform's own config or call the endpoint with an
+  <span class="inline">Authorization: Bearer</span> header.</p>
   <div class="code"><pre>
 <span class="comment">// Reads AGENTBILL_API_KEY from the environment. Units are yours to define.</span>
 import { preflight, record, TaskCeilingExceededError } from 'agentbill'
