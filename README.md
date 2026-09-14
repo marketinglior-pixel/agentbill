@@ -23,6 +23,19 @@ It is an SDK and an HTTP API, not a proxy. Nothing sits in your request path.
 
 That is the whole contract. `preflight()` returns a decision or raises for you to catch, and your `except` block chooses whether to degrade, retry smaller, or return what you already have.
 
+### Not the same as
+
+Other limits are real and they fire. They are bound to something else, and they reach somewhere else.
+
+| Mechanism | Bound to | Reaches |
+|---|---|---|
+| Wall-clock timeout (a Lambda, a job runner) | One invocation's runtime and memory | That invocation. A retry loop can make two hundred provider calls well inside fifteen minutes |
+| Calendar-window spend meter | A project, an organization or a key, over a day or a month | Everything on that identity. A run too small to move the number never trips it; a number low enough to catch it pauses every agent on the account until the window turns |
+| Session ceiling on a vendor's own runtime | A session, inside that vendor, for that window | Work that goes through that runtime, for as long as the window lasts |
+| **AgentBill** | One `task_ref`, with no clock on it | Every call that passes the same `task_ref`, in any process, to any provider |
+
+A budget that resets tomorrow does not stop the loop that is running tonight. AgentBill does not stop it either: preflight answers `approved: false` and your code decides.
+
 ---
 
 ## Install
@@ -273,9 +286,3 @@ it touches is authenticated:
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and how to open a PR.
 
 Looking for something to work on? Check the [`good first issue`](https://github.com/marketinglior-pixel/agentbill/issues?q=label%3A%22good+first+issue%22) label.
-
----
-
-## Star this repo
-
-If a per-task spend ceiling is what you needed, star this. It helps other developers find it.
