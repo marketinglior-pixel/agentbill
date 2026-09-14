@@ -323,11 +323,11 @@ export async function registerRoute(app: FastifyInstance) {
        the instructional rows below it (.ns p), and the panel's own 18px gutter,
        so it reads as part of the key panel and not as a paragraph that drifted
        into one. */
-    .success .where { padding: 12px 18px 0; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    .success .where { padding: 12px 18px 0; font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     /* The minority path, under the line it is an alternative to. --dim, because
        a reader who has a terminal has already been served by the line above and
        should be able to skip this on sight. */
-    .success .noterm { color: var(--dim); font-size: 12.5px; line-height: 1.6; margin-top: 8px; }
+    .success .noterm { color: var(--dim); font-size: var(--fs-small); line-height: 1.6; margin-top: 8px; }
     /* --code-ink: design.md calls it "the base ink inside a code frame", and
        this is one. .panel carries the ground and border (panels.ts:14) and
        .panel-h the label bar. A long green mono string sitting beside a
