@@ -160,8 +160,13 @@ ${siteNav('/pricing', { sticky: false })}
       <div class="msg-slot"><span class="msg" id="keymsg" aria-live="polite"></span></div>
     </div>
 ${UPGRADE_JS}`}
-    <p class="note">One runaway retry loop costs more than a year of Builder.
-    No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
+    <!-- The line that used to open this note said "One runaway retry loop costs more than a
+         year of Builder." It is a claim about what a run would have cost, and this product
+         cannot know that: it meters units the developer defines and never reads a provider
+         invoice. Four other surfaces say so in as many words (/ "units refused is not money",
+         /about, /docs, /faq), so the sentence directly under the checkout box contradicted
+         the rest of the site. Retired 2026-09-14. Do not replace it with another dollar line. -->
+    <p class="note">No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
   </div>
 </main>
 ${siteFooter()}

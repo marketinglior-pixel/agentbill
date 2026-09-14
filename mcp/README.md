@@ -2,7 +2,7 @@
 
 # agentbill-mcp
 
-AgentBill MCP server. Add spend controls and usage billing to any AI agent in 3 lines.
+One spend ceiling for one agent job, exposed as MCP tools. Bound to a `task_ref` you pass, not to a calendar month.
 
 ## What it does
 
