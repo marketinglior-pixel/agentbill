@@ -143,6 +143,8 @@ clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin --dr
 clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin
 ```
 
+ClawHub accepts exactly one `categories` entry on a new release, even though the Gateway manifest allows up to three; this plugin declares `security`.
+
 `clawhub package validate .` runs ClawHub's plugin inspector. It checks
 package and manifest shape against the target OpenClaw; it does not load the
 plugin, and it passed a manifest category the Gateway then rejected. The
