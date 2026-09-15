@@ -25,6 +25,7 @@ Gateway environment as `AGENTBILL_API_KEY`.
     "entries": {
       "agentbill": {
         "enabled": true,
+        "hooks": { "allowConversationAccess": true },
         "config": {
           "apiKey": "agb_...",
           "ceilingUnits": 500000
@@ -35,8 +36,16 @@ Gateway environment as `AGENTBILL_API_KEY`.
 }
 ```
 
+The `hooks.allowConversationAccess` line is not optional. OpenClaw registers
+`before_agent_run` and `llm_output` for a non-bundled plugin only when the
+operator has set it; without it the Gateway silently registers the other five
+hooks, so model turns would not be gated and, in tokens mode, nothing would be
+recorded. The plugin checks for the flag at load and logs an error naming the
+exact `openclaw config set` command if it is missing. `openclaw plugins inspect
+agentbill --runtime` lists which typed hooks the host accepted.
+
 Restart the Gateway. The log line `[agentbill] ceiling 500000 tokens per
-session` means it is on.
+session, ... conversation hooks allowed` means it is on.
 
 ## What one unit is
 
@@ -123,9 +132,25 @@ manifest check when the `openclaw` CLI is installed (it needs Node 24).
 
 ## Publishing
 
+`dist/` is built, not committed, and `openclaw.extensions` points at
+`./dist/index.js`. So publish the npm-pack tarball, which carries `dist/`,
+rather than the repository path, which does not:
+
 ```bash
 npm run build
-clawhub package publish .
+npm pack
+clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin --dry-run
+clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin
+```
+
+`clawhub package validate .` runs ClawHub's plugin inspector. It checks
+package and manifest shape against the target OpenClaw; it does not load the
+plugin, and it passed a manifest category the Gateway then rejected. The
+Gateway is the check that counts:
+
+```bash
+openclaw plugins install -l . --force --accept-capabilities
+openclaw plugins inspect agentbill --runtime
 ```
 
 ClawHub requires a GitHub account old enough to pass its upload gate and runs

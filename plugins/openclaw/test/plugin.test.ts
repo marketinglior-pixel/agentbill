@@ -217,3 +217,15 @@ test('customerFrom=sender attributes preflight and record to the sender', async 
     assert.equal(srv.calls[1]!.body.customer_id, 'u42')
   })
 })
+
+test('without hooks.allowConversationAccess the plugin says the host blocks the model-turn gate; with it, it does not', () => {
+  const off = fakeApi({ apiKey: 'agb_x' })
+  registerCeiling(off.api as any)
+  assert.ok(off.logs.some((l) => l.startsWith('error') && l.includes('allowConversationAccess') && l.includes('nothing is recorded')), off.logs.join('\n'))
+  const on = fakeApi({ apiKey: 'agb_x' })
+  ;(on.api as any).id = 'agentbill'
+  ;(on.api as any).config = { plugins: { entries: { agentbill: { hooks: { allowConversationAccess: true } } } } }
+  registerCeiling(on.api as any)
+  assert.ok(!on.logs.some((l) => l.includes('allowConversationAccess is not true')), on.logs.join('\n'))
+  assert.ok(on.logs.some((l) => l.includes('conversation hooks allowed')))
+})

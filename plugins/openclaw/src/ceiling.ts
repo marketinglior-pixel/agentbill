@@ -235,7 +235,7 @@ function usageUnits(usage: { total?: number; input?: number; output?: number } |
 }
 
 /** Register the hooks on an OpenClaw plugin api. Exported so a test can drive it with a fake api. */
-export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | 'pluginConfig'>, ceiling?: Ceiling): Ceiling {
+export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | 'pluginConfig'> & Partial<Pick<OpenClawPluginApi, 'id' | 'config'>>, ceiling?: Ceiling): Ceiling {
   const cfg = resolveConfig(api.pluginConfig)
   const log: Logger = {
     info: (m) => api.logger.info(`[agentbill] ${m}`),
@@ -249,6 +249,22 @@ export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | '
     return ceiling ?? new Ceiling(cfg, new AgentBillClient({ baseUrl: cfg.baseUrl, apiKey: '', timeoutMs: cfg.timeoutMs }), log)
   }
   const c = ceiling ?? new Ceiling(cfg, new AgentBillClient({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, timeoutMs: cfg.timeoutMs }), log)
+
+  // The host gates conversation hooks (before_agent_run, llm_output) behind an
+  // operator flag and registers the others silently, so without the flag this
+  // plugin would gate tool calls and count nothing. Found in a real Gateway, not
+  // in the types: "typed hook before_agent_run blocked because non-bundled
+  // plugins must set plugins.entries.<id>.hooks.allowConversationAccess=true".
+  const pluginId = api.id ?? 'agentbill'
+  const entry = (api.config as { plugins?: { entries?: Record<string, { hooks?: { allowConversationAccess?: boolean } }> } } | undefined)?.plugins?.entries?.[pluginId]
+  const conversationAccess = entry?.hooks?.allowConversationAccess === true
+  if (!conversationAccess) {
+    log.error(
+      `plugins.entries.${pluginId}.hooks.allowConversationAccess is not true, so OpenClaw blocks before_agent_run and llm_output for this plugin: ` +
+        `model turns are NOT gated and ${cfg.units === 'tokens' ? 'nothing is recorded, so the ceiling never moves' : 'model calls are not counted, only tool calls'}. ` +
+        `Fix: openclaw config set plugins.entries.${pluginId}.hooks.allowConversationAccess true`,
+    )
+  }
 
   const customerOf = (senderId: string | undefined, channelId: string | undefined): string | undefined => {
     if (cfg.customerFrom === 'sender') return senderId
@@ -295,7 +311,7 @@ export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | '
     await c.settleToolCall(key, event.toolName, ctx.runId ?? event.runId, ctx.toolCallId ?? event.toolCallId, customerOf(ctx.requester?.senderId, ctx.channelId))
   })
 
-  log.info(`ceiling ${cfg.ceilingUnits} ${cfg.units} per session, failMode=${cfg.failMode}, base ${cfg.baseUrl}`)
+  log.info(`ceiling ${cfg.ceilingUnits} ${cfg.units} per session, failMode=${cfg.failMode}, base ${cfg.baseUrl}, conversation hooks ${conversationAccess ? 'allowed' : 'BLOCKED by host config'}`)
   return c
 }
 
