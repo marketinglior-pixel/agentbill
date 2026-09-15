@@ -12,8 +12,11 @@ running now.
 ## Install
 
 ```bash
-openclaw plugins install clawhub:agentbill
+openclaw plugins install clawhub:@agentbill/openclaw
 ```
+
+The package is `@agentbill/openclaw` on ClawHub; its plugin id, and the key
+under `plugins.entries` in your config, is `agentbill`.
 
 Then give it a key. Create a free one at https://agentbill.dev/register (1,000
 preflight calls a month, no card), and put it in the plugin config or in the
