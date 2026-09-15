@@ -139,6 +139,28 @@ ok('customer reserved back to 0', c.reservedUnits === 0, `got ${c.reservedUnits}
 const t2 = (await sql`SELECT reserved_units FROM task_budgets WHERE account_id=${ACCT} AND task_ref='t2'`)[0]
 ok('task reserved back to 0', t2.reservedUnits === 0, `got ${t2.reservedUnits}`)
 ok('sweeping again is a no-op', await sweepExpiredReservations() === 0)
+// The reclaim is only worth something if the CALLER gets the budget back. A
+// counter at 0 with a ceiling that still refuses would be the same outage in a
+// different column. So: the call that was refused while the abandoned 30 were
+// held is approved once they are reclaimed. The refusal half is asserted
+// first, so a sweep that reclaimed nothing cannot pass this by accident.
+await pre({ agent_id: 'r', estimated_units: 30, task_ref: 't2b', task_ceiling: 100 })
+const heldRefusal = await pre({ agent_id: 'r', estimated_units: 80, task_ref: 't2b' })
+ok('[recovery] while 30 are held, 80 more on a ceiling of 100 is refused', heldRefusal.body.approved === false && heldRefusal.body.reason === 'task_ceiling_exceeded', JSON.stringify(heldRefusal.body))
+await sql`UPDATE reservations SET expires_at = now() - interval '1 minute' WHERE account_id = ${ACCT} AND task_ref = 't2b'`
+ok('[recovery] the abandoned row is reclaimed', await sweepExpiredReservations() === 1)
+const afterSweep = await pre({ agent_id: 'r', estimated_units: 80, task_ref: 't2b' })
+ok('[recovery] the same call is approved once the sweeper has run: the ceiling recovers', afterSweep.body.approved === true && afterSweep.body.task_remaining_units === 20, JSON.stringify(afterSweep.body))
+// And the recovered reservation is an ordinary one: it releases. success:false
+// is the honest settle for a probe that never ran anything: it closes the row
+// without billing, so the gates after this one find the customer exactly as
+// it was, reserved 0 and used untouched. The first version of this block
+// settled with success:true and 80 billed units leaked into '[1b] used_units
+// still recorded (30)', which read 110.
+const usedBeforeRelease = (await cust()).usedUnits
+const recoveredSettle = await rec({ customer_id: 'default', event_type: 'llm', idempotency_key: 'recovery-settle', units: 80, task_ref: 't2b', success: false })
+const afterRelease = await cust()
+ok('[recovery] the post-sweep reservation releases like any other, and bills nothing', recoveredSettle.status === 200 && afterRelease.reservedUnits === 0 && afterRelease.usedUnits === usedBeforeRelease, `status ${recoveredSettle.status}, reserved ${afterRelease.reservedUnits}, used ${usedBeforeRelease} -> ${afterRelease.usedUnits}`)
 
 // -------------------------------------- double-release: late record after a sweep
 console.log('\n[1b] a late record cannot double-release')

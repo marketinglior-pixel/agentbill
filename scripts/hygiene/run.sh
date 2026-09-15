@@ -66,6 +66,17 @@ n=$(grep -rn "from 'resend'" src --include=*.ts 2>/dev/null | grep -v 'src/lib/m
 gate "and only mail.ts imports the mailer" 0 "$n" "$(grep -rn "from 'resend'" src --include=*.ts 2>/dev/null | grep -v 'src/lib/mail.ts' | head -3)"
 
 # The mark is one drawing. A second <span class="dot"> is a second drawing.
+# The sweeper that reclaims abandoned reservations is an in-process timer, so
+# it exists only if server.ts starts it after listen. A function that is
+# defined and never called is the 2026-09-15 finding this guards against:
+# production held 7 reserved units with no row behind them, and the sweeper
+# cannot see those; it could just as easily hold rows it never sweeps.
+# Anchored to a line that is a bare call, so a commented-out call counts as
+# absent: the first version of this gate counted the string and stayed green
+# with the call behind '//'.
+n=$(grep -cE '^[[:space:]]*startReservationSweeper\(\)' src/server.ts 2>/dev/null | tr -d ' ')
+gate "server.ts starts the reservation sweeper exactly once" 1 "$n" "$(grep -n 'startReservationSweeper' src/server.ts | head -3)"
+
 n=$(grep -rn 'class="dot"' src 2>/dev/null | wc -l | tr -d ' ')
 gate "no second copy of the mark" 0 "$n"
 
