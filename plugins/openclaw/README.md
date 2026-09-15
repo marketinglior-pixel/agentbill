@@ -50,6 +50,9 @@ agentbill --runtime` lists which typed hooks the host accepted.
 Restart the Gateway. The log line `[agentbill] ceiling 500000 tokens per
 session, ... conversation hooks allowed` means it is on.
 
+`openclaw plugins uninstall agentbill` removes the whole `plugins.entries.agentbill`
+block, including that flag, so after a reinstall set it again.
+
 ## What one unit is
 
 `units: "tokens"` (default). Every model call records the usage total OpenClaw
