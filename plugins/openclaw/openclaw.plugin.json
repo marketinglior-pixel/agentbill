@@ -1,0 +1,76 @@
+{
+  "id": "agentbill",
+  "name": "AgentBill",
+  "description": "One spend ceiling per session. Every model turn and tool call consults it before it runs; when the ceiling is spent the call is refused and the session says so.",
+  "categories": ["budget", "governance"],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "description": "AgentBill API key (agb_...). Omit to read AGENTBILL_API_KEY from the Gateway environment."
+      },
+      "baseUrl": {
+        "type": "string",
+        "default": "https://agentbill.dev",
+        "description": "AgentBill API base URL."
+      },
+      "ceilingUnits": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 500000,
+        "description": "Ceiling for one session, in units. With units=tokens the default is 500,000 tokens. Applied when the session's task is opened; raise or lower it later from the console at /app."
+      },
+      "units": {
+        "type": "string",
+        "enum": ["tokens", "calls"],
+        "default": "tokens",
+        "description": "What one unit is. tokens: every model call records the usage total OpenClaw reports. calls: every model call and tool call is one unit."
+      },
+      "estimateUnits": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Units reserved before a call whose cost is not yet known. Defaults to 2000 for tokens and 1 for calls; after the first model call the plugin uses a running average of what this session actually spent."
+      },
+      "toolCallUnits": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Units recorded per tool call. Defaults to 0 for tokens (the model call around the tool is what costs) and 1 for calls."
+      },
+      "taskRefPrefix": {
+        "type": "string",
+        "default": "openclaw:",
+        "description": "Prefix for the task_ref the plugin opens per session. The task_ref is the prefix followed by the session key."
+      },
+      "agentId": {
+        "type": "string",
+        "default": "openclaw",
+        "description": "Agent identifier the events are attributed to in the AgentBill console."
+      },
+      "customerFrom": {
+        "type": "string",
+        "enum": ["none", "sender", "channel"],
+        "default": "none",
+        "description": "Which OpenClaw identity becomes the AgentBill customer, for per-customer attribution in the console."
+      },
+      "failMode": {
+        "type": "string",
+        "enum": ["closed", "open"],
+        "default": "closed",
+        "description": "What happens when AgentBill cannot be reached. closed refuses the call and says why. open lets it run and logs the failure. A ceiling that fails open is not a ceiling, so the default is closed."
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 14000,
+        "default": 5000,
+        "description": "Per-request timeout for AgentBill calls. Kept under OpenClaw's 15 second gate budget."
+      }
+    }
+  }
+}
