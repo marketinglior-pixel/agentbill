@@ -33,9 +33,12 @@ const num = (n: number) => n.toLocaleString('en-US')
  *  a machine-readable file that is ahead of the registry describes something no
  *  reader can install. Bump in the same commit as the publish or delete the line. */
 export const SDK_VERSIONS = {
-  python: '0.6.4', // pypi.org/pypi/agentbill-sdk/0.6.3/json, published and checked 2026-09-09
+  python: '0.6.5', // pypi.org/pypi/agentbill-sdk/0.6.5/json, published and checked 2026-09-15
+  // 0.4.2 is merged to main in this repo but NOT on npm: the publish failed on
+  // an expired ~/.npmrc token. This line names what a reader can actually install,
+  // so it stays at 0.4.1 until `npm publish` succeeds. Raise it then, not before.
   node: '0.4.1',   // registry.npmjs.org/agentbill, published and checked 2026-09-09
-  mcp: '0.2.1',    // pypi.org/pypi/agentbill-mcp/0.2.1/json, published and checked 2026-09-09
+  mcp: '0.2.2',    // pypi.org/pypi/agentbill-mcp/0.2.2/json, published and checked 2026-09-15
 } as const
 
 /** The one-paragraph definition. Shared by both files so an engine that reads
