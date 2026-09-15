@@ -76,7 +76,7 @@ The server answers approved=False when the customer has no remaining balance, an
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AGENTBILL_API_KEY` | Yes | none | Your AgentBill API key |
-| `AGENTBILL_BASE_URL` | No | `https://agentbill.fly.dev` | Override for self-hosted |
+| `AGENTBILL_BASE_URL` | No | `https://agentbill.dev` | Override for self-hosted |
 
 ## Links
 

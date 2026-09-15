@@ -16,7 +16,7 @@ mcp = FastMCP(
     ),
 )
 
-BASE_URL = os.getenv("AGENTBILL_BASE_URL", "https://agentbill.fly.dev")
+BASE_URL = os.getenv("AGENTBILL_BASE_URL", "https://agentbill.dev")
 
 
 def _headers() -> dict:

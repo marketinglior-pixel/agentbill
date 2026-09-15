@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbill-mcp"
-version = "0.2.1"
+version = "0.2.2"
 description = "One spend ceiling for one agent job, exposed as MCP tools. Bound to a task_ref you pass, not to a calendar month."
 readme = "README.md"
 license = { text = "MIT" }

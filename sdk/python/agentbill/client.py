@@ -4,7 +4,7 @@ from .meter import BudgetExhaustedError, AgentBillError, AuthenticationError, _r
 from dataclasses import dataclass
 from typing import Optional
 
-BASE_URL = "https://agentbill.fly.dev"
+BASE_URL = "https://agentbill.dev"
 
 @dataclass
 class PreflightResult:
@@ -133,7 +133,7 @@ class AgentBillClient:
         if not api_key or not api_key.strip():
             raise ValueError(
                 "AgentBill API key is missing.\n"
-                "Get your free key (1,000 calls/month) at: https://agentbill.fly.dev/register"
+                "Get your free key (1,000 calls/month) at: https://agentbill.dev/register"
             )
         # A key with a non-ASCII character in it cannot be an AgentBill key and
         # cannot be sent: the Authorization header is latin-1, and the failure
