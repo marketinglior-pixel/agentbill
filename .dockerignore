@@ -32,3 +32,6 @@ fly.toml
 **/__pycache__
 **/*.py[cod]
 **/.pytest_cache
+
+# OpenClaw plugin: published to ClawHub/npm on its own, never part of the Fly image
+plugins/

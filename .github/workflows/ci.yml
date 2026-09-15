@@ -26,6 +26,32 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  openclaw-plugin:
+    # The plugin lives outside `src`, so the root build and every hygiene grep
+    # above skip it. This job is the only gate it has.
+    name: OpenClaw plugin typechecks and its hook tests pass
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/openclaw
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # openclaw itself declares node >=24.16; the plugin runs inside it.
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: plugins/openclaw/package-lock.json
+      # openclaw is a Gateway-sized devDependency, present only for the types.
+      # --ignore-scripts keeps its postinstall out of CI; the tests never load it.
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - name: No em dash in the plugin (same rule as every other surface)
+        run: |
+          n=$(grep -rn '—' src test README.md openclaw.plugin.json package.json | wc -l | tr -d ' ')
+          if [ "$n" != "0" ]; then grep -rn '—' src test README.md openclaw.plugin.json package.json; exit 1; fi
+
   hygiene:
     name: Design drift and copy rules
     runs-on: ubuntu-latest

@@ -1,0 +1,64 @@
+{
+  "name": "@agentbill/openclaw",
+  "version": "0.1.0",
+  "description": "One spend ceiling per OpenClaw session, consulted before every model turn and tool call. Bound to the task, not to a calendar window.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx test/*.test.ts",
+    "plugin:validate": "openclaw plugins validate"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "clawhub",
+    "agentbill",
+    "spend-ceiling",
+    "budget",
+    "ai-agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marketinglior-pixel/agentbill",
+    "directory": "plugins/openclaw"
+  },
+  "homepage": "https://agentbill.dev",
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openclaw": "2026.9.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "plugin": {
+      "id": "agentbill",
+      "label": "AgentBill"
+    },
+    "compat": {
+      "pluginApi": ">=2026.9.4",
+      "minGatewayVersion": "2026.9.4"
+    },
+    "build": {
+      "openclawVersion": "2026.9.4",
+      "pluginSdkVersion": "2026.9.4"
+    }
+  }
+}
