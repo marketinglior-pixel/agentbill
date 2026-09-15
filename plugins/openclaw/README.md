@@ -139,9 +139,20 @@ rather than the repository path, which does not:
 ```bash
 npm run build
 npm pack
-clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin --dry-run
-clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin
+clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin \
+  --source-repo https://github.com/marketinglior-pixel/agentbill \
+  --source-commit "$(git rev-parse HEAD)" --dry-run
+clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin \
+  --source-repo https://github.com/marketinglior-pixel/agentbill \
+  --source-commit "$(git rev-parse HEAD)"
 ```
+
+A code plugin release is pinned to a repository and a commit; ClawHub refuses
+the upload without both. Commit and push before publishing, so the pinned
+commit exists and is the one the tarball was built from. The package name is
+scoped, so the `@agentbill` publisher had to exist on ClawHub first
+(`clawhub publisher create agentbill`, once). Publishing itself needs
+`clawhub login`; a new release is held for security scans before it is public.
 
 ClawHub accepts exactly one `categories` entry on a new release, even though the Gateway manifest allows up to three; this plugin declares `security`.
 
