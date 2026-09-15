@@ -1,8 +1,8 @@
 #!/bin/bash
 # Final smoke test against the live Fly.io server.
-# Usage: ./test_live.sh https://agentbill.fly.dev sk-your-api-key
+# Usage: ./test_live.sh https://agentbill.dev sk-your-api-key
 
-BASE_URL="${1:-https://agentbill.fly.dev}"
+BASE_URL="${1:-https://agentbill.dev}"
 API_KEY="${2:-$AGENTBILL_API_KEY}"
 
 if [ -z "$API_KEY" ]; then

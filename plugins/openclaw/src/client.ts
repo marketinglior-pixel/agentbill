@@ -3,11 +3,11 @@
  *
  * Why this is not `import { preflight, record } from 'agentbill'`:
  * the published Node SDK reads its key and base URL from process.env at call
- * time and defaults the host to agentbill.fly.dev. A Gateway plugin gets its
- * config from OpenClaw, must not write into a shared process environment, and
- * is bundled by `openclaw plugins pack` without runtime dependencies. So the
- * wire contract lives here once more, kept deliberately small. When the SDK
- * takes an explicit client config this file should collapse into it.
+ * time. A Gateway plugin gets its config from OpenClaw, must not write into a
+ * shared process environment, and is bundled by `openclaw plugins pack` without
+ * runtime dependencies. So the wire contract lives here once more, kept
+ * deliberately small. When the SDK takes an explicit client config this file
+ * should collapse into it.
  *
  * The contract itself is `POST /preflight` and `POST /events`, documented at
  * https://agentbill.dev/docs. Field names below are the server's.

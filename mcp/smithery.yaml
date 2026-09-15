@@ -6,7 +6,7 @@ startCommand:
     properties:
       apiKey:
         type: string
-        description: "AgentBill API key. Get yours free at agentbill.fly.dev/register"
+        description: "AgentBill API key. Get yours free at agentbill.dev/register"
     required:
       - apiKey
   exampleConfig:

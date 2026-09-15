@@ -11,12 +11,12 @@
  *   )
  *
  * Environment variables:
- *   AGENTBILL_API_KEY     Required. Your key from agentbill.fly.dev/register.
- *   AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.fly.dev
+ *   AGENTBILL_API_KEY     Required. Your key from agentbill.dev/register.
+ *   AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.dev
  *   AGENTBILL_CUSTOMER_ID Optional. Fallback customer_id when not passed per-call.
  */
 
-const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://agentbill.fly.dev'
+const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://agentbill.dev'
 
 // ---------------------------------------------------------------------------
 // Public exceptions
@@ -101,7 +101,7 @@ function apiKey(): string {
   const key = process.env.AGENTBILL_API_KEY ?? ''
   if (!key) {
     throw new AgentBillError(
-      'AGENTBILL_API_KEY is not set. Get your key at agentbill.fly.dev/register.'
+      'AGENTBILL_API_KEY is not set. Get your key at agentbill.dev/register.'
     )
   }
   return key

@@ -11,8 +11,8 @@ A decorator that records billable agent events.
 
 Environment variables
 ---------------------
-AGENTBILL_API_KEY     Required. Your API key from agentbill.fly.dev/register.
-AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.fly.dev
+AGENTBILL_API_KEY     Required. Your API key from agentbill.dev/register.
+AGENTBILL_BASE_URL    Optional. Defaults to https://agentbill.dev
 AGENTBILL_CUSTOMER_ID Optional. Fallback customer_id when not passed per-call.
 """
 
@@ -31,7 +31,7 @@ import httpx
 F = TypeVar("F", bound=Callable[..., Any])
 UnitsResolver = Union[int, Callable[[Any], int]]
 
-_BASE_URL = os.environ.get("AGENTBILL_BASE_URL", "https://agentbill.fly.dev")
+_BASE_URL = os.environ.get("AGENTBILL_BASE_URL", "https://agentbill.dev")
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ def _api_key() -> str:
     if not key:
         raise AgentBillError(
             "AGENTBILL_API_KEY is not set. "
-            "Get your key at agentbill.fly.dev/register."
+            "Get your key at agentbill.dev/register."
         )
     return key
 

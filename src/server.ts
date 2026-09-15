@@ -131,9 +131,11 @@ app.setErrorHandler((error, request, reply) => {
 
 // Canonical-host redirect. Off until CANONICAL_HOST is set (fly secrets set
 // CANONICAL_HOST=agentbill.dev once DNS validates), so nothing breaks while
-// the domain propagates. Marketing GETs only: published SDKs default to the
-// fly.dev base URL, and Polar posts webhooks there, API traffic must keep
-// working on the old host forever.
+// the domain propagates. Marketing GETs only: Polar posts webhooks to the
+// fly.dev host, and every SDK published before 2026-09-15 defaults to it, so
+// API traffic must keep working on the old host forever. The SDKs in this repo
+// now default to agentbill.dev and never meet this redirect; the copies already
+// installed in the wild still call fly.dev, which is why none of this retires.
 const CANONICAL_HOST = process.env.CANONICAL_HOST
 // Inverted 2026-09-05. This was an allow-list of marketing paths, which meant
 // every new page had to be added to a regex in this file or silently stopped
@@ -143,7 +145,9 @@ const CANONICAL_HOST = process.env.CANONICAL_HOST
 // redirect is cross-host, and a 301 to another host drops the Authorization
 // header in curl without --location-trusted, in requests, and in fetch. Every
 // authenticated GET a published SDK might call against agentbill.fly.dev has to
-// be on this list or its callers start getting 401s. Enumerated from
+// be on this list or its callers start getting 401s. Moving the SDK default to
+// agentbill.dev does NOT shrink this list: an installed SDK keeps calling the
+// host it was published with, for as long as it stays installed. Enumerated from
 // `grep -rn "app.get(" src/routes/`; the CI audit asserts each still 401s.
 const API_PREFIXES = [
   '/preflight', '/events', '/keys', '/tasks', '/budget', '/customers',

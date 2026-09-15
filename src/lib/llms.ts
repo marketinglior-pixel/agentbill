@@ -415,8 +415,9 @@ gets 409 preflight_in_progress, which is not a refusal and reserves nothing.
 
 ## HTTP API
 
-Base URL ${ORIGIN}. The published SDKs default to https://agentbill.fly.dev; both hostnames serve
-the same application. Routes are registered at the root: POST /preflight, not /v1/preflight.
+Base URL ${ORIGIN}. The SDKs default to https://agentbill.dev; https://agentbill.fly.dev serves
+the same application and keeps working, which is what SDKs published before 2026-09-15 call.
+Routes are registered at the root: POST /preflight, not /v1/preflight.
 
 Auth: \`Authorization: Bearer agb_<48 hex characters>\` on every endpoint except the public ones:
 /register, /health, /health/db, /pulse, the Polar webhook, and the marketing pages. No
