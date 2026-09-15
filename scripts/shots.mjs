@@ -51,8 +51,58 @@ const PAGES = [
 // session. 320 is the narrowest width still in real use, so it is the floor
 // that matters; 390 stays because it is the common one and the two widths
 // break differently.
+//
+// The HEIGHTS took until 2026-09-13 to get the same treatment, and the gap cost
+// four dogfood runs. `desktop` was 1440x1000, and 1000 is not a height any
+// common Mac laptop has. Chrome's viewport is the screen minus the menu bar and
+// its own tab strip and toolbar, so a maximised window gives roughly:
+//
+//   MacBook Air 13" M1 / 13" MBP   1440x900 default    ->  ~1440x760, ~725 with a bookmarks bar
+//   MacBook Air 13" M2             1470x956            ->  ~1470x816
+//   MacBook Pro 14"                1512x982            ->  ~1512x842
+//   MacBook Pro 16"                1728x1117           ->  ~1728x977
+//
+// So 1000 models a 16" Pro or an external display: the LOOSEST case, and the
+// one least able to show a fold problem. 735 is the 1440x900 machine with a
+// bookmarks bar, which is the tightest desktop geometry in real use and the one
+// the founder was sitting at. Measured here on 2026-09-15, both heights, same
+// page: at 1000 the key screen's answer, export line and button are ALL above
+// the fold and this gate sees nothing; at 735 the button sits below it, which
+// is the truth a reader gets.
+//
+// Not a fourth viewport, deliberately. Nothing 1000 covers is lost: every other
+// check in this file is height-independent, because `fullPage: true` captures
+// the whole page at any viewport height. What IS lost is a regression that only
+// appears on a tall screen, a sticky element that needs short content to show
+// itself. That is the trade, and it is worth ten fewer captures on every run.
+// The name stays `desktop` because every past record and filename uses it.
+// How far below the fold the key screen's ONE action may sit, per viewport.
+//
+// Two different claims, because they are not equally negotiable.
+//
+// The ANSWER to "where does the key go" (.where) must be ABOVE the fold on
+// every viewport, with no budget at all. That is the sentence dogfood run 4
+// went looking for and did not find, and a reader who cannot see it does not
+// know there is anything below to scroll to. Measured 2026-09-15 it clears with
+// room everywhere: 320px of margin at desktop, 420 at mobile, 98 at narrow.
+//
+// The ACTION (.btn-go) is allowed below the fold, within one short scroll,
+// because it cannot be lifted above 735 without deleting something the reader
+// needs. Measured today it is +44 at desktop and +9 at mobile. The state that
+// blocked run 4 was +312, so a 150px budget passes what ships and catches what
+// shipped.
+//
+// `narrow` has no action budget, and that is an argument rather than an
+// exemption of convenience. At 320x568 the viewport is 568px tall and the key
+// panel alone, heading through export line, is taller than that; no arrangement
+// puts a fourth element above the fold. A budget there would either be loose
+// enough to catch nothing or force deleting content to satisfy a number. It is
+// measured and printed on every run, so a regression is still visible; it is
+// just not a build failure. Today it sits at +418.
+const FOLD_ACTION_BUDGET = { desktop: 150, mobile: 150 }
+
 const VIEWPORTS = [
-  ['desktop', 1440, 1000, false],
+  ['desktop', 1440, 735, false],
   ['mobile', 390, 844, true],
   ['narrow', 320, 568, true],
 ]
@@ -138,6 +188,28 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       await page.screenshot({ path: file, fullPage: true })
       const m = await page.evaluate(() => ({
         h: document.documentElement.scrollHeight,
+        // Where the key screen's answer and its action sit, against the fold.
+        //
+        // This is the one thing this gate could not see on 2026-09-12, and the
+        // reason it passed 30/30 through four blocked dogfood runs. Every other
+        // check here is height-independent: `fullPage: true` captures the whole
+        // page whatever the viewport, so status, sideways scroll, leaks and
+        // clipping all read the same at any height. The fold does not, and the
+        // fold is what a reader actually gets.
+        //
+        // Measured only where the success state is really visible. The markup
+        // is in every /register response but display:none until the reveal, and
+        // getBoundingClientRect on a hidden subtree returns zeros, which would
+        // report a comfortable 0px on the one page that has the problem.
+        fold: (() => {
+          const s = document.getElementById('success-state')
+          if (!s || s.offsetParent === null) return null
+          const top = (sel) => {
+            const e = document.querySelector(sel)
+            return e && e.offsetParent !== null ? Math.round(e.getBoundingClientRect().top + window.scrollY) : null
+          }
+          return { vh: window.innerHeight, answer: top('.where'), line: top('#key-export'), action: top('.btn-go') }
+        })(),
         overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
         // An escaped `\${` inside a template literal emits the expression as
         // TEXT. It renders as a paragraph of source at the top of the page, it
@@ -207,11 +279,32 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           return hits
         })(),
       }))
+      if (m.fold) {
+        // A missing element is a failure, not a skip. If .where or .btn-go is
+        // renamed away, every check below it silently stops running and this
+        // gate goes quiet on the exact screen it was added for.
+        if (m.fold.answer === null) {
+          failures.push(`${vp} ${name}: no .where on the key screen, so the fold check measured nothing`)
+        } else if (m.fold.answer >= m.fold.vh) {
+          failures.push(`${vp} ${name}: the answer to "where does the key go" is ${m.fold.answer - m.fold.vh}px BELOW the fold`)
+        }
+        const budget = FOLD_ACTION_BUDGET[vp]
+        if (budget !== undefined) {
+          if (m.fold.action === null) failures.push(`${vp} ${name}: no .btn-go on the key screen, so the action budget measured nothing`)
+          else if (m.fold.action > m.fold.vh + budget) {
+            failures.push(`${vp} ${name}: the one action is ${m.fold.action - m.fold.vh}px below the fold, past the ${budget}px budget`)
+          }
+        }
+      }
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)
       if (m.overflowX) failures.push(`${vp} ${name}: scrolls sideways`)
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
       for (const c of m.clipped.slice(0, 4)) failures.push(`${vp} ${name}: ${c}`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
+      if (m.fold) {
+        const d = (v) => v === null ? '?' : `${v}${v < m.fold.vh ? '' : ` (+${v - m.fold.vh} BELOW)`}`
+        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.fold.vh}  answer ${d(m.fold.answer)}  line ${d(m.fold.line)}  action ${d(m.fold.action)}`)
+      }
       rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} ${status} ${String(m.h).padStart(6)}px${m.overflowX ? '  OVERFLOW-X' : ''}${errs.length ? `  ERRS:${errs.length}` : ''}${m.clipped.length ? `  CLIPPED:${m.clipped.length}` : ''}`)
     } catch (e) {
       failures.push(`${vp} ${name}: ${String(e).slice(0, 160)}`)
