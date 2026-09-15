@@ -1050,6 +1050,31 @@ ok('and a later agent does not take it over', (await task8('job-plain')).agentId
 
 // The console form runs the same statement, session-gated and same-origin only.
 const nav8 = (path, init = {}) => fetch(`${API}${path}`, { redirect: 'manual', ...init })
+
+/**
+ * Read a page until it says what the write path will eventually make it say,
+ * or the deadline passes. Same contract as `reads()` above: `until` is an
+ * EARLY EXIT, never an expectation this wait enforces. The gate always runs
+ * on the last body actually read, so a page that never gets there is reported
+ * as what it is, at the deadline, rather than spun into a pass.
+ *
+ * Why it exists: every approved:false is written to preflight_decisions
+ * fire-and-forget, through the module-level sql and never through the
+ * request's tx (preflight.ts). So the sixth call resolving proves nothing
+ * about the row the start screen renders. On a warm database the row lands
+ * before the next GET; on CI's cold one it did not, three times on 2026-09-15,
+ * on commits that touched no server code.
+ */
+const PAGE_DEADLINE_MS = 20_000
+const pageUntil = async (path, init, until) => {
+  const started = Date.now()
+  let body = await nav8(path, init).then(r => r.text())
+  while (!until(body) && Date.now() - started < PAGE_DEADLINE_MS) {
+    await settle(POLL_MS)
+    body = await nav8(path, init).then(r => r.text())
+  }
+  return body
+}
 const FORM8 = { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }
 const login8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}` })
 const cookie8 = (login8.headers.get('set-cookie') ?? '').split(';')[0]
@@ -1264,11 +1289,11 @@ ok('[start] back is an allowlist of two, not an echo',
 for (let i = 0; i < 5; i++) await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
 const sixth8 = await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
 ok('[start] the sixth call on a ceiling of 5 is refused', sixth8.body.approved === false && sixth8.body.reason === 'task_ceiling_exceeded', JSON.stringify(sixth8.body))
-const afterRefuse8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
+const afterRefuse8 = await pageUntil('/app?view=start', { headers: { cookie: cookie8 } }, b => b.includes('Refused. Asked 1 unit'))
 ok('[start] step 3 shows the refusal with the body the code received',
    afterRefuse8.includes('Refused. Asked 1 unit') && afterRefuse8.includes('&quot;reason&quot;: &quot;task_ceiling_exceeded&quot;')
      && afterRefuse8.includes('Open the console'), 'step 3 did not show the refusal')
-const overviewAfter8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
+const overviewAfter8 = await pageUntil('/app', { headers: { cookie: cookie8 } }, b => b.includes('class="kpis"'))
 ok('[start] after the first refusal the overview is the dashboard, and the start screen stays reachable',
    overviewAfter8.includes('class="kpis"') && !overviewAfter8.includes('Three steps to your first refusal')
      && afterRefuse8.includes('class="setf3"'), 'the overview did not become the dashboard')
