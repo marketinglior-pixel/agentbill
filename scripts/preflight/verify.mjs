@@ -341,14 +341,31 @@ const counts = async () => {
 // how long a WRONG value takes to be reported. So it is set well above the
 // longest gap the write path can produce rather than trimmed for speed.
 //
-// The gap that proved it: the 20-concurrent-request gate reads {origins:3,
-// alerts:2}, and those are two separate writes. auth.ts claims the origin with
-// an INSERT, then SELECTs the context, then UPDATEs alerted_at. With 20 requests
-// in flight against a pool of 10, the winner's SELECT and UPDATE queue behind
-// nineteen losing claims, so `origins` hits 3 while `alerts` is still 1 and the
-// state sits there for longer than half a second. At QUIET_MS = 500 the helper
-// called that settled and the gate went red on a correct system.
-const QUIET_MS = 2_500
+// Two gaps measured, and the second one is why this number is 8 seconds rather
+// than the 2.5 it was first set to.
+//
+// The 20-concurrent-request gate reads {origins:3, alerts:2}, and those are two
+// separate writes: auth.ts claims the origin with an INSERT, then SELECTs the
+// context, then UPDATEs alerted_at. With 20 requests in flight against a pool of
+// 10, the winner's SELECT and UPDATE queue behind nineteen losing claims, so
+// `origins` hits 3 while `alerts` is still 1 for over half a second. At
+// QUIET_MS = 500 the helper called that settled and went red on a correct
+// system.
+//
+// The longer gap is the FIRST alert on a cold database, and it was missed the
+// first time because the number was set from the worst gap SEEN rather than the
+// worst the path can produce. Measured 2026-09-16 on a fresh database, from the
+// row itself: origin 2a02:169:3f00:1::/64 first_seen_at 17:01:15.077,
+// alerted_at 17:01:18.616. Three and a half seconds, because that request pays
+// for the first execution of the joined `ctx` query and the first UPDATE on the
+// table. At 2,500 the gate read {origins:2, alerts:0} and failed on a correct
+// system, one second before the write landed.
+//
+// Eight is comfortably past that and costs almost nothing: a passing run never
+// waits for quiet at all, because the early exit fires as soon as the counter
+// reaches the wanted value. Quiet only bounds how long a WRONG value takes to be
+// reported.
+const QUIET_MS = 8_000
 const DEADLINE_MS = 20_000
 const POLL_MS = 50
 const same = (a, b) => a.origins === b.origins && a.alerts === b.alerts
@@ -386,7 +403,11 @@ const reads = async (want, quietMs = QUIET_MS) => {
  * So those wait on quiet alone, and on a longer quiet, because quiet is the
  * whole claim rather than a way of knowing a write has finished.
  */
-const QUIET_NEGATIVE_MS = 1500
+// Above the 3.5s first-alert gap too, and for the same reason: this wait has no
+// early exit, so it is the ONLY thing standing between "nothing happened" and
+// "the write has not landed yet". At 1,500 it would have declared a regression
+// absent a second before the regression's own write appeared.
+const QUIET_NEGATIVE_MS = 5_000
 const readsQuiet = () => reads(null, QUIET_NEGATIVE_MS)
 
 // The exact shape that produced the flood: one laptop, one network, address
@@ -416,15 +437,28 @@ ipc = await reads({ origins: 3, alerts: 2 })
 ok('20 concurrent requests from one new network claim it once', ipc.origins === 3, JSON.stringify(ipc))
 ok('and alert exactly once', ipc.alerts === 2, JSON.stringify(ipc))
 
-// The backstop: distinct networks are not themselves a bound. A key sprayed
-// from a botnet stops at ALERTS_PER_DAY instead of mailing per source /64.
+// The backstop: distinct networks are not themselves a bound. Without a ceiling,
+// a caller spraying one key across many source /64s would earn a mail per
+// network, forever, because every one of them is a genuinely new origin.
+//
+// WHAT THIS BLOCK SHOWS, AND WHAT IT DOES NOT. It walks the count up to the
+// ceiling and stops there. That is a PRECONDITION for testing the ceiling, not
+// a test of it, and this comment claimed the opposite until 2026-09-13.
+//
+// Proven by mutation rather than by reading: turn the check into dead code
+// (`if (false && Number(ctx.recent) >= ALERTS_PER_DAY)` in auth.ts) and the gate
+// below stays GREEN, because six origins produce exactly five alerts whether or
+// not a ceiling exists. The line that goes red is the seventh-origin pair
+// further down, at {"origins":7,"alerts":6}. Anyone scanning this file for
+// "is the cap tested" would have found yes here and been wrong about where.
+//
+// One correction to the sentence above while it is being rewritten: the unit is
+// the ACCOUNT, not the key. `recent` in auth.ts joins developer_api_keys on
+// account_id, since #47. Counted per key, POST /keys/generate handed every newly
+// minted key a fresh allowance of five into the same inbox, which is the flood
+// rebuilt out of the one thing the counter was not counting.
 for (const n of ['2001:db8:1::9', '2001:db8:2::9', '2001:db8:3::9']) await from(n)
 ipc = await reads({ origins: 6, alerts: 5 })
-// Names what it checks: five alerts have ACCUMULATED, which is the cap's value.
-// It is a precondition, not the enforcement test. Proven by mutation: disabling
-// the cap check entirely (`if (false && ...)` at auth.ts) leaves this line GREEN,
-// because six origins produce exactly five alerts whether or not a cap exists.
-// The gate that goes red is the next pair, on the seventh origin.
 ok('five alerts accumulate, which is the cap value', ipc.alerts === 5, JSON.stringify(ipc))
 
 
