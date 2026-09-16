@@ -44,6 +44,7 @@ import { OG_PNG } from './lib/og-image.js'
 import { FAVICON_ICO, APPLE_TOUCH_PNG } from './lib/icons.js'
 import { FAVICON_SVG } from './ui/mark.js'
 import { FOUNDER_JPG } from './lib/photo.js'
+import { HERO_LOOP_MP4, HERO_POSTER_JPG } from './lib/hero-video.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 import { llmsTxt, llmsFullTxt } from './lib/llms.js'
@@ -301,6 +302,21 @@ app.get('/site.webmanifest', publicRoute(), async (_, reply) => {
 // generated, and scripts/photo/build.sh refuses to write it otherwise.
 app.get('/founder.jpg', publicRoute(), async (_, reply) => {
   return reply.type('image/jpeg').header('Cache-Control', ICON_CACHE).send(FOUNDER_JPG)
+})
+
+// The homepage hero loop: 3.8s, 1280x720, no audio stream, cut from the brand
+// film by scripts/hero-video/build.sh. Immutable is wrong here for the same
+// reason it is wrong for the icons — the path carries no version — but a day is
+// safe, because the poster is what a cold visitor sees first and the loop only
+// has to arrive before they scroll.
+const HERO_CACHE = 'public, max-age=86400'
+
+app.get('/hero-loop.mp4', publicRoute(), async (_, reply) => {
+  return reply.type('video/mp4').header('Cache-Control', HERO_CACHE).send(HERO_LOOP_MP4)
+})
+
+app.get('/hero-poster.jpg', publicRoute(), async (_, reply) => {
+  return reply.type('image/jpeg').header('Cache-Control', HERO_CACHE).send(HERO_POSTER_JPG)
 })
 
 // Open Graph card for link previews and ads (1200x630, embedded at build time)

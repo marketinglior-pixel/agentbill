@@ -39,6 +39,11 @@ export function inlineScript(js: string): { html: string; hash: string } {
  *   img-src              CSP img-src governs favicons. data: is for the select
  *                        arrow on /register, the site's one inline SVG.
  *   manifest-src         head() emits a manifest link on every page.
+ *   media-src 'self'     the homepage hero loop. Without it default-src 'none'
+ *                        applies and the <video> is blocked with a console
+ *                        error and no visible failure: the poster still paints,
+ *                        so the page looks finished and simply never moves.
+ *                        Caught by scripts/shots.mjs, which reads the console.
  *   style-src            'unsafe-inline' ALONE. The moment style-src contains a
  *                        hash or a nonce, 'unsafe-inline' stops applying to
  *                        style ATTRIBUTES, and this site sets style="width:..."
@@ -62,6 +67,7 @@ export function policy(scriptHashes: readonly string[], extra: Extra | readonly 
     'font-src https://fonts.gstatic.com',
     `img-src ${img}`,
     "manifest-src 'self'",
+    "media-src 'self'",
     `connect-src ${connect}`,
     "form-action 'self'",
     "base-uri 'none'",

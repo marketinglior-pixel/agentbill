@@ -27,7 +27,12 @@ const GITHUB = 'https://github.com/marketinglior-pixel/agentbill'
  *  because they are different actions: "Start free" on the price tables, and
  *  "Generate my API key" on the register submit, which says what the button
  *  does rather than where it goes. */
-export const KEY_CTA = 'Get your API key &rarr;'
+// 2026-09-16: 'Get your API key' -> 'Get API key', the wording locked in the
+// copy session. Changed HERE rather than overridden on the homepage, because the
+// whole point of this constant is that the site ships one wording; a page-local
+// literal would rebuild the seven-wordings problem it was created to kill. Every
+// page's button changes with it, which is the intended behaviour.
+export const KEY_CTA = 'Get API key &rarr;'
 export const KEY_CTA_SHORT = 'Get key'
 
 /** The destinations, once. The centre cluster and the mobile menu both render from here. */
@@ -57,7 +62,10 @@ export const CHROME_CSS = `
      painting over it during scroll. Change .nav-inner's height and this together. */
   :root { --shell: 960px; --banner-height: 60px; }
 
-  .site-nav { position: sticky; top: 0; z-index: 10; background: rgba(5,5,5,0.92);
+  /* --nav-bg, not a literal. This was the one colour on the site that lived
+     outside theme.ts, so the nav stayed near-black on a paper page while every
+     other surface followed the token block. */
+  .site-nav { position: sticky; top: 0; z-index: 10; background: var(--nav-bg);
               backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
   .nav-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; height: var(--banner-height);
                display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
