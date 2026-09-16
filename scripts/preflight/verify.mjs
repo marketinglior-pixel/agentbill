@@ -1391,7 +1391,7 @@ const login8b = await fetch(`${API}/app`).then(r => r.text())
 // the cold path.
 const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('</header>'))
 // Rewritten 2026-09-16 for the paper identity (`c70b8bd`), and the rewrite is
-// three gates where there were two, on purpose.
+// five gates where there were two, on purpose.
 //
 // What changed in the hero: the static dual-state demo became a looping film
 // (`figure.plate`), and the caption string `job ceiling &middot; not a month
@@ -1401,11 +1401,12 @@ const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('<
 // rendered identities), so these gates follow the guarantee rather than the
 // markup that used to carry it.
 //
-// WHAT IS NO LONGER COVERED, said out loud rather than quietly dropped: the old
-// demo showed BOTH states side by side, a month window with room next to this
-// job refused. The film shows the refusal and the h1 asserts the contrast in
-// words, so the fold no longer DEMONSTRATES the comparison, it states it. If
-// that matters it is a product decision, not a gate to tighten.
+// What the old demo card showed, BOTH states side by side, a month window with
+// room next to this job refused, did not leave the fold: it moved out of the
+// hero and into Fig. 1, the section directly under it, drawn as four meters
+// under one ceiling line. The plate carries the refusal, the h1 states the
+// contrast, and the figure demonstrates it. The Fig. 1 gate below is the one
+// that holds that.
 ok('[fold] the film sits after the headline and carries the burn-down to a refusal',
    fold8.includes('class="plate"') && fold8.indexOf('class="plate"') > fold8.indexOf('A ceiling on this job')
      && fold8.includes('492 of 500 units') && /refused/.test(visible8(hero8)),
@@ -1420,6 +1421,22 @@ ok('[fold] the argument survives a film that never plays',
    'the film is the only thing saying what happens')
 ok('[fold] the copy still says what the ceiling is and is not',
    fold8.includes('not on the month') && fold8.includes('not a proxy'))
+// Fig. 1: the dual state, DRAWN. Three meters under the cap (a clock, an
+// org-month, a USD window), this task_ref refused, one ceiling line across all
+// four. The numbers are read off the plate's foot line rather than typed here:
+// home.ts draws the plate foot, the figure's lit row and the figure's ceiling
+// label from one heroRefusalBody(), so the three must agree, and a gate that
+// typed 492 would go red on a change that changed nothing.
+const plateFoot8 = fold8.match(/(\d[\d,]*) of (\d[\d,]*) units &middot; [a-z_-]+ asks (\d[\d,]*) &middot; refused/)
+const [, used8, ceil8] = plateFoot8 ?? ['', '', '']
+const figStart8 = fold8.indexOf('<figure class="fig"')
+const fig8 = figStart8 < 0 ? '' : fold8.slice(figStart8, fold8.indexOf('</figure>', figStart8))
+ok('[fold] Fig. 1 draws both states under one ceiling line: a month meter with room, this task_ref refused',
+   plateFoot8 !== null && fig8.includes('Fig. 1') && fig8.includes(`ceiling &middot; ${ceil8}`)
+     && /class="mrow">\s*<span class="m-l">Org &middot; month<\/span>[\s\S]*?<span class="m-s">under the cap<\/span>/.test(fig8)
+     && /class="mrow lit">\s*<span class="m-l">task_ref [^<]*<\/span>[\s\S]*?<span class="m-s">refused<\/span>/.test(fig8)
+     && fig8.includes(`${used8} / ${ceil8}`),
+   fig8 ? `the figure does not show a month meter under the cap beside this job refused at ${used8} / ${ceil8}` : 'no Fig. 1 under the hero')
 // The claims guard, now standing on its own. It was the second half of the
 // caption gate and had NOTHING to do with the caption: it bans the words that
 // carry a claim about somebody else, from the one surface most likely to grow
