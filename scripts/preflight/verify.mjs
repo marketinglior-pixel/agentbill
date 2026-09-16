@@ -1390,11 +1390,52 @@ const login8b = await fetch(`${API}/app`).then(r => r.text())
 // anyone else. The brochure rows (keys, the console overview) are gone from
 // the cold path.
 const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('</header>'))
-ok('[fold] the dual-state demo sits beside the headline: a month window with room, this job refused',
-   fold8.includes('class="demo"') && fold8.includes('still under the cap') && fold8.includes('<b>approved: false</b>')
-     && fold8.indexOf('class="demo"') > fold8.indexOf('A ceiling on this job'), 'no demo in the fold')
-ok('[fold] the caption says what the ceiling is and is not, and claims nothing about anyone else',
-   fold8.includes('job ceiling &middot; not a month window &middot; not a proxy') && !/\b(only|first|nobody)\b/i.test(visible8(hero8)))
+// Rewritten 2026-09-16 for the paper identity (`c70b8bd`), and the rewrite is
+// three gates where there were two, on purpose.
+//
+// What changed in the hero: the static dual-state demo became a looping film
+// (`figure.plate`), and the caption string `job ceiling &middot; not a month
+// window &middot; not a proxy` was dissolved into the copy: "not on the month"
+// is in the h1 and "not a proxy" is in the sub. That was a decision, not a
+// regression (`M-memory/decisions.md`, 2026-09-16, chosen by Lior from three
+// rendered identities), so these gates follow the guarantee rather than the
+// markup that used to carry it.
+//
+// WHAT IS NO LONGER COVERED, said out loud rather than quietly dropped: the old
+// demo showed BOTH states side by side, a month window with room next to this
+// job refused. The film shows the refusal and the h1 asserts the contrast in
+// words, so the fold no longer DEMONSTRATES the comparison, it states it. If
+// that matters it is a product decision, not a gate to tighten.
+ok('[fold] the film sits after the headline and carries the burn-down to a refusal',
+   fold8.includes('class="plate"') && fold8.indexOf('class="plate"') > fold8.indexOf('A ceiling on this job')
+     && fold8.includes('492 of 500 units') && /refused/.test(visible8(hero8)),
+   'no plate in the fold, or it does not reach a refusal')
+// `preload="none"` means the film may never be fetched, and autoplay is refused
+// outright under Low Power Mode and by reduced-motion settings. So the argument
+// cannot live in the video alone: the poster and the two captions have to carry
+// it for a reader who sees no moving picture at all. That is what this asserts.
+ok('[fold] the argument survives a film that never plays',
+   fold8.includes('poster="/hero-poster.jpg"') && /aria-label="[^"]+"/.test(fold8)
+     && fold8.includes('job-142 burns down') && fold8.includes('researcher asks 12'),
+   'the film is the only thing saying what happens')
+ok('[fold] the copy still says what the ceiling is and is not',
+   fold8.includes('not on the month') && fold8.includes('not a proxy'))
+// The claims guard, now standing on its own. It was the second half of the
+// caption gate and had NOTHING to do with the caption: it bans the words that
+// carry a claim about somebody else, from the one surface most likely to grow
+// one. It was still passing when the caption clause it was joined to went dead,
+// which is the danger: anyone deleting a stale gate would have taken this with
+// it and nothing would have gone red. Retired claims are listed in
+// C-core/voice-dna.md; the audit that produced them is in M-memory/decisions.md,
+// 2026-09-03.
+//
+// Extended here to the hero's aria-labels. `visible8` strips tags, so attribute
+// text never reached this regex, and an aria-label is read aloud to a screen
+// reader: it is a claim surface the guard could not see.
+const heroClaims8 = visible8(hero8) + ' ' + (hero8.match(/aria-label="([^"]*)"/g) ?? []).join(' ')
+ok('[fold] the hero claims nothing about anyone else',
+   !/\b(only|first|nobody)\b/i.test(heroClaims8),
+   (heroClaims8.match(/\b(only|first|nobody)\b/gi) ?? []).join(', '))
 ok('[fold] one primary action in the hero, and the brochure rows are gone',
    (hero8.match(/class="btn btn-lg"/g) ?? []).length === 1 && !hero8.includes('btn-ghost')
      && !fold8.includes('Keys you can revoke') && !fold8.includes('What the ceiling saved you from'))
