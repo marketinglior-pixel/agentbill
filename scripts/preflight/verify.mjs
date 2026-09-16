@@ -1629,10 +1629,24 @@ ok('[home] the not-list is four lines, none about stopping a run or about who ha
 ok('[start] the footer names the endpoint with the field it takes, and does not teach task_ceiling from code',
    visible8(virgin8).includes('ceiling_units') && !/\btask_ceiling\b/.test(visible8(virgin8)))
 
+// Attribute text counts as copy, 2026-09-16. `visible8` strips tags, so every
+// gate built on it has been blind to aria-label, title, alt and placeholder,
+// and all four are read to somebody: aria-label and alt out loud by a screen
+// reader, title and placeholder on screen. The microcopy ban is a voice-dna
+// hard rule, so `aria-label="We block the call"` was a sentence that could ship
+// with every gate green.
+//
+// Found while splitting the hero's claims guard, which had the identical hole.
+// Checked before closing it rather than assumed: 21 attributes across /, /app,
+// /register, /pricing and /docs, all clean, so this is a latent hole and not a
+// live defect. Closing it costs one line and the mutation below proves it bites.
+const readable8 = (html) =>
+  visible8(html) + ' ' + [...html.matchAll(/(?:aria-label|title|alt|placeholder)="([^"]*)"/gi)].map((m) => m[1]).join(' ')
+
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
                             ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
                             ['/register', register8], ['the console login card', login8b]]) {
-  const hits = visible8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
+  const hits = readable8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
 }
 
