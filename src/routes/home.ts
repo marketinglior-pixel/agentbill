@@ -63,83 +63,90 @@ function heroAnswer(): string {
 }
 
 /**
- * The month-window sample on the fold's first card, as a share of a window.
- * A percentage and not a count, on purpose: this product has no month meter
- * to read, and a number of units or dollars on that card would be a claim
- * about a meter we do not run. The card says "sample" in its own frame.
+ * The month-window sample, as a share of a window. A percentage and not a count,
+ * on purpose: this product has no month meter to read, and a number of units or
+ * dollars on that row would be a claim about a meter we do not run. Fig. 1 says
+ * "sample" in its own frame.
  */
 const MONTH_SAMPLE_PCT = 4
 
 /**
- * The fold's one demo: two meters on one account at one moment. The month
- * window has room and nothing fires. This job is out, and the body under it
- * is what POST /preflight answered, from heroRefusalBody(). The two cards are
- * the whole argument of the page in the time it takes to read two chips:
- * a ceiling on this job, not on the month.
+ * FIG. 1: the argument, drawn.
  *
- * The caption under it says what the ceiling is and is not, and stops there.
- * It does not say nobody else has one; a session or run ceiling can be
- * built by hand on any gateway, and the claims rules do not allow the word
- * "only" on a surface nobody can check.
+ * Four meters in one account in one minute. Three are real mechanisms that other
+ * products ship and all three still say yes; the fourth is this task_ref and it
+ * is out. The ceiling is ONE vertical line crossing all four, so "a ceiling on
+ * this job" is a thing on the page rather than a phrase in the headline.
+ *
+ * The fourth row's numbers come from heroRefusalBody(), the same source the code
+ * frame's answer and the playground read, so the figure cannot disagree with the
+ * wire. The first three are illustrative and the frame says SAMPLE, once.
+ *
+ * The bar geometry is percentages of the bar column, and the bar column stops AT
+ * the ceiling line. Nothing can be drawn past it by accident; the only thing in
+ * the zone beyond is the dashed block for the units this call asked for.
  */
-function dualState(): string {
+function ceilingFigure(): string {
   const body = heroRefusalBody()
-  const used = Number(body.task_used_units ?? 0)
-  const ceil = Number(body.task_ceiling ?? 1)
-  const ask = Number(body.estimated_units ?? 1)
-  const pct = Math.min(100, (used / ceil) * 100)
-  return `<figure class="demo">
-      <div class="dcard month">
-        <div class="dhead"><span>Month window &middot; the organization</span><span class="dtag">sample</span></div>
-        <div class="dbody">
-          <div class="dline"><b>${MONTH_SAMPLE_PCT}%</b> of the month used</div>
-          <div class="track" aria-hidden="true"><i class="used" style="width:${MONTH_SAMPLE_PCT}%"></i></div>
-          <div class="dfoot"><span class="chip flow">still under the cap</span><span class="dwhen">resets on the 1st</span></div>
-        </div>
+  const used = Number(body.task_used_units)
+  const ceil = Number(body.task_ceiling)
+  const ask = Number(body.estimated_units)
+  const rows: ReadonlyArray<readonly [label: string, value: string, state: string, pct: number, lit: boolean]> = [
+    ['Wall clock', '34 min', 'still running', 34, false],
+    ['Org &middot; month', `${MONTH_SAMPLE_PCT}% used`, 'under the cap', MONTH_SAMPLE_PCT, false],
+    ['USD window &middot; 1h', '$1.60 / $5', 'under the cap', 32, false],
+    [`task_ref ${esc(String(body.task_ref))}`, `${num(used)} / ${num(ceil)}`, 'refused', 100, true],
+  ]
+  return `<figure class="fig">
+      <figcaption class="fig-head">
+        <span class="fig-n">Fig. 1 &mdash; four meters, one account, one minute</span>
+        <span class="fig-tag">sample</span>
+      </figcaption>
+      <div class="plot">
+        <div class="ceil" aria-hidden="true"><span>ceiling &middot; ${num(ceil)}</span></div>
+        ${rows.map(([label, value, state, pct, lit]) => `<div class="mrow${lit ? ' lit' : ''}">
+          <span class="m-l">${label}</span>
+          <span class="m-v">${value}</span>
+          <span class="m-t" aria-hidden="true"><i style="width:${pct}%"></i>${lit ? `<u title="this call asks ${num(ask)}"></u>` : ''}</span>
+          <span class="m-s">${state}</span>
+        </div>`).join('\n        ')}
       </div>
-      <div class="dlink"><span>same account, same minute</span></div>
-      <div class="dcard job">
-        <div class="dhead"><span>This job</span><span class="dref">task_ref <b>${esc(String(body.task_ref))}</b></span></div>
-        <div class="dbody">
-          <div class="dline"><b>${num(used)}</b> of ${num(ceil)} units &middot; this call asks ${num(ask)}</div>
-          <div class="track" aria-hidden="true"><i class="used held" style="width:${pct.toFixed(1)}%"></i></div>
-          <div class="dfoot"><span class="chip held">refused</span><span class="dwhen">out of units &middot; <b>approved: false</b></span></div>
-          <code class="co-json">${heroAnswer()}</code>
-        </div>
-      </div>
-      <figcaption class="dcap">job ceiling &middot; not a month window &middot; not a proxy</figcaption>
+      <p class="fig-cap">Clock / month / window &nbsp;&ne;&nbsp; a ceiling on this
+      <span class="mono-in">task_ref</span>.</p>
     </figure>`
 }
 
 /**
- * The provider-cap argument, as evidence rather than prose. Three sources,
- * each read at the URL beside it on 2026-09-07. The claim on the page is only
- * what each ceiling is BOUND to; nothing here says a provider lacks a cap,
- * because the first card is a provider's cap firing.
+ * PLATE 1: the film, and only the part of it that is the product.
+ *
+ * 3.8 seconds cut from the 30s brand film at 16.6: the console's counter climbing
+ * to 492 of 500, `researcher needs 12` turning red, and the refusal body. Its
+ * numbers are the figure's numbers.
+ *
+ * The first ~11 seconds of the master are a blue analytics dashboard that is not
+ * this product and not any real one, recorded in the vault as an open defect.
+ * They are not on this page, and this is the comment that says so out loud so a
+ * future edit that "restores the full film" has to argue with it first.
+ *
+ * `poster` carries the frame before a byte of video arrives, `preload="none"`
+ * means a phone on a cellular connection pays for the 41KB still and nothing
+ * else, and the loop is muted with no audio STREAM at all rather than muted by
+ * attribute, which is what keeps autoplay out of browser policy entirely.
  */
-function sourceCards(): string {
-  return `<div class="src-grid">
-        <div class="src">
-          <span class="src-l">OpenAI &middot; spend limits</span>
-          <p>A hard limit answers <b class="mono-in">429 project_spend_limit_exceeded</b>, and enforcement
-          &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount.&rdquo;
-          The boundary is the project or the organization.</p>
-          <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">developers.openai.com</a>
-        </div>
-        <div class="src">
-          <span class="src-l">Anthropic &middot; rate limits</span>
-          <p>A tier spend cap pauses API usage &ldquo;until 00:00 UTC on the first day of the next month.&rdquo;
-          The boundary is the organization, and the clock is the calendar.</p>
-          <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">platform.claude.com</a>
-        </div>
-        <div class="src">
-          <span class="src-l">claude-code &middot; issue 64744, open</span>
-          <p>Enterprise plan, <b>$3,000/month limit</b>: &ldquo;~$300 of unintended API usage over a single
-          weekend with no way to detect or stop it from the CLI.&rdquo; The limit is a month. The incident
-          was a weekend.</p>
-          <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener">github.com</a>
-        </div>
-      </div>`
+function videoPlate(): string {
+  return `<figure class="plate">
+      <figcaption class="plate-head">
+        <span>Plate 1 &mdash; job-142 burns down</span>
+        <span class="plate-meta">0:04 loop &middot; muted</span>
+      </figcaption>
+      <video class="plate-v" poster="/hero-poster.jpg" preload="none" muted playsinline loop autoplay
+             width="1280" height="720" aria-label="The AgentBill console counting job-142 up to its 500-unit ceiling and refusing the next call.">
+        <source src="/hero-loop.mp4" type="video/mp4" />
+      </video>
+      <div class="plate-foot">
+        <span>${num(Number(heroRefusalBody().task_used_units))} of ${num(Number(heroRefusalBody().task_ceiling))} units &middot; researcher asks ${num(Number(heroRefusalBody().estimated_units))} &middot; refused</span>
+      </div>
+    </figure>`
 }
 
 export async function homeRoute(app: FastifyInstance) {
@@ -148,6 +155,10 @@ export async function homeRoute(app: FastifyInstance) {
       title: `AgentBill · ${HEADLINE}`,
       description: 'A ceiling on this job, not on the month. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next. Free tier, API key in 30 seconds, no card.',
       path: '/',
+      // The one page on the paper theme. /app, /docs, /register and the rest stay
+      // dark: the console's --held green is semantics, not decoration, and a
+      // marketing decision must not reach it. See TOKENS_PAPER in theme.ts.
+      theme: 'paper',
       og: {
         description: 'A ceiling on this job, not on the month. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next.',
       },
@@ -171,12 +182,15 @@ export async function homeRoute(app: FastifyInstance) {
      * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action; nothing of its
      *        product, palette or claims · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
+    /* Page-local values. These were three hex literals and they were the only
+       colours on the page that did NOT follow the token block, so when the
+       route moved to the paper theme the playground band stayed near-black and
+       looked like a bug on a white page. They are now derived, which is the
+       whole reason a token block exists. --cmt is a comment on a DARK code
+       plate, so it takes the plate's dim ink and not the page's. */
     :root { --shell: 1080px;
-            /* Page-local: the playground band's ground and the code-comment ink.
-               The console colours the panels use (--flow, --res, the chip
-               grounds) live in theme.ts, one copy for every page. */
-            --band-hi: #121212; --band-lo: #0c0c0c;
-            --cmt: #79837c; }
+            --band-hi: var(--surface2); --band-lo: var(--surface2);
+            --cmt: var(--plate-dim); }
 
     /* .wrap owns the inline axis; every block-axis rule below uses padding-block,
        so neither can wipe the other via the padding shorthand. */
@@ -206,46 +220,92 @@ export async function homeRoute(app: FastifyInstance) {
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     /* One primary action on the fold, one size up from the site's buttons. */
     .btn-lg { padding: 15px 28px; font-size: var(--fs-body); border-radius: 10px; }
-    .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
+    /* One line, not a row of dotted spans: the locked copy is a sentence. */
+    .trust { margin-top: 16px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
              display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
-    .trust > span:not(:last-child)::after { content: "\\00b7"; margin-left: var(--s3); color: var(--border2); }
-    .trust b { color: var(--muted); font-weight: 500; }
 
     /* The dual-state demo. Two cards on the panel frame every product surface
        uses, staggered the way the reference stacks its pair: the month card
        narrower and quieter, the job card wider, lower and carrying the
        answer. The stagger is width and margin, not a transform, so nothing
        moves and nothing is drawn over anything. */
-    .demo { margin: 0; min-width: 0; display: grid; }
-    .dcard { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-             border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); overflow: hidden; min-width: 0; }
-    .dcard.month { width: 82%; }
-    .dcard.job { width: 94%; margin-inline-start: auto; }
-    .dhead { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: 10px 16px;
-             border-bottom: 1px solid var(--border); background: var(--surface2); box-shadow: var(--edge);
-             font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
-    .dhead .dref { text-transform: none; letter-spacing: 0; }
-    .dhead .dref b { color: var(--text); font-weight: 500; }
-    /* "sample" at the chip register, inside the frame, so a screenshot of the
-       card carries the label with it. */
-    .dtag { font-size: var(--fs-chip); letter-spacing: .1em; border: 1px solid var(--border2); border-radius: var(--r-chip);
-            padding: 1px 6px; color: var(--dim); }
-    .dbody { padding: 16px 16px 18px; display: grid; gap: 10px; }
-    .dline { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); font-variant-numeric: tabular-nums; }
-    .dline b { color: var(--text); font-weight: 500; }
-    .dfoot { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
-    .dfoot .chip { margin-left: 0; }
-    .dwhen { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
-    .dwhen b { color: var(--red); font-weight: 700; }
-    .demo .co-json { margin-top: 4px; padding: 12px 14px; background: var(--bg-deep); border: 1px solid var(--border);
-                     border-radius: var(--r-control); font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.65; }
-    /* Between the cards: the one fact that makes them one picture. A tick, then
-       the label, at the month card's left edge. */
-    .dlink { display: flex; align-items: center; gap: var(--s3); padding: 8px 0 8px 18px;
-             font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
-    .dlink::before { content: ""; width: 1px; height: 22px; background: var(--border-strong); }
-    .dcap { margin-top: 14px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); text-align: right;
-            letter-spacing: .02em; }
+    /* PLATE 1: the film.
+       A dark rectangle on paper is not a clash: it is how a technical document
+       embeds a photograph, and it is the rule the code frames follow too. Hard
+       edges, a rule above, a caption below, and no play chrome of our own: the
+       loop is 3.8s and silent, so a play button would be furniture. */
+    .plate { margin: 0; min-width: 0; display: grid; gap: 12px; align-content: start; padding-top: 6px; }
+    .plate-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+                  font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .1em;
+                  text-transform: uppercase; color: var(--text); }
+    /* The meta never wraps; the label is the half that gives way. Measured: at
+       1440 the plate column is 454px and the two together wanted 483. */
+    .plate-meta { color: var(--dim); white-space: nowrap; }
+    /* aspect-ratio, not a fixed height: poster and loop are both 16:9, so the
+       box cannot shift when the video swaps in. Without it the poster arrives,
+       lays out, and the page jumps under the reader. */
+    .plate-v { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9;
+               background: var(--plate); border: 1px solid var(--text); object-fit: cover; }
+    .plate-foot { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+                  flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+
+    /* FIG. 1: the meters.
+       A four-column grid: label, value, the bar column, the callout. The bar
+       column ends exactly where the ceiling line is drawn, so a bar cannot
+       overrun it and the zone past it belongs to the refused request alone. */
+    .fig-sec { padding-block: 0 88px; }
+    .fig { margin: 0; --barL: 300px; --barW: calc(100% - 300px - 160px); }
+    .fig-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+                font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .1em;
+                text-transform: uppercase; color: var(--text); padding-bottom: 10px;
+                border-bottom: 1px solid var(--text); }
+    .fig-tag { color: var(--dim); }
+    .plot { position: relative; padding-block: 26px 10px; }
+    /* One line, drawn once, crossing every meter. It is the figure's whole
+       argument, so it is an element rather than a border on some row. */
+    .ceil { position: absolute; top: 0; bottom: 6px; left: calc(var(--barL) + var(--barW));
+            width: 2px; background: var(--text); }
+    .ceil span { position: absolute; top: 0; left: 12px; white-space: nowrap;
+                 font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .1em;
+                 text-transform: uppercase; color: var(--text); }
+    .mrow { display: grid; grid-template-columns: 190px 100px var(--barW) 1fr; align-items: center;
+            column-gap: 10px; padding-block: 15px; }
+    .m-l { font-family: var(--mono); font-size: var(--fs-small); letter-spacing: .06em;
+           text-transform: uppercase; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+    .m-v { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); text-align: right;
+           font-variant-numeric: tabular-nums; }
+    .m-t { position: relative; display: block; height: 9px; border-bottom: 1px solid var(--border);
+           margin-left: 10px; }
+    .m-t i { position: absolute; left: 0; bottom: 0; height: 9px; background: var(--dim); opacity: .5; }
+    /* The units this call asked for, past the line: dashed, because they were
+       never spent. */
+    .m-t u { position: absolute; left: 100%; bottom: 0; width: 28px; height: 100%;
+             border: 1px dashed var(--signal); background: var(--held-bg); }
+    .m-s { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em;
+           text-transform: uppercase; color: var(--dim); padding-left: 16px; }
+    .mrow.lit .m-l, .mrow.lit .m-v { color: var(--text); font-weight: 500; }
+    .mrow.lit .m-t { height: 15px; }
+    .mrow.lit .m-t i { height: 15px; background: var(--signal); opacity: 1; }
+    /* --signal-deep, not --signal: this callout sits beside the signal's own
+       tint, where the paper value measures 3.94 against a 4.5 floor. */
+    .mrow.lit .m-s { color: var(--signal-deep); font-weight: 500; }
+    .fig-cap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+               font-family: var(--mono); font-size: var(--fs-small); color: var(--muted); }
+
+    /* The thesis band. The concession is --muted and the claim is --text: the
+       page concedes in grey and claims in ink, which is an argument made with
+       weight instead of with an adverb. */
+    .band { background: var(--surface2); border-block: 1px solid var(--border); padding-block: 88px; }
+    .thesis { font-size: clamp(20px, 2.2vw, 27px); line-height: 1.5; letter-spacing: -.015em;
+              color: var(--text); max-width: min(960px, 100%); }
+    .thesis .concede { color: var(--muted); }
+    .thesis .sig { color: var(--signal); font-size: .9em; }
+    .evid { margin-top: 52px; padding-left: 20px; border-left: 2px solid var(--signal); max-width: 900px; }
+    .evid p { color: var(--muted); line-height: 1.6; }
+    .evid a { display: inline-block; margin-top: 10px; font-family: var(--mono); font-size: var(--fs-micro);
+              letter-spacing: .08em; text-transform: uppercase; color: var(--dim); text-decoration: underline;
+              text-underline-offset: 3px; }
+    .evid a:hover { color: var(--text); }
 
     /* The code frame. Its label bar carries the language tabs on the left and
        the caption on the right; the bar keeps the 44px floor every control on
@@ -299,22 +359,9 @@ export async function homeRoute(app: FastifyInstance) {
     .not-for { padding-block: 88px 0; }
 
     /* The why. One head, one paragraph, three cards of evidence. */
-    .why h2 { color: var(--white); max-width: 22ch; margin-bottom: var(--s4); }
+    /* .lead-p survives the sourced-card removal: the pricing head and the
+       playground lede both use it. */
     .lead-p { color: var(--muted); max-width: 62ch; line-height: 1.7; }
-    .src-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); margin-top: var(--s6); }
-    .src { min-width: 0; display: flex; flex-direction: column; gap: var(--s3);
-           background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-           border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s4) var(--s5) var(--s5); }
-    .src-l { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
-    .src p { color: var(--muted); font-size: var(--fs-small); line-height: 1.65; flex: 1; }
-    .src p b { color: var(--text); font-weight: 600; }
-    /* Source links at the citation register: --muted and underlined, the way
-       .proof a used to be, because the claim carries the page and the link
-       carries the claim. */
-    .src a { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); text-decoration: underline;
-             text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
-    .src a:hover { color: var(--text); text-decoration-color: var(--text); }
-    .src-note { margin-top: var(--s4); font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); max-width: 70ch; }
 
     /* The row. Text on one side, the product on the other. One row since
        2026-09-12, and still written as a row recipe so a second one, if it
@@ -381,34 +428,64 @@ export async function homeRoute(app: FastifyInstance) {
       .hero, .dip { grid-template-columns: minmax(0, 1fr); gap: 40px; }
       .hero { align-items: start; padding-block: var(--s7) var(--s7); }
       /* One column: the stagger has no second column to play against. */
-      .dcard.month, .dcard.job { width: 100%; margin-inline-start: 0; }
       .dip-text { padding-top: 0; }
       .dip { padding-block: 36px 36px; }
       section { padding-block: 64px 0; }
       .rows { padding-block: 16px 0; }
       .pricing { padding-block: 80px 0; }
       .sub { max-width: 54ch; }
-      .src-grid { grid-template-columns: minmax(0, 1fr); }
+      /* The figure's four columns do not survive one column of page. The label
+         and value keep their row, the bar takes the rest, and the callout moves
+         under the bar rather than being squeezed off the edge, which is what
+         it did, silently, until scripts/shots.mjs measured the clip. */
+      .fig { --barL: 150px; --barW: calc(100% - 150px - 130px); }
+      .mrow { grid-template-columns: 120px 1fr var(--barW) 130px; }
+      .m-l { font-size: var(--fs-micro); }
     }
     @media (max-width: ${BP.md}px) {
       .nots { grid-template-columns: minmax(0, 1fr); }
+      /* Two rows per meter: label and value on the first, the bar on the
+         second, the callout in the strip past the ceiling. --barW is written
+         against the SAME expression the .ceil line reads, so the line and the
+         end of the bar column cannot drift apart at any width. */
+      .fig { --barL: 0px; --barW: calc(100% - 104px); }
+      .mrow { grid-template-columns: 1fr auto; grid-template-areas: "l v" "t t"; row-gap: 9px;
+              padding-block: 13px; }
+      .m-l { grid-area: l; font-size: var(--fs-micro); }
+      .m-v { grid-area: v; }
+      .m-t { grid-area: t; margin-left: 0; }
+      /* The callout no longer has a column, so it is positioned into the strip
+         the ceiling line opens. */
+      .m-s { position: absolute; left: calc(var(--barW) + 12px); padding-left: 0;
+             font-size: var(--fs-tick); max-width: 92px; line-height: 1.25; }
+      .mrow { position: relative; }
+      .ceil span { font-size: var(--fs-tick); left: auto; right: calc(100% + 8px); }
     }
     @media (max-width: ${BP.sm}px) {
-      /* One column: the subhead takes the column's width at body size, and the
-         two hero buttons go full width and centred, the sanctioned exception
-         recorded in design.md. */
+      /* The full-width exception in design.md was written when the fold carried
+         TWO hero buttons. It carries one, and chrome.ts already puts a
+         full-width sticky bar at the bottom of the same phone screen, so
+         honouring it here paints two identical ink slabs 600px apart, the
+         defect this redesign started from. The hero button stays inline: the
+         sticky bar is the full-width primary on a phone, and the hero's is the
+         one you meet first. */
       .sub { max-width: none; font-size: var(--fs-body); margin: 18px 0 26px; }
       .hero { padding-block: var(--s6) var(--s7); }
-      .hero-cta { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
-      .hero-cta > a { text-align: center; }
+      .hero-cta > a { display: inline-block; }
       .cp { max-width: none; }
       .code-body { padding: 18px 16px; }
       .code-body pre { font-size: var(--fs-micro); }
       /* The caption in the label bar yields to the tabs at 390px; the tabs
          carry the meaning and the caption repeats the section under it. */
       .code-head > span { display: none; }
-      .dhead { flex-direction: column; gap: 2px; }
       .final-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .fig { --barW: calc(100% - 96px); }
+      .m-s { max-width: 84px; }
+      .plate-head { flex-direction: column; gap: 4px; align-items: flex-start; }
+      .plate-foot { flex-direction: column; gap: 4px; }
+      .thesis { font-size: var(--fs-lede); }
+      .band { padding-block: 56px; }
+      .fig-sec { padding-block: 0 56px; }
     }
 `,
     })}
@@ -418,31 +495,38 @@ ${siteNav('/')}
 
   <header class="hero wrap">
     <div class="hero-copy">
-      <h1>${HEADLINE}.</h1>
-      <p class="sub">One call before the work asks whether this job has units left, and
-      preflight is that call. When this job is out, the answer is no and your code
-      decides what next.</p>
+      <h1>${HEADLINE}</h1>
+      <p class="sub">Set a shared <span class="mono-in">task_ref</span> budget. Preflight returns
+      <span class="mono-in">approved: false</span> when that job is out. Your code decides what next.
+      SDK you install &mdash; not a proxy.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
       </div>
-      <p class="trust"><span><b>free tier</b></span><span>${num(PLAN_LIMITS.free)} preflight calls/mo</span><span>no card</span><span>key in 30 seconds</span></p>
+      <p class="trust">Start free &middot; ${num(PLAN_LIMITS.free)} preflight calls/mo, no card</p>
     </div>
-    ${dualState()}
+    ${videoPlate()}
   </header>
 
-${playgroundSection()}
-
-  <section class="wrap why">
-    <p class="eyebrow">Why a task, not a month</p>
-    <h2>Your job is not an account, and it does not last a month.</h2>
-    <p class="lead-p">The provider cap is real and it fires. It is bound to a project, to an organization
-    over a calendar month, or to one session on the vendor's own harness. A run too small to move a
-    monthly number never trips it. A number low enough to catch that run stops every agent in the
-    organization until the month turns.</p>
-    ${sourceCards()}
-    <p class="src-note">Read at source on 2026-09-07. What differs is not whether a cap fires. It is what
-    the cap is bound to.</p>
+  <section class="wrap fig-sec">
+    ${ceilingFigure()}
   </section>
+
+  <section class="band">
+    <div class="wrap">
+      <p class="thesis"><span class="concede">Wall-clock timeouts, org-month meters, and window budgets
+      (e.g. ClawGuard USD windows) are real. They meter a clock or an account.</span> A
+      <span class="mono-in sig">task_ref</span> ceiling meters this job &mdash; preflight can return
+      <span class="mono-in sig">approved: false</span> before the next call; your code decides what next.</p>
+      <div class="evid">
+        <p>~$300 unintended weekend API usage on a $3,000/mo Enterprise limit, with no way to detect or
+        stop it from the CLI.</p>
+        <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener"
+           target="_blank">github.com/anthropics/claude-code/issues/64744</a>
+      </div>
+    </div>
+  </section>
+
+${playgroundSection()}
 
   <section class="wrap rows">
     <div class="dip row-close">

@@ -47,6 +47,18 @@ export const BRAND = {
   greenInk: '#05130e',
 } as const
 
+/**
+ * The paper theme's three fixed values, for the same three surfaces that cannot
+ * read a CSS variable: the theme-color meta, the manifest and the favicon.
+ * `signal` is the refusal, and it is deliberately not a second brand colour:
+ * nothing but a refused call may use it.
+ */
+export const PAPER = {
+  bg: '#F2F0E9',
+  ink: '#15130F',
+  signal: '#C2410C',
+} as const
+
 /** Colour, type and spacing tokens. Every route gets exactly these. */
 export const TOKENS = `
   :root {
@@ -72,6 +84,19 @@ export const TOKENS = `
        pure grey, so the frame still belongs to this palette. */
     --code-ink: #cfd6d2;
     --red: #ff5757; --amber: #f5b942;
+    /* Roles, not hues. --green is the PRIMARY ACTION and --signal is the
+       REFUSAL; on the dark theme one value plays both parts, which is exactly
+       why the homepage read as a page decorated in mint rather than a page
+       that means something by it. The paper theme splits them, and a component
+       written against these names renders correctly under either. */
+    --signal: ${BRAND.green}; --signal-deep: ${BRAND.green}; --signal-ink: ${BRAND.greenInk};
+    /* A plate is the ground for anything the MACHINE produced: a code frame, a
+       wire body, a video still. On the dark theme it is one step under the page
+       and on paper it is the page's opposite. */
+    --plate: #0d0d0d; --plate-ink: #cfd6d2; --plate-dim: #868e88; --plate-signal: ${BRAND.green};
+    /* The sticky nav's own ground. It was hardcoded rgba(5,5,5,0.92) inside
+       chrome.ts, the one colour on the site that lived outside this file. */
+    --nav-bg: rgba(5,5,5,0.92);
     /* Console semantics, shared by every page that shows the console's rows
        (the console itself, the homepage panels). --flow is ordinary traffic,
        --res is units held by a reservation that has not settled, the *-bg /
@@ -117,6 +142,9 @@ export const TOKENS = `
        label, and a chip. */
     --fs-label: 11.5px;
     --fs-chip: 11px;
+    /* One rung under --fs-chip, for a tick label beside a figure's axis. It is
+       not a general small size: nothing that has to be READ may use it. */
+    --fs-tick: 9.5px;
 
     /* The two h1 sizes that already existed implicitly. --fs-h1-sub was typed
        identically into docs.ts and upgrade.ts, and register.ts had a third
@@ -174,6 +202,76 @@ export const TOKENS = `
     --grad-vignette: radial-gradient(120% 80% at 50% 0%, #0b0f0d 0%, var(--bg) 60%);
   }`
 
+/**
+ * The paper theme, for marketing surfaces only.
+ *
+ * It redefines the SAME token names as TOKENS above rather than adding a second
+ * vocabulary, which is what lets `/` change identity without touching
+ * chrome.ts, tiers.ts or panels.ts. The console keeps the dark theme: `--held`
+ * green is load-bearing semantics in /app, and nothing here reaches it.
+ *
+ * Contrast was measured on every pair before this shipped, compositing
+ * translucent grounds and walking text RANGES rather than node fills. Six pairs
+ * failed AA on the first pass; the values below are the corrected ones. Ratios
+ * are in the comments so the next edit has to beat a number, not a taste.
+ */
+export const TOKENS_PAPER = `
+  :root {
+    color-scheme: light;
+    /* ground */
+    --bg: ${PAPER.bg}; --surface: ${PAPER.bg}; --surface2: #E9E5DA; --surface3: #E0DACE;
+    --bg-deep: #E9E5DA;
+    /* borders */
+    --border: #D3CDBF; --border-soft: #E0DACE; --border2: ${PAPER.ink}; --border-strong: ${PAPER.ink};
+    /* ink. 16.3 / 6.3 / 5.0 on the paper ground; --dim was #8C8578 at 3.21 and
+       failed on all 39 of its labels. */
+    --text: ${PAPER.ink}; --muted: #5C574C; --dim: #6B665A; --white: ${PAPER.ink};
+    /* The primary action is ink on paper. --green keeps its NAME because it is
+       the same role every shared component already binds to; renaming it is a
+       12-file refactor and belongs in its own pass, not smuggled into a
+       redesign. */
+    --green: ${PAPER.ink}; --green-ink: ${PAPER.bg};
+    /* The refusal. One hue cannot clear AA on paper, on its own tint and on a
+       near-black plate, so it is three values: 4.54 on paper, 5.89 on the 8%
+       tint, 6.67 on the plate. */
+    --signal: ${PAPER.signal}; --signal-deep: #9A3009; --signal-ink: ${PAPER.bg};
+    --plate: #14120E; --plate-ink: #D8D3C8; --plate-dim: #8A8478; --plate-signal: #F97316;
+    --nav-bg: rgba(242,240,233,0.92);
+    --code: #F97316; --code-ink: #D8D3C8;
+    --red: #B91C1C; --amber: #92400E;
+    /* Console semantics are not used on paper surfaces, but a shared partial
+       could reach for one, so they resolve to something legible rather than to
+       nothing. */
+    --flow: #8A8478; --flow-ink: #5C574C; --res: #D3CDBF;
+    --held-bg: #F5E6DC; --held-line: ${PAPER.signal};
+    --near-bg: #F6EBD6; --near-line: #92400E; --near-ink: #6B4A0B;
+    --fail-bg: #F7E2E2; --fail-line: #B91C1C; --fail-ink: #7F1D1D;
+    /* Two faces, not three. The display face and the body face are one family:
+       an industrial grotesque set tight for headings and loose for prose. The
+       mono is a drafting mono, so a code frame reads as a technical document
+       rather than as a terminal screenshot. */
+    --display: 'Instrument Sans', 'Helvetica Neue', Arial, sans-serif;
+    --sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --fs-display: clamp(40px, 5.2vw, 60px);
+    --fs-h2: clamp(26px, 3.4vw, 42px);
+    --fs-h3: clamp(19px, 2.2vw, 22px);
+    --fs-lede: 18px; --fs-body: 16px; --fs-small: 13.5px; --fs-micro: 12px;
+    --fs-label: 11px; --fs-chip: 10.5px; --fs-tick: 9.5px;
+    --fs-h1-sub: clamp(32px, 5vw, 50px); --fs-h1-app: 28px; --fs-figure: 34px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+    --s6: 32px; --s7: 48px; --s8: 64px; --s9: 88px;
+    --gutter: 24px; --gap: 56px;
+    /* Nothing is rounded. A hard edge is the whole difference between a spec
+       sheet and a dashboard, and it is one line rather than a rule per element. */
+    --r-frame: 0px; --r-control: 0px; --r-chip: 0px; --r-pill: 0px;
+    /* No bevel and no lift. On paper an object is separated by a rule, not by a
+       fake light source; --edge and --lift exist only so a shared component
+       that names them does not emit an empty box-shadow. */
+    --edge: none; --lift: none;
+    --grad-vignette: none;
+  }`
+
 /** Reset plus the element defaults every page shares. */
 export const BASE = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -204,13 +302,32 @@ export const BASE = `
 // If a future rule sets a weight on a --display element that is not 700 or 800,
 // the browser will synthesise it and it will look subtly wrong rather than
 // break. Add the weight here rather than letting it synthesise.
-const FONTS = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
+const FONTS_DARK = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />`
+
+// The paper theme's two families, and only the weights it renders: Instrument
+// Sans at 400/500/700 and IBM Plex Mono at 400/500. Counted the same way the
+// dark set was, by walking every rendered element and collecting the computed
+// family and weight, so a weight added later has to be added here too rather
+// than being synthesised.
+const FONTS_PAPER = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />`
+
+/** Which token block the page renders against. */
+export type ThemeName = 'dark' | 'paper'
 
 type HeadOpts = {
   /** Full <title>, including the " · AgentBill" suffix. */
   title: string
+  /**
+   * The token block. Defaults to 'dark', which is every page that existed
+   * before the homepage redesign. 'paper' is opt-in per route on purpose: the
+   * console's colour semantics are load-bearing and must not follow a
+   * marketing decision.
+   */
+  theme?: ThemeName
   description?: string
   /**
    * The page's path in the registry. Canonical, the share card and the robots
@@ -348,14 +465,16 @@ function webPageLd(
  * /admin, which does not go through the token block, and because without it a
  * dark page still gets light native scrollbars, form controls and autofill.
  */
-const ICONS = `  <meta name="color-scheme" content="dark" />
-  <meta name="theme-color" content="${BRAND.bg}" />
+const icons = (theme: ThemeName) => `  <meta name="color-scheme" content="${theme === 'paper' ? 'light' : 'dark'}" />
+  <meta name="theme-color" content="${theme === 'paper' ? PAPER.bg : BRAND.bg}" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'dark' }: HeadOpts): string {
+  const tokens = theme === 'paper' ? TOKENS_PAPER : TOKENS
+  const fonts = theme === 'paper' ? FONTS_PAPER : FONTS_DARK
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
   // A canonical on a noindex page is two contradictory signals about one URL.
@@ -387,7 +506,7 @@ export function head({ title, description, path, canonical, css = '', extraHead 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-${csp}${ICONS}
+${csp}${icons(theme)}
   <title>${title}</title>${description ? `
   <meta name="description" content="${description}" />` : ''}${href ? `
   <link rel="canonical" href="${href}" />` : ''}${hidden ? `
@@ -405,8 +524,8 @@ ${csp}${ICONS}
   <meta name="twitter:title" content="${ogTitle}" />${ogDesc ? `
   <meta name="twitter:description" content="${ogDesc}" />` : ''}
   <meta name="twitter:image" content="${card}" />
-${FONTS}
-  <style>${TOKENS}${BASE}${css}
+${fonts}
+  <style>${tokens}${BASE}${css}
   </style>${blocks.map((b) => `\n  <script type="application/ld+json">${ld(b)}</script>`).join('')}${extraHead ? `\n${extraHead}` : ''}
 </head>`
 }
