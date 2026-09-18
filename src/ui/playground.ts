@@ -405,6 +405,16 @@ const PLAYGROUND_SRC = `
   for (var ci = 0; ci < CTA_LINKS.length; ci++) {
     CTA_LINKS[ci].addEventListener('click', function(){ pulse('cta_click'); });
   }
+  // The hero's text link to the demo, 2026-09-18. It scrolls, it does not
+  // navigate, so the beacon has all the time it needs; sendBeacon is still the
+  // one call that costs the click nothing. Read beside cta_click: a page where
+  // try_click runs well ahead of cta_click is a page whose demo has earned a
+  // higher place, and one where neither moves is a fold problem, not a depth
+  // problem.
+  var TRY_LINKS = document.querySelectorAll('a[href="#playground"]');
+  for (var ti = 0; ti < TRY_LINKS.length; ti++) {
+    TRY_LINKS[ti].addEventListener('click', function(){ pulse('try_click'); });
+  }
   if (!el('run')) return;
 
   var task = null, timer = null, running = false, idx = 0;

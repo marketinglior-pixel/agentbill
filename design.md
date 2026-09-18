@@ -267,11 +267,17 @@ lines of code". `copyPill()` in `src/ui/copy.ts` is the control; one delegated
 listener covers every instance, so one CSP hash does too. The label changes to
 "Copied" and back, which is a state change rather than motion for mood.
 
-The hero's second action is the docs route (changed 2026-09-09 from an in-page
-jump to the playground: with the playground directly under the hero, a button
-that scrolls one screen is a button that says nothing). The install line under
-the pair is also the honest answer to the proof the references put
-beside their primary action. Fourteen of fourteen show a logo wall or a customer
+The hero has one action. On 2026-09-09 its second button, an in-page jump to
+the playground, was retired: with the playground directly under the hero, a
+button that scrolls one screen is a button that says nothing. The paper
+redesign of 2026-09-16 then moved Fig. 1 and the thesis band between them, and
+the first day of paid traffic (2026-09-18) found the demo two screens down on a
+desktop and three on a phone, unreached by any of the first 40 visits. The jump
+came back that night as a text link (`.hero-try`, "Try it in your browser"),
+not a button, and it is measured (`try_click` in `site_pulse`) so the data
+decides whether the demo moves up rather than a redesign made on no evidence.
+The install line under the pair is also the honest answer to the proof the
+references put beside their primary action. Fourteen of fourteen show a logo wall or a customer
 count within one screen of the CTA. This product has two external signups, so a
 logo wall is unavailable and a fabricated one would break the claims rules. The
 install line is what is true and actionable now: a step that needs no account.
@@ -289,6 +295,9 @@ rather than where it goes.
   `nowrap`, clears 44px.
 - Secondary: outlined chip (`.btn-ghost`, `.chip-link`). `--border-strong`
   hairline, text colour, `nowrap`.
+- Text link beside a primary (`.hero-try`): `--fs-small`, weight 600, underlined,
+  rests `--muted` and darkens to `--text` on hover like the evidence links and
+  the nav. Not a third button register; the `[fold]` gates keep it a link.
 - One primary per fold. Labels are verbs and fit 272px at 320px viewport.
 
 ## What pages must share

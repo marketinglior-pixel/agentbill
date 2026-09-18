@@ -116,8 +116,8 @@ export async function legalRoute(app: FastifyInstance) {
       <li><strong>Site analytics</strong>: our marketing pages may use the Meta Pixel to measure ad
       performance (page views and registrations). This involves cookies set by Meta. We do not run
       the pixel inside the product dashboard or API. Our marketing pages also record a few
-      page-level events in our own database (the demo being run, a click through to the sign-up
-      page, the sign-up page loading), with no cookie, no IP address and no identifier that
+      page-level events in our own database (the demo being run, a click to the demo or through
+      to the sign-up page, the sign-up page loading), with no cookie, no IP address and no identifier that
       outlives the tab.</li>
     </ul>
 

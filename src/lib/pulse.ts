@@ -2,6 +2,7 @@ import { sql } from '../db/index.js'
 
 export type SitePulse = {
   ctaClicks: number
+  tryClicks: number
   registerViews: number
   views: number
   runs: number
@@ -19,14 +20,17 @@ export type SitePulse = {
 // is stated under the tiles, not in a comment nobody reads.
 //
 // ctaClicks and registerViews were added 2026-09-18, the first day of paid
-// traffic. Read them as a funnel with the accounts table: homepage views that
-// clicked through, /register loads, account rows. Where the numbers fall off
-// is where the visit ended.
+// traffic, and tryClicks the same day. Read them as a funnel with the accounts
+// table: homepage views that clicked through, /register loads, account rows.
+// Where the numbers fall off is where the visit ended. tryClicks sits beside
+// ctaClicks: well ahead of it, the demo has earned a higher place; neither
+// moving, the fold is the problem and not the depth.
 export async function getSitePulse(): Promise<SitePulse> {
   try {
     const [row] = await sql`
       SELECT
         count(DISTINCT view_id) FILTER (WHERE event = 'cta_click')                       AS cta_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'try_click')                       AS try_clicks,
         count(DISTINCT view_id) FILTER (WHERE event = 'register_view')                   AS register_views,
         count(DISTINCT view_id) FILTER (WHERE event = 'playground_run')                  AS views,
         count(*)                FILTER (WHERE event = 'playground_run')                  AS runs,
@@ -38,6 +42,7 @@ export async function getSitePulse(): Promise<SitePulse> {
     `
     return {
       ctaClicks: Number(row?.ctaClicks ?? 0),
+      tryClicks: Number(row?.tryClicks ?? 0),
       registerViews: Number(row?.registerViews ?? 0),
       views: Number(row?.views ?? 0),
       runs: Number(row?.runs ?? 0),
@@ -48,6 +53,6 @@ export async function getSitePulse(): Promise<SitePulse> {
   } catch {
     // The table is additive and the page predates it. A missing table must not
     // take down the account list, which is what admin is actually for.
-    return { ctaClicks: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null }
+    return { ctaClicks: 0, tryClicks: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null }
   }
 }

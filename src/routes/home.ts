@@ -187,7 +187,8 @@ export async function homeRoute(app: FastifyInstance) {
      * order: hero (copy beside the dual-state demo), Fig. 1, the thesis band with two evidence lines, playground band,
      *        one row (the request path with the code frame, console-first),
      *        four tier cards, a four-line not-list, the close · one grid break, the playground band
-     * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action; nothing of its
+     * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action (and, since 2026-09-18,
+     *        one text link to the demo, measured as try_click before any reorder); nothing of its
      *        product, palette or claims · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
     /* Page-local values. These were three hex literals and they were the only
@@ -226,6 +227,17 @@ export async function homeRoute(app: FastifyInstance) {
     h1 { color: var(--white); max-width: 12ch; }
     .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 40ch; line-height: 1.55; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    /* One text link beside the one button, 2026-09-18. The demo sits about two
+       screens down on a desktop and three on a phone, and none of the first 40
+       paid visits reached it. The measured alternative to moving it: a link,
+       counted as try_click, so the data decides whether the demo moves. A link
+       and not a second button, which the [fold] gates keep true. Type and
+       weight follow .chip-link; the ink rests muted and darkens on hover like
+       the evidence links and the nav, so beside the one primary it is quiet
+       at rest and answers the pointer the way everything else here does. */
+    .hero-try { font-size: var(--fs-small); font-weight: 600; color: var(--muted);
+                text-decoration: underline; text-underline-offset: .2em; }
+    .hero-try:hover { color: var(--text); }
     /* One primary action on the fold, one size up from the site's buttons. */
     .btn-lg { padding: 15px 28px; font-size: var(--fs-body); border-radius: 10px; }
     /* One line, not a row of dotted spans: the locked copy is a sentence. */
@@ -510,6 +522,7 @@ ${siteNav('/')}
       SDK you install &mdash; not a proxy.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
+        <a class="hero-try" href="#playground">Try it in your browser &rarr;</a>
       </div>
       <p class="trust">Start free &middot; ${num(PLAN_LIMITS.free)} preflight calls/mo, no card</p>
     </div>
