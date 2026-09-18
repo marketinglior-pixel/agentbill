@@ -29,7 +29,9 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // frame used to be. The frame moved one screen down, into the request-path
 // row, where a reader who has understood the demo meets the integration. The
 // playground sits directly under the hero as the page's one full-bleed band;
-// the provider-cap argument is three sourced cards instead of an essay; ONE
+// the provider-cap argument is two evidence lines, a sentence and a link each,
+// under the thesis band (the three sourced cards went out with the essay on
+// 2026-09-16; the lines came back one at a time, each read at source); ONE
 // row carries the integration, the code frame beside the console-first order
 // the ceiling is set in; the tiers are the same four cards /pricing renders;
 // and the list of what the product does not do is four lines. The keys row
@@ -176,7 +178,7 @@ export async function homeRoute(app: FastifyInstance) {
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio
      * theme: design.md (paper, type and accent are theme.ts) · design-system: design.md · designed-as-app
      * nav: N1b, unchanged · footer: Ft2, unchanged · enrichment: none, real product panels
-     * order: hero (copy beside the dual-state demo), playground band, three sourced cards,
+     * order: hero (copy beside the dual-state demo), Fig. 1, the thesis band with two evidence lines, playground band,
      *        one row (the request path with the code frame, console-first),
      *        four tier cards, a four-line not-list, the close · one grid break, the playground band
      * craft reference 2026-09-12: pressplaced.com, for air, one demo and one action; nothing of its

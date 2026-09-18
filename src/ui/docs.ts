@@ -58,6 +58,9 @@ export const DOCS_CSS = `${CHROME_CSS}
   /* A post's dateline: date and reading time, in the label register. */
   .meta { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 8px; }
   .meta + h2, .lede + h2 { margin-top: 44px; }
+  /* A source line under a quote carries the full URL as its own text, so a
+     reader can check it; at 390px that URL has to be allowed to break. */
+  .meta a { overflow-wrap: anywhere; }
   blockquote { border-left: 2px solid var(--border2); padding-left: 20px; margin: 24px 0; max-width: 68ch; }
   blockquote p { color: var(--dim); font-style: italic; }
   /* Sections are separated by space, not by rules. The first h2 after the lede
