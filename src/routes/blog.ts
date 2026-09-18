@@ -29,8 +29,8 @@ const POSTS: readonly Post[] = [
   {
     path: '/blog/monthly-caps-wont-save-you',
     title: "Why monthly caps don't protect you from one bad LLM run",
-    description: 'Monthly spend caps fire after the damage is done. One overnight agent loop can exhaust your budget before the cap triggers. Here\'s the pattern that actually works.',
-    minutes: 5,
+    description: 'Four reported runs, four caps that were in force, and what each cap is bound to, in the vendors\' own words. Then the pattern that binds the ceiling to the job: preflight, approved: false, your code decides.',
+    minutes: 8,
   },
   {
     path: '/blog/how-preflight-avoids-double-billing',
@@ -290,129 +290,136 @@ record(units=7)
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
   <div class="meta">${dateline('/blog/monthly-caps-wont-save-you')}</div>
 
-  <p>An agent starts a task at night. A retry loop gets stuck. By morning the bill is many times the monthly cap that was supposed to prevent exactly this.</p>
+  <p>Four people had a spend cap in force when a run went wrong. The caps held. The bills came anyway. Each report below is one or two sentences in the reporter's own words, with the link, the date and the state of the thread, so you can read the rest yourself and disagree with what we make of it.</p>
 
-  <p>The cap didn't fire. The bill did.</p>
-
-  <p>This is not a bug. It's how monthly caps work. And if you're building AI agents in production, it will happen to you too, unless you change the pattern.</p>
+  <p>None of the four caps had a bug. Each did what it is bound to do. This post is about what that is.</p>
 
 
-  <h2>The timeline of a bad run</h2>
+  <h2>Four runs, four caps that were in force</h2>
 
-  <p>The shape of the failure is always the same:</p>
+  <p><strong>A $3,000 monthly limit. One weekend.</strong></p>
+  <blockquote><p>&ldquo;~$300 of unintended API usage over a single weekend&rdquo; on an &ldquo;Enterprise plan ($3,000/month limit)&rdquo;.</p></blockquote>
+  <p class="meta">claude-code issue 64744, opened June 2, 2026. Open, labelled bug and area:cost. <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener">github.com/anthropics/claude-code/issues/64744</a></p>
+  <p>The limit is a month. The incident was a weekend, and $300 never came near $3,000: there was nothing to cross. The loop ran inside the tool's own daemon and made its own provider calls, which matters further down. A ceiling governs a call where the call asks.</p>
 
-  <p>11:30pm, agent starts a research task. Fetches a URL. Gets a timeout. Retries. Gets another timeout. The retry logic calls the LLM to decide what to do next. The LLM decides to retry again. This repeats.</p>
+  <p><strong>A weekly plan allowance and a spending cap. One evening.</strong></p>
+  <blockquote><p>&ldquo;My Codex run consumed the remainder of my weekly pro plan allowance (80%+) and +$700 of additional usage credits before my spending cap finally stopped it. Effectively zero work was done.&rdquo;</p></blockquote>
+  <p class="meta">OpenAI Developer Community, July 30, 2026. One user's report, not confirmed by OpenAI; the thread is open and its two replies argue with it. <a href="https://community.openai.com/t/1388493" rel="nofollow noopener">community.openai.com/t/1388493</a></p>
+  <p>The cap fired. It fired when the account crossed its threshold, which is what an account cap is for, and by then the run had spent the plan and $700 on top of it.</p>
 
-  <p>The monthly cap is passed somewhere around midnight. But the cap check runs on a billing cycle, not on each request, so nothing stops. The agent keeps looping until someone wakes up and kills it, thousands of calls later.</p>
+  <p><strong>A $600 organization spend limit. One day.</strong></p>
+  <blockquote><p>&ldquo;One session hit its ChatGPT subscription usage limit and, instead of stopping, wrote batch runner scripts that called the metered API directly.&rdquo;</p>
+  <p>&ldquo;The billing export confirmed 1,917 requests and 62.2 million tokens in a single UTC day (July 19), roughly $453 of metered usage, three automatic card recharges, and a July bill of $812.47 against a configured $600 organization spend limit.&rdquo;</p></blockquote>
+  <p class="meta">OpenAI Developer Community, August 4, 2026. One user's report; OpenAI Support closed the thread on August 13, 2026 while an internal review was open. <a href="https://community.openai.com/t/1389087" rel="nofollow noopener">community.openai.com/t/1389087</a></p>
+  <p>The reporter says the keys sat in a <code>.env</code> file in the working directory, and the thread's own verdict is that the setup was at fault, not the platform. It is here for a narrower reason. The subscription limit was bound to the session, the spend limit to the organization and the month, and the runner that did the spending answered to neither. A ceiling on a job governs the calls that pass through its check. A script that calls the provider directly never asks, so it is never refused.</p>
 
-  <p>Monthly caps are real and they fire. What they are bound to is a billing cycle, so the boundary they enforce is a month, not a run.</p>
-
-
-  <h2>Why the cap didn't fire</h2>
-
-  <p>Most billing systems, OpenAI's included, check spend limits asynchronously. The request goes through first. The ledger updates after. By the time the cap logic runs, hundreds more requests have already been processed.</p>
-
-  <p>This is a fundamental property of post-hoc billing, not a bug you can patch. The cap will always lag behind the actual spend, especially during a loop that fires hundreds of requests per minute.</p>
-
-  <p>A monthly cap and a bill many times its size can coexist. They operate at different time scales.</p>
-
-
-  <h2>The pattern that actually works: preflight</h2>
-
-  <p>The fix is to check budget <em>before</em> the run starts, not after it finishes. This is called a preflight check.</p>
-
-  <p>Before your agent makes a single API call, you ask: does this customer have budget for this run? If not, you block it. The agent never starts. No tokens consumed. No bill generated.</p>
-
-  <div class="code"><pre>
-from agentbill import AgentBillClient
-
-client = AgentBillClient(api_key="agb_your_key")
-
-<span class="comment"># Before the agent runs: reserve the units this run expects to cost.</span>
-<span class="comment"># A blocked run raises here, before anything expensive happens.</span>
-client.preflight(agent_id="researcher", estimated_units=200)
-
-<span class="comment"># Agent only runs if budget is confirmed</span>
-result = run_my_agent()
-
-<span class="comment"># Record the run: the same units preflight reserved (the server settles by the recorded amount)</span>
-client.record(agent_id="researcher", units=200)
-  </pre></div>
-
-  <p>Two calls. The agent either runs with a confirmed budget or it doesn't run at all. No overnight surprises.</p>
+  <p><strong>A session window. Two runs.</strong></p>
+  <blockquote><p>&ldquo;Once an agent dies with <code>You've hit your session limit &middot; resets &lt;time&gt;</code>, that error is terminal for the whole window &mdash; every subsequent spawn will hit it too. The orchestrator treats it as a per-agent failure instead, and keeps feeding the queue.&rdquo;</p></blockquote>
+  <p class="meta">claude-code issue 94012, opened September 13, 2026. Open, labelled bug and has repro, no maintainer reply yet; one user's report, counted in tokens and agents rather than dollars. <a href="https://github.com/anthropics/claude-code/issues/94012" rel="nofollow noopener">github.com/anthropics/claude-code/issues/94012</a></p>
+  <p>Here the cap is bound to a clock. The window refused every agent, and the harness kept spawning into it, because a refusal tied to a reset time says nothing about the job that is asking.</p>
 
 
-  <h2>Monthly caps vs. per-request ceilings</h2>
+  <h2>What each cap is bound to</h2>
 
-  <p>These solve different problems. A monthly cap is useful for overall budget visibility, you want to know your AI costs didn't triple this month. Fine.</p>
+  <p>The vendors say it themselves. The sentences below are quoted, not summarised, so the boundary each one names is theirs.</p>
 
-  <p>A per-request ceiling is what protects you from a single bad run. It operates at the invocation level, before compute is consumed, with no lag between the check and the block.</p>
+  <p><strong>OpenAI</strong></p>
+  <blockquote><p>&ldquo;Enforcement is not instantaneous. The API Platform can process a small amount of extra usage while the limit state propagates, so recorded spend can slightly exceed the configured amount.&rdquo;</p>
+  <p>&ldquo;An organization hard limit applies to API traffic across all projects in the organization.&rdquo;</p></blockquote>
+  <p class="meta">OpenAI, Spend limits, developer documentation. <a href="https://developers.openai.com/api/docs/guides/spend-limits" rel="nofollow noopener">developers.openai.com/api/docs/guides/spend-limits</a></p>
 
-  <p>You need both. The monthly cap catches drift. The preflight ceiling catches catastrophe.</p>
+  <p><strong>Anthropic</strong></p>
+  <blockquote><p>&ldquo;Once you reach your tier's spend cap, API usage pauses until 00:00 UTC on the first day of the next month, unless you request a higher limit sooner.&rdquo;</p>
+  <p>&ldquo;Retrying, including the SDKs' automatic retries, fails until access resumes.&rdquo;</p></blockquote>
+  <p class="meta">Anthropic, Rate limits, developer documentation. <a href="https://platform.claude.com/docs/en/api/rate-limits" rel="nofollow noopener">platform.claude.com/docs/en/api/rate-limits</a></p>
+
+  <p><strong>Google</strong></p>
+  <blockquote><p>&ldquo;Long-running tasks like batch mode completions and agent sessions may incur overages beyond your project spend cap.&rdquo;</p>
+  <p>&ldquo;Billing data processing times can be delayed in AI Studio, up to around 10 minutes.&rdquo;</p></blockquote>
+  <p class="meta">Google, Gemini API billing. <a href="https://ai.google.dev/gemini-api/docs/billing" rel="nofollow noopener">ai.google.dev/gemini-api/docs/billing</a></p>
+
+  <p>Three vendors, one shape. The boundary is the organization, the project or the billing account. The unit is a calendar month, or the minutes a billing pipeline needs to catch up. The enforcement lags the spend by design, and each page says so. None of that is a defect. A cap bound to an account over a month has nothing to cross at the scale one runaway job operates on, and when a job does push the account across, the whole account waits for the reset, retries included.</p>
+
+  <p>OpenAI's own Cookbook draws the conclusion in one sentence:</p>
+  <blockquote><p>&ldquo;Organization and project spending limits cover overall usage, but they cannot tell you whether that task can afford its next request.&rdquo;</p></blockquote>
+  <p class="meta">OpenAI Cookbook, Build a per-run spending controller with the Responses API, August 17, 2026. <a href="https://developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api" rel="nofollow noopener">developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api</a></p>
 
 
-  <h2>The same run, replayed with preflight</h2>
+  <h2>A ceiling on the job</h2>
 
-  <p>Same agent. Same retry bug. Same overnight run.</p>
+  <p>AgentBill binds the ceiling to the job. You name the job with a <code>task_ref</code> and set its ceiling once, in the console or with <code>PUT /tasks/:task_ref/ceiling</code> and <code>ceiling_units</code> in the body. From then on every call that passes that <code>task_ref</code> draws from the same ceiling: different processes, different providers, same job. Before each provider call, <code>preflight</code> asks whether this job has units left for this one. When it does not, the answer is <code>approved: false</code> with the reason <code>task_ceiling_exceeded</code>, the SDK raises, and your code decides what happens next: wait and retry, fall back to something cheaper, hand the job to a person, or let it end there. AgentBill is an SDK inside your process, not a proxy. No base URL changes, no traffic routed through us, no provider keys held. If we are unreachable, the SDK raises inside your process and, again, your code decides.</p>
 
-  <p>First invocation: preflight checks the task budget. Approved, units remain. Agent runs. Finishes. Cost recorded.</p>
-
-  <p>Second invocation (the retry loop): preflight checks again. Previous run already consumed the budget for this session. Blocked. Agent never starts.</p>
-
-  <p>The run stops at the ceiling you set, not at whatever the loop reaches by morning.</p>
-
-  <p>The retry bug still exists. But it can't compound into a runaway loop when each invocation requires a budget check to proceed.</p>
+  <p>What this does not govern, because two of the four reports above turn on it: a call that never passes through preflight. A script that calls the provider with keys from a <code>.env</code> file does not ask. A loop inside a tool's own daemon does not ask. The ceiling covers the calls your code routes through it and nothing else. That is a smaller promise than a cap on the account, and it is the one a runaway job actually tests.</p>
 
 
-  <h2>Implementing preflight in your stack</h2>
+  <h2>The same run, with a task_ref</h2>
 
-  <p>The pattern works regardless of what's inside your agent, LangChain, OpenAI Agents SDK, AutoGen, custom chains. You're wrapping the invocation, not the internals.</p>
+  <p>Take the weekend loop. The job is <code>job-142</code>, its ceiling is 500 units, set in the console before the run starts. Run 1: preflight asks, the answer is approved, the provider call goes out, the units are recorded. Run 2, the retry: preflight asks against the same <code>task_ref</code>, approved, units remain. This continues while units remain. Run 42: the job is at 492 of 500 and this call asks for 12. Preflight answers <code>approved: false</code>, the SDK raises <code>TaskCeilingExceededError</code>, and your code decides.</p>
 
-  <p><strong>Python:</strong></p>
+  <p>The retry bug is still there. What it can no longer do is compound. Every call of the job asks the same ceiling, and the ceiling was set before the night began, not read off the bill in the morning.</p>
+
+
+  <h2>Where the recipe leaves off</h2>
+
+  <p>The Cookbook article quoted above is a working recipe for the same idea: give each run a budget, reserve before the call, settle after it. Its closing section says what it leaves out. The lock &ldquo;protects one Python process&rdquo;, and for several workers it points you to &ldquo;a shared store that checks and reserves the budget in one operation&rdquo;. That shared, atomic reservation is the part that is hard to get right under concurrency, and it is what the preflight endpoint is. How it avoids reserving twice for one retry, and why settlement is by the recorded amount, is in <a href="/blog/how-preflight-avoids-double-billing">the post on double-billing under concurrent load</a>.</p>
+
+
+  <h2>Implementing it</h2>
+
+  <p>The pattern is the same whatever runs inside the agent: LangChain, the OpenAI Agents SDK, AutoGen, a hand-written loop. You are wrapping the provider call, not the internals. Set the ceiling in the console, then the code names the job and nothing about its budget.</p>
+
+  <p><strong>Python</strong></p>
   <div class="code"><pre>pip install agentbill-sdk</pre></div>
 
   <div class="code"><pre>
-from agentbill import AgentBillClient, BudgetExhaustedError
+from agentbill import AgentBillClient, TaskCeilingExceededError
 
 client = AgentBillClient(api_key="agb_your_key")
 
-def run_agent_safely(customer_id: str, task: str):
-    try:
-        client.preflight(agent_id="my_agent", estimated_units=200, customer_id=customer_id)
-    except BudgetExhaustedError as e:
-        return {"blocked": True, "reason": str(e)}
+<span class="comment"># job-142 has a ceiling of 500 units, set in the console.</span>
+<span class="comment"># Every call that passes this task_ref draws from the same one.</span>
+try:
+    client.preflight(agent_id="researcher", task_ref="job-142", estimated_units=12)
+except TaskCeilingExceededError:
+    <span class="comment"># approved: false. The job is out of units. Your code decides:</span>
+    <span class="comment"># wait, fall back, hand off, or let the job end here.</span>
+    raise
 
-    result = run_my_agent(task)
-    client.record(agent_id="my_agent", units=200, customer_id=customer_id)
-    return result
+<span class="comment"># your provider call goes here</span>
+
+<span class="comment"># settle, or the units stay held until the reservation expires</span>
+client.record(agent_id="researcher", task_ref="job-142", units=12)
   </pre></div>
 
-  <p><strong>Node.js:</strong></p>
+  <p><strong>Node.js</strong></p>
   <div class="code"><pre>npm install agentbill</pre></div>
 
   <div class="code"><pre>
-import { preflight, record, BudgetExhaustedError } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
+import { preflight, record, TaskCeilingExceededError } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
-async function runAgentSafely(customerId: string, task: string) {
-  try {
-    await preflight({ agentId: 'my_agent', estimatedUnits: 200, customerId })
-  } catch (e) {
-    if (e instanceof BudgetExhaustedError) return { blocked: true, reason: e.message }
-    throw e
+<span class="comment">// job-142 has a ceiling of 500 units, set in the console.</span>
+<span class="comment">// Every call that passes this taskRef draws from the same one.</span>
+try {
+  await preflight({ agentId: 'researcher', taskRef: 'job-142', estimatedUnits: 12 })
+} catch (e) {
+  if (e instanceof TaskCeilingExceededError) {
+    <span class="comment">// approved: false. The job is out of units. Your code decides.</span>
   }
-
-  const result = await runMyAgent(task)
-  await record({ agentId: 'my_agent', units: 200, customerId })
-  return result
+  throw e
 }
+
+<span class="comment">// your provider call goes here</span>
+
+<span class="comment">// settle, or the units stay held until the reservation expires</span>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
   </pre></div>
 
 
   <h2>Summary</h2>
 
-  <p>A monthly cap fires on a calendar, over a whole account. A preflight check answers before one call goes out, on a budget you named, and your code decides what to do with the answer. The two are bound to different things, and only one of them knows about this job.</p>
+  <p>A monthly cap fires on a calendar, over an account, and the vendors document the lag. A preflight check answers before one call goes out, on a ceiling you named for this job, and your code decides what to do with the answer. They are bound to different things. Keep the account cap for drift. Give the job a ceiling for the night you are not watching.</p>
 
-  <p>If you're running AI agents in production, especially agents that loop, retry, or run unattended, you need a check that fires before the first token, not after the last one.</p>
+  <p>If you are running agents that loop, retry or run unattended, the check that matters is the one that answers before the next call, not the statement that arrives after the last one.</p>
 
   <h2>Add preflight to your agents</h2>
   <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
