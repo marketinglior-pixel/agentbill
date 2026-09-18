@@ -518,8 +518,8 @@ ${siteNav('/')}
       <span class="mono-in sig">task_ref</span> ceiling meters this job &mdash; preflight can return
       <span class="mono-in sig">approved: false</span> before the next call; your code decides what next.</p>
       <div class="evid">
-        <p>~$300 unintended weekend API usage on a $3,000/mo Enterprise limit, with no way to detect or
-        stop it from the CLI.</p>
+        <p>~$300 of unintended API usage over one unattended weekend, under a $3,000/month Enterprise
+        limit. The limit is a month. The incident was a weekend.</p>
         <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener"
            target="_blank">github.com/anthropics/claude-code/issues/64744</a>
       </div>
