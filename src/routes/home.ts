@@ -306,6 +306,7 @@ export async function homeRoute(app: FastifyInstance) {
               letter-spacing: .08em; text-transform: uppercase; color: var(--dim); text-decoration: underline;
               text-underline-offset: 3px; }
     .evid a:hover { color: var(--text); }
+    .evid + .evid { margin-top: var(--s6); }
 
     /* The code frame. Its label bar carries the language tabs on the left and
        the caption on the right; the bar keeps the 44px floor every control on
@@ -522,6 +523,16 @@ ${siteNav('/')}
         limit. The limit is a month. The incident was a weekend.</p>
         <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener"
            target="_blank">github.com/anthropics/claude-code/issues/64744</a>
+      </div>
+      <!-- Google's own billing page, read at the URL beside it on 2026-09-18. A
+           provider may be named: it is the substrate, not a competitor. The
+           sentence is quoted, not paraphrased, so one click checks it. It says
+           what the cap is bound to; nothing here says a provider lacks one. -->
+      <div class="evid">
+        <p>Google, on the Gemini API billing page: &ldquo;Long-running tasks like batch mode completions and
+        agent sessions may incur overages beyond your project spend cap.&rdquo;</p>
+        <a href="https://ai.google.dev/gemini-api/docs/billing" rel="nofollow noopener"
+           target="_blank">ai.google.dev/gemini-api/docs/billing</a>
       </div>
     </div>
   </section>
