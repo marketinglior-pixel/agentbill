@@ -1643,8 +1643,46 @@ ok('[start] the footer names the endpoint with the field it takes, and does not 
 const readable8 = (html) =>
   visible8(html) + ' ' + [...html.matchAll(/(?:aria-label|title|alt|placeholder)="([^"]*)"/gi)].map((m) => m[1]).join(' ')
 
+// The blog post that argues the thesis, 2026-09-18. For four months it argued
+// with a fictional agent and no sources, called the product a per-request
+// ceiling, taught the pre-pivot samples (customer_id, BudgetExhaustedError,
+// blocked: True) and used every banned word, while every gate stayed green,
+// because no gate read /blog. Five gates. Each was run against the post it
+// replaced before that post was replaced, and each went red there; the record
+// is in the PR that added them. Scope is the post body, <h1> to the related
+// guides: the site footer links to GitHub, npm and PyPI and those are not
+// sources. Quotes and samples are cut out before the word ban runs, because a
+// vendor or a reporter saying "stopped" is not us claiming we stop the run.
+const blog8 = await fetch(`${API}/blog/monthly-caps-wont-save-you`).then((r) => r.text())
+const postStart8 = blog8.indexOf('<h1>')
+const postEnd8 = postStart8 < 0 ? -1 : blog8.indexOf('class="also"', postStart8)
+const post8 = postStart8 < 0 || postEnd8 < 0 ? '' : blog8.slice(postStart8, postEnd8)
+const blogLinks8 = [...post8.matchAll(/<a href="(https:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g)]
+  .map((m) => ({ href: m[1], text: visible8(m[2]).trim() }))
+const BLOG_HOSTS8 = [/^https:\/\/github\.com\/anthropics\//, /^https:\/\/community\.openai\.com\//,
+                     /^https:\/\/developers\.openai\.com\//, /^https:\/\/platform\.claude\.com\//, /^https:\/\/ai\.google\.dev\//]
+const offList8 = blogLinks8.filter((l) => !BLOG_HOSTS8.some((re) => re.test(l.href)))
+ok('[blog] the post cites at least six sources, every one at a provider or the provider\'s own tracker',
+   blogLinks8.length >= 6 && offList8.length === 0,
+   `${blogLinks8.length} links; off-list: ${offList8.map((l) => l.href).join(', ') || 'none'}`)
+const blogProse8 = post8.replace(/<blockquote[\s\S]*?<\/blockquote>/g, ' ').replace(/<pre[\s\S]*?<\/pre>/g, ' ')
+{
+  const hits = readable8(blogProse8).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\b(first|nobody|only)\b|per-request ceiling|\bcustomer/gi) ?? []
+  ok('[blog] outside its quotes and samples the post never says stop, kill, block, dies, first, nobody, only, per-request ceiling or customer',
+     hits.length === 0, hits.join(', '))
+}
+const blogPre8 = [...post8.matchAll(/<pre[\s\S]*?<\/pre>/g)].map((m) => m[0]).join('\n')
+ok('[blog] the samples teach the task_ref order and none of the retired one',
+   blogPre8.includes('task_ref="job-142"') && blogPre8.includes("taskRef: 'job-142'")
+     && !/customer_id|customerId|BudgetExhaustedError|blocked|task_ceiling\s*=|taskCeiling\s*:/.test(blogPre8),
+   (blogPre8.match(/customer_id|customerId|BudgetExhaustedError|blocked|task_ceiling\s*=|taskCeiling\s*:/g) ?? ['no task_ref sample']).join(', '))
+const misnamed8 = blogLinks8.filter((l) => l.text !== l.href.replace(/^https:\/\//, ''))
+ok('[blog] every external link says, in its own text, exactly where it goes',
+   blogLinks8.length > 0 && misnamed8.length === 0,
+   misnamed8.map((l) => `"${l.text}" -> ${l.href}`).join('; ') || 'no external links')
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
                             ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
+                            ['the blog post on monthly caps, outside its quotes and samples', blogProse8],
                             ['/register', register8], ['the console login card', login8b]]) {
   const hits = readable8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
