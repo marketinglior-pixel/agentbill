@@ -1659,9 +1659,13 @@ const postEnd8 = postStart8 < 0 ? -1 : blog8.indexOf('class="also"', postStart8)
 const post8 = postStart8 < 0 || postEnd8 < 0 ? '' : blog8.slice(postStart8, postEnd8)
 const blogLinks8 = [...post8.matchAll(/<a href="(https:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g)]
   .map((m) => ({ href: m[1], text: visible8(m[2]).trim() }))
-const BLOG_HOSTS8 = [/^https:\/\/github\.com\/anthropics\//, /^https:\/\/community\.openai\.com\//,
-                     /^https:\/\/developers\.openai\.com\//, /^https:\/\/platform\.claude\.com\//, /^https:\/\/ai\.google\.dev\//]
-const offList8 = blogLinks8.filter((l) => !BLOG_HOSTS8.some((re) => re.test(l.href)))
+// Where a source may live: a provider's own docs, or the provider's own tracker.
+// Shared by the blog gates and the band gates below, so the two surfaces cannot
+// drift apart on what counts as a source. A link anywhere else is the guard
+// against citing a competitor's launch post as if it were a bystander.
+const SOURCE_HOSTS8 = [/^https:\/\/github\.com\/anthropics\//, /^https:\/\/community\.openai\.com\//,
+                       /^https:\/\/developers\.openai\.com\//, /^https:\/\/platform\.claude\.com\//, /^https:\/\/ai\.google\.dev\//]
+const offList8 = blogLinks8.filter((l) => !SOURCE_HOSTS8.some((re) => re.test(l.href)))
 ok('[blog] the post cites at least six sources, every one at a provider or the provider\'s own tracker',
    blogLinks8.length >= 6 && offList8.length === 0,
    `${blogLinks8.length} links; off-list: ${offList8.map((l) => l.href).join(', ') || 'none'}`)
@@ -1680,9 +1684,47 @@ const misnamed8 = blogLinks8.filter((l) => l.text !== l.href.replace(/^https:\/\
 ok('[blog] every external link says, in its own text, exactly where it goes',
    blogLinks8.length > 0 && misnamed8.length === 0,
    misnamed8.map((l) => `"${l.text}" -> ${l.href}`).join('; ') || 'no external links')
+// The band under Fig. 1, 2026-09-18: the one place on / where a third party is
+// quoted or characterised, and until now in no gate's slice. The sentence "with
+// no way to detect or stop it from the CLI" sat here for twelve days under a
+// paid campaign with main green, because the hero guard reads the <header>, the
+// not-list guard reads the <ul>, and nothing read what lies between them. The
+// two PRs that touched the band since then enforced the rule with a script in a
+// session scratchpad, and a gate outside the repo dies with its session. Five
+// assertions here, each proven red on the page that carried that sentence or on
+// a synthetic mutation before it was committed; the record is in the PR.
+const bandAt8 = fold8.indexOf('<section class="band">')
+const band8 = bandAt8 < 0 ? '' : fold8.slice(bandAt8, fold8.indexOf('</section>', bandAt8))
+// A gate on an empty slice passes for free, so the slice is asserted first.
+ok('[band] the evidence band is on the page and has a slice of its own',
+   band8.length > 0 && band8.includes('class="evid"'), 'no <section class="band"> with an .evid inside')
+// Inline quotes, &ldquo;...&rdquo;, come out before the word ban: a vendor or a
+// reporter saying "stopped" inside a quote is not us claiming we stop the run.
+// "no way to" is on the list by name because it is the sentence that lived.
+const bandProse8 = band8.replace(/&ldquo;[\s\S]*?&rdquo;/g, ' ')
+{
+  const hits = readable8(bandProse8).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\b(first|nobody|only)\b|\bno way to\b/gi) ?? []
+  ok('[band] outside its quotes the band never says stop, kill, block, dies, first, nobody, only or "no way to"',
+     band8.length > 0 && hits.length === 0, hits.join(', ') || 'empty band')
+}
+const evids8 = [...band8.matchAll(/<div class="evid">([\s\S]*?)<\/div>/g)].map((m) => m[1])
+const evidLinks8 = evids8.map((e) => [...e.matchAll(/<a href="(https:\/\/[^"]+)"([^>]*)>([\s\S]*?)<\/a>/g)]
+  .map((m) => ({ href: m[1], attrs: m[2], text: visible8(m[3]).trim() })))
+const linkOk8 = (ls) => ls.length === 1 && SOURCE_HOSTS8.some((re) => re.test(ls[0].href))
+  && ls[0].text === ls[0].href.replace(/^https:\/\//, '') && /rel="nofollow noopener"/.test(ls[0].attrs)
+ok('[band] every evidence line carries exactly one link, at a source host, whose text says where it goes',
+   evids8.length > 0 && evidLinks8.every(linkOk8),
+   evidLinks8.map((ls, i) => linkOk8(ls) ? '' : `evid ${i + 1}: ${ls.length} link(s)${ls[0] ? ` "${ls[0].text}" -> ${ls[0].href}` : ''}`).filter(Boolean).join('; ') || 'no evidence lines')
+// A sentence about somebody else in our own voice, with no figure and no
+// quotation marks, is exactly the shape that fell: neither arithmetic nor a quote.
+const evidenceShaped8 = (e) => /\$\d/.test(e) || /&ldquo;[\s\S]*?&rdquo;/.test(e)
+ok('[band] every evidence line is arithmetic or a quote: a $ figure, or a sentence in quotation marks',
+   evids8.length > 0 && evids8.every(evidenceShaped8),
+   `${evids8.filter((e) => !evidenceShaped8(e)).length} line(s) with neither`)
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
                             ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
                             ['the blog post on monthly caps, outside its quotes and samples', blogProse8],
+                            ['the homepage evidence band, outside its quotes', bandProse8],
                             ['/register', register8], ['the console login card', login8b]]) {
   const hits = readable8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b/gi) ?? []
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
