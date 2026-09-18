@@ -31,7 +31,13 @@ import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 // playground sits directly under the hero as the page's one full-bleed band;
 // the provider-cap argument is two evidence lines, a sentence and a link each,
 // under the thesis band (the three sourced cards went out with the essay on
-// 2026-09-16; the lines came back one at a time, each read at source); ONE
+// 2026-09-16; the lines came back one at a time, each read at source: issue 64744
+// through the issue's comments API, and Google's billing page by direct fetch,
+// both on 2026-09-18; a provider may be named, it is the substrate, and the
+// sentence is quoted so one click checks it. Notes like this one stay up here:
+// an HTML comment inside the template is sent with every response, and the
+// one that sat under the second line cost ~330 bytes on the most-fetched page
+// until it moved); ONE
 // row carries the integration, the code frame beside the console-first order
 // the ceiling is set in; the tiers are the same four cards /pricing renders;
 // and the list of what the product does not do is four lines. The keys row
@@ -526,10 +532,6 @@ ${siteNav('/')}
         <a href="https://github.com/anthropics/claude-code/issues/64744" rel="nofollow noopener"
            target="_blank">github.com/anthropics/claude-code/issues/64744</a>
       </div>
-      <!-- Google's own billing page, read at the URL beside it on 2026-09-18. A
-           provider may be named: it is the substrate, not a competitor. The
-           sentence is quoted, not paraphrased, so one click checks it. It says
-           what the cap is bound to; nothing here says a provider lacks one. -->
       <div class="evid">
         <p>Google, on the Gemini API billing page: &ldquo;Long-running tasks like batch mode completions and
         agent sessions may incur overages beyond your project spend cap.&rdquo;</p>
