@@ -13,6 +13,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, ORIGIN } from '../ui/site.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
+import { PULSE_CLIENT_SRC } from '../ui/pulse-client.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
 import { sessionCookieFor } from './app.js'
@@ -107,7 +108,8 @@ function generateApiKey(): string {
 
 // Lifted out of the page template so its hash can be computed from the same
 // string that is emitted. See src/lib/csp.ts.
-const reg = inlineScript(`  let apiKey = ''
+const reg = inlineScript(`${PULSE_CLIENT_SRC}
+  let apiKey = ''
 
   document.getElementById('reg-form').addEventListener('submit', async (e) => {
     e.preventDefault()
@@ -210,7 +212,21 @@ const reg = inlineScript(`  let apiKey = ''
     btn.textContent = 'Copied'
     btn.style.color = 'var(--green)'
     setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
-  }`)
+  }
+
+  // This page loaded, in our own rows. Between a landing page view on / and a
+  // row in accounts there was no record at all, so a visitor who clicked
+  // through and stalled on this form and a visitor who never left the homepage
+  // produced the same zero. Once per load, and on load only: the account row
+  // is its own record of how the visit ended.
+  //
+  // Last in the script, and guarded, so this one line can never take the form
+  // down with it. It was first written above the submit listener; review found
+  // that a helper which failed to arrive would have thrown there before the
+  // listener attached, and this form's native fallback is a GET with the
+  // address in the URL. Every listener is attached before this runs, and a
+  // missing helper now costs one row, not a registration.
+  try { pulse('register_view') } catch (e) {}`)
 const REGISTER_JS = reg.html
 export const REGISTER_HASH = reg.hash
 

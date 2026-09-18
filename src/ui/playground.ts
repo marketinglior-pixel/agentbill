@@ -1,4 +1,5 @@
 import { inlineScript } from '../lib/csp.js'
+import { PULSE_CLIENT_SRC } from './pulse-client.js'
 // The homepage playground: a preflight you can run yourself.
 //
 // The refusal band above states the outcome, and it now renders from the run
@@ -392,37 +393,20 @@ const PLAYGROUND_SRC = `
   var PLAN = ${JSON.stringify(PLAN.map(([n, u]) => [n, u]))};
   var TASK_REF = ${JSON.stringify(TASK_REF)};
   var el = function(id){ return document.getElementById('pg-' + id) };
+  ${PULSE_CLIENT_SRC}
+  // Every link to /register on this page, wherever it sits: the nav, the hero,
+  // the pricing row, the close, the footer. Added 2026-09-18, the first day
+  // the site had paid traffic: Meta counted 40 landing page views, accounts
+  // gained 0 rows, and no row anywhere said whether one of the 40 had pressed
+  // the one button the page asks for. The listener adds nothing to the click;
+  // the beacon is queued and the navigation goes ahead. Above the playground
+  // guard on purpose: this is a page fact, not a playground fact.
+  var CTA_LINKS = document.querySelectorAll('a[href="/register"]');
+  for (var ci = 0; ci < CTA_LINKS.length; ci++) {
+    CTA_LINKS[ci].addEventListener('click', function(){ pulse('cta_click'); });
+  }
   if (!el('run')) return;
 
-  // A random token for THIS page view. Not a cookie, not localStorage, gone
-  // when the tab closes. It exists so the rows can tell ten visitors running
-  // once from one visitor running ten times, and it cannot follow anyone
-  // between visits.
-  var VIEW = (function(){
-    try {
-      var a = new Uint8Array(12);
-      window.crypto.getRandomValues(a);
-      var out = '';
-      for (var i = 0; i < a.length; i++) out += (a[i] % 36).toString(36);
-      return out;
-    } catch (e) { return String(Date.now()) + String(Math.random()).slice(2, 8) }
-  })();
-
-  // One direction, never blocking, never throwing. The page does not care
-  // whether this lands, so nothing here is awaited and nothing is retried.
-  function pulse(event, ceiling){
-    try {
-      var payload = { event: event, view_id: VIEW };
-      if (ceiling != null) payload.ceiling = ceiling;
-      var body = JSON.stringify(payload);
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon('/pulse', new Blob([body], { type: 'application/json' }));
-        return;
-      }
-      fetch('/pulse', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: body, keepalive: true }).catch(function(){});
-    } catch (e) {}
-  }
   var task = null, timer = null, running = false, idx = 0;
   // Captured from the server-rendered markup rather than duplicated in this
   // script, so the resting request has exactly one definition.

@@ -2,11 +2,24 @@ import type { FastifyInstance } from 'fastify'
 import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { publicRoute } from '../middleware/auth.js'
+import { byPath } from '../ui/site.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
 // and Meta ad review checks destination pages for both. Plain, honest, short.
 
-const LAST_UPDATED = 'August 27, 2026'
+// Both dates come from the page registry in src/ui/site.ts, which is also what
+// the sitemap's lastmod and each page's JSON-LD dateModified read. One source,
+// so the line a person reads and the line a crawler reads cannot disagree. They
+// did, for about an hour on 2026-09-18: the privacy policy gained a sentence
+// (first-party page events disclosed), this file learned the new date as a
+// literal, and site.ts still said August. The terms did not move that day.
+const updatedOn = (path: string): string => {
+  const iso = byPath.get(path)?.updated
+  if (!iso) throw new Error(`site.ts has no updated date for ${path}`)
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+}
+const TERMS_UPDATED = updatedOn('/terms')
+const PRIVACY_UPDATED = updatedOn('/privacy')
 const CONTACT = 'marketinglior@gmail.com'
 
 function legalShell(title: string, path: string, body: string): string {
@@ -44,7 +57,7 @@ export async function legalRoute(app: FastifyInstance) {
     reply.type('text/html')
     return reply.send(legalShell('Terms of Service', '/terms', `
     <h1>Terms of Service</h1>
-    <p class="updated">Last updated: ${LAST_UPDATED}</p>
+    <p class="updated">Last updated: ${TERMS_UPDATED}</p>
 
     <h2>1. The service</h2>
     <p>AgentBill provides billing governance for AI agents: preflight budget checks, per-task spend
@@ -91,7 +104,7 @@ export async function legalRoute(app: FastifyInstance) {
     reply.type('text/html')
     return reply.send(legalShell('Privacy Policy', '/privacy', `
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: ${LAST_UPDATED}</p>
+    <p class="updated">Last updated: ${PRIVACY_UPDATED}</p>
 
     <h2>1. What we collect</h2>
     <ul>
@@ -102,7 +115,10 @@ export async function legalRoute(app: FastifyInstance) {
       alerts).</li>
       <li><strong>Site analytics</strong>: our marketing pages may use the Meta Pixel to measure ad
       performance (page views and registrations). This involves cookies set by Meta. We do not run
-      the pixel inside the product dashboard or API.</li>
+      the pixel inside the product dashboard or API. Our marketing pages also record a few
+      page-level events in our own database (the demo being run, a click through to the sign-up
+      page, the sign-up page loading), with no cookie, no IP address and no identifier that
+      outlives the tab.</li>
     </ul>
 
     <h2>2. What we use it for</h2>
