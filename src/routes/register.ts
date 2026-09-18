@@ -123,12 +123,11 @@ const reg = inlineScript(`${PULSE_CLIENT_SRC}
       const res = await fetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email:    document.getElementById('email').value,
-          name:     document.getElementById('name').value || undefined,
-          use_case: document.getElementById('use_case').value || undefined,
-          stack:    document.getElementById('stack').value || undefined,
-        }),
+        // Email only. The three optional fields left this form on 2026-09-19
+        // (see the form markup for the measurement) and are asked on the key
+        // screen instead, through /app/profile. The API still accepts them
+        // here, for curl and for anyone reading llms.txt.
+        body: JSON.stringify({ email: document.getElementById('email').value }),
       })
       const data = await res.json()
 
@@ -213,6 +212,38 @@ const reg = inlineScript(`${PULSE_CLIENT_SRC}
     btn.style.color = 'var(--green)'
     setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '' }, 2000)
   }
+
+  // The optional context, asked once the key is on screen. A fetch and not a
+  // form submit, because a submit navigates, and this screen shows the key
+  // once: a reader who saved their name and lost their key would have traded
+  // the thing they came for. The cookie the 201 set is scoped Path=/app, and
+  // /app/profile is under it, so the request carries the session with no key
+  // in the body. Nothing here is required; a reader who clicks the console
+  // button instead loses nothing.
+  document.getElementById('profile-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const btn = document.getElementById('profile-save')
+    const note = document.getElementById('profile-note')
+    btn.disabled = true
+    try {
+      const res = await fetch('/app/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name:     document.getElementById('name').value || undefined,
+          use_case: document.getElementById('use_case').value || undefined,
+          stack:    document.getElementById('stack').value || undefined,
+        }),
+      })
+      if (res.ok) { btn.textContent = 'Saved'; note.textContent = 'Thanks. You can change any of this later by writing in.'; return }
+      const data = await res.json().catch(() => ({}))
+      note.textContent = data.message ?? 'That did not save. It is optional, so carry on.'
+      btn.disabled = false
+    } catch {
+      note.textContent = 'Network error. It is optional, so carry on.'
+      btn.disabled = false
+    }
+  })
 
   // This page loaded, in our own rows. Between a landing page view on / and a
   // row in accounts there was no record at all, so a visitor who clicked
@@ -396,6 +427,22 @@ export async function registerRoute(app: FastifyInstance) {
     .ns-go .aside { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
     .ns-go .aside a { color: var(--dim); text-decoration: underline; }
     .ns-go .aside a:hover { color: var(--text); }
+    /* The optional context, under the one action and not above it. The key
+       screen's fold gate (scripts/shots.mjs) holds .where above 735 and
+       .btn-go within one short scroll of it; a panel placed above the button
+       would spend that budget on questions nobody has to answer. Below it,
+       the reader who wants the console never sees a form in the way, and the
+       reader who lingers is the one being asked. */
+    .profile { padding: 14px 18px 16px; display: grid; gap: 14px; }
+    .profile > p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+    .profile .row { display: grid; gap: 10px; align-items: center; grid-template-columns: auto minmax(0, 1fr); }
+    .btn-save { min-height: 36px; padding: 0 14px; background: transparent; color: var(--text);
+                border: 1px solid var(--border-strong); border-radius: 6px; font-family: var(--sans);
+                font-size: var(--fs-small); font-weight: 600; cursor: pointer; white-space: nowrap;
+                transition: border-color .15s; }
+    @media (hover: hover) { .btn-save:hover { border-color: var(--text); } }
+    .btn-save:disabled { opacity: .55; cursor: default; }
+    .profile .note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); min-height: 1lh; }
     .btn-go { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; background: var(--green);
               color: var(--green-ink); border: 0; border-radius: 8px; font-family: var(--sans); font-size: var(--fs-small);
               font-weight: 700; text-decoration: none; cursor: pointer; transition: filter .15s; }
@@ -428,33 +475,21 @@ ${siteNav('/register', { cta: false })}
         <noscript><p class="msg-slot" style="display:block">This form needs JavaScript to submit. Without it, ask for a key
           from a terminal: <code>curl -X POST https://agentbill.dev/register -H 'Content-Type: application/json'
           -d '{"email":"you@company.com"}'</code></p></noscript>
+        <!-- One field. Until 2026-09-19 three optional fields sat between this
+             one and the button: name, what you are building, primary language,
+             264px of them. Measured in Chrome with the form as the only thing
+             on the page: the button's top at 904 against a 900 fold on a
+             1440x900 laptop and an 864 fold on 1536x864, the most common
+             desktop viewport there is. Four pixels and forty. The only action
+             on the page was off the screen for the audience the ads had just
+             been pointed at, and every one of the fields pushing it there was
+             optional. They are asked on the key screen now, once the reader
+             is registered, through /app/profile; the fold gate in
+             scripts/shots.mjs measures this button against the fold so they
+             cannot drift back. -->
         <div class="field">
           <label for="email">Work email</label>
           <input type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" />
-        </div>
-        <div class="field">
-          <label for="name">Your name <span class="opt">(optional)</span></label>
-          <input type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
-        </div>
-        <div class="field">
-          <label for="use_case">What are you building? <span class="opt">(optional)</span></label>
-          <select id="use_case" name="use_case">
-            <option value="">Select one&hellip;</option>
-            <option value="ai_saas">AI SaaS product</option>
-            <option value="internal_agents">Internal agent workflows</option>
-            <option value="agent_platform">Agent platform / marketplace</option>
-            <option value="research">Research / experiments</option>
-            <option value="other">Something else</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="stack">Primary language <span class="opt">(optional)</span></label>
-          <select id="stack" name="stack">
-            <option value="">Select one&hellip;</option>
-            <option value="python">Python</option>
-            <option value="nodejs">Node.js</option>
-            <option value="other">Other</option>
-          </select>
         </div>
         <div class="msg-slot"><p class="err" id="err" aria-live="polite"></p></div>
         <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
@@ -549,6 +584,46 @@ ${siteNav('/register', { cta: false })}
                keep the key on screen, and a footnote, not a second action. -->
           <p class="aside">Reference, when you need it: <a href="/docs" target="_blank" rel="noopener">docs</a> &middot; <a href="/faq" target="_blank" rel="noopener">questions</a>.</p>
         </div>
+      </div>
+      <!-- The three questions that used to sit in the signup form, asked after
+           the key instead of before it. Below the console button on purpose:
+           the fold gate holds that button within reach, and a reader who
+           takes it has lost nothing by skipping this. Saved by fetch to
+           /app/profile on the session the 201 set, so the key on screen is
+           never navigated away from and never leaves this page. -->
+      <div class="panel">
+        <div class="panel-h"><span>Optional</span><span>it can wait</span></div>
+        <form class="profile" id="profile-form">
+          <p>A little context, if you want to give it. Nothing here is required, and the console works the same without it.</p>
+          <div class="field">
+            <label for="name">Your name <span class="opt">(optional)</span></label>
+            <input type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
+          </div>
+          <div class="field">
+            <label for="use_case">What are you building? <span class="opt">(optional)</span></label>
+            <select id="use_case" name="use_case">
+              <option value="">Select one&hellip;</option>
+              <option value="ai_saas">AI SaaS product</option>
+              <option value="internal_agents">Internal agent workflows</option>
+              <option value="agent_platform">Agent platform / marketplace</option>
+              <option value="research">Research / experiments</option>
+              <option value="other">Something else</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="stack">Primary language <span class="opt">(optional)</span></label>
+            <select id="stack" name="stack">
+              <option value="">Select one&hellip;</option>
+              <option value="python">Python</option>
+              <option value="nodejs">Node.js</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="row">
+            <button class="btn-save" id="profile-save" type="submit">Save</button>
+            <p class="note" id="profile-note" aria-live="polite"></p>
+          </div>
+        </form>
       </div>
     </div>
   </div>

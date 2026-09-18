@@ -1492,6 +1492,39 @@ const toStart8 = await nav8('/app/session', { method: 'POST', headers: FORM8, bo
 ok('[register] /app/session honours next=/app?view=start', toStart8.status === 303 && toStart8.headers.get('location') === '/app?view=start', `${toStart8.headers.get('location')}`)
 const toElse8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dkeys` })
 ok('[register] and drops any other view', toElse8.status === 303 && toElse8.headers.get('location') === '/app', `${toElse8.headers.get('location')}`)
+// [profile] 2026-09-19. The three optional fields left the signup form,
+// where they pushed the only button off a 1440x900 and a 1536x864 screen, and
+// are asked on the key screen, saved by fetch to /app/profile on the session
+// the 201 sets. Four things this holds: the form asks for one thing; the key
+// screen asks for the rest; the endpoint writes only what was given, to the
+// signed-in account, from this origin only; and a blank is not a value.
+const formHtmlP = register8.slice(register8.indexOf('id="form-state"'), register8.indexOf('id="success-state"'))
+const doneHtmlP = register8.slice(register8.indexOf('id="success-state"'))
+const formFieldsP = (formHtmlP.match(/<(input|select)\b/g) ?? []).length
+ok('[profile] the signup form asks for the email and nothing else',
+   formFieldsP === 1 && formHtmlP.includes('type="email"'), `${formFieldsP} fields in the form`)
+ok('[profile] the key screen carries the three optional fields and saves them by fetch to /app/profile',
+   doneHtmlP.includes('id="profile-form"') && doneHtmlP.includes('id="name"') && doneHtmlP.includes('id="use_case"')
+     && doneHtmlP.includes('id="stack"') && register8.includes("fetch('/app/profile'"))
+const JSONP = { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' }
+const anonP = await nav8('/app/profile', { method: 'POST', headers: JSONP, body: JSON.stringify({ name: 'Nobody' }) })
+ok('[profile] no session: 401, nothing written', anonP.status === 401, `${anonP.status}`)
+const crossP = await nav8('/app/profile', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site', cookie: cookie8 }, body: JSON.stringify({ name: 'Nobody' }) })
+ok('[profile] a cross-site POST on a valid session: 403', crossP.status === 403, `${crossP.status}`)
+const savedP = await nav8('/app/profile', { method: 'POST', headers: { ...JSONP, cookie: cookie8 }, body: JSON.stringify({ name: 'Harness Eight', use_case: 'research', stack: '' }) })
+const savedBodyP = await savedP.json()
+ok('[profile] a signed-in save answers 200 with exactly what it wrote, and "" is not a choice',
+   savedP.status === 200 && JSON.stringify(savedBodyP.saved) === JSON.stringify({ name: 'Harness Eight', use_case: 'research' }), JSON.stringify(savedBodyP))
+const [rowP] = await sql`SELECT name, use_case, stack FROM accounts WHERE id = ${process.env.ACCOUNT_ID}`
+ok('[profile] and the row says so', rowP.name === 'Harness Eight' && rowP.useCase === 'research', JSON.stringify(rowP))
+const onlyP = await nav8('/app/profile', { method: 'POST', headers: { ...JSONP, cookie: cookie8 }, body: JSON.stringify({ stack: 'python' }) })
+const [rowPb] = await sql`SELECT name, use_case, stack FROM accounts WHERE id = ${process.env.ACCOUNT_ID}`
+ok('[profile] a later save of one field leaves the others as they were',
+   onlyP.status === 200 && rowPb.name === 'Harness Eight' && rowPb.useCase === 'research' && rowPb.stack === 'python', JSON.stringify(rowPb))
+const badP = await nav8('/app/profile', { method: 'POST', headers: { ...JSONP, cookie: cookie8 }, body: JSON.stringify({ use_case: 'crypto' }) })
+ok('[profile] a value outside the option list: 422, not a write', badP.status === 422, `${badP.status}`)
+const blankP = await nav8('/app/profile', { method: 'POST', headers: { ...JSONP, cookie: cookie8 }, body: JSON.stringify({ name: '   ', stack: '' }) })
+ok('[profile] blanks alone: 422, nothing to save', blankP.status === 422, `${blankP.status}`)
 // The key screen does one job. Until 2026-09-11 it also carried the install
 // command as an unnumbered bullet above the console's numbered steps, so the
 // first instruction a new key holder read was to open a terminal, and the one
