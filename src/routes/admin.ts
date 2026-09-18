@@ -310,6 +310,10 @@ ${topBar('signed in')}
       <div class="stat-value ${pulse.ctaClicks > 0 ? 'held' : ''}">${pulse.ctaClicks}</div>
     </div>
     <div class="stat">
+      <div class="stat-label">Homepage: page views that clicked Try it</div>
+      <div class="stat-value ${pulse.tryClicks > 0 ? 'held' : ''}">${pulse.tryClicks}</div>
+    </div>
+    <div class="stat">
       <div class="stat-label">/register: page loads</div>
       <div class="stat-value ${pulse.registerViews > 0 ? 'held' : ''}">${pulse.registerViews}</div>
     </div>
@@ -333,9 +337,11 @@ ${topBar('signed in')}
   <p class="sub">
     A view is one page load, not one person: the token is minted per load and never stored, so
     the same visitor returning counts twice. It is not a signup and it is not attributable to a
-    channel; no source column exists yet. The two funnel tiles are first-party rows as well, so a
+    channel; no source column exists yet. The three funnel tiles are first-party rows as well, so a
     click through that no pixel saw still counts here, and a /register load with no account row
-    after it is the form losing someone.
+    after it is the form losing someone. Read Try it beside the click-through: if Try it runs well
+    ahead, the demo has earned a higher place on the page; if neither moves, the fold is the
+    problem, not the depth.
     ${pulse.since
       ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
       : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}

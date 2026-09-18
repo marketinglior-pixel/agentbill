@@ -1456,6 +1456,30 @@ ok('[fold] the hero claims nothing about anyone else',
 ok('[fold] one primary action in the hero, and the brochure rows are gone',
    (hero8.match(/class="btn btn-lg"/g) ?? []).length === 1 && !hero8.includes('btn-ghost')
      && !fold8.includes('Keys you can revoke') && !fold8.includes('What the ceiling saved you from'))
+// 2026-09-18, the depth question. The demo sits about two screens down on a
+// desktop and three on a phone, and none of the first 40 paid visits reached
+// it. Lior chose the measured alternative to a reorder: one text link in the
+// hero to #playground, counted as try_click, so the data decides whether the
+// demo moves. A link and not a second button; the gate above keeps the button
+// count at one, this one keeps the link at one, on the whole page and not only
+// in the hero (the wiring is document-wide and the tile is read as "the hero's
+// link", so a second one anywhere would pool into the number), and the anchor
+// on the page. The tag is selected first and its class tested after, so the
+// attribute order cannot hide a button: the first version tested
+// class-then-href in one regex and review showed <a href="#playground"
+// class="btn"> passing both gates. Breaks that proved it, each restored
+// byte-identical: the link removed (0 on the page); href-first class="btn"
+// (this gate alone red); class-first class="btn btn-lg" (this gate and the
+// one above both red); a second #playground link in the closing section
+// (2 on the page, 1 in the hero, red).
+const tryRe8 = /<a\b[^>]*\bhref="#playground"[^>]*>/g
+const tryPage8 = fold8.match(tryRe8) ?? []
+const tryHero8 = hero8.match(tryRe8) ?? []
+ok('[fold] the hero carries one text link to the demo, a link and not a second button, and the anchor exists',
+   tryPage8.length === 1 && tryHero8.length === 1
+     && !/\bclass="[^"]*\bbtn\b/.test(tryPage8[0])
+     && fold8.includes('id="playground"'),
+   `${tryPage8.length} on the page, ${tryHero8.length} in the hero; ${tryPage8[0] ?? 'no tag'}`)
 // /register, 2026-09-12: setup language above one form, nothing under it
 // that pitches, and a key screen whose one action signs the key into the
 // start screen rather than sending the reader to a login card.
@@ -1688,13 +1712,14 @@ for (const [name, html] of [['the console first run', virgin8], ['the console af
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
 }
 
-// ---------------------------------------------------------------- pulse: the two events between a landing and an account
+// ---------------------------------------------------------------- pulse: the events between a landing and an account
 // 2026-09-18, the first day the site had paid traffic. Meta counted 40 landing
 // page views, accounts gained 0 rows, and site_pulse, our own table, had no
 // event for anything a visitor does between arriving and registering, so a
 // page nobody engaged and a form everybody abandoned read as the same zero.
-// Two events close that gap: cta_click on any homepage link to /register, and
-// register_view when /register loads.
+// Two events closed that gap in PR #62: cta_click on any homepage link to
+// /register, and register_view when /register loads. A third, try_click on the
+// hero's link to the demo, followed the same day.
 //
 // The CSP gate is here for two reasons, neither of them a past hash drift: no
 // hash drift has shipped, because src/lib/csp.ts inlineScript() derives the tag
@@ -1719,8 +1744,10 @@ for (const [name, html] of [['the console first run', virgin8], ['the console af
 //   one bucket for both event classes ......... flood gate read playground_run:38, no cta_click
 //   pixel tag written as <script async> ....... both CSP gates red, "1 of 4" and "1 of 3",
 //                                               the unhashed script beginning !function(f,b,e,v
+//   drop 'try_click' from the enum (09-18, PR 2) "land as rows" read cta_click, register_view;
+//                                               "list still closed" read 2 rows
 // Every other gate in this file stayed green under every one of those breaks.
-console.log('\n[pulse] the two funnel events between a landing page view and an account row')
+console.log('\n[pulse] the funnel events between a landing page view and an account row')
 const home9 = await fetch(`${API}/`).then((r) => r.text())
 const register9 = await fetch(`${API}/register`).then((r) => r.text())
 // Inline scripts only: JSON-LD is data, and a src= tag is covered by origin.
@@ -1742,6 +1769,10 @@ ok('[pulse] the homepage script defines pulse() and wires every link to /registe
    homeJs9.includes('a[href="/register"]') && homeJs9.includes("pulse('cta_click')")
      && homeJs9.indexOf('function pulse(') > -1
      && homeJs9.indexOf('function pulse(') < homeJs9.indexOf("pulse('cta_click')"))
+// Break that proved it: the listener's call replaced by a setAttribute; this
+// gate alone went red.
+ok('[pulse] the homepage wires the demo link to a try_click beacon',
+   homeJs9.includes('a[href="#playground"]') && homeJs9.includes("pulse('try_click')"))
 const regJs9 = scripts9(register9).join('\n')
 // On /register the order is load-bearing: helper, then the submit listener,
 // then the beacon. Placed above the listener, a helper that failed to arrive
@@ -1761,12 +1792,13 @@ const post9 = (body) => fetch(`${API}/pulse`, { method: 'POST', headers: { 'Cont
                                                 body: JSON.stringify(body) }).then((r) => r.status)
 const st9 = [await post9({ event: 'cta_click', view_id: view9 }),
              await post9({ event: 'register_view', view_id: view9 }),
+             await post9({ event: 'try_click', view_id: view9 }),
              await post9({ event: 'cta_view', view_id: view9 })]
 const rows9 = (await sql`SELECT event FROM site_pulse WHERE view_id = ${view9} ORDER BY event`).map((r) => r.event)
-ok('[pulse] cta_click and register_view are on the allowlist and land as rows',
-   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'register_view']), rows9.join(', ') || 'no rows')
+ok('[pulse] cta_click, register_view and try_click are on the allowlist and land as rows',
+   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'register_view', 'try_click']), rows9.join(', ') || 'no rows')
 ok('[pulse] and the list is still closed: an unknown name is dropped and still answers 204',
-   st9.every((c) => c === 204) && rows9.length === 2, `statuses ${st9.join('/')}, ${rows9.length} rows`)
+   st9.every((c) => c === 204) && rows9.length === 3, `statuses ${st9.join('/')}, ${rows9.length} rows`)
 // Two buckets, not one. Forty playground writes from one network and then a
 // click through: under the single bucket this change was first written with,
 // the click was the forty-first write and vanished into a 204, so the visitor
