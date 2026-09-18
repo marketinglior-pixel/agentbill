@@ -101,6 +101,21 @@ const PAGES = [
 // just not a build failure. Today it sits at +418.
 const FOLD_ACTION_BUDGET = { desktop: 150, mobile: 150 }
 
+// The signup form's one action, against the fold, on the viewports where it
+// must be visible without a scroll. No budget: unlike the key screen, nothing
+// on the form needs to sit above the button, so there is no argument for
+// letting it slip. Measured 2026-09-19 with three optional fields still in the
+// form: the button's top at 904 against 900 on a 1440x900 laptop and against
+// 864 on 1536x864, and against this gate's own 735 it was 213px down. Every
+// viewport in this set fails on that layout, which is the point. `narrow` is
+// measured and printed, not enforced, for the same reason the key screen's
+// action has no budget there: a 568px viewport under the shared header does
+// not hold a headline, a lede and a form, and a number that can only be met
+// by deleting the lede is not a gate. The BOTTOM edge is what is compared,
+// not the top: a button whose top clears the fold by ten pixels is a button
+// cut in half.
+const FORM_ACTION_VISIBLE = new Set(['desktop', 'mobile'])
+
 const VIEWPORTS = [
   ['desktop', 1440, 735, false],
   ['mobile', 390, 844, true],
@@ -201,6 +216,16 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         // is in every /register response but display:none until the reveal, and
         // getBoundingClientRect on a hidden subtree returns zeros, which would
         // report a comfortable 0px on the one page that has the problem.
+        // The signup form's button, where the form is the visible state.
+        // Same offsetParent rule as the key screen below: a hidden subtree
+        // measures as zeros, and zero is above every fold.
+        form: (() => {
+          const f = document.getElementById('form-state')
+          if (!f || f.offsetParent === null) return null
+          const b = document.getElementById('submit-btn')
+          if (!b || b.offsetParent === null) return { vh: window.innerHeight, bottom: null }
+          return { vh: window.innerHeight, bottom: Math.round(b.getBoundingClientRect().bottom + window.scrollY) }
+        })(),
         fold: (() => {
           const s = document.getElementById('success-state')
           if (!s || s.offsetParent === null) return null
@@ -279,6 +304,14 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           return hits
         })(),
       }))
+      if (m.form) {
+        // As with the key screen: a renamed button is a failure, not a skip.
+        if (m.form.bottom === null) {
+          failures.push(`${vp} ${name}: no #submit-btn on the signup form, so the fold check measured nothing`)
+        } else if (FORM_ACTION_VISIBLE.has(vp) && m.form.bottom > m.form.vh) {
+          failures.push(`${vp} ${name}: the signup button's bottom edge is ${m.form.bottom - m.form.vh}px BELOW the fold`)
+        }
+      }
       if (m.fold) {
         // A missing element is a failure, not a skip. If .where or .btn-go is
         // renamed away, every check below it silently stops running and this
@@ -301,6 +334,10 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
       for (const c of m.clipped.slice(0, 4)) failures.push(`${vp} ${name}: ${c}`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
+      if (m.form) {
+        const b = m.form.bottom
+        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.form.vh}  submit-bottom ${b === null ? '?' : `${b}${b <= m.form.vh ? '' : ` (+${b - m.form.vh} BELOW)`}`}`)
+      }
       if (m.fold) {
         const d = (v) => v === null ? '?' : `${v}${v < m.fold.vh ? '' : ` (+${v - m.fold.vh} BELOW)`}`
         rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.fold.vh}  answer ${d(m.fold.answer)}  line ${d(m.fold.line)}  action ${d(m.fold.action)}`)

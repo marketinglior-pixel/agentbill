@@ -7,7 +7,8 @@ import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
-import { isId, INT4_MAX } from '../lib/ids.js'
+import { z } from 'zod'
+import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
@@ -166,6 +167,40 @@ export async function appRoute(app: FastifyInstance) {
     // (the label is read only when a save opens the job); say so.
     const kept = agent && !result.row.taskCreated ? '&agent=kept' : ''
     return to(`saved=${encodeURIComponent(ref)}${result.row.taskCreated ? '&created=1' : ''}${kept}`)
+  })
+
+  // The optional context the signup form used to ask for, asked on the key
+  // screen instead (src/routes/register.ts, 2026-09-19). A fetch from that
+  // screen, on the session cookie the 201 set, so JSON in and JSON out and no
+  // redirect: a redirect would navigate a page whose whole point is a key
+  // shown once. Every field is optional and every field is bounded the way
+  // RegisterBody bounds it; the two selects are closed sets, so they are
+  // enums here and not free text.
+  app.post('/app/profile', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.code(401).send({ error: 'unauthorized', message: 'Sign in to the console first.' })
+    if (!checkRateLimit(viewer.apiKey).allowed) return reply.code(429).send({ error: 'rate_limited' })
+    const parsed = ProfileBody.safeParse(request.body)
+    if (!parsed.success) {
+      return reply.code(422).send({
+        error: 'validation_error',
+        message: [parsed.error.issues[0]?.path?.join('.'), parsed.error.issues[0]?.message].filter(Boolean).join(': '),
+      })
+    }
+    // Only what was given is written. "" from an untouched select is not a
+    // choice, and a blank name is not a name, so neither overwrites a value
+    // the row already has.
+    const patch: Record<string, string> = {}
+    for (const k of ['name', 'use_case', 'stack'] as const) {
+      const v = parsed.data[k]
+      if (typeof v === 'string' && v.length > 0) patch[k] = v
+    }
+    if (Object.keys(patch).length === 0) {
+      return reply.code(422).send({ error: 'validation_error', message: 'Nothing to save.' })
+    }
+    await sql`UPDATE accounts SET ${sql(patch)} WHERE id = ${viewer.accountId}`
+    return reply.code(200).send({ saved: patch })
   })
 
   // The canonical-host redirect preserves a trailing slash; without this the
@@ -354,6 +389,14 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
  * Exported because /recover posts too, and a second copy of this would be a
  * second chance to reintroduce the Fastify 5 host/hostname bug documented below.
  */
+// Mirrors RegisterBody in register.ts for the two free-text bounds; the two
+// selects are the option lists the key screen renders, nothing else.
+const ProfileBody = z.object({
+  name:     plain(z.string().trim().max(128)).optional(),
+  use_case: z.enum(['', 'ai_saas', 'internal_agents', 'agent_platform', 'research', 'other']).optional(),
+  stack:    z.enum(['', 'python', 'nodejs', 'other']).optional(),
+})
+
 export function sameOrigin(request: FastifyRequest): boolean {
   const sfs = request.headers['sec-fetch-site']
   if (typeof sfs === 'string') return sfs === 'same-origin'
