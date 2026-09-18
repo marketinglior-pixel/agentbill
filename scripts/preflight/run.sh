@@ -65,7 +65,12 @@ SQL
 # every login answers err=unavailable and the checkout hand-off cannot be tested.
 # RATE_LIMIT_PER_MINUTE: the suite makes ~90 API calls on one key and CI runs it in ~30s,
 # which is past the production limit of 100/min at the tail. The limit is not under test.
-RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+# META_PIXEL_ID: production sets it, so / and /register carry one more inline
+# script there than they did in this harness, hashed by src/lib/pixel.ts on a
+# path that csp.ts's one-string guarantee does not cover. A synthetic id puts
+# that script under the [pulse] CSP gate; the harness only fetches HTML, so
+# nothing here talks to Meta.
+META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break

@@ -139,7 +139,7 @@ export const PAGES: readonly PageMeta[] = [
   // reachable, and noindex beside a canonical sends two contradictory signals
   // about one URL.
   { path: '/terms', section: 'legal', crumbs: [HOME], crumb: 'Terms', og: 'default', index: true, updated: '2026-08-27', priority: 0.2, changefreq: 'yearly' },
-  { path: '/privacy', section: 'legal', crumbs: [HOME], crumb: 'Privacy', og: 'default', index: true, updated: '2026-08-27', priority: 0.2, changefreq: 'yearly' },
+  { path: '/privacy', section: 'legal', crumbs: [HOME], crumb: 'Privacy', og: 'default', index: true, updated: '2026-09-18', priority: 0.2, changefreq: 'yearly' },
 
   // Not indexable, and here anyway: robots.txt's Disallow lines are generated
   // from this list, so a page cannot be forgotten in one place and remembered

@@ -1688,6 +1688,117 @@ for (const [name, html] of [['the console first run', virgin8], ['the console af
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
 }
 
+// ---------------------------------------------------------------- pulse: the two events between a landing and an account
+// 2026-09-18, the first day the site had paid traffic. Meta counted 40 landing
+// page views, accounts gained 0 rows, and site_pulse, our own table, had no
+// event for anything a visitor does between arriving and registering, so a
+// page nobody engaged and a form everybody abandoned read as the same zero.
+// Two events close that gap: cta_click on any homepage link to /register, and
+// register_view when /register loads.
+//
+// The CSP gate is here for two reasons, neither of them a past hash drift: no
+// hash drift has shipped, because src/lib/csp.ts inlineScript() derives the tag
+// and its hash from one string. The 2026-09-06 incident that did ship (commit
+// 184d110) had a MATCHING hash and a script that failed to parse, and the gate
+// for that is hygiene's node --check, not this one. This one exists because
+// (1) this change rewrote both hashed scripts, and (2) src/lib/pixel.ts hashes
+// its own tag with a regex, outside that one-string guarantee, which is why
+// run.sh now sets a synthetic META_PIXEL_ID: without it the harness served
+// three scripts on / where production serves four, and the pixel path was
+// never under any gate.
+//
+// Each gate below was run against a deliberate break before it was trusted,
+// in an isolated worktree, restored byte-identical afterwards. What each read:
+//   drop 'cta_click' from the enum ............ "land as rows" read register_view alone;
+//                                               "list still closed" read 1 row
+//   replace the click listener's call ......... the homepage wiring gate went red
+//   remove pulse('register_view') ............. the /register gate went red
+//   drop PLAYGROUND_HASH in home.ts ........... the / CSP gate read "1 of 4 unhashed"
+//   drop ${PULSE_CLIENT_SRC} from register.ts . helper@-1 form@469 beacon@6184
+//   move the beacon above the form wiring ..... helper@1368 form@1970 beacon@1902
+//   one bucket for both event classes ......... flood gate read playground_run:38, no cta_click
+//   pixel tag written as <script async> ....... both CSP gates red, "1 of 4" and "1 of 3",
+//                                               the unhashed script beginning !function(f,b,e,v
+// Every other gate in this file stayed green under every one of those breaks.
+console.log('\n[pulse] the two funnel events between a landing page view and an account row')
+const home9 = await fetch(`${API}/`).then((r) => r.text())
+const register9 = await fetch(`${API}/register`).then((r) => r.text())
+// Inline scripts only: JSON-LD is data, and a src= tag is covered by origin.
+const scripts9 = (html) => [...html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/g)]
+  .filter((m) => !/ld\+json|\bsrc=/.test(m[1] ?? '')).map((m) => m[2])
+const csp9 = (html) => (html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/) ?? [])[1] ?? ''
+const sha9 = (js) => `'sha256-${createHash('sha256').update(js, 'utf8').digest('base64')}'`
+for (const [name, html] of [['/', home9], ['/register', register9]]) {
+  const all = scripts9(html)
+  const missing = all.filter((js) => !csp9(html).includes(sha9(js)))
+  ok(`[pulse] every inline script on ${name} is named by that page's CSP`, all.length > 0 && missing.length === 0,
+     missing.length ? `${missing.length} of ${all.length} unhashed; first begins ${JSON.stringify(missing[0].slice(0, 60))}` : `${all.length} scripts`)
+}
+const homeJs9 = scripts9(home9).join('\n')
+// The helper has to be IN the script that calls it, before the call. The call
+// string alone was the first version of these two gates, and it stays present
+// when the interpolated helper is dropped, which is the one break that matters.
+ok('[pulse] the homepage script defines pulse() and wires every link to /register to a cta_click beacon',
+   homeJs9.includes('a[href="/register"]') && homeJs9.includes("pulse('cta_click')")
+     && homeJs9.indexOf('function pulse(') > -1
+     && homeJs9.indexOf('function pulse(') < homeJs9.indexOf("pulse('cta_click')"))
+const regJs9 = scripts9(register9).join('\n')
+// On /register the order is load-bearing: helper, then the submit listener,
+// then the beacon. Placed above the listener, a helper that failed to arrive
+// would throw before the form was wired, and the form's native fallback is a
+// GET with the address in the URL. Review caught that on 2026-09-18.
+const regHelper9 = regJs9.indexOf('function pulse(')
+const regForm9 = regJs9.indexOf("getElementById('reg-form').addEventListener")
+const regBeacon9 = regJs9.indexOf("pulse('register_view')")
+ok('[pulse] /register defines pulse(), wires the form, and only then fires register_view, once',
+   (regJs9.match(/pulse\('register_view'\)/g) ?? []).length === 1
+     && regHelper9 > -1 && regForm9 > -1 && regHelper9 < regForm9 && regForm9 < regBeacon9,
+   `helper@${regHelper9} form@${regForm9} beacon@${regBeacon9}`)
+// The write itself, end to end, plus the closed list. The handler awaits the
+// insert before it answers, so the row is there when the 204 is.
+const view9 = `verify9${Date.now()}`
+const post9 = (body) => fetch(`${API}/pulse`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify(body) }).then((r) => r.status)
+const st9 = [await post9({ event: 'cta_click', view_id: view9 }),
+             await post9({ event: 'register_view', view_id: view9 }),
+             await post9({ event: 'cta_view', view_id: view9 })]
+const rows9 = (await sql`SELECT event FROM site_pulse WHERE view_id = ${view9} ORDER BY event`).map((r) => r.event)
+ok('[pulse] cta_click and register_view are on the allowlist and land as rows',
+   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'register_view']), rows9.join(', ') || 'no rows')
+ok('[pulse] and the list is still closed: an unknown name is dropped and still answers 204',
+   st9.every((c) => c === 204) && rows9.length === 2, `statuses ${st9.join('/')}, ${rows9.length} rows`)
+// Two buckets, not one. Forty playground writes from one network and then a
+// click through: under the single bucket this change was first written with,
+// the click was the forty-first write and vanished into a 204, so the visitor
+// who played hardest read back as one who never clicked.
+const flood9 = `flood9${Date.now()}`
+for (let i = 0; i < 40; i++) await post9({ event: 'playground_run', view_id: flood9, ceiling: 500 })
+const after9 = [await post9({ event: 'playground_run', view_id: flood9, ceiling: 500 }),
+                await post9({ event: 'cta_click', view_id: flood9 })]
+const floodRows9 = (await sql`SELECT event, count(*)::int AS n FROM site_pulse WHERE view_id = ${flood9} GROUP BY event ORDER BY event`)
+  .map((r) => `${r.event}:${r.n}`)
+ok('[pulse] forty playground writes from one network do not cost that visitor the click through',
+   after9.every((c) => c === 204) && JSON.stringify(floodRows9) === JSON.stringify(['cta_click:1', 'playground_run:40']),
+   `statuses ${after9.join('/')}, rows ${floodRows9.join(', ') || 'none'}`)
+
+// ---------------------------------------------------------------- legal: one date per page
+// /privacy's visible "Last updated" and the dateModified in its JSON-LD (which
+// is also the sitemap's lastmod) read the same registry row in src/ui/site.ts
+// since 2026-09-18, after an hour in which a literal in legal.ts said
+// September and the registry said August. The gate reads both off the served
+// page and formats the ISO date the way legal.ts does. Break that proved it:
+// a literal put back in /privacy's <p class="updated"> read
+// shown "August 27, 2026", dateModified 2026-09-18, and only this gate went red.
+console.log('\n[legal] the date a reader sees on a legal page is the date its structured data carries')
+for (const path of ['/privacy', '/terms']) {
+  const html = await fetch(`${API}${path}`).then((r) => r.text())
+  const shown = (html.match(/Last updated: ([^<]+)</) ?? [])[1] ?? ''
+  const iso = (html.match(/"dateModified":"(\d{4}-\d{2}-\d{2})"/) ?? [])[1] ?? ''
+  const fromIso = iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : ''
+  ok(`[legal] ${path} shows the date its JSON-LD dateModified carries`, shown !== '' && iso !== '' && shown === fromIso,
+     `shown "${shown}", dateModified ${iso || 'absent'} -> "${fromIso}"`)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

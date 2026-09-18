@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from '../lib/conversion.js'
 import type { AccountSignals } from '../lib/conversion.js'
-import { getPlaygroundPulse } from '../lib/pulse.js'
-import type { PlaygroundPulse } from '../lib/pulse.js'
+import { getSitePulse } from '../lib/pulse.js'
+import type { SitePulse } from '../lib/pulse.js'
 import { publicRoute } from '../middleware/auth.js'
 import { head, BP } from '../ui/theme.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
@@ -30,7 +30,7 @@ export async function adminRoute(app: FastifyInstance) {
       return reply.send(loginPage())
     }
     const accounts = await getAccountsWithSignals()
-    const pulse = await getPlaygroundPulse()
+    const pulse = await getSitePulse()
     reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
     return reply.send(adminPage(accounts, pulse))
   })
@@ -245,7 +245,7 @@ ${topBar('admin')}
 </html>`
 }
 
-function adminPage(accounts: AccountSignals[], pulse: PlaygroundPulse) {
+function adminPage(accounts: AccountSignals[], pulse: SitePulse) {
   const total = accounts.length
   const paid = accounts.filter(a => a.plan !== 'free').length
   const hot = accounts.filter(isHot).length
@@ -303,8 +303,16 @@ ${topBar('signed in')}
   <h1>Admin</h1>
   <p class="sub">Conversion radar: hot accounts first, sorted by likelihood to pay. Refresh to update.</p>
 
-  <h2>Playground, last 30 days</h2>
+  <h2>Site pulse, last 30 days</h2>
   <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Homepage: page views that clicked through to /register</div>
+      <div class="stat-value ${pulse.ctaClicks > 0 ? 'held' : ''}">${pulse.ctaClicks}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">/register: page loads</div>
+      <div class="stat-value ${pulse.registerViews > 0 ? 'held' : ''}">${pulse.registerViews}</div>
+    </div>
     <div class="stat">
       <div class="stat-label">Playground: page views that ran it (30d)</div>
       <div class="stat-value ${pulse.views > 0 ? 'held' : ''}">${pulse.views}</div>
@@ -325,7 +333,9 @@ ${topBar('signed in')}
   <p class="sub">
     A view is one page load, not one person: the token is minted per load and never stored, so
     the same visitor returning counts twice. It is not a signup and it is not attributable to a
-    channel; no source column exists yet.
+    channel; no source column exists yet. The two funnel tiles are first-party rows as well, so a
+    click through that no pixel saw still counts here, and a /register load with no account row
+    after it is the form losing someone.
     ${pulse.since
       ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
       : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}

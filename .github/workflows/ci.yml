@@ -88,6 +88,10 @@ jobs:
         env:
           DATABASE_URL: postgres://unused@127.0.0.1:1/unused
           PORT: "3998"
+          # Production sets a pixel id, which adds an inline script to / and
+          # /register. A synthetic one here puts that script under the parse
+          # check below; the job only fetches HTML.
+          META_PIXEL_ID: "1234567890"
         run: |
           node dist/server.js &
           for i in $(seq 1 40); do curl -sf http://localhost:3998/health >/dev/null && break; sleep 0.5; done
