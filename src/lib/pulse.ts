@@ -1,5 +1,24 @@
 import { sql } from '../db/index.js'
 
+/**
+ * One tagged surface's slice of the funnel, over the same 30-day window.
+ *
+ * Only rows with a source appear here, and most rows will not have one:
+ * organic traffic carries no ?src=, and neither does the paid campaign, whose
+ * creatives cannot be retagged. So these rows do not sum to the totals above
+ * and are not meant to. The question they answer is the narrow one: of what
+ * the funnel shows, how much came from a link we went out and placed.
+ */
+export type SourceSlice = {
+  source: string
+  ctaClicks: number
+  tryClicks: number
+  registerViews: number
+  runs: number
+  first: string
+  last: string
+}
+
 export type SitePulse = {
   ctaClicks: number
   tryClicks: number
@@ -9,6 +28,8 @@ export type SitePulse = {
   blocked: number
   movedSlider: number
   since: string | null
+  /** Tagged surfaces, busiest first. Empty until a tagged link is published. */
+  sources: SourceSlice[]
 }
 
 // The public pages, from our own rows. Every figure here is derived in SQL
@@ -40,6 +61,26 @@ export async function getSitePulse(): Promise<SitePulse> {
       FROM site_pulse
       WHERE created_at > now() - interval '30 days'
     `
+    // A second round trip rather than a GROUP BY folded into the first: the
+    // totals must keep reading exactly as they did before this column existed,
+    // and a query that returns one row per source can no longer also return
+    // one row of totals without a rollup that changes the shape of both.
+    const bySource = await sql`
+      SELECT
+        source,
+        count(DISTINCT view_id) FILTER (WHERE event = 'cta_click')      AS cta_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'try_click')      AS try_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'register_view')  AS register_views,
+        count(*)                FILTER (WHERE event = 'playground_run') AS runs,
+        min(created_at)                                                 AS first,
+        max(created_at)                                                 AS last
+      FROM site_pulse
+      WHERE created_at > now() - interval '30 days' AND source IS NOT NULL
+      GROUP BY source
+      ORDER BY count(*) DESC, source ASC
+      LIMIT 50
+    `
+
     return {
       ctaClicks: Number(row?.ctaClicks ?? 0),
       tryClicks: Number(row?.tryClicks ?? 0),
@@ -49,10 +90,19 @@ export async function getSitePulse(): Promise<SitePulse> {
       blocked: Number(row?.blocked ?? 0),
       movedSlider: Number(row?.movedSlider ?? 0),
       since: row?.since ? new Date(row.since).toISOString() : null,
+      sources: bySource.map((r) => ({
+        source: String(r.source),
+        ctaClicks: Number(r.ctaClicks ?? 0),
+        tryClicks: Number(r.tryClicks ?? 0),
+        registerViews: Number(r.registerViews ?? 0),
+        runs: Number(r.runs ?? 0),
+        first: new Date(r.first).toISOString(),
+        last: new Date(r.last).toISOString(),
+      })),
     }
   } catch {
     // The table is additive and the page predates it. A missing table must not
     // take down the account list, which is what admin is actually for.
-    return { ctaClicks: 0, tryClicks: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null }
+    return { ctaClicks: 0, tryClicks: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null, sources: [] }
   }
 }

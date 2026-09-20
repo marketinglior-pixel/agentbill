@@ -336,8 +336,10 @@ ${topBar('signed in')}
   </div>
   <p class="sub">
     A view is one page load, not one person: the token is minted per load and never stored, so
-    the same visitor returning counts twice. It is not a signup and it is not attributable to a
-    channel; no source column exists yet. The three funnel tiles are first-party rows as well, so a
+    the same visitor returning counts twice. It is not a signup. A row carries a channel only when
+    the link we published put one there (see the table below); organic traffic and the paid campaign
+    both arrive untagged, so the totals above are every source at once. The three funnel tiles are
+    first-party rows as well, so a
     click through that no pixel saw still counts here, and a /register load with no account row
     after it is the form losing someone. Read Try it beside the click-through: if Try it runs well
     ahead, the demo has earned a higher place on the page; if neither moves, the fold is the
@@ -346,6 +348,44 @@ ${topBar('signed in')}
       ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
       : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}
   </p>
+
+  <h2>Tagged surfaces, last 30 days</h2>
+  ${pulse.sources.length === 0
+    ? `<p class="sub">No tagged rows. Nothing has been published with a <code>?src=</code> link yet, or
+       nothing published has been opened. This is the expected reading before the first directory
+       listing goes out, and it is <b>not</b> the same as no traffic: an untagged visit is counted in
+       the tiles above and simply cannot say where it came from.</p>`
+    : `<table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Clicked through</th>
+        <th>Try it</th>
+        <th>/register loads</th>
+        <th>Playground runs</th>
+        <th>First</th>
+        <th>Last</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${pulse.sources.map((row) => `<tr>
+        <td><code>${esc(row.source)}</code></td>
+        <td class="${row.ctaClicks > 0 ? 'held' : ''}">${row.ctaClicks}</td>
+        <td>${row.tryClicks}</td>
+        <td class="${row.registerViews > 0 ? 'held' : ''}">${row.registerViews}</td>
+        <td>${row.runs}</td>
+        <td>${row.first.slice(0, 16).replace('T', ' ')}</td>
+        <td>${row.last.slice(0, 16).replace('T', ' ')}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <p class="sub">
+    These rows do not sum to the tiles above and are not meant to. Only a visit that arrived on a
+    link carrying <code>?src=</code> is counted here; a visitor who strips the parameter is recorded
+    with no source, which is the honest answer rather than a gap to be filled by sniffing a referrer.
+    A source with clicks and zero /register loads is the link, not the page: check that the surface
+    points at <code>/</code> or <code>/register</code> and not somewhere the parameter is dropped.
+  </p>`}
 
   <h2>Accounts</h2>
   <div class="stats">

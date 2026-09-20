@@ -401,7 +401,14 @@ const PLAYGROUND_SRC = `
   // the one button the page asks for. The listener adds nothing to the click;
   // the beacon is queued and the navigation goes ahead. Above the playground
   // guard on purpose: this is a page fact, not a playground fact.
-  var CTA_LINKS = document.querySelectorAll('a[href="/register"]');
+  // Exact, or exact followed by a query string. Not a prefix match: '^=' would
+  // also claim any future /register-anything. The second half of the selector
+  // exists because of ?src= (lib/source.ts): on a tagged visit the homepage
+  // renders these links as /register?src=x, and an exact-only selector matches
+  // nothing on precisely the traffic the tag was added to measure. That is the
+  // shape where a guard is dead in the one case it was written for, so it has
+  // its own gate in verify.mjs and the gate was red before it was green.
+  var CTA_LINKS = document.querySelectorAll('a[href="/register"], a[href^="/register?"]');
   for (var ci = 0; ci < CTA_LINKS.length; ci++) {
     CTA_LINKS[ci].addEventListener('click', function(){ pulse('cta_click'); });
   }

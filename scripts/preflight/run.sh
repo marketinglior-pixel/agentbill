@@ -11,6 +11,11 @@ PORT="${PORT:-3999}"
 ACCOUNT_ID="00000000-0000-0000-0000-0000000000aa"
 API_KEY="agb_testkey_local_verification_0001"
 WEBHOOK_SECRET="preflight-verify-webhook-secret"
+# ADMIN_SECRET, 2026-09-20. /admin is the only surface that reads site_pulse
+# back, so the gate on the tagged-source slice has to authenticate like the
+# owner does. Without it that gate fetches a 401 and is red for a reason that
+# has nothing to do with the code under test, which is the same as no gate.
+ADMIN_SECRET="preflight-verify-admin-secret"
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
@@ -70,7 +75,7 @@ SQL
 # path that csp.ts's one-string guarantee does not cover. A synthetic id puts
 # that script under the [pulse] CSP gate; the harness only fetches HTML, so
 # nothing here talks to Meta.
-META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break
@@ -78,5 +83,5 @@ for _ in $(seq 1 30); do
 done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
-  WEBHOOK_SECRET="$WEBHOOK_SECRET" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" \
   node "$ROOT/scripts/preflight/verify.mjs"
