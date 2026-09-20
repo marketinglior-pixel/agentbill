@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { plain } from '../lib/ids.js'
+import { cleanSource, SOURCE_MAX } from '../lib/source.js'
 import { sql } from '../db/index.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
@@ -51,6 +52,16 @@ const PulseBody = z.object({
   // The ceiling the visitor chose. Bounded to the slider's own range so the
   // column cannot be used as free storage.
   ceiling: z.number().int().min(0).max(100_000).optional(),
+  // The campaign label the page read out of its own ?src=. Validated here a
+  // second time and by the same rule the page used, because the page's copy
+  // runs on the visitor's machine and is therefore a convenience, not a check.
+  // `catch` rather than a refusal: a bad label must cost the row its source,
+  // never the row itself. The event is the measurement; the source is a tag on
+  // it, and dropping a real cta_click because someone appended junk to the URL
+  // would let anyone delete our funnel by sharing a mangled link.
+  source: z.string().max(SOURCE_MAX * 4).optional()
+    .transform((v) => cleanSource(v))
+    .catch(null),
 })
 
 // Same tradeoff as the /register guard: in-memory, per-machine, damage control
@@ -104,14 +115,14 @@ export async function pulseRoute(app: FastifyInstance) {
     const parsed = PulseBody.safeParse(request.body ?? {})
     if (!parsed.success) return done()
 
-    const { event, view_id, ceiling } = parsed.data
+    const { event, view_id, ceiling, source } = parsed.data
     const playground = event.startsWith('playground_')
     if (!allowPulse(`${limiterKey(request)}|${playground ? 'pg' : 'funnel'}`,
                     playground ? PLAYGROUND_LIMIT : FUNNEL_LIMIT)) return done()
     try {
       await sql`
-        INSERT INTO site_pulse (event, view_id, ceiling)
-        VALUES (${event}, ${view_id ?? null}, ${ceiling ?? null})
+        INSERT INTO site_pulse (event, view_id, ceiling, source)
+        VALUES (${event}, ${view_id ?? null}, ${ceiling ?? null}, ${source ?? null})
       `
     } catch (err) {
       // An analytics write must never surface as a failure on a marketing page.

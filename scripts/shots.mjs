@@ -351,6 +351,56 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   }
   await ctx.close()
 }
+// ---------------------------------------------------------------- the ?src= rewrite, in a browser
+//
+// The only check that can prove this one. The homepage's six links to
+// /register are tagged by script at load, so the served HTML says /register
+// and the DOM the visitor clicks says /register?src=x. Every grep, every
+// string-presence gate in verify.mjs and every curl reads the FIRST of those
+// and would stay green with the rewrite deleted.
+//
+// Two assertions, and the second is the one that matters: not that the loop is
+// in the file, but that after a real page load every anchor a visitor can
+// press carries the label, and that pressing one lands on a /register whose
+// own beacon will therefore carry it too.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await ctx.newPage()
+  const beacons = []
+  await page.route('**/pulse', async (route) => {
+    try { beacons.push(JSON.parse(route.request().postData() ?? '{}')) } catch {}
+    await route.fulfill({ status: 204, body: '' })
+  })
+  await page.goto(`${BASE}/?src=shotsgate`, { waitUntil: 'networkidle' })
+
+  const hrefs = await page.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
+  const tagged = hrefs.filter((h) => h === '/register?src=shotsgate').length
+  if (hrefs.length !== 6 || tagged !== 6) {
+    failures.push(`src-rewrite: ${tagged}/${hrefs.length} /register links tagged after load (expected 6/6) -> ${JSON.stringify(hrefs)}`)
+  }
+
+  // And the click itself: the listener still fires on the rewritten href, and
+  // the payload carries the label. This is the pair that broke once already --
+  // an exact a[href="/register"] selector matches nothing after the rewrite,
+  // and the beacon goes silent on precisely the traffic the label measures.
+  await page.click('.hero-cta a.btn-lg', { noWaitAfter: true })
+  await page.waitForTimeout(400)
+  const cta = beacons.find((b) => b.event === 'cta_click')
+  if (!cta || cta.source !== 'shotsgate') {
+    failures.push(`src-rewrite: click sent ${JSON.stringify(cta ?? null)}; expected a cta_click carrying source shotsgate`)
+  }
+
+  // An untagged visit must be left exactly as it was.
+  const plain = await ctx.newPage()
+  await plain.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  const plainHrefs = await plain.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
+  if (plainHrefs.some((h) => h !== '/register')) {
+    failures.push(`src-rewrite: an untagged homepage grew a parameter -> ${JSON.stringify(plainHrefs)}`)
+  }
+  rows.push(`browser  src-rewrite   ${tagged}/6 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
+  await ctx.close()
+}
+
 await browser.close()
 
 console.log(`\n${BASE}\n`)

@@ -1888,6 +1888,98 @@ ok('[pulse] forty playground writes from one network do not cost that visitor th
    after9.every((c) => c === 204) && JSON.stringify(floodRows9) === JSON.stringify(['cta_click:1', 'playground_run:40']),
    `statuses ${after9.join('/')}, rows ${floodRows9.join(', ') || 'none'}`)
 
+// ---------------------------------------------------------------- source: which surface sent the visit
+// 2026-09-20. Until migration 012 every row in site_pulse was anonymous as to
+// origin and so was every row in accounts, so a registration arriving from a
+// directory listing was indistinguishable from one arriving from the paid
+// campaign. That was survivable with one channel running and stops being so
+// with two, because the funnel tiles on /admin are the only read the ad spend
+// buys. These gates check the column end to end AND the two places the value
+// has to survive a handoff, which is where this kind of change actually fails.
+console.log('\n[source] a tagged visit stays tagged from the landing page to the form')
+const { readFileSync: readFileSync9 } = await import('node:fs')
+const ROOT9 = new URL('../../', import.meta.url).pathname
+const SRC9 = 'harnesssrc'
+const homeTagged9 = await fetch(`${API}/?src=${SRC9}`).then((r) => r.text())
+
+// 1. One rule, two runtimes. The page decides whether to send a label and the
+// handler decides whether to store it, and they are different files in
+// different languages. Drift here is silent and one-directional: the page
+// sends what the server drops, and the surface reads "that directory sent
+// nobody" rather than "the gate disagreed with itself".
+const serverRe9 = (readFileSync9(`${ROOT9}/src/lib/source.ts`, 'utf8').match(/SOURCE_RE = (\/.*\/)\n/) ?? [])[1] ?? 'server?'
+const clientRe9 = (readFileSync9(`${ROOT9}/src/ui/pulse-client.ts`, 'utf8').match(/return (\/.*\/)\.test\(v\)/) ?? [])[1] ?? 'client?'
+ok('[source] the page and the handler apply the same pattern, character for character',
+   serverRe9 === clientRe9 && serverRe9 !== 'server?', `server ${serverRe9} vs client ${clientRe9}`)
+
+// 2. The page tags its own links to /register. Six of them on the homepage,
+// from three shared components across six routes, which is why the rewrite is
+// one loop where the beacon already lives rather than a parameter threaded
+// through nav, the tier card and the footer.
+//
+// This gate reads the SERVED script, so it goes red if the loop is dropped.
+// It does not prove the rewrite happens -- that needs a browser and is gated
+// in shots.mjs, which clicks one of these links and reads the href back.
+const taggedJs9 = scripts9(homeTagged9).join('\n')
+const anchors9 = (homeTagged9.match(/<a [^>]*href="\/register"/g) ?? []).length
+ok('[source] the homepage carries the /register links the rewrite is written against, and the loop that rewrites them',
+   anchors9 === 6 && taggedJs9.includes("querySelectorAll('a[href=\"/register\"]')")
+     && taggedJs9.includes("setAttribute('href', '/register?src='"),
+   `${anchors9} anchors (expected 6)`)
+
+// 3. And the click beacon still matches them AFTER the rewrite. An exact
+// attribute selector matches nothing once the href gains a query string: the
+// beacon would go silent on exactly the traffic the label was added to
+// measure, while every string-presence check above stayed green. Break that
+// proved it: the selector narrowed back to a[href="/register"] alone, and this
+// gate was the only one that went red.
+const ctaSel9 = (taggedJs9.match(/var CTA_LINKS = document\.querySelectorAll\('([^']*)'\)/) ?? [])[1] ?? ''
+const acceptsTagged9 = ctaSel9.split(',').map((x) => x.trim())
+  .some((sel) => sel.startsWith('a[href^="') && '/register?src=x'.startsWith(sel.slice(9, -2)))
+const acceptsPlain9 = ctaSel9.includes('a[href="/register"]')
+ok('[source] the cta_click selector accepts a /register link both before and after it is tagged',
+   ctaSel9 !== '' && acceptsPlain9 && acceptsTagged9, `selector ${JSON.stringify(ctaSel9)}`)
+
+// 4. The label reaches the payload. Read from the page's own URL and nothing
+// else: not the referrer, not the user agent.
+ok('[source] the beacon reads src from the page URL and puts it on the payload',
+   taggedJs9.includes('[?&]src=') && taggedJs9.includes('payload.source = SRC'))
+
+// 5. The write, end to end, and the rule that decides what is stored. The
+// handler awaits the insert before answering, so the row is there when the
+// 204 is.
+const vTag9 = `src9${Date.now()}`
+const postS9 = (body) => fetch(`${API}/pulse`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                 body: JSON.stringify(body) }).then((r) => r.status)
+const sOk9 = await postS9({ event: 'cta_click', view_id: `${vTag9}a`, source: SRC9 })
+const sUp9 = await postS9({ event: 'cta_click', view_id: `${vTag9}b`, source: 'HarnessSRC' })
+const sBad9 = await postS9({ event: 'cta_click', view_id: `${vTag9}c`, source: 'no spaces!' })
+const sLong9 = await postS9({ event: 'cta_click', view_id: `${vTag9}d`, source: 'x'.repeat(40) })
+const sNone9 = await postS9({ event: 'cta_click', view_id: `${vTag9}e` })
+const tagRows9 = (await sql`SELECT view_id, source FROM site_pulse WHERE view_id LIKE ${vTag9 + '%'} ORDER BY view_id`)
+  .map((r) => `${r.viewId.slice(-1)}=${r.source ?? 'null'}`)
+ok('[source] a well-formed label is stored and an uppercase one is folded to the same row value',
+   [sOk9, sUp9].every((c) => c === 204) && tagRows9[0] === `a=${SRC9}` && tagRows9[1] === `b=${SRC9}`,
+   `statuses ${sOk9}/${sUp9}, rows ${tagRows9.join(', ') || 'none'}`)
+
+// 6. Why the schema says .catch(null) and not a refusal. A junk label must
+// cost the row its source and never the row: otherwise anyone who shares a
+// link with a mangled parameter is deleting our funnel for us.
+ok('[source] a junk or over-long label costs the row its source, never the row itself',
+   [sBad9, sLong9, sNone9].every((c) => c === 204) && tagRows9.length === 5
+     && tagRows9.slice(2).every((r) => r.endsWith('=null')),
+   `statuses ${sBad9}/${sLong9}/${sNone9}, rows ${tagRows9.join(', ') || 'none'}`)
+
+// 7. /admin reports the slice, and says out loud that it does not sum to the
+// tiles. The paragraph above those tiles read "no source column exists yet"
+// until this commit: a claim about our own data, on our own surface, goes
+// stale in the same commit that makes it false or it does not go at all.
+const adminSrc9 = await fetch(`${API}/admin`, { headers: { Authorization: `Bearer ${process.env.ADMIN_SECRET}` } })
+  .then((r) => r.text()).catch(() => '')
+ok('[source] /admin shows the tagged slice and no longer claims the column does not exist',
+   adminSrc9.includes('Tagged surfaces') && adminSrc9.includes(SRC9) && !adminSrc9.includes('no source column exists yet'),
+   adminSrc9 ? `${adminSrc9.length} bytes` : 'admin not fetched (ADMIN_SECRET set?)')
+
 // ---------------------------------------------------------------- legal: one date per page
 // /privacy's visible "Last updated" and the dateModified in its JSON-LD (which
 // is also the sitemap's lastmod) read the same registry row in src/ui/site.ts
