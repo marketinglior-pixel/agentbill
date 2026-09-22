@@ -422,6 +422,15 @@ const PLAYGROUND_SRC = `
   for (var ti = 0; ti < TRY_LINKS.length; ti++) {
     TRY_LINKS[ti].addEventListener('click', function(){ pulse('try_click'); });
   }
+  // This page loaded, in our own rows, 2026-09-22. Meta's pixel is a
+  // third-party script and desktop browsers block it: between 20.09 and 22.09
+  // the campaign counted 40 desktop link clicks and the pixel saw seven landing
+  // page views, so the funnel had no first step of its own. This beacon goes
+  // from our script to our origin, once per load, and carries the ?src= label
+  // like every other event, which is what lets /admin read the funnel per
+  // surface from the landing onward. Above the playground guard on purpose: a
+  // page fact, not a playground fact.
+  pulse('page_view');
   if (!el('run')) return;
 
   var task = null, timer = null, running = false, idx = 0;

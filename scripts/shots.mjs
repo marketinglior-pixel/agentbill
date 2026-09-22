@@ -373,6 +373,14 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   })
   await page.goto(`${BASE}/?src=shotsgate`, { waitUntil: 'networkidle' })
 
+  // The load itself, 2026-09-22: exactly one page_view per load, carrying the
+  // label, sent before anyone clicks anything. The route above answers it, so
+  // nothing here reaches the live table.
+  const pv = beacons.filter((b) => b.event === 'page_view')
+  if (pv.length !== 1 || pv[0].source !== 'shotsgate') {
+    failures.push(`page-view: ${pv.length} page_view beacon(s) on a tagged load, first ${JSON.stringify(pv[0] ?? null)}; expected exactly one carrying source shotsgate`)
+  }
+
   const hrefs = await page.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
   const tagged = hrefs.filter((h) => h === '/register?src=shotsgate').length
   if (hrefs.length !== 6 || tagged !== 6) {
@@ -390,14 +398,25 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
     failures.push(`src-rewrite: click sent ${JSON.stringify(cta ?? null)}; expected a cta_click carrying source shotsgate`)
   }
 
-  // An untagged visit must be left exactly as it was.
+  // An untagged visit must be left exactly as it was, and its load is counted
+  // with no source, never a guessed one.
   const plain = await ctx.newPage()
+  const plainBeacons = []
+  await plain.route('**/pulse', async (route) => {
+    try { plainBeacons.push(JSON.parse(route.request().postData() ?? '{}')) } catch {}
+    await route.fulfill({ status: 204, body: '' })
+  })
   await plain.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   const plainHrefs = await plain.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
   if (plainHrefs.some((h) => h !== '/register')) {
     failures.push(`src-rewrite: an untagged homepage grew a parameter -> ${JSON.stringify(plainHrefs)}`)
   }
+  const plainPv = plainBeacons.filter((b) => b.event === 'page_view')
+  if (plainPv.length !== 1 || 'source' in plainPv[0]) {
+    failures.push(`page-view: ${plainPv.length} page_view beacon(s) on an untagged load, first ${JSON.stringify(plainPv[0] ?? null)}; expected exactly one with no source`)
+  }
   rows.push(`browser  src-rewrite   ${tagged}/6 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
+  rows.push(`browser  page-view     tagged load ${pv.length} beacon(s) src ${pv[0]?.source ?? 'none'}, plain load ${plainPv.length} beacon(s) src ${plainPv[0]?.source ?? 'none'}`)
   await ctx.close()
 }
 

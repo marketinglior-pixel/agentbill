@@ -1821,6 +1821,13 @@ for (const [name, html] of [['the console first run', virgin8], ['the console af
 //                                               the unhashed script beginning !function(f,b,e,v
 //   drop 'try_click' from the enum (09-18, PR 2) "land as rows" read cta_click, register_view;
 //                                               "list still closed" read 2 rows
+//   remove pulse('page_view') (09-22) ......... "fires page_view once" read 0 call(s), and the
+//                                               shots.mjs browser gate read 0 beacons on both loads
+//   drop 'page_view' from the enum (09-22) .... tsc refused the build: the bucket expression
+//                                               compares event to a name the enum no longer has
+//   page_view routed to the funnel bucket ..... the load-flood gate read page_view:8, no click,
+//                                               and two [source] writes after it were dropped too
+//   page_views dropped from the by-source query the /admin page-loads gate read 0 in the first cell
 // Every other gate in this file stayed green under every one of those breaks.
 console.log('\n[pulse] the funnel events between a landing page view and an account row')
 const home9 = await fetch(`${API}/`).then((r) => r.text())
@@ -1868,12 +1875,47 @@ const post9 = (body) => fetch(`${API}/pulse`, { method: 'POST', headers: { 'Cont
 const st9 = [await post9({ event: 'cta_click', view_id: view9 }),
              await post9({ event: 'register_view', view_id: view9 }),
              await post9({ event: 'try_click', view_id: view9 }),
+             await post9({ event: 'page_view', view_id: view9 }),
              await post9({ event: 'cta_view', view_id: view9 })]
 const rows9 = (await sql`SELECT event FROM site_pulse WHERE view_id = ${view9} ORDER BY event`).map((r) => r.event)
-ok('[pulse] cta_click, register_view and try_click are on the allowlist and land as rows',
-   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'register_view', 'try_click']), rows9.join(', ') || 'no rows')
+ok('[pulse] cta_click, page_view, register_view and try_click are on the allowlist and land as rows',
+   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'page_view', 'register_view', 'try_click']), rows9.join(', ') || 'no rows')
 ok('[pulse] and the list is still closed: an unknown name is dropped and still answers 204',
-   st9.every((c) => c === 204) && rows9.length === 3, `statuses ${st9.join('/')}, ${rows9.length} rows`)
+   st9.every((c) => c === 204) && rows9.length === 4, `statuses ${st9.join('/')}, ${rows9.length} rows`)
+// page_view, 2026-09-22: the funnel's first step in our own rows. Once per
+// load, after the helper it calls and before the playground guard, so a page
+// with no playground on it (or a guard that returns early) still counts the
+// load. Breaks that proved it, each restored byte-identical: the call
+// removed (0 on the page); the call moved below the guard (order red);
+// 'page_view' dropped from the enum (the "land as rows" gate above read three
+// names and the closed-list gate read 3 rows).
+const pvCalls9 = (homeJs9.match(/pulse\('page_view'\)/g) ?? []).length
+const pvAt9 = homeJs9.indexOf("pulse('page_view')")
+const guardAt9 = homeJs9.indexOf("if (!el('run')) return")
+ok('[pulse] the homepage fires page_view once per load, after the helper and before the playground guard',
+   pvCalls9 === 1 && homeJs9.indexOf('function pulse(') < pvAt9 && guardAt9 > -1 && pvAt9 < guardAt9,
+   `${pvCalls9} call(s); helper@${homeJs9.indexOf('function pulse(')} page_view@${pvAt9} guard@${guardAt9}`)
+// And /admin reads the loads per surface and for the week. Two tagged loads
+// are written and the row for that label has to show them in its first
+// numeric cell as "30d / 7d", both 2, because they are minutes old and inside
+// both windows; the tiles carry the week under each total. Placed BEFORE the
+// load flood below on purpose: the flood fills this address's page bucket for
+// the hour, and a tagged load written after it is dropped, which is how the
+// first version of this gate read "0 / 0" on code that was right. The label
+// is minted per run: on a database that survives between runs a fixed label
+// accumulates, and this gate read "4 / 4" and "6 / 6" on code that was right
+// before it was made unique. Break that proved it: the page_views column
+// dropped from the by-source query, and the row's first cell read 0.
+const pvSrc9 = `pv${Date.now().toString(36)}`
+await post9({ event: 'page_view', view_id: `${view9}pv1`, source: pvSrc9 })
+await post9({ event: 'page_view', view_id: `${view9}pv2`, source: pvSrc9 })
+const adminPv9 = await fetch(`${API}/admin`, { headers: { Authorization: `Bearer ${process.env.ADMIN_SECRET}` } })
+  .then((r) => r.text()).catch(() => '')
+const srcRow9 = adminPv9.match(new RegExp(`<td><code>${pvSrc9}</code></td>\\s*<td[^>]*>(\\d+) <span class="muted">/ (\\d+)</span></td>`)) ?? []
+ok('[pulse] /admin reports page loads for a tagged surface, 30 days and 7 days, and the tiles carry the week',
+   srcRow9[1] === '2' && srcRow9[2] === '2' && adminPv9.includes('Homepage: page loads')
+     && /Last 7 days: \d+/.test(adminPv9) && adminPv9.includes('Page loads (30d / 7d)'),
+   srcRow9.length ? `row reads ${srcRow9[1]} / ${srcRow9[2]}` : (adminPv9 ? 'no page-loads cell for the tagged source' : 'admin not fetched (ADMIN_SECRET set?)'))
 // Two buckets, not one. Forty playground writes from one network and then a
 // click through: under the single bucket this change was first written with,
 // the click was the forty-first write and vanished into a 204, so the visitor
@@ -1887,6 +1929,31 @@ const floodRows9 = (await sql`SELECT event, count(*)::int AS n FROM site_pulse W
 ok('[pulse] forty playground writes from one network do not cost that visitor the click through',
    after9.every((c) => c === 204) && JSON.stringify(floodRows9) === JSON.stringify(['cta_click:1', 'playground_run:40']),
    `statuses ${after9.join('/')}, rows ${floodRows9.join(', ') || 'none'}`)
+// And a third bucket for loads, 2026-09-22. An office behind one address is
+// many people loading the page in an hour; if a load shared the funnel bucket,
+// the thirtieth visitor's click through would be the sixteenth write and gone.
+// Thirty-one loads are posted; the bucket holds thirty an hour and this
+// address has already written three loads above (one on the allowlist gate,
+// two tagged), so 27 land here and the rest are dropped, while a click and a
+// /register load after them still land. The count is asserted as a range
+// rather than a number so a gate added above this one does not move it, and
+// the range is still a gate: routed to the funnel bucket, page_view read 8
+// and neither the click nor the /register load after it landed; with no cap
+// at all it would read 31.
+// The two writes after the flood are funnel events, not a playground run: the
+// forty-run flood above has already filled this address's playground bucket
+// for the hour, and the first version of this gate asked for a run and read
+// its absence as the page bucket's fault.
+const pv9 = `pv9${Date.now()}`
+for (let i = 0; i < 31; i++) await post9({ event: 'page_view', view_id: `${pv9}-${i}` })
+const afterPv9 = [await post9({ event: 'cta_click', view_id: `${pv9}-c` }),
+                  await post9({ event: 'register_view', view_id: `${pv9}-v` })]
+const pvRows9 = Object.fromEntries((await sql`SELECT event, count(*)::int AS n FROM site_pulse WHERE view_id LIKE ${pv9 + '%'} GROUP BY event`)
+  .map((r) => [r.event, r.n]))
+ok('[pulse] page loads from one network fill their own bucket at thirty an hour, and the click and the /register load after them still land',
+   afterPv9.every((c) => c === 204) && pvRows9.cta_click === 1 && pvRows9.register_view === 1
+     && pvRows9.page_view >= 27 && pvRows9.page_view <= 30,
+   `statuses ${afterPv9.join('/')}, rows ${JSON.stringify(pvRows9)}`)
 
 // ---------------------------------------------------------------- source: which surface sent the visit
 // 2026-09-20. Until migration 012 every row in site_pulse was anonymous as to
@@ -1979,6 +2046,7 @@ const adminSrc9 = await fetch(`${API}/admin`, { headers: { Authorization: `Beare
 ok('[source] /admin shows the tagged slice and no longer claims the column does not exist',
    adminSrc9.includes('Tagged surfaces') && adminSrc9.includes(SRC9) && !adminSrc9.includes('no source column exists yet'),
    adminSrc9 ? `${adminSrc9.length} bytes` : 'admin not fetched (ADMIN_SECRET set?)')
+
 
 // ---------------------------------------------------------------- legal: one date per page
 // /privacy's visible "Last updated" and the dateModified in its JSON-LD (which
