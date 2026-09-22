@@ -260,14 +260,14 @@ try {
 
 ---
 
-## Pricing for outcomes, not tokens
+## Units for outcomes, not tokens
 
-Most billing tools count *events*. They have no concept of "did the task actually succeed?"
+Most usage meters count *events*. They have no concept of "did the task actually succeed?"
 
-AgentBill does. The credit count is a function of the result. You decide what success means:
+AgentBill does. The unit count is a function of the result. You decide what success means:
 
 ```python
-# Support agent, charge credits only when the ticket is resolved
+# Support agent, count units only when the ticket is resolved
 @meter(
     event="ticket_resolved",
     customer_id_from="customer_id",
@@ -279,7 +279,7 @@ async def resolve_ticket(customer_id: str, ticket_id: str) -> dict:
 ```
 
 ```python
-# Coding agent, charge credits only when tests pass
+# Coding agent, count units only when tests pass
 @meter(
     event="code_generated",
     customer_id_from="customer_id",
@@ -292,7 +292,7 @@ async def generate_code(customer_id: str, spec: str) -> dict:
 ```
 
 ```python
-# Research agent, charge by volume processed
+# Research agent, count by volume processed
 @meter(
     event="research_completed",
     customer_id_from="customer_id",
@@ -303,42 +303,35 @@ async def research(customer_id: str, topic: str) -> dict:
     # returns {"summary": "...", "pages_processed": 14}
 ```
 
-If credits resolve to `0`, no event is recorded. The customer is not charged. Your margins stay intact.
+If the units resolve to `0`, no event is recorded and nothing is drawn from that customer's balance.
 
 ---
 
-## Why AgentBill? (vs. Metronome / Orb / Stripe)
-
-**Metronome and Orb** are excellent for SaaS products. They're built around usage records, pricing tiers, and invoicing. If you're building a database or an API with predictable units, use them.
-
-AgentBill is different in two ways:
+## Why AgentBill?
 
 ### 1. The ceiling is bound to a job, not to a month
 
-Metronome and Orb record usage *after the fact*. They have no way to stop an expensive operation
-before it starts.
-
-Provider spend caps do stop things, and they are real. What they are bound to is a project, or an
+A usage meter records after the fact, so the number arrives with the invoice. Provider spend caps
+are consulted before the call, and they are real. What they are bound to is a project, or an
 organization over a calendar month, or one session on that vendor's own harness. A 3-hour research
 loop spread across two providers and a scraping tool is none of those.
 
 AgentBill's ceiling is bound to a `task_ref` you choose. If the units already used plus this call's
 estimate would cross it, preflight answers `approved: false` and the SDK raises before your provider
-call goes out.
+call goes out. Your code decides what the job does next.
 
 ```
-Metronome/Orb:   run → bill → (oops, over budget)
+Usage meter:     run → record → the number arrives with the invoice
 Monthly cap:     run → run → run → ... → dark until the 1st
-AgentBill:       check this job's total → [refused] → run → settle
+AgentBill:       consult this job's ceiling → approved: false → your code decides → settle
 ```
 
 This matters when a single agent run costs $0.80 on a good day and $43 on a bad one.
 
 ### 2. Lives inside your function
 
-Metronome requires you to emit events from your infrastructure. AgentBill is a decorator: it wraps
-your function directly and handles the preflight, the reservation, the settle, idempotency and error
-handling.
+Nothing to emit from your infrastructure. AgentBill is a decorator: it wraps your function directly
+and handles the preflight, the reservation, the settle, idempotency and error handling.
 
 And there is no proxy in your request path. Your provider call is still yours; AgentBill answers a
 separate allow/deny question next to it.
@@ -465,21 +458,11 @@ Requires: Node 20+, PostgreSQL 14+
 - [x] Per-call ceiling and per-customer balances
 - [x] Outcome-based metering (`units=lambda`)
 - [x] Live console at `/app`
-- [ ] Stripe Connect, bill your customers directly
 - [ ] Webhooks, alerts at 80% and 100% credit usage
 - [ ] Multi-signal outcome support
 - [ ] Team accounts
 
 ---
 
-## Why not Stripe directly?
-
-Stripe's metered billing requires: a product, a price, a customer, a subscription, a subscription item, and then a usage record per event. That's 6 API calls and 47 pages of documentation to charge someone $2.
-
-Stripe also has no concept of "did the task succeed?" or "stop before it starts."
-
-AgentBill handles all of that behind a single decorator.
-
----
-
-Built for developers who ship agents and want to get paid fairly for what they actually deliver.
+One ceiling per job, consulted before the call goes out. preflight answers `approved: false`; your
+code decides what happens next.

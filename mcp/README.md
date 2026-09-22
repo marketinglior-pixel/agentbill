@@ -9,7 +9,7 @@ One spend ceiling for one agent job, exposed as MCP tools. Bound to a `task_ref`
 Exposes two tools to any MCP-compatible agent host (Claude Code, Cursor, Windsurf, etc.):
 
 - `preflight(agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling, idempotency_key)`. Check budget before starting work; answers approved=False with a reason when a ceiling or balance is spent. Pass `task_ref` with a `task_ceiling` to give one job a single cross-call budget that every later call in the job consults, and `idempotency_key` so a retried check cannot reserve the budget twice.
-- `record_event(agent_id, units, customer_id, metadata)`. Bill a customer after work completes. Idempotent.
+- `record_event(agent_id, units, customer_id, metadata)`. Record what the work used against that customer's balance, after it completes. Idempotent.
 
 ## Install
 

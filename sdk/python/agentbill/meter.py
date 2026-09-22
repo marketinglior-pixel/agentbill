@@ -56,8 +56,8 @@ class BudgetExhaustedError(Exception):
 class AgentBillError(Exception):
     """Unexpected AgentBill error (network failure, 5xx response).
 
-    By default the decorator raises this so your agent doesn't bill
-    silently on server errors. Override this by wrapping the call.
+    By default the decorator raises this so a server error is never recorded
+    as a silent success. Override this by wrapping the call.
     """
 
 
@@ -273,14 +273,14 @@ def meter(
     """Decorator that records a billable event after the wrapped function returns.
 
     The event is submitted AFTER the function succeeds. If the function raises,
-    no event is recorded and your customer is not billed.
+    no event is recorded and nothing is drawn from that customer's balance.
 
     Args:
-        event:            Event type label (snake_case). Shown in dashboard and Stripe.
+        event:            Event type label (snake_case). Shown in the console.
         units:            Billable units per call. Default 1.
         customer_id:      Fixed customer identifier.
         customer_id_from: Name of a function parameter to read customer_id from.
-        metadata:         Static key-value pairs attached to every event (not billed).
+        metadata:         Static key-value pairs attached to every event (not counted).
         preflight:        If True, check budget BEFORE running the function. Raises
                           BudgetExhaustedError immediately if the customer's balance is spent,
                           preventing any expensive LLM calls from being made.
@@ -304,7 +304,7 @@ def meter(
         def generate_report(date: str) -> bytes:
             ...
 
-        # Batch: bill by volume (e.g. pages processed)
+        # Batch: count by volume (e.g. pages processed)
         @meter(event="pages_processed", customer_id_from="customer_id", units=10)
         async def process_document(customer_id: str, path: str) -> list:
             ...

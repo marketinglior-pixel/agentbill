@@ -46,7 +46,7 @@ Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, def
 
 ### `preflight(options)`
 
-Check every budget before the call runs, so the expensive call never happens.
+Consult every ceiling before the call runs. A refusal arrives before the expensive call is made; your code decides what happens next.
 
 **One rule, identical in the Python SDK: it throws when your spend rule refused the call, and returns a result when AgentBill's own billing did.**
 

@@ -9,9 +9,9 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP(
     "agentbill",
     instructions=(
-        "AgentBill is billing infrastructure for AI agents. "
-        "Call preflight() before starting any agent work to check if the customer has budget. "
-        "Call record_event() after work completes to bill the customer. "
+        "AgentBill is one spend ceiling per agent job, consulted before the call goes out. "
+        "Call preflight() before starting any agent work to check if the job and the customer have units left. "
+        "Call record_event() after work completes to record what it used against that customer's balance. "
         "Set AGENTBILL_API_KEY in your environment before use."
     ),
 )
