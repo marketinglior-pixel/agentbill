@@ -13,8 +13,16 @@ gate() { # name  expected_count  actual_count  detail
 }
 
 # design.md: "No em dash. Anywhere. Grep before shipping."
-n=$(grep -rn '—' src/ui src/routes src/lib 2>/dev/null | wc -l | tr -d ' ')
-gate "no em dash on a rendered surface" 0 "$n" "$(grep -rn '—' src/ui src/routes src/lib 2>/dev/null | head -5)"
+# The entity form too, 2026-09-22: &mdash; renders the same dash and three of
+# them sat on / (a figure label, the plate label, the thesis) while this gate
+# read 0, because it grepped for the character and not for what the browser
+# draws. Checked against a deliberate violation: an &mdash; planted in
+# home.ts makes this gate read 1.
+# A <blockquote> line is exempt: the blog quotes third parties byte for byte
+# and five [blog] gates hold those quotes to their source, so a dash inside
+# one is theirs to keep and not ours to edit.
+n=$(grep -rn '—\|&mdash;' src/ui src/routes src/lib 2>/dev/null | grep -v '<blockquote>' | wc -l | tr -d ' ')
+gate "no em dash on a rendered surface, literal or &mdash;" 0 "$n" "$(grep -rn '—\|&mdash;' src/ui src/routes src/lib 2>/dev/null | grep -v '<blockquote>' | head -5)"
 
 # A source file carrying a NUL byte is binary to git (no line diff, no blame)
 # and invisible to every grep gate in this file, because grep without -a stops

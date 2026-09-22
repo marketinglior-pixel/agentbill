@@ -1419,8 +1419,37 @@ ok('[fold] the argument survives a film that never plays',
    fold8.includes('poster="/hero-poster.jpg"') && /aria-label="[^"]+"/.test(fold8)
      && fold8.includes('job-142 burns down') && fold8.includes('researcher asks 12'),
    'the film is the only thing saying what happens')
+// 2026-09-22: the sub under the h1 is a locked sentence (the pause-Broad,
+// hygiene, one-targeted-relaunch ticket). "not a proxy" left the sub with it
+// and lives in the request-path row's eyebrow, so this gate follows the
+// guarantee rather than the old markup: the h1 still carries the contrast, the
+// page still says no proxy, and the sub is the sentence below, byte for byte
+// once its tags and line breaks are folded. The em dash the ticket's own text
+// carried is a period here: voice-dna bans the character on every surface and
+// hygiene greps for the literal, so the entity form is asserted on the hero
+// too, since &mdash; renders the same dash and no grep in this repo sees it.
+const LOCKED_SUB8 = 'AgentBill is a per-task spending ceiling for autonomous AI agents. Before the next model call, preflight returns approved: false when this task_ref is out of units. Your code decides whether to stop, skip, or replan.'
+const subHtml8 = (hero8.match(/<p class="sub">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const subText8 = subHtml8.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 ok('[fold] the copy still says what the ceiling is and is not',
-   fold8.includes('not on the month') && fold8.includes('not a proxy'))
+   fold8.includes('not on the month') && fold8.includes('No proxy') && subText8.startsWith('AgentBill is a per-task spending ceiling'),
+   `sub reads: ${subText8.slice(0, 80)}`)
+ok('[fold] the sub under the h1 is the locked sentence, byte for byte, and the hero carries no em dash',
+   subText8 === LOCKED_SUB8 && !hero8.includes('&mdash;') && !hero8.includes('\u2014'),
+   subText8 === LOCKED_SUB8 ? 'an em dash (literal or &mdash;) is in the hero' : `sub reads: ${subText8}`)
+// The locked sentence says "whether to stop, skip, or replan", and that "stop"
+// is the reader's verb: the sentence exists to say whose decision the refusal
+// is. Everything else in the family stays banned on the hero, by name here and
+// by the [onboarding] loop below, which reads the hero with this one phrase cut
+// out exactly. Mutation that proved both: "stops runaway" planted in the sub,
+// this gate and the loop's hero line red, everything else green.
+ok('[fold] the hero never says we stop the run: no stops, stopped, runaway, or "<we|it|preflight> stop"',
+   !/\bstops\b|\bstopped\b|\bstopping\b|\brunaway\b|\b(we|it|agentbill|preflight|the sdk)\s+stops?\b/i.test(visible8(hero8)),
+   (visible8(hero8).match(/\bstops\b|\bstopped\b|\bstopping\b|\brunaway\b|\b(we|it|agentbill|preflight|the sdk)\s+stops?\b/gi) ?? []).join(', '))
+// The served markup wraps the sentence across source lines, so the cut has to
+// tolerate a line break inside it: the first version matched single spaces,
+// cut nothing, and the loop went red on the locked sentence itself.
+const heroBan8 = hero8.replace(/whether to stop,\s+skip,\s+or replan/g, ' ')
 // Fig. 1: the dual state, DRAWN. Three meters under the cap (a clock, an
 // org-month, a USD window), this task_ref refused, one ceiling line across all
 // four. The numbers are read off the plate's foot line rather than typed here:
@@ -1779,7 +1808,7 @@ ok('[band] every evidence line is arithmetic or a quote: a $ figure, or a senten
    evids8.length > 0 && evids8.every(evidenceShaped8),
    `${evids8.filter((e) => !evidenceShaped8(e)).length} line(s) with neither`)
 for (const [name, html] of [['the console first run', virgin8], ['the console after a save', mine8],
-                            ['the console after the first refusal', afterRefuse8], ['the homepage fold', hero8],
+                            ['the console after the first refusal', afterRefuse8], ['the homepage fold, outside the locked sentence', heroBan8],
                             ['the blog post on monthly caps, outside its quotes and samples', blogProse8],
                             ['the homepage evidence band, outside its quotes', bandProse8],
                             ['/register', register8], ['the console login card', login8b]]) {

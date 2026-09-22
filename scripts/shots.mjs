@@ -116,6 +116,17 @@ const FOLD_ACTION_BUDGET = { desktop: 150, mobile: 150 }
 // cut in half.
 const FORM_ACTION_VISIBLE = new Set(['desktop', 'mobile'])
 
+// The homepage hero's one button, against the fold, 2026-09-22. The sub under
+// the h1 became a locked three-sentence paragraph, longer than the one it
+// replaced, and nothing in this file read the hero at all: every fold check
+// above is /register's. Enforced on the desktop geometry the campaign buys
+// (1440x735, the tightest laptop in real use). On a phone the sticky bar is
+// the primary action and the hero's button is measured and printed, not
+// enforced, for the same reason the key screen's action has no budget at
+// `narrow`: the plate under the copy is taller than the viewport there and a
+// number that can only be met by deleting the sentence is not a gate.
+const HERO_ACTION_VISIBLE = new Set(['desktop'])
+
 const VIEWPORTS = [
   ['desktop', 1440, 735, false],
   ['mobile', 390, 844, true],
@@ -235,6 +246,13 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           }
           return { vh: window.innerHeight, answer: top('.where'), line: top('#key-export'), action: top('.btn-go') }
         })(),
+        // The homepage hero's button. The selector exists on / alone, so every
+        // other page reads null here and the check below is keyed on the page.
+        hero: (() => {
+          const b = document.querySelector('.hero-cta a.btn-lg')
+          if (!b || b.offsetParent === null) return null
+          return { vh: window.innerHeight, bottom: Math.round(b.getBoundingClientRect().bottom + window.scrollY) }
+        })(),
         overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
         // An escaped `\${` inside a template literal emits the expression as
         // TEXT. It renders as a paragraph of source at the top of the page, it
@@ -329,11 +347,23 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           }
         }
       }
+      if (name === 'home') {
+        // A renamed or missing button is a failure, not a skip: otherwise this
+        // gate goes quiet on the one page it was added for.
+        if (!m.hero) failures.push(`${vp} ${name}: no .hero-cta a.btn-lg on the homepage, so the hero fold check measured nothing`)
+        else if (HERO_ACTION_VISIBLE.has(vp) && m.hero.bottom > m.hero.vh) {
+          failures.push(`${vp} ${name}: the hero button's bottom edge is ${m.hero.bottom - m.hero.vh}px BELOW the fold`)
+        }
+      }
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)
       if (m.overflowX) failures.push(`${vp} ${name}: scrolls sideways`)
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
       for (const c of m.clipped.slice(0, 4)) failures.push(`${vp} ${name}: ${c}`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
+      if (name === 'home' && m.hero) {
+        const b = m.hero.bottom
+        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.hero.vh}  hero-button-bottom ${b}${b <= m.hero.vh ? '' : ` (+${b - m.hero.vh} BELOW)`}`)
+      }
       if (m.form) {
         const b = m.form.bottom
         rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.form.vh}  submit-bottom ${b === null ? '?' : `${b}${b <= m.form.vh ? '' : ` (+${b - m.form.vh} BELOW)`}`}`)
