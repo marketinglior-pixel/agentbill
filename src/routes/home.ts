@@ -225,7 +225,27 @@ export async function homeRoute(app: FastifyInstance) {
     .hero { padding-block: 96px 104px; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 10fr);
             gap: 80px; align-items: center; }
     h1 { color: var(--white); max-width: 12ch; }
-    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 40ch; line-height: 1.55; }
+    .sub { font-size: var(--fs-lede); color: var(--muted); margin: var(--s5) 0 var(--s6); max-width: 40ch; line-height: 1.55;
+           text-wrap: pretty; }
+    /* A phrase the line break must not cut. The sub is a locked sentence, so
+       the words cannot move; only where the line ends can. Measured on
+       production 2026-09-22 at 1180, 1440, 1536 and 1920: the box is 480px at
+       all four, so every desktop reader got the same two breaks, "autonomous
+       AI / agents" and "Your / code".
+
+       Why the glue is "AI agents." and not "autonomous AI agents.", which was
+       the first attempt: the wider phrase does not fit beside "ceiling for" and
+       pushes the paragraph to five lines, the fifth being "or replan." alone.
+       That trades a split phrase for an orphan, which is not a fix. Measured,
+       both at 480px with the real font loaded: wide glue 5 lines with an
+       orphan, this one 4 lines with neither. The first measurement of all this
+       was taken before document.fonts.ready and disagreed with itself, so the
+       numbers here are the ones taken after it.
+
+       A span rather than &nbsp; because the gate that holds this sentence byte
+       for byte strips tags and would read the entity as six literal
+       characters. */
+    .nb { white-space: nowrap; }
     .hero-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     /* One text link beside the one button, 2026-09-18. The demo sits about two
        screens down on a desktop and three on a phone, and none of the first 40
@@ -517,10 +537,11 @@ ${siteNav('/')}
   <header class="hero wrap">
     <div class="hero-copy">
       <h1>${HEADLINE}</h1>
-      <p class="sub">AgentBill is a per-task spending ceiling for autonomous AI agents. Before the next
+      <p class="sub">AgentBill is a per-task spending ceiling for autonomous
+      <span class="nb">AI agents.</span> Before the next
       model call, preflight returns <span class="mono-in">approved: false</span> when this
-      <span class="mono-in">task_ref</span> is out of units. Your code decides whether to stop, skip,
-      or replan.</p>
+      <span class="mono-in">task_ref</span> is out of units. <span class="nb">Your code</span>
+      decides whether to stop, skip, or replan.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="hero-try" href="#playground">Try it in your browser &rarr;</a>
