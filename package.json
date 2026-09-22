@@ -1,7 +1,7 @@
 {
   "name": "agentbill-api",
   "version": "0.1.0",
-  "description": "Usage-based billing infrastructure for AI agent developers",
+  "description": "One spend ceiling per agent job, consulted before the call goes out. Bound to a task_ref, not to a calendar month.",
   "engines": {
     "node": ">=22"
   },

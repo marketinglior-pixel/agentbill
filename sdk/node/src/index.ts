@@ -1,7 +1,8 @@
 /**
  * agentbill: the Node.js SDK
  *
- * Usage-based billing for AI agents. 3-line integration.
+ * One spend ceiling per agent job, consulted before the call goes out.
+ * Bound to a task_ref, not to a calendar month.
  *
  *   import { meter } from 'agentbill'
  *
@@ -87,7 +88,7 @@ export interface MeterOptions<TArgs extends Record<string, unknown>, TResult> {
   units?: UnitsResolver<TResult>
   /** If true, check budget BEFORE running the function. Throws BudgetExhaustedError immediately if the balance is spent. */
   preflight?: boolean
-  /** Static metadata attached to every event (not billed). */
+  /** Static metadata attached to every event (not counted). */
   metadata?: Record<string, unknown>
   /** Attribute events to a cross-call task budget (created via preflight()). */
   taskRef?: string
@@ -384,10 +385,10 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
 // ---------------------------------------------------------------------------
 
 /**
- * Wraps an async function with usage-based billing.
+ * Wraps an async function so its usage is recorded in units you define.
  *
  * The event is submitted AFTER the function succeeds. If the function throws,
- * no event is recorded and the customer is not billed.
+ * no event is recorded and nothing is drawn from that customer's balance.
  *
  * @example
  * // Basic: reads customer_id from args
@@ -408,7 +409,7 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
  * })
  *
  * @example
- * // Outcome-based: bill 0 units on failure
+ * // Outcome-based: record 0 units on failure
  * const runAgent = meter(fn, {
  *   event: 'ticket_resolved',
  *   customerIdFrom: 'customerId',
@@ -438,7 +439,7 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
 
     const actualUnits = resolveUnits(units as UnitsResolver<TResult>, result)
 
-    // Skip recording if outcome-based billing resolved to 0
+    // Skip recording if the outcome-based unit count resolved to 0
     if (actualUnits > 0) {
       await submitEvent(customerId, event, actualUnits, metadata, taskRef)
     }
