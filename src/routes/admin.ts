@@ -303,19 +303,27 @@ ${topBar('signed in')}
   <h1>Admin</h1>
   <p class="sub">Conversion radar: hot accounts first, sorted by likelihood to pay. Refresh to update.</p>
 
-  <h2>Site pulse, last 30 days</h2>
+  <h2>Site pulse, last 30 days, with the last 7 under each</h2>
   <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Homepage: page loads</div>
+      <div class="stat-value ${pulse.pageViews > 0 ? 'held' : ''}">${pulse.pageViews}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.pageViews}</div>
+    </div>
     <div class="stat">
       <div class="stat-label">Homepage: page views that clicked through to /register</div>
       <div class="stat-value ${pulse.ctaClicks > 0 ? 'held' : ''}">${pulse.ctaClicks}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.ctaClicks}</div>
     </div>
     <div class="stat">
       <div class="stat-label">Homepage: page views that clicked Try it</div>
       <div class="stat-value ${pulse.tryClicks > 0 ? 'held' : ''}">${pulse.tryClicks}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.tryClicks}</div>
     </div>
     <div class="stat">
       <div class="stat-label">/register: page loads</div>
       <div class="stat-value ${pulse.registerViews > 0 ? 'held' : ''}">${pulse.registerViews}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.registerViews}</div>
     </div>
     <div class="stat">
       <div class="stat-label">Playground: page views that ran it (30d)</div>
@@ -324,6 +332,7 @@ ${topBar('signed in')}
     <div class="stat">
       <div class="stat-label">Runs, including repeats</div>
       <div class="stat-value">${pulse.runs}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.runs}</div>
     </div>
     <div class="stat">
       <div class="stat-label">Reached the block</div>
@@ -338,10 +347,12 @@ ${topBar('signed in')}
     A view is one page load, not one person: the token is minted per load and never stored, so
     the same visitor returning counts twice. It is not a signup. A row carries a channel only when
     the link we published put one there (see the table below); organic traffic and the paid campaign
-    both arrive untagged, so the totals above are every source at once. The three funnel tiles are
-    first-party rows as well, so a
+    both arrive untagged, so the totals above are every source at once. The four funnel tiles are
+    first-party rows as well, so a page load or a
     click through that no pixel saw still counts here, and a /register load with no account row
-    after it is the form losing someone. Read Try it beside the click-through: if Try it runs well
+    after it is the form losing someone. The page-load tile starts on 2026-09-22 and is empty
+    before that; it is not a pixel PageView and will not match one, since the pixel is a script
+    desktop browsers block. Read Try it beside the click-through: if Try it runs well
     ahead, the demo has earned a higher place on the page; if neither moves, the fold is the
     problem, not the depth.
     ${pulse.since
@@ -359,9 +370,10 @@ ${topBar('signed in')}
     <thead>
       <tr>
         <th>Source</th>
-        <th>Clicked through</th>
+        <th>Page loads (30d / 7d)</th>
+        <th>Clicked through (30d / 7d)</th>
         <th>Try it</th>
-        <th>/register loads</th>
+        <th>/register loads (30d / 7d)</th>
         <th>Playground runs</th>
         <th>First</th>
         <th>Last</th>
@@ -370,9 +382,10 @@ ${topBar('signed in')}
     <tbody>
       ${pulse.sources.map((row) => `<tr>
         <td><code>${esc(row.source)}</code></td>
-        <td class="${row.ctaClicks > 0 ? 'held' : ''}">${row.ctaClicks}</td>
+        <td class="${row.pageViews > 0 ? 'held' : ''}">${row.pageViews} <span class="muted">/ ${row.pageViews7}</span></td>
+        <td class="${row.ctaClicks > 0 ? 'held' : ''}">${row.ctaClicks} <span class="muted">/ ${row.ctaClicks7}</span></td>
         <td>${row.tryClicks}</td>
-        <td class="${row.registerViews > 0 ? 'held' : ''}">${row.registerViews}</td>
+        <td class="${row.registerViews > 0 ? 'held' : ''}">${row.registerViews} <span class="muted">/ ${row.registerViews7}</span></td>
         <td>${row.runs}</td>
         <td>${row.first.slice(0, 16).replace('T', ' ')}</td>
         <td>${row.last.slice(0, 16).replace('T', ' ')}</td>

@@ -44,6 +44,14 @@ const PulseBody = z.object({
     // was moving the demo up the page on no evidence; this counts whether
     // anyone asks for it first.
     'try_click',
+    // page_view, 2026-09-22: the homepage loaded. Between 20.09 and 22.09 Meta
+    // counted 40 desktop link clicks on the campaign and its pixel saw seven
+    // landing page views; the pixel is a third-party script and desktop
+    // browsers block it, so that number was the pixel's reach and not the
+    // page's. This row is written by our own script to our own origin, once
+    // per load, and carries the ?src= label like every other event, so the
+    // funnel on /admin starts at the landing and not at the first click.
+    'page_view',
   ]),
   // The random per-page-view token from the page. Never a cookie, never
   // localStorage, gone when the tab closes. It exists to separate ten visitors
@@ -78,6 +86,13 @@ const PLAYGROUND_LIMIT = 40
 // 15, not 10, since try_click: a full visit is now up to three funnel writes
 // plus one on /register, and a network is often an office, not a person.
 const FUNNEL_LIMIT = 15
+// A third bucket for page_view, 2026-09-22, for the same reason there are two
+// and not one: a load is not a click. An office behind one address is many
+// people loading the page in an hour, and a load that shared the funnel
+// bucket would spend the click-through of the visitor who came after. Thirty
+// an hour per network: past that the loads stop being recorded and the
+// clicks and the /register loads still are.
+const PAGE_LIMIT = 30
 const IP_WINDOW_MS = 60 * 60 * 1000
 const MAX_ENTRIES = 10_000
 const ipHits = new Map<string, number[]>()
@@ -117,8 +132,9 @@ export async function pulseRoute(app: FastifyInstance) {
 
     const { event, view_id, ceiling, source } = parsed.data
     const playground = event.startsWith('playground_')
-    if (!allowPulse(`${limiterKey(request)}|${playground ? 'pg' : 'funnel'}`,
-                    playground ? PLAYGROUND_LIMIT : FUNNEL_LIMIT)) return done()
+    const bucket = playground ? 'pg' : event === 'page_view' ? 'page' : 'funnel'
+    const limit = playground ? PLAYGROUND_LIMIT : event === 'page_view' ? PAGE_LIMIT : FUNNEL_LIMIT
+    if (!allowPulse(`${limiterKey(request)}|${bucket}`, limit)) return done()
     try {
       await sql`
         INSERT INTO site_pulse (event, view_id, ceiling, source)
