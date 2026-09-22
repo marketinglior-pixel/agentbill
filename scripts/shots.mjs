@@ -246,6 +246,54 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           }
           return { vh: window.innerHeight, answer: top('.where'), line: top('#key-export'), action: top('.btn-go') }
         })(),
+        // How the hero's locked sentence actually breaks. Only a browser can
+        // answer this: the served HTML is one string and says nothing about
+        // where a line ends. Two claims, 2026-09-22.
+        //
+        // (1) A phrase inside a .nb span never wraps. getClientRects() returns
+        //     one rect per line a span occupies, so a length above 1 IS the
+        //     break we are banning, measured rather than inferred.
+        // (2) The last line is not an orphan. This is here because the first
+        //     attempt at the fix produced one: gluing "autonomous AI agents."
+        //     pushed the paragraph to five lines ending in "or replan." alone,
+        //     which is a different defect, not a fix. Without this half, that
+        //     version would have shipped green.
+        sub: (() => {
+          const el = document.querySelector('.hero .sub')
+          if (!el || el.offsetParent === null) return null
+          const nb = [...el.querySelectorAll('.nb')].map((s) => ({
+            text: s.textContent.replace(/\s+/g, ' ').trim(), lines: s.getClientRects().length,
+          }))
+          // Group the words by the top of their own rect: that is the visual line.
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          const lines = new Map(); const r = document.createRange(); let n
+          while ((n = walker.nextNode())) {
+            const t = n.textContent; let i = 0
+            while (i < t.length) {
+              while (i < t.length && /\s/.test(t[i])) i++
+              if (i >= t.length) break
+              let j = i; while (j < t.length && !/\s/.test(t[j])) j++
+              r.setStart(n, i); r.setEnd(n, j)
+              const top = Math.round(r.getBoundingClientRect().top)
+              if (!lines.has(top)) lines.set(top, 0)
+              lines.set(top, lines.get(top) + 1)
+              i = j
+            }
+          }
+          // Tops within a few pixels are the same visual line. The monospace
+          // spans sit on the shared baseline but their rect starts a pixel or
+          // two higher, and an exact-top grouping split them: this printed
+          // "9 lines" for a paragraph of five on the 320px capture. Merging
+          // by a tolerance keeps the number honest at every width.
+          const tops = [...lines.entries()].sort((a, b) => a[0] - b[0])
+          const counts = []
+          let prev = null
+          for (const [top, c] of tops) {
+            if (prev !== null && top - prev <= 6) counts[counts.length - 1] += c
+            else { counts.push(c); prev = top }
+          }
+          return { nb, lineCount: counts.length, lastLineWords: counts[counts.length - 1] ?? 0 }
+        })(),
         // The homepage hero's button. The selector exists on / alone, so every
         // other page reads null here and the check below is keyed on the page.
         hero: (() => {
@@ -348,6 +396,20 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         }
       }
       if (name === 'home') {
+        // The sentence's line breaks. Enforced at desktop, where the measure is
+        // fixed at 54ch and every reader from 1180px up gets the same breaks;
+        // printed but not enforced at mobile and narrow, where the column is
+        // fluid and a break moves with the viewport.
+        if (!m.sub) failures.push(`${vp} ${name}: no .hero .sub, so the line-break check measured nothing`)
+        else {
+          if (m.sub.nb.length !== 2) failures.push(`${vp} ${name}: ${m.sub.nb.length} .nb phrase(s) in the sub, expected 2`)
+          for (const p of m.sub.nb) {
+            if (p.lines > 1) failures.push(`${vp} ${name}: the phrase "${p.text}" is broken across ${p.lines} lines`)
+          }
+          if (vp === 'desktop' && m.sub.lastLineWords <= 2) {
+            failures.push(`${vp} ${name}: the sub's last line is an orphan, ${m.sub.lastLineWords} word(s) over ${m.sub.lineCount} lines`)
+          }
+        }
         // A renamed or missing button is a failure, not a skip: otherwise this
         // gate goes quiet on the one page it was added for.
         if (!m.hero) failures.push(`${vp} ${name}: no .hero-cta a.btn-lg on the homepage, so the hero fold check measured nothing`)
@@ -360,6 +422,9 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
       for (const c of m.clipped.slice(0, 4)) failures.push(`${vp} ${name}: ${c}`)
       if (errs.length) failures.push(`${vp} ${name}: ${errs.length} console error(s): ${errs[0]}`)
+      if (name === 'home' && m.sub) {
+        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     sub ${m.sub.lineCount} lines, last ${m.sub.lastLineWords} word(s), phrases ${m.sub.nb.map((p) => `${p.lines}`).join('/')}`)
+      }
       if (name === 'home' && m.hero) {
         const b = m.hero.bottom
         rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.hero.vh}  hero-button-bottom ${b}${b <= m.hero.vh ? '' : ` (+${b - m.hero.vh} BELOW)`}`)
