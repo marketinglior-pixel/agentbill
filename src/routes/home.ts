@@ -107,7 +107,7 @@ function ceilingFigure(): string {
   ]
   return `<figure class="fig">
       <figcaption class="fig-head">
-        <span class="fig-n">Fig. 1 &mdash; four meters, one account, one minute</span>
+        <span class="fig-n">Fig. 1 &middot; four meters, one account, one minute</span>
         <span class="fig-tag">sample</span>
       </figcaption>
       <div class="plot">
@@ -144,7 +144,7 @@ function ceilingFigure(): string {
 function videoPlate(): string {
   return `<figure class="plate">
       <figcaption class="plate-head">
-        <span>Plate 1 &mdash; job-142 burns down</span>
+        <span>Plate 1 &middot; job-142 burns down</span>
         <span class="plate-meta">0:04 loop &middot; muted</span>
       </figcaption>
       <video class="plate-v" poster="/hero-poster.jpg" preload="none" muted playsinline loop autoplay
@@ -517,9 +517,10 @@ ${siteNav('/')}
   <header class="hero wrap">
     <div class="hero-copy">
       <h1>${HEADLINE}</h1>
-      <p class="sub">Set a shared <span class="mono-in">task_ref</span> budget. Preflight returns
-      <span class="mono-in">approved: false</span> when that job is out. Your code decides what next.
-      SDK you install &mdash; not a proxy.</p>
+      <p class="sub">AgentBill is a per-task spending ceiling for autonomous AI agents. Before the next
+      model call, preflight returns <span class="mono-in">approved: false</span> when this
+      <span class="mono-in">task_ref</span> is out of units. Your code decides whether to stop, skip,
+      or replan.</p>
       <div class="hero-cta">
         <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
         <a class="hero-try" href="#playground">Try it in your browser &rarr;</a>
@@ -537,7 +538,7 @@ ${siteNav('/')}
     <div class="wrap">
       <p class="thesis"><span class="concede">Wall-clock timeouts, org-month meters, and window budgets
       (e.g. ClawGuard USD windows) are real. They meter a clock or an account.</span> A
-      <span class="mono-in sig">task_ref</span> ceiling meters this job &mdash; preflight can return
+      <span class="mono-in sig">task_ref</span> ceiling meters this job: preflight can return
       <span class="mono-in sig">approved: false</span> before the next call; your code decides what next.</p>
       <div class="evid">
         <p>~$300 of unintended API usage over one unattended weekend, under a $3,000/month Enterprise
