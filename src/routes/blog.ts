@@ -4,11 +4,69 @@ import { PLAN_LIMITS } from '../integrations/polar.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath, monthYear } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
+import { CONTENT_CSS } from '../ui/content.js'
 
 // Posts render through the shared content shell in src/ui/docs.ts: one copy of
 // the content CSS, and an "On this page" rail built from each post's <h2>s.
 // Post copy is untouched; only the frame and the closing CTA changed.
 const free = PLAN_LIMITS.free.toLocaleString('en-US')
+
+// The canvas pieces a post adds to the content pages' recipe (CONTENT_CSS),
+// 2026-09-23.
+//
+// A quote and the line that sources it are one card, the homepage's evidence
+// frame: white, the card hairline, --r-card corners, the quote in the ink at
+// the lede size and upright, the attribution and its link under it in the
+// mono. Drawn on the two siblings the post already writes (a <blockquote> and
+// the p.meta after it) rather than on a wrapper, because the em-dash gate
+// exempts a line by its literal <blockquote> tag and five [blog] gates read
+// these quotes against their sources: neither tag moves.
+//
+// The closing "Add preflight to your agents" section is a warm-grey panel, the
+// homepage's band, so a post ends on one frame instead of on a heading, a
+// sentence and a button that happen to be adjacent.
+const POST_CSS = `${CONTENT_CSS}
+  .container blockquote { max-width: none; margin: var(--s5) 0 0; padding: var(--s6) var(--s6) var(--s4);
+                          background: var(--card-bg); border: 1px solid var(--card-line); border-bottom: 0;
+                          border-radius: var(--r-card) var(--r-card) 0 0; }
+  .container blockquote p { font-style: normal; color: var(--text); font-size: var(--fs-lede); line-height: 1.55;
+                            max-width: 60ch; }
+  .container blockquote p:last-child { margin-bottom: 0; }
+  .container blockquote + .meta { max-width: none; margin: 0 0 var(--s5); padding: 0 var(--s6) var(--s6);
+                                  background: var(--card-bg); border: 1px solid var(--card-line); border-top: 0;
+                                  border-radius: 0 0 var(--r-card) var(--r-card); line-height: 1.6; }
+  .container blockquote + .meta a { color: var(--text); }
+  .ct-cta { background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s7) var(--s6);
+            margin-top: var(--s8); }
+  .ct-cta h2 { margin: 0 0 var(--s3); }
+  .ct-cta p { margin-bottom: 0; }
+  .ct-cta .end { margin-top: var(--s5); }
+  @media (max-width: 720px) {
+    .container blockquote { padding: var(--s5) var(--s4) var(--s3); border-radius: var(--r-card-sm) var(--r-card-sm) 0 0; }
+    .container blockquote p { font-size: var(--fs-body); }
+    .container blockquote + .meta { padding: 0 var(--s4) var(--s5); border-radius: 0 0 var(--r-card-sm) var(--r-card-sm); }
+    .ct-cta { padding: var(--s6) var(--s4); border-radius: var(--r-card-sm); }
+  }
+`
+
+// The index: each post is a warm-grey card, its dateline in the label voice
+// above the title, the whole card the link (the title's own anchor, stretched),
+// two across on a desktop and one column on a phone.
+const INDEX_CSS = `${CONTENT_CSS}
+  .ct-posts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); margin-top: var(--s7); }
+  .ct-post { position: relative; display: flex; flex-direction: column; gap: var(--s3); min-width: 0;
+             background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s6); }
+  .ct-post .meta { margin: 0; }
+  .ct-post h2 { font-size: var(--fs-h3); line-height: 1.3; margin: 0; }
+  .ct-post h2 a::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+  .ct-post p { margin: 0; font-size: var(--fs-small); max-width: none; }
+  @media (max-width: 960px) {
+    .ct-posts { grid-template-columns: minmax(0, 1fr); margin-top: var(--s6); }
+  }
+  @media (max-width: 720px) {
+    .ct-post { padding: var(--s5) var(--s4); border-radius: var(--r-card-sm); }
+  }
+`
 
 
 // One definition per post. The title, the description, the reading time and the
@@ -73,6 +131,7 @@ export async function blogRoute(app: FastifyInstance) {
       mainEntity: 'https://agentbill.dev/blog/how-preflight-avoids-double-billing#post',
       og: { type: 'article' },
       current: '',
+      css: POST_CSS,
       body: `
 
   <h1>How preflight avoids double-billing under concurrent load</h1>
@@ -96,8 +155,7 @@ def preflight(customer_id, estimated_units):
     if estimated_units > remaining:
         return {"approved": False}
 
-    return {"approved": True}
-  </pre></div>
+    return {"approved": True}</pre></div>
 
   <p>This reads the current balance, checks if the run fits, and returns a decision. Under a single serial workload it works fine.</p>
 
@@ -108,8 +166,7 @@ Thread A: reads remaining = 10. 8 &lt;= 10. Approved.
 Thread B: reads remaining = 10. 8 &lt;= 10. Approved.
 
 Thread A runs. Uses 8 units. Used = 8.
-Thread B runs. Uses 8 units. Used = 16. Limit exceeded.
-  </pre></div>
+Thread B runs. Uses 8 units. Used = 16. Limit exceeded.</pre></div>
 
   <p>Both reads happen before either write. Both see the same balance. Both get approved. The customer burns 16 units against a 10-unit budget. The check was useless.</p>
 
@@ -130,8 +187,7 @@ WHERE account_id = :account_id
     limit_units IS NULL
     OR used_units + reserved_units + :estimated_units &lt;= limit_units
   )
-RETURNING limit_units, used_units, reserved_units
-  </pre></div>
+RETURNING limit_units, used_units, reserved_units</pre></div>
 
   <p>If budget is available, the UPDATE succeeds and returns the updated row. The reservation is now reflected in <span class="inline">reserved_units</span>, visible to every subsequent transaction.</p>
 
@@ -143,8 +199,7 @@ RETURNING limit_units, used_units, reserved_units
 Thread A: UPDATE adds 8 to reserved_units. reserved = 8. Succeeds.
 Thread B: UPDATE tries to add 8. used + reserved + 8 = 16 > 10. WHERE fails. Blocked.
 
-Thread A runs. Completes. record() converts reserved → used.
-  </pre></div>
+Thread A runs. Completes. record() converts reserved → used.</pre></div>
 
   <p>The database handles the serialization. No application-level locking required.</p>
 
@@ -158,8 +213,7 @@ UPDATE customers
 SET used_units     = used_units + :actual_units,
     reserved_units = reserved_units - :estimated_units
 WHERE account_id = :account_id
-  AND customer_ref = :customer_ref
-  </pre></div>
+  AND customer_ref = :customer_ref</pre></div>
 
   <p>The reserved units come out. The actual units go in. The net balance reflects reality.</p>
 
@@ -173,8 +227,7 @@ WHERE account_id = :account_id
   <div class="code"><pre>
 <span class="comment"># The run failed. Release the reservation, bill nothing.</span>
 <span class="comment"># units must match what preflight reserved.</span>
-client.record(agent_id="researcher", units=200, success=False)
-  </pre></div>
+client.record(agent_id="researcher", units=200, success=False)</pre></div>
 
   <p>The SDK decorator does this for you: it wraps the call in try/except and releases on the way out of a failed run.</p>
 
@@ -185,8 +238,7 @@ client.record(agent_id="researcher", units=200, success=False)
   <div class="code"><pre>
 <span class="comment">-- The invariant every path maintains</span>
 customers.reserved_units    = SUM(units) of open rows for that customer
-task_budgets.reserved_units = SUM(units) of open rows for that task
-  </pre></div>
+task_budgets.reserved_units = SUM(units) of open rows for that task</pre></div>
 
   <p>Which turns the sweep into something boring, and boring is the goal on this path:</p>
 
@@ -200,8 +252,7 @@ WHERE id IN (
   ORDER BY expires_at LIMIT 500
   FOR UPDATE SKIP LOCKED
 )
-RETURNING customer_id, task_ref, units
-  </pre></div>
+RETURNING customer_id, task_ref, units</pre></div>
 
   <h2>The bug this design exists to prevent</h2>
 
@@ -219,8 +270,7 @@ consumed = consume_reservations(customer_id, task_ref, units)
 
 UPDATE customers
 SET used_units     = used_units + :units,
-    reserved_units = GREATEST(0, reserved_units - :consumed)
-  </pre></div>
+    reserved_units = GREATEST(0, reserved_units - :consumed)</pre></div>
 
   <p>A settle for a reservation that no longer exists finds nothing to close, gets <span class="inline">consumed = 0</span>, and leaves the counter alone. Same code path covers <span class="inline">record()</span> calls that never had a preflight at all.</p>
 
@@ -256,15 +306,16 @@ agent runs (actual cost: 7 units)
 record(units=7)
   → used_units += 7
   → reserved_units -= 10
-  → net: 7 charged, 3 released
-  </pre></div>
+  → net: 7 charged, 3 released</pre></div>
 
   <p>If two runs start simultaneously, only one can atomically claim the budget. The other is blocked at the database level before any compute runs.</p>
 
 
+  <section class="ct-cta">
   <h2>Add preflight to your agents</h2>
   <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
-  <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+  <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
+  </section>
 
   <div class="also">
     <p>Related</p>
@@ -285,6 +336,7 @@ record(units=7)
       mainEntity: 'https://agentbill.dev/blog/monthly-caps-wont-save-you#post',
       og: { type: 'article' },
       current: '',
+      css: POST_CSS,
       body: `
 
   <h1>Why monthly caps don't protect you from one bad LLM run</h1>
@@ -388,8 +440,7 @@ except TaskCeilingExceededError:
 <span class="comment"># your provider call goes here</span>
 
 <span class="comment"># settle, or the units stay held until the reservation expires</span>
-client.record(agent_id="researcher", task_ref="job-142", units=12)
-  </pre></div>
+client.record(agent_id="researcher", task_ref="job-142", units=12)</pre></div>
 
   <p><strong>Node.js</strong></p>
   <div class="code"><pre>npm install agentbill</pre></div>
@@ -411,8 +462,7 @@ try {
 <span class="comment">// your provider call goes here</span>
 
 <span class="comment">// settle, or the units stay held until the reservation expires</span>
-await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
-  </pre></div>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></div>
 
 
   <h2>Summary</h2>
@@ -421,9 +471,11 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 
   <p>If you are running agents that loop, retry or run unattended, the check that matters is the one that answers before the next call, not the statement that arrives after the last one.</p>
 
+  <section class="ct-cta">
   <h2>Add preflight to your agents</h2>
   <p>Free tier: ${free} preflight calls/month. No credit card required.</p>
-  <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+  <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
+  </section>
 
   <div class="also">
     <p>Related guides</p>
@@ -451,6 +503,7 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
       // would be the same two titles printed twice on one screen.
       rail: false,
       mainEntity: 'https://agentbill.dev/blog#blog',
+      css: INDEX_CSS,
       jsonLd: {
         '@context': 'https://schema.org',
         '@type': 'Blog',
@@ -469,10 +522,13 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
       body: `
   <h1>Blog</h1>
   <p class="lede">Two posts, both about the same thing: a ceiling that fires while the run is still going.</p>
-${POSTS.map((x) => `
-  <h2><a href="${x.path}">${x.title}</a></h2>
-  <div class="meta">${dateline(x.path)}</div>
-  <p>${x.description}</p>`).join('')}
+  <div class="ct-posts">${POSTS.map((x) => `
+    <article class="ct-post">
+      <div class="meta">${dateline(x.path)}</div>
+      <h2><a href="${x.path}">${x.title}</a></h2>
+      <p>${x.description}</p>
+    </article>`).join('')}
+  </div>
 `,
     }))
   })

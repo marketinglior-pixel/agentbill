@@ -293,6 +293,13 @@ stay dark.
 - **Content (`/docs`, `/docs/*`, `/blog/*`):** Long Document with a sticky
   "On this page" rail (S3) docked beneath the nav. Typography only. Code blocks
   are the panels.
+  - On a phone the page starts with its head, as the homepage does: h1, lede,
+    dateline, then the rail as a strip between two hairlines, then the body.
+    `docsShell()` splits the body at its first top-level `<h2>` into
+    `.doc-head` and `.doc-body` and puts the rail between them inside
+    `<main>`; above 960 the three sit on two tracks and the desktop page is
+    pixel-identical to what it was. Until 2026-09-23 the rail rendered first
+    at every width, so on /faq at 390 the h1 sat at 705px under eleven links.
 
 ## Type
 
@@ -473,6 +480,22 @@ bar ("python · the whole integration"), never window chrome.
 Macrostructure within their family. Shell width per family. Whether a grid
 break exists (marketing yes, content no). `/register` runs 560px inside the
 1080 shell because it is one form.
+
+**`/he/cost-per-client` renders neither the shared nav nor the shared footer.
+That is an exception on the record, not a settled rule: it is Lior's to
+decide.** The page is the Hebrew lead magnet, written to be passed on ("תעביר
+את הדף למישהו שכן", and its footer gives the address for whoever received a
+screenshot), and its second line promises "אין פה מה לקנות ואין טופס". The
+shared nav is English and carries Pricing, Console and "Get API key", so
+rendering it adds copy and an action to a page whose copy says there is
+neither: a copy decision, outside a restyle. What the page does share is
+everything below the chrome: the canvas tokens, the kit (`.cv-panel`, `.btn`),
+the card and plate frames, `--chrome-w` as its wide measure, and on a phone
+the console's labelled-card tables. The two ways to close it: (a) `siteNav()`
+and `siteFooter()` in a `dir="ltr"` wrapper around the RTL body, with
+`navCta: false` as `/thanks` does after a paid checkout, so the no-sale
+line stays true; or (b) keep this exception. Until he picks, (b) is what the
+branch renders.
 
 `/pricing` is the pricing variant of the marketing family. Until 2026-09-09 it
 was a spec-sheet table and its stamp said so; it is now the same four tier cards

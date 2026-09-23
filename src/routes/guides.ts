@@ -4,6 +4,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
+import { CONTENT_CSS } from '../ui/content.js'
 
 // The free-tier number is read from the same table preflight enforces, never
 // typed. /docs/langchain-billing used to claim each customer had their own free
@@ -15,6 +16,10 @@ const num = (n: number) => n.toLocaleString('en-US')
 // The guide copy below is untouched. Two frame-level things changed inside the
 // bodies: the closing CTA is the site's .btn instead of a white .cta of its
 // own, and its label is short enough to stay on one line at 320px.
+//
+// On canvas (2026-09-23) the body takes CONTENT_CSS, the content pages' one
+// recipe: the related list at the foot is white rows in a warm-grey panel, and
+// the closing button is L, the page's one action.
 function page(path: string, title: string, description: string, body: string) {
   const meta = byPath.get(path)
   return docsShell({
@@ -47,6 +52,7 @@ function page(path: string, title: string, description: string, body: string) {
       isPartOf: { '@id': 'https://agentbill.dev/#website' },
     },
     mainEntity: `https://agentbill.dev${path}#techarticle`,
+    css: CONTENT_CSS,
     body: `${body}
   <div class="also">
     <p>Related guides</p>
@@ -197,7 +203,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   all, <a href="/recover">/recover</a> shows the filled-in export line again to whoever can read the
   email the account was registered with.</p>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -405,7 +411,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   reserved units is <span class="inline">409 ceiling_below_committed</span> with the smallest value
   that would be accepted; nothing in flight is rewritten.</p>
 
-  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
+  <p class="end"><a class="btn btn-lg" href="/register">${KEY_CTA}</a></p>
 `
     ))
   })
@@ -451,16 +457,14 @@ client.preflight(
 result = run_agent()
 
 <span class="comment"># Settle, or the units stay held until the reservation expires</span>
-client.record(agent_id="researcher", task_ref="job-142", units=12)
-      </pre></div>
+client.record(agent_id="researcher", task_ref="job-142", units=12)</pre></div>
 
       <p>Every later call in the same run passes <span class="inline">task_ref</span> and nothing
       else about the budget. It does not need to know the ceiling, or what the calls before it
       spent.</p>
       <div class="code"><pre>
 <span class="comment"># A different agent, a different tool, the same run and the same ceiling.</span>
-client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
-      </pre></div>
+client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)</pre></div>
 
       <h2>Use the @gate decorator (shortest path)</h2>
       <p>The <span class="inline">@client.gate()</span> decorator does the preflight before the body
@@ -472,8 +476,7 @@ client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
              task_ceiling=500, estimated_units=12)
 def run_agent(task: str) -> str:
     <span class="comment"># preflight runs before this body, record runs after it</span>
-    return do_the_work(task)
-      </pre></div>
+    return do_the_work(task)</pre></div>
 
       <h2>Handle the refusal</h2>
       <p>The exception carries the numbers, so the handler can say what happened without a second
@@ -484,8 +487,7 @@ from agentbill import TaskCeilingExceededError
 try:
     result = run_agent("analyze this")
 except TaskCeilingExceededError as e:
-    return {"error": f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units"}
-      </pre></div>
+    return {"error": f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units"}</pre></div>
 
       <h2>What a per-request ceiling is, and is not</h2>
       <p>There is a second, narrower ceiling: <span class="inline">ceiling</span> on the client
@@ -494,8 +496,7 @@ except TaskCeilingExceededError as e:
       own it will not stop a loop that makes two hundred individually reasonable calls.</p>
       <div class="code"><pre>
 <span class="comment"># No single call may cost more than 50 units. The run still needs a task_ceiling.</span>
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-      </pre></div>
+client = AgentBillClient(api_key="agb_your_key", ceiling=50)</pre></div>
 
       <p>And note what is <em>not</em> on this list. <span class="inline">agent_id</span> is a label
       the console groups tasks and refusals by; it carries no budget of its own. Ceilings are bound
@@ -512,10 +513,9 @@ await preflight({ agentId: 'researcher', taskRef: 'job-142',
 
 const result = await runAgent()
 
-await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
-      </pre></div>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></div>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -561,8 +561,7 @@ def run_research_agent(customer_id: str, topic: str) -> str:
 
     <span class="comment"># 3. Record units used</span>
     client.record(agent_id="research_chain", units=10, customer_id=customer_id)
-    return result.content
-      </pre></div>
+    return result.content</pre></div>
 
       <h2>Pattern 2, @gate decorator (cleanest)</h2>
       <p>The <span class="inline">@client.gate()</span> decorator handles preflight and record automatically. Zero boilerplate inside the function.</p>
@@ -581,8 +580,7 @@ def run_research_agent(topic: str) -> str:
     return chain.invoke({"topic": topic}).content
 
 <span class="comment"># preflight runs before, record runs after, automatically</span>
-result = run_research_agent("quantum computing")
-      </pre></div>
+result = run_research_agent("quantum computing")</pre></div>
 
       <h2>Pattern 3, Mid-run checkpoint for long chains</h2>
       <p>For agents that run many steps, use <span class="inline">checkpoint()</span> to enforce a ceiling mid-run. The call is refused if the task has already recorded too many units.</p>
@@ -611,8 +609,7 @@ def run_multi_step_agent(customer_id: str, tasks: list) -> list:
             break  <span class="comment"># stopped early, no runaway cost</span>
 
     client.record(agent_id="multi_step", units=len(results), customer_id=customer_id)
-    return results
-      </pre></div>
+    return results</pre></div>
 
       <h2>Error handling</h2>
       <div class="code"><pre>
@@ -627,8 +624,7 @@ except CeilingExceededError:
 except BudgetExhaustedError:
     return {"error": "customer budget exhausted, top up to continue"}
 except FreeTierExceededError as e:
-    return {"error": "free tier limit reached", "upgrade_url": e.upgrade_url}
-      </pre></div>
+    return {"error": "free tier limit reached", "upgrade_url": e.upgrade_url}</pre></div>
 
       <h2>Works with any LangChain component</h2>
       <p>AgentBill wraps at the invocation level, it doesn't care what's inside the chain. Use it with:</p>
@@ -651,13 +647,12 @@ except FreeTierExceededError as e:
 <span class="comment"># Different customers, isolated budgets</span>
 check_alice = client.preflight(agent_id="research", estimated_units=10,
                                customer_id="alice")
-check_bob   = client.preflight(agent_id="research", estimated_units=10, customer_id="bob")
-      </pre></div>
+check_bob   = client.preflight(agent_id="research", estimated_units=10, customer_id="bob")</pre></div>
 
       <h2>LangGraph support</h2>
       <p>For LangGraph workflows, call <span class="inline">preflight()</span> before entering the graph and <span class="inline">record()</span> after the final node completes. Use <span class="inline">checkpoint()</span> inside nodes to enforce ceilings mid-graph.</p>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -707,8 +702,7 @@ def run_agent(customer_id: str, task: str) -> str:
         units=10,
         customer_id=customer_id
     )
-    return response.choices[0].message.content
-      </pre></div>
+    return response.choices[0].message.content</pre></div>
 
       <h2>Use the @gate decorator</h2>
       <p>The <span class="inline">@client.gate()</span> decorator wraps the function with preflight + record automatically.</p>
@@ -725,8 +719,7 @@ def run_agent(task: str) -> str:
         model="gpt-4o",
         messages=[{"role": "user", "content": task}]
     )
-    return response.choices[0].message.content
-      </pre></div>
+    return response.choices[0].message.content</pre></div>
 
       <h2>Handle the refusals</h2>
       <div class="code"><pre>
@@ -737,8 +730,7 @@ try:
 except CeilingExceededError:
     return {"error": "run exceeds per-request ceiling"}
 except BudgetExhaustedError:
-    return {"error": "customer budget exhausted"}
-      </pre></div>
+    return {"error": "customer budget exhausted"}</pre></div>
 
       <h2>Node.js</h2>
       <div class="code"><pre>
@@ -759,10 +751,9 @@ async function runAgent(customerId: string, task: string): Promise&lt;string&gt;
 
   await record({ agentId: 'openai_assistant', units: 10, customerId })
   return res.choices[0].message.content ?? ''
-}
-      </pre></div>
+}</pre></div>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })

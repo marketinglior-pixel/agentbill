@@ -23,18 +23,34 @@ export const DOCS_CSS = `${CHROME_CSS}
      wordmark's edge. It was 1080 against the nav's 1072: 4px off on each side. */
   :root { --shell: var(--chrome-w); }
 
+  /* One column: the breadcrumb, then <main>. A page without a rail is that
+     and nothing more (/status, /blog and /thanks once opened with an empty
+     220px track beside their content; a hidden rail takes no space). */
   .docs { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); padding-block: var(--s7) 96px;
-          display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
-  /* Without a rail the 220px track was still reserved and rendered empty, so
-     /status, /blog and /thanks each opened with a column of nothing beside a
-     column of content. A hidden rail should take no space, not invisible space. */
-  .docs.no-rail { grid-template-columns: minmax(0, 1fr); }
+          display: grid; grid-template-columns: minmax(0, 1fr); gap: 56px; align-items: start; }
+  /* With a rail, <main> holds three parts in reading order: the page's head
+     (h1, lede, dateline), the rail, then the body. On a wide screen they sit
+     on two tracks, the rail in the first spanning both rows and sticky, head
+     and body in the second, so the desktop page is what it was. On a phone
+     main is one column and the DOM order IS the layout: the page starts with
+     its head, like the homepage, and "On this page" follows the lede. Until
+     2026-09-23 the rail sat before <main>, so at 390px it rendered above the
+     h1 and pushed it to 705px on /faq, 665 on /docs/first-run: the first
+     screen was eleven links and a sticky bar. */
+  .docs.has-rail > .container { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 56px;
+                                align-items: start; }
+  .docs.has-rail .rail { grid-column: 1; grid-row: 1 / span 2; }
+  .doc-head, .doc-body { grid-column: 2; min-width: 0; }
+  /* A grid item does not collapse margins with its neighbour, so the head's
+     last margin is dropped here and the body's first h2 carries the whole gap,
+     which is what the collapse used to produce. The rules below restate the
+     "first h2 sits closer" rules for the split, which a "+" can no longer see
+     across. */
+  .doc-head > :last-child { margin-bottom: 0; }
 
   /* Breadcrumb.
      A full-width first row of the grid rather than the first thing inside
-     <main>. At 960px and below the rail collapses to a horizontal strip and it
-     is first in DOM order, so a breadcrumb inside main would render BELOW "On
-     this page" on every phone.
+     <main>, so the trail is always the first line under the nav.
      Furniture, in the mono label voice's case and size but not its tracking:
      a trail is read as words. */
   .crumbs { grid-column: 1 / -1; margin-bottom: 28px; }
@@ -73,6 +89,9 @@ export const DOCS_CSS = `${CHROME_CSS}
      sits closer than the rest so the page does not open with a gap. */
   h2 { color: var(--white); margin: 72px 0 18px; overflow-wrap: anywhere; scroll-margin-top: calc(var(--banner-height) + 24px); }
   .lede ~ .badge + h2 { margin-top: 44px; }
+  /* The same two rules on a page whose head and body are split around the rail. */
+  .doc-head:has(> .lede:last-child, > .meta:last-child) ~ .doc-body > h2:first-child,
+  .doc-head:has(> .lede ~ .badge:last-child) ~ .doc-body > h2:first-child { margin-top: 44px; }
   /* The third rung. Until 2026-09-23 it was set in the mono, uppercase and
      tracked, which on the dark theme separated it from the display face. On
      canvas the mono uppercase is the LABEL voice (column heads, the label over
@@ -163,10 +182,14 @@ export const DOCS_CSS = `${CHROME_CSS}
   .end { margin-top: 56px; }
 
   @media (max-width: 960px) {
-    .docs { grid-template-columns: minmax(0, 1fr); gap: 0; padding-block: 32px 72px; }
+    .docs { gap: 0; padding-block: 32px 72px; }
     .crumbs { margin-bottom: 20px; }
+    /* One column, in DOM order: head, rail, body. */
+    .docs.has-rail > .container { display: block; }
+    /* The strip under the lede: between two hairlines, so it reads as the
+       page's index and not as the first section of it. */
     .rail { position: static; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px;
-            padding-bottom: 20px; margin-bottom: var(--s5); border-bottom: 1px solid var(--border); }
+            margin-block: var(--s6) var(--s5); padding-block: 20px; border-block: 1px solid var(--border); }
     .rail-h { margin: 0; flex-basis: 100%; margin-bottom: 4px; }
     .rail a { border-left: 0; padding: 8px 0; white-space: nowrap; }
     .rail a[aria-current="true"] { border-left: 0; padding-left: 0; }
@@ -365,25 +388,59 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
+/**
+ * Split a body at its first top-level <h2>: the head (h1, lede, dateline) and
+ * everything from that heading on. The rail goes between them.
+ *
+ * Null when there is no <h2>, or when the first one sits inside a container
+ * that opened before it: cutting there would close a <div> in the wrong part.
+ * The caller then keeps the body whole and puts the rail first, which is how
+ * every page rendered before this split existed.
+ */
+const CONTAINERS = 'div|section|article|aside|ul|ol|table|blockquote|details|figure'
+export function splitHead(body: string): { head: string; rest: string } | null {
+  const i = body.search(/<h2[\s>]/)
+  if (i < 0) return null
+  const head = body.slice(0, i)
+  const opened = (head.match(new RegExp(`<(${CONTAINERS})[\\s>]`, 'g')) || []).length
+  const closed = (head.match(new RegExp(`</(${CONTAINERS})>`, 'g')) || []).length
+  return opened === closed ? { head, rest: body.slice(i) } : null
+}
+
 export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, sticky = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
-  const rail = wantRail && toc.length
+  const hasRail = wantRail && toc.length > 0
+  const rail = hasRail
     ? `  <nav class="rail" aria-label="On this page">
     <p class="rail-h">On this page</p>
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : ''
+  const parts = hasRail ? splitHead(anchored) : null
+  const inner = !hasRail
+    ? anchored
+    : parts
+      ? `  <div class="doc-head">
+${parts.head}
+  </div>
+${rail}
+  <div class="doc-body">
+${parts.rest}
+  </div>`
+      : `${rail}
+  <div class="doc-body">
+${anchored}
+  </div>`
   return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
                     css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
 <body>
 ${siteNav(current, { cta: navCta, sticky })}
-<div class="docs${wantRail ? '' : ' no-rail'}">
+<div class="docs ${hasRail ? 'has-rail' : 'no-rail'}">
 ${crumb ? crumb.html : ''}
-${rail}
   <main class="container">
-${anchored}
+${inner}
   </main>
 </div>
 ${siteFooter()}
