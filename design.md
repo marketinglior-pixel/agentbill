@@ -15,7 +15,9 @@ page.
 ## Genre
 
 modern-minimal, dark. A brilliant systems engineer's page: terse, precise,
-trusts the reader, hates decoration.
+trusts the reader, hates decoration. `/` alone is light since 2026-09-16 (paper)
+and, from 2026-09-23, the canvas theme; the console, docs, pricing and register
+stay dark.
 
 ## Macrostructure families
 
@@ -45,6 +47,28 @@ trusts the reader, hates decoration.
   rows are top-level sections, so their heads are `h2` at the section rung
   and no group heading governs them. The copy budget that produced this: hero
   subhead under 25 words, a row under 45, the not-list under 25 per item.
+
+  **The canvas homepage (2026-09-23).** Supersedes the order above for `/`.
+  Craft reference: x.ai/bot, read for the white canvas, near-black type, pale
+  warm-gray panels, the centred hero with two pill actions, the large
+  soft-cornered product frame under it, the split statement panel, the card
+  grid and the two-column FAQ; nothing of its product, palette or claims, and
+  none of its social-proof slot (ours holds a public incident instead). Built
+  from the approved Figma file `uMcr4L26RQYChYmpykVGRQ` after Lior's FIGMA GO.
+  Order, and nothing else: hero (announcement pill, the h1 `HOME_H1`, the
+  locked sub, the primary to `/register` and a secondary pill to `#estimate`,
+  the trust line, then the agent's-log frame rendered from `RUN` and labelled
+  sample), the statement (month and org caps conceded, then the job ceiling's
+  scope, with a sample figure of both states), the estimator (the visitor's
+  own arithmetic, `src/ui/estimator.ts`), the demo (the playground, restyled,
+  with your code on the language tabs under its wire), How it works (three
+  cards), the ICP chips (examples, never integrations or customers), the
+  evidence band (one sentence, its attribution, the link), the four tier
+  cards, the questions (the not-list is the first item, open), and the close.
+  Tokens: `TOKENS_CANVAS` in `theme.ts`, opt-in per route; Geist and Geist
+  Mono from Google Fonts on `/` only. Frames at 24px, inner cards at 16,
+  fields at 12, actions and chips as pills. No film and no Fig. 1: the frame
+  and the statement carry their numbers as text from the same walk of PLAN.
 
   **The fold (2026-09-12).** Craft reference: pressplaced.com, read for air,
   one demo and one action; nothing of its product, palette or claims. The
@@ -267,6 +291,14 @@ lines of code". `copyPill()` in `src/ui/copy.ts` is the control; one delegated
 listener covers every instance, so one CSP hash does too. The label changes to
 "Copied" and back, which is a state change rather than motion for mood.
 
+**Amended 2026-09-23 for `/` (Lior's decision 6 on the canvas redesign):** the
+hero has two actions, the filled primary to `/register` and one secondary pill,
+"Estimate a run", to `#estimate` (`.btn-alt`: a filled light pill on
+`--surface3`, never a second ink fill), measured as `estimate_click`; the text
+link to the demo below was retired with it, and `try_click` holds only its
+history. Everything else in this section still holds, and the paragraph below
+is kept as the record of why the hero had one action until then.
+
 The hero has one action. On 2026-09-09 its second button, an in-page jump to
 the playground, was retired: with the playground directly under the hero, a
 button that scrolls one screen is a button that says nothing. The paper
@@ -298,6 +330,9 @@ rather than where it goes.
 - Text link beside a primary (`.hero-try`): `--fs-small`, weight 600, underlined,
   rests `--muted` and darkens to `--text` on hover like the evidence links and
   the nav. Not a third button register; the `[fold]` gates keep it a link.
+- Secondary pill on `/` (`.btn-alt`, 2026-09-23): same height as the primary,
+  `--surface3` ground, `--text` label, pill radius. One per fold, beside the
+  primary, never a fill in ink.
 - One primary per fold. Labels are verbs and fit 272px at 320px viewport.
 
 ## What pages must share

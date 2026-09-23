@@ -52,6 +52,14 @@ const PulseBody = z.object({
     // per load, and carries the ?src= label like every other event, so the
     // funnel on /admin starts at the landing and not at the first click.
     'page_view',
+    // estimate_click and estimate_use, 2026-09-23: the redesigned homepage's
+    // second hero action is a pill to #estimate, the visitor's own arithmetic
+    // (calls times their cost per call). estimate_click is that pill pressed;
+    // estimate_use is the first keystroke into the calculator, sent at most
+    // once per page load. Neither carries a number: what the visitor typed
+    // never leaves the page. try_click above stays for its history, and the
+    // page no longer sends it (its link was retired with the redesign).
+    'estimate_click', 'estimate_use',
   ]),
   // The random per-page-view token from the page. Never a cookie, never
   // localStorage, gone when the tab closes. It exists to separate ten visitors
@@ -93,6 +101,11 @@ const FUNNEL_LIMIT = 15
 // an hour per network: past that the loads stop being recorded and the
 // clicks and the /register loads still are.
 const PAGE_LIMIT = 30
+// A fourth bucket for estimate_use, 2026-09-23. The page sends it at most once
+// per load, but a visitor who reloads and plays with the numbers is the same
+// shape as a playground run, and it must not spend the click-through of the
+// visit after it. estimate_click is a click, so it stays in the funnel bucket.
+const ESTIMATE_LIMIT = 20
 const IP_WINDOW_MS = 60 * 60 * 1000
 const MAX_ENTRIES = 10_000
 const ipHits = new Map<string, number[]>()
@@ -132,8 +145,11 @@ export async function pulseRoute(app: FastifyInstance) {
 
     const { event, view_id, ceiling, source } = parsed.data
     const playground = event.startsWith('playground_')
-    const bucket = playground ? 'pg' : event === 'page_view' ? 'page' : 'funnel'
-    const limit = playground ? PLAYGROUND_LIMIT : event === 'page_view' ? PAGE_LIMIT : FUNNEL_LIMIT
+    const bucket = playground ? 'pg' : event === 'page_view' ? 'page' : event === 'estimate_use' ? 'est' : 'funnel'
+    const limit = playground ? PLAYGROUND_LIMIT
+      : event === 'page_view' ? PAGE_LIMIT
+      : event === 'estimate_use' ? ESTIMATE_LIMIT
+      : FUNNEL_LIMIT
     if (!allowPulse(`${limiterKey(request)}|${bucket}`, limit)) return done()
     try {
       await sql`

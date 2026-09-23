@@ -316,8 +316,18 @@ ${topBar('signed in')}
       <div class="stat-label">Last 7 days: ${pulse.week.ctaClicks}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Homepage: page views that clicked Try it</div>
-      <div class="stat-value ${pulse.tryClicks > 0 ? 'held' : ''}">${pulse.tryClicks}</div>
+      <div class="stat-label">Homepage: page views that pressed Estimate a run</div>
+      <div class="stat-value ${pulse.estimateClicks > 0 ? 'held' : ''}">${pulse.estimateClicks}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.estimateClicks}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Estimator: page views that typed into it</div>
+      <div class="stat-value ${pulse.estimateUses > 0 ? 'held' : ''}">${pulse.estimateUses}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.estimateUses}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Homepage: page views that clicked Try it (link retired 2026-09-23)</div>
+      <div class="stat-value">${pulse.tryClicks}</div>
       <div class="stat-label">Last 7 days: ${pulse.week.tryClicks}</div>
     </div>
     <div class="stat">
@@ -347,14 +357,15 @@ ${topBar('signed in')}
     A view is one page load, not one person: the token is minted per load and never stored, so
     the same visitor returning counts twice. It is not a signup. A row carries a channel only when
     the link we published put one there (see the table below); organic traffic and the paid campaign
-    both arrive untagged, so the totals above are every source at once. The four funnel tiles are
+    both arrive untagged, so the totals above are every source at once. The funnel tiles are
     first-party rows as well, so a page load or a
     click through that no pixel saw still counts here, and a /register load with no account row
     after it is the form losing someone. The page-load tile starts on 2026-09-22 and is empty
     before that; it is not a pixel PageView and will not match one, since the pixel is a script
-    desktop browsers block. Read Try it beside the click-through: if Try it runs well
-    ahead, the demo has earned a higher place on the page; if neither moves, the fold is the
-    problem, not the depth.
+    desktop browsers block. Read Estimate a run beside the click-through: if it runs well
+    ahead, visitors want the arithmetic before the key; if neither moves, the fold is the
+    problem, not the depth. The estimator tile counts that someone typed, never what they typed.
+    Try it was the hero's link to the demo until 2026-09-23 and only holds history now.
     ${pulse.since
       ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
       : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}
@@ -373,6 +384,7 @@ ${topBar('signed in')}
         <th>Page loads (30d / 7d)</th>
         <th>Clicked through (30d / 7d)</th>
         <th>Try it</th>
+        <th>Estimate a run</th>
         <th>/register loads (30d / 7d)</th>
         <th>Playground runs</th>
         <th>First</th>
@@ -385,6 +397,7 @@ ${topBar('signed in')}
         <td class="${row.pageViews > 0 ? 'held' : ''}">${row.pageViews} <span class="muted">/ ${row.pageViews7}</span></td>
         <td class="${row.ctaClicks > 0 ? 'held' : ''}">${row.ctaClicks} <span class="muted">/ ${row.ctaClicks7}</span></td>
         <td>${row.tryClicks}</td>
+        <td>${row.estimateClicks}</td>
         <td class="${row.registerViews > 0 ? 'held' : ''}">${row.registerViews} <span class="muted">/ ${row.registerViews7}</span></td>
         <td>${row.runs}</td>
         <td>${row.first.slice(0, 16).replace('T', ' ')}</td>
