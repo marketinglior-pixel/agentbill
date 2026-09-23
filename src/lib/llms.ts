@@ -61,7 +61,8 @@ const NOT_A = `## What AgentBill is not
   table, no currency field anywhere in the API. Every quantity is an integer unit you defined and
   sent, so the ceiling is exactly as tight as your estimate. The console's task budgets view can
   show dollars at a rate you type there (dollars_per_unit): it divides a dollar amount by your rate,
-  rounds down, and fills in the unit ceiling. The rate is stored nowhere, and your provider
+  rounds down, and fills in the unit ceiling. The rate is not saved to your account or anywhere in
+  the API: it rides in that page's address, so your browser history keeps it. Your provider
   invoices may differ from your rate times your units.
 - **Not a per-agent budget.** agent_id is an attribution label. It is stored on tasks, steps and
   refusals and can be filtered on, and nothing is capped by it. Two agents sharing a task_ref

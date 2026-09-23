@@ -150,10 +150,12 @@ trusts the reader, hates decoration.
   - **Dollars are a calculator, never a control (2026-09-23, T3).** The task
     budgets view takes a dollar amount and the reader's own `dollars_per_unit`
     on a GET, divides, rounds down, and puts the whole number in the unit field
-    of the same `ceiling_units` form. It saves nothing and stores no rate, so
-    the rule above holds: the one write is still the job's ceiling in units,
-    and the API still has no currency field. Beside it, a suggested ceiling per
-    agent (p50, p90 and max `used_units` of that agent's recent jobs that hold
+    of the same `ceiling_units` form. It writes nothing to the account and keeps
+    no rate there (the rate rides in the view's address, and
+    `src/lib/log-url.ts` logs a console URL without its query), so the rule
+    above holds: the one write is still the job's ceiling in units, and the
+    API still has no currency field. Beside it, a suggested ceiling per agent
+    (p50, p90 and max `used_units` of that agent's recent jobs that hold
     nothing in flight), hidden when there is no such job, and at a typed rate
     the same figures in dollars. Every dollar figure on the console is labelled
     as the reader's estimate at the reader's rate, because AgentBill reads no

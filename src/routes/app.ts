@@ -43,7 +43,7 @@ import { INSTALL_PY } from '../ui/site.js'
 // product's whole problem. Every other number here is still read-only.
 // The dollars on the tasks view (2026-09-23) add no write: they are a
 // calculator on a GET, at a rate the reader types, that fills the same unit
-// field and saves nothing, the rate included. See readCalc below.
+// field and writes nothing to the account, the rate included. See readCalc below.
 // This page loads no script at all and the CSP below has no script-src; the
 // chart's hover layer is CSS. Corrected 2026-09-10: that sentence used to
 // justify itself with "a live key is rendered into it", which stopped being
@@ -541,11 +541,13 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
 //
 // Neither one writes. Both fill the ceiling field of the POST form, which
 // still takes ceiling_units and nothing else, so the ledger stays units and a
-// dollar value never reaches setTaskCeiling or preflight. The rate is never
-// stored: it rides the query string of this view and the hidden field that
-// carries it across a save, and nowhere else. AgentBill reads no bill and
-// keeps no price, so every dollar figure here is labelled as the reader's own
-// estimate at the reader's own rate.
+// dollar value never reaches setTaskCeiling or preflight. The rate is saved to
+// no account: it rides the query string of this view and the hidden field that
+// carries it across a save. That query string is in the reader's browser
+// history, and the page says so; it is not in our request log, because
+// src/lib/log-url.ts logs a console URL without its query. AgentBill reads no
+// bill and keeps no price, so every dollar figure here is labelled as the
+// reader's own estimate at the reader's own rate.
 // ---------------------------------------------------------------------------
 
 /** How many of an agent's most recent jobs the suggested ceiling reads. */
@@ -2184,7 +2186,7 @@ function dollarsForm(p: Page): string {
       <div><label for="d-rate">At your rate, <code>dollars_per_unit</code></label><input id="d-rate" name="dollars_per_unit" inputmode="decimal" maxlength="24" placeholder="0.01" value="${c.rate ? esc(c.rate) : ''}" /></div>
       <button class="btn-out" type="submit">Convert to units</button>
     </form>
-    <p class="fine">You declare what one unit is worth to you. AgentBill stores and reserves units only: this divides your dollars by your rate, rounds down, and puts the result in the ceiling field. It saves nothing, the rate included, and reads no bill, so your invoices may differ from your rate times your units.</p>`
+    <p class="fine">You declare what one unit is worth to you. AgentBill stores and reserves units only: this divides your dollars by your rate, rounds down, and puts the result in the ceiling field. It saves no ceiling and no rate to your account: the rate rides in this page's address, which your browser keeps in its history. It reads no bill, so your invoices may differ from your rate times your units.</p>`
 }
 
 const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
@@ -2655,7 +2657,7 @@ function consolePage(p: Page): string {
         ${body}
         <div class="foot">
           Every ${p.calc?.rate || p.calc?.history.length ? 'unit count' : 'number'} on this page is on the API too:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.calc?.history.length ? ' A suggested ceiling is a percentile of the <code>used_units</code> that <code>GET /tasks?agent_id=</code> returns.' : ''}${p.calc?.rate ? ' A dollar figure is one of those counts times the rate you typed, worked out for this page and stored nowhere; the API carries no currency field.' : ''}
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.calc?.history.length ? ' A suggested ceiling is a percentile of the <code>used_units</code> that <code>GET /tasks?agent_id=</code> returns.' : ''}${p.calc?.rate ? ' A dollar figure is one of those counts times the rate you typed, worked out for this page from its address and saved to no account; the API carries no currency field.' : ''}
         </div>
       </div>
     </main>

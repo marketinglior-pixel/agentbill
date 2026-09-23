@@ -2344,6 +2344,91 @@ for (const [name, h] of [['tasks+rate', fcD], ['tasks+dollars', convD], ['tasks+
 ok('[copy] no sitemap page, llms file or console view says "we stop at" or "we read your bill"',
    pathsD.length >= 10 && saidD.length === 0, saidD.join('; ') || `${pathsD.length} sitemap paths`)
 
+// ---------------------------------------------------------------- dollars, after review: where the rate goes, and the suggestion's two trust edges, 2026-09-23 (T3)
+// The review found three things the gates above could not see. Each gate
+// below was made red once by a planted break and green again after restoring
+// from a copy.
+//
+// 1. "The rate is stored nowhere" was on five surfaces while Fastify wrote
+// every console URL, rate and all, to the request log. The rate rides in the
+// page's address, so the copy now says so, and server.ts logs a console URL
+// without its query. This reads the log the server under test is writing
+// (run.sh passes its path) and counts the redacted lines so the gate cannot
+// pass on a log that recorded nothing: the page view and a 415 on the form,
+// which goes through the error handler's own log line.
+console.log('\n[dollars] after review: the rate stays out of the request log, the suggestion reads one account and prints labels as text')
+const LOG_D = process.env.SERVER_LOG ?? ''
+const logD = () => { try { return readFileSync9(LOG_D, 'utf8') } catch { return '' } }
+const countD = (text, needle) => text.split(needle).length - 1
+const APP_OMIT_D = '"url":"/app?[omitted]"'
+const FORM_OMIT_D = '"url":"/app/tasks?[omitted]"'
+const log0D = logD()
+const logViewD = await nav8('/app?view=tasks&ceiling_dollars=12.5&dollars_per_unit=0.000987654321&task=logprobe-q7x', { headers: { cookie: cookie8 } })
+const logFormD = await nav8('/app/tasks?dollars_per_unit=0.000192837465', { method: 'POST', headers: { 'Content-Type': 'application/xml', 'Sec-Fetch-Site': 'same-origin', cookie: cookie8 }, body: '<x/>' })
+const logApiD = await fetch(`${API}/decisions?task_ref=logprobe-api-q7x`, { headers: { 'Authorization': `Bearer ${KEY8}` } })
+const logSeenD = (t) => countD(t, APP_OMIT_D) > countD(log0D, APP_OMIT_D) && countD(t, FORM_OMIT_D) >= countD(log0D, FORM_OMIT_D) + 2 && t.includes('logprobe-api-q7x')
+let log1D = logD()
+for (const started = Date.now(); !logSeenD(log1D) && Date.now() - started < PAGE_DEADLINE_MS; log1D = logD()) await settle(POLL_MS)
+ok('[log] a console URL is logged without its query: the rate typed on the tasks view and on the form is not in the request log, and an API URL still logs whole',
+   LOG_D !== '' && logViewD.status === 200 && logFormD.status === 415 && logApiD.status === 200 && logSeenD(log1D)
+     && !log1D.includes('987654321') && !log1D.includes('192837465') && !log1D.includes('logprobe-q7x'),
+   LOG_D === '' ? 'SERVER_LOG is not set; run through scripts/preflight/run.sh'
+     : `${logViewD.status} ${logFormD.status} ${logApiD.status} | ${(log1D.match(/[^\n]*(987654321|192837465|logprobe-q7x)[^\n]*/) ?? ['no marker'])[0].slice(0, 200)}`)
+// And the words: every surface that said "stored nowhere" now says where the
+// rate is, and none says the old sentence.
+const STALE_D = /stored nowhere|saves nothing, the rate included/i
+const staleD = []
+for (const path of [...pathsD, '/llms.txt', '/llms-full.txt']) {
+  const text = (await fetch(`${API}${path}`).then((r) => r.text())).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  const hit = text.match(STALE_D)
+  if (hit) staleD.push(`${path}: "${hit[0]}"`)
+}
+const fcNowD = await getD('/app?view=tasks&dollars_per_unit=0.01')
+const llmsFullD = await fetch(`${API}/llms-full.txt`).then((r) => r.text())
+const docsD = shownD(await fetch(`${API}/docs`).then((r) => r.text()))
+ok('[copy] the rate is described where it is: in the page address and the browser history, saved to no account, and no surface says it is stored nowhere',
+   staleD.length === 0 && !STALE_D.test(shownD(fcNowD))
+     && shownD(fcNowD).includes('It saves no ceiling and no rate to your account: the rate rides in this page\'s address, which your browser keeps in its history')
+     && shownD(fcNowD).includes('worked out for this page from its address and saved to no account')
+     && llmsFullD.replace(/\s+/g, ' ').includes('The rate is not saved to your account or anywhere in the API: it rides in that page\'s address')
+     && docsD.includes('The rate is not saved to your account or anywhere in the API: it rides in the page\'s address'),
+   staleD.join('; ') || 'a reworded sentence is missing from a surface')
+
+// 2 and 3. loadHistory filters task_budgets by account, and historyBlock
+// prints an agent label the developer's code chose. With the account clause
+// removed and the label's esc() removed (the review's mutation R3), every gate
+// above stayed green. Another account's settled job, under a label of its
+// own and a count no job here has, must never show; and a label made of
+// markup, opened through the real API path, must be text in each of the five
+// places the suggestion prints it: its row, its pick link, the agent field,
+// the line under the form and the calculator's hidden field.
+const OTHER_D = '00000000-0000-0000-0000-0000000000dd'
+await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
+          VALUES (${OTHER_D}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units)
+          VALUES (${OTHER_D}, 'tenant-b-agent', 'hist-b-1', 100000, 4242, 0)`
+const HOSTILE_D = '"><img src=x>'
+const HOSTILE_ESC_D = '&quot;&gt;&lt;img src=x&gt;'
+const HOSTILE_URI_D = encodeURIComponent(HOSTILE_D)
+const hostilePutD = await putCeil('hist-hostile', { ceiling_units: 100, agent_id: HOSTILE_D })
+await pre8({ agent_id: HOSTILE_D, task_ref: 'hist-hostile', estimated_units: 30, idempotency_key: 'hist-hostile-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'hist-hostile-rec', units: 30, task_ref: 'hist-hostile' })
+const isoD = await getD('/app?view=tasks')
+const isoBlockD = isoD.includes('<div class="hist">') ? histBlockD(isoD) : ''
+ok('[suggest] another account\'s agent and its job never reach this account\'s suggestion',
+   isoBlockD.includes('<span class="ha">summarizer</span>') && !isoD.includes('tenant-b-agent') && !isoD.includes('4,242'),
+   `summarizer row ${isoBlockD.includes('<span class="ha">summarizer</span>')}, tenant-b-agent on the page ${isoD.includes('tenant-b-agent')}, 4,242 on the page ${isoD.includes('4,242')}`)
+const pickHostileD = await getD(`/app?view=tasks&history=${HOSTILE_URI_D}&pick=p50&dollars_per_unit=0.01`)
+const hostileLineD = (pickHostileD.match(/<p class="conv">[\s\S]*?<\/p>/) ?? [''])[0]
+ok('[suggest] an agent label made of markup is text in its row, its pick link, the agent field, the line under the form and the hidden field',
+   hostilePutD.status === 200 && !isoD.includes('<img src=x>') && !pickHostileD.includes('<img src=x>')
+     && isoBlockD.includes(`<span class="ha">${HOSTILE_ESC_D}</span>`) && isoBlockD.includes(`history=${HOSTILE_URI_D}&amp;pick=p50`)
+     && pickHostileD.includes(`name="agent_id" placeholder="researcher" maxlength="128" value="${HOSTILE_ESC_D}"`)
+     && hostileLineD.includes(`from your last job by ${HOSTILE_ESC_D}`) && /value="30"/.test((pickHostileD.match(/<input id="t-ceil"[^>]*>/) ?? [''])[0])
+     && pickHostileD.includes(`<input type="hidden" name="history" value="${HOSTILE_ESC_D}" />`),
+   `${hostilePutD.status} ${hostileLineD.slice(0, 200) || (pickHostileD.match(/[^\n]*<img src=x>[^\n]*/) ?? ['no conv line'])[0].slice(0, 200)}`)
+await sql`DELETE FROM accounts WHERE id = ${OTHER_D}`
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

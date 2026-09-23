@@ -253,7 +253,8 @@ client.preflight(
   1,666 units, not 1,667.</p>
   <p>The console's <a href="/app?view=tasks">task budgets view</a> does that division for you. Type
   the amount and your rate, and it puts the whole number of units in the ceiling field; the save is
-  the same <span class="inline">ceiling_units</span> write, and the rate is stored nowhere. The same
+  the same <span class="inline">ceiling_units</span> write. The rate is not saved to your account or
+  anywhere in the API: it rides in the page's address, so your browser history keeps it. The same
   view suggests a ceiling from your own history, the p50, p90 and max units of an agent's recent
   jobs, and at your rate shows what those jobs come to, as your estimate. In code it is the same
   arithmetic, done exactly:</p>

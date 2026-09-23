@@ -48,9 +48,11 @@ import { HERO_LOOP_MP4, HERO_POSTER_JPG } from './lib/hero-video.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 import { llmsTxt, llmsFullTxt } from './lib/llms.js'
+import { logUrl, reqSerializer } from './lib/log-url.js'
 
 const app = Fastify({
-  logger: true,
+  // A console URL is logged without its query: src/lib/log-url.ts says why.
+  logger: { serializers: { req: reqSerializer } },
   // A malformed percent-encoding in the path (/%) fails inside the router,
   // before any hook or setErrorHandler this app registers can see it, and
   // Fastify's default answer is a JSON body that echoes the URL back to the
@@ -118,7 +120,7 @@ app.setErrorHandler((error, request, reply) => {
     // Fastify's own 4xx bodies carry a `code` (FST_ERR_CTP_INVALID_MEDIA_TYPE
     // and friends) and its default handler logs them. Dropping either would
     // make the comment above this function false.
-    request.log.warn({ err: error, url: request.url }, 'request error')
+    request.log.warn({ err: error, url: logUrl(request.url) }, 'request error')
     return reply.code(status).send({
       statusCode: status,
       error: STATUS_CODES[status] ?? 'Error',
@@ -126,7 +128,7 @@ app.setErrorHandler((error, request, reply) => {
       ...(code ? { code } : {}),
     })
   }
-  request.log.error({ err: error, url: request.url }, 'unhandled error')
+  request.log.error({ err: error, url: logUrl(request.url) }, 'unhandled error')
   return reply.code(500).send({ error: 'internal_error', message: 'Unexpected server error' })
 })
 
