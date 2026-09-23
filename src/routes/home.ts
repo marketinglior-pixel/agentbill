@@ -72,7 +72,7 @@ function logFrame(): string {
   return `<figure class="frame" aria-label="Sample: an agent's log for ${RUN.taskRef}, ${num(RUN.used)} of ${num(RUN.ceiling)} units used, the next call answered approved false">
       <div class="fr-win">
         <div class="fr-bar">
-          <span class="fr-title"><span class="tag tag-id">${RUN.taskRef}</span> your agent&rsquo;s log &middot; ceiling ${num(RUN.ceiling)} units</span>
+          <span class="fr-title"><span class="tag tag-id">${RUN.taskRef}</span><span class="fr-t">your agent&rsquo;s log &middot; ceiling ${num(RUN.ceiling)} units</span></span>
           <span class="tag">sample</span>
         </div>
         <div class="fr-body">
@@ -80,7 +80,7 @@ function logFrame(): string {
             <div class="lg-row lg-head"><span class="lg-c">call</span><span class="lg-u">units</span><span class="lg-t">total</span><span class="lg-a">answer</span></div>
             ${row(`${early.length} earlier calls`, `+${num(early[early.length - 1].cum)}`, num(early[early.length - 1].cum), ok, ' lg-dim')}
             ${last2.map((s) => row(s.name, `+${num(s.units)}`, num(s.cum), ok)).join('\n            ')}
-            ${row(RUN.refused.name, `asks ${num(RUN.refused.asked)}`, `${num(RUN.used + RUN.refused.asked)} &gt; ${num(RUN.ceiling)}`, '<span class="chip-no">approved: false</span>', ' lg-no')}
+            ${row(RUN.refused.name, `asks ${num(RUN.refused.asked)}<span class="ph"> &middot; ${num(RUN.remaining)} left</span>`, `${num(RUN.used + RUN.refused.asked)} &gt; ${num(RUN.ceiling)}`, '<span class="chip-no">approved: false</span>', ' lg-no')}
             <div class="fr-decide">
               <span class="fr-k">Your code decides what happens next</span>
               <div class="fr-picks"><span>Return what you have</span><span>Skip this step</span><span>Replan</span></div>
@@ -106,7 +106,7 @@ function logFrame(): string {
 /** The statement's figure: the same account in the same minute, a month meter with room beside this job at its ceiling. */
 function statementFigure(): string {
   return `<figure class="st-fig">
-        <figcaption class="st-top"><span class="fr-k">same account, same minute</span><span class="tag">sample</span></figcaption>
+        <figcaption class="st-top"><span class="fr-k">same account, <span class="nb">same minute</span></span><span class="tag">sample</span></figcaption>
         <div class="st-m">
           <div class="st-l"><span class="st-n">Org &middot; month cap</span><span class="st-v">${MONTH_SAMPLE_PCT}% used</span></div>
           <div class="st-bar"><i style="width:${MONTH_SAMPLE_PCT}%"></i></div>
@@ -115,7 +115,7 @@ function statementFigure(): string {
         <div class="st-m st-lit">
           <div class="st-l"><span class="st-n">${RUN.taskRef}</span><span class="st-v">${num(RUN.used)} / ${num(RUN.ceiling)}</span></div>
           <div class="st-bar"><i style="width:${Math.round((RUN.used / RUN.ceiling) * 1000) / 10}%"></i><u></u></div>
-          <span class="st-s">ceiling ${num(RUN.ceiling)} &middot; next call asks ${num(RUN.refused.asked)} &middot; refused</span>
+          <span class="st-s"><span class="st-ceil">ceiling ${num(RUN.ceiling)} &middot; </span>next call asks ${num(RUN.refused.asked)} &middot; refused</span>
         </div>
       </figure>`
 }
@@ -157,7 +157,7 @@ def critique(draft):
   from 'agentbill'
 
 <span class="cmt">// Reads AGENTBILL_API_KEY from env.</span>
-async function critique(draft: string) {
+async function critique(draft) {
   try {
     const r = await preflight({
       agentId: 'researcher',
@@ -183,11 +183,11 @@ const QUESTIONS: ReadonlyArray<readonly [q: string, a: string]> = [
   ['Does AgentBill see my provider bill?',
     'No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read, estimate or reconcile against your invoice. It knows what your code told it a call was worth. That is a deliberate limit and it is why a unit is whatever you say it is.'],
   ['How is a job ceiling different from a monthly spend cap?',
-    'A monthly cap meters the whole account over the month, and some platforms also cap one session inside their own runtime. A job ceiling is a name your code passes: a call counts against it only if it asks preflight with that name, from any process and for any provider, and the number has no reset.'],
+    'A monthly cap meters an organization or a project over the month, and some platforms also cap one session inside their own runtime. A job ceiling is a name your code passes: a call is checked against it only if it asks preflight with that name, from any process and for any provider, and the number has no reset.'],
   ['Does AgentBill sit in my request path?',
-    'No. It is an endpoint your code calls before it calls a provider, not a gateway your traffic routes through. Nothing to point your base URL at, nothing new that can be down between you and OpenAI, and no third party holding your provider keys. If AgentBill is unreachable your code decides what to do, which is a decision a proxy would have taken away from you.'],
+    'No. It is an endpoint your code calls before it calls a provider, not a gateway your traffic routes through. Nothing to point your base URL at and no third party holding your provider keys. If AgentBill is unreachable, preflight raises in your process after its timeout, and your code decides whether to call the provider anyway.'],
   ['What happens if a job crashes with units still reserved?',
-    `Preflight reserves the units it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released early because a process was slow.`],
+    `Preflight reserves the units it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released before its ${RESERVATION_TTL_MINUTES} minutes are up, however slow the process.`],
   [`What happens when I reach the free tier's ${num(PLAN_LIMITS.free)} calls?`,
     'Preflight starts answering approved: false with reason free_tier_exceeded (plan_limit_exceeded on a paid plan) and an upgrade_url. The SDK returns that answer instead of raising, so check result.approved. A refused call reserves nothing and is not counted.'],
   ['Can I show the ceiling in dollars?',
@@ -198,7 +198,7 @@ export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: `AgentBill · ${HOME_H1}`,
-      description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next. Free tier, API key in 30 seconds, no card.`,
+      description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next. Free tier, no card.`,
       path: '/',
       // The one page on the canvas theme. /app, /docs, /register and the rest
       // keep their own: the console's --held green is semantics, not
@@ -206,7 +206,7 @@ export async function homeRoute(app: FastifyInstance) {
       // TOKENS_CANVAS in theme.ts.
       theme: 'canvas',
       og: {
-        description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what next.`,
+        description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next.`,
       },
       // The product entity lives in ui/ld.ts and is emitted identically here
       // and on /pricing under one @id.
@@ -260,8 +260,10 @@ export async function homeRoute(app: FastifyInstance) {
        other route; these overrides are scoped to what / renders. */
     .site-nav .btn, .btn, .btn-ghost, .nav-menu summary { border-radius: var(--r-pill); }
     .btn { font-weight: 500; }
-    .btn-lg { padding: 13px 26px; font-size: var(--fs-body); min-height: 48px; display: inline-flex; align-items: center; }
-    .btn-alt { display: inline-flex; align-items: center; min-height: 48px; padding: 13px 26px; border-radius: var(--r-pill);
+    /* Heights from the Figma Button component: L 44, M 40. */
+    .btn-lg { padding: 10px 24px; font-size: var(--fs-body); line-height: 24px; min-height: 44px; display: inline-flex; align-items: center; }
+    .site-nav .btn, .pricing .tier-card .btn, .pricing .tier-card .btn-ghost { padding: 10px 20px; line-height: 20px; }
+    .btn-alt { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 24px; line-height: 24px; border-radius: var(--r-pill);
                background: var(--surface3); color: var(--text); text-decoration: none; font-weight: 500;
                font-size: var(--fs-body); white-space: nowrap; transition: background .15s; }
     .btn-alt:hover { background: var(--border); }
@@ -385,7 +387,12 @@ export async function homeRoute(app: FastifyInstance) {
     .pricing .tier-card.rec { background: var(--surface); border: 1.5px solid var(--text); }
     .pricing .tier-price { font-weight: 500; }
     .pricing .tier-tag { color: var(--text); border-color: var(--border2); background: var(--surface3); }
+    /* Plan buttons hug their label, as the frames draw them; /pricing keeps
+       its own full-width ones because this rule is scoped to this page. */
+    .pricing .tier-card .btn, .pricing .tier-card .btn-ghost { display: inline-flex; width: auto; align-self: flex-start; }
     .price-links { margin-top: var(--s5); display: flex; justify-content: center; }
+    .more-link { font-size: var(--fs-small); font-weight: 500; color: var(--text); text-decoration: none; }
+    .more-link:hover { text-decoration: underline; }
 
     /* Questions: the two-column accordion. Native details, no script. The
        first item is the not-list, open, and it is the [home] gate's slice. */
@@ -413,6 +420,15 @@ export async function homeRoute(app: FastifyInstance) {
     .final-band p { color: var(--muted); font-size: var(--fs-lede); }
     .final-row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
     .cp { border-radius: var(--r-pill); }
+    .cp .cp-btn { border: 0; border-radius: var(--r-pill); background: var(--surface3); color: var(--text); font-weight: 500;
+                  height: 32px; padding: 0 var(--s3); transition: background .15s; }
+    .cp .cp-btn:hover { background: var(--border); }
+    /* Body copy at the text styles' own line heights (16/24, 14/20). */
+    .st-copy p, .step p, .faq-list details p, .nots li { line-height: 1.5; }
+    .trust, .icp-note, .evid-a { line-height: 20px; }
+    #estimate .sec-head .lead { max-width: 48rem; }
+    .pg-lede { max-width: 51rem; }
+    .ph { display: none; }
 
     /* Your code, under the demo's wire. */
     .code-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-inner); min-width: 0; }
@@ -435,10 +451,40 @@ export async function homeRoute(app: FastifyInstance) {
     }
     @media (max-width: ${BP.md}px) {
       :root { --gutter: 16px; }
+      /* The phone frames (Figma 5:2): heads and chips set left, the hero alone centred. */
+      .sec-head, .how h2, .icp { text-align: left; }
+      .sec-head .lead, .pg-lede { margin-inline: 0; }
+      .chips { justify-content: flex-start; gap: 8px; }
+      .chips li { padding: 9px 15px; font-size: var(--fs-small); }
+      .pill { padding: 7px 13px; gap: .28em; }
+      .pill-tag { font: inherit; letter-spacing: normal; text-transform: none; background: none; border: 0; padding: 0; }
+      /* The hero frame as the phone frame draws it (5:22): the meter first, the
+         last two approved calls and the refused one, and the line under them. */
+      .fr-body { display: flex; flex-direction: column; }
+      .fr-side { order: -1; background: none; border: 0; padding: 14px 14px 0; gap: 8px; }
+      .fr-side > .fr-k, .fr-next, .fr-plate { display: none; }
+      .lg-head, .lg-dim, .fr-picks { display: none; }
+      .fr-decide { margin-top: 10px; }
+      .fr-decide .fr-k { font-family: var(--sans); font-size: var(--fs-small); letter-spacing: 0; text-transform: none; color: var(--text); }
+      .lg-row.lg-no { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 8px; row-gap: 4px; padding-block: 8px; }
+      .lg-row.lg-no .lg-c { white-space: nowrap; }
+      .lg-row.lg-no .lg-t { display: none; }
+      .lg-row.lg-no .lg-u { order: 3; flex-basis: 100%; text-align: left; }
+      .ph { display: inline; }
+      .st-ceil { display: none; }
+      .st-v { font-size: var(--fs-body); white-space: nowrap; }
+      .st-n { white-space: nowrap; }
+      /* The phone frames keep the samples and the illustrations off the phone;
+         both stay in the served HTML, so the harvester and the gates still read them. */
+      .code-card, .step-ill { display: none; }
       .sec, .band, .final { padding-block: 72px 0; }
-      .hero { padding-block: 40px 0; }
-      .hero h1 { margin-top: 20px; }
-      .sub { font-size: var(--fs-body); }
+      .hero { padding-block: 24px 0; }
+      .hero h1 { margin-top: 16px; }
+      .sub { font-size: var(--fs-body); margin-top: 14px; }
+      .hero-cta { margin-top: 20px; }
+      .trust { margin-top: 10px; }
+      .frame { margin-top: 20px; }
+      .fr-title .fr-t { display: none; }
       .frame { padding: 12px; border-radius: 20px; }
       .fr-bar { padding: 10px 12px; }
       .fr-log { padding: 8px 8px 14px; }
@@ -456,6 +502,12 @@ export async function homeRoute(app: FastifyInstance) {
     @media (max-width: ${BP.sm}px) {
       .fr-title { flex-wrap: wrap; }
       .code-head > span { display: none; }
+    }
+    /* At 320 the install pill is wider than the close band, so the Copy button
+       drops under the command instead of being cut by the band's edge. */
+    @media (max-width: ${BP.xs}px) {
+      .final-row .cp { flex-wrap: wrap; justify-content: center; padding: 8px 12px; row-gap: 8px; }
+      .final-band { padding-inline: 16px; }
     }
 `,
     })}
@@ -485,8 +537,8 @@ ${siteNav('/')}
         <h2>Unattended agents need a job ceiling</h2>
         <p>Month caps, org caps, and session or window budgets are real. They meter an account, a clock, or
         one session. A job ceiling meters one job, across processes and providers, with no reset: a call
-        counts against it only if it asks preflight with the job&rsquo;s name, and the call that would cross
-        it gets <span class="mono-in">approved: false</span>.</p>
+        is checked against it only if it asks preflight with the job&rsquo;s name, and the call that would
+        cross it gets <span class="mono-in">approved: false</span>.</p>
         <p class="st-line">An org cap is monthly: either tonight&rsquo;s loop fits under it, or every agent in
         the org is refused until the cap resets or someone raises it.</p>
       </div>
@@ -509,7 +561,8 @@ ${playgroundSection(codeFrame())}
         <span class="mono-in">ceiling_units</span> in the body sets the same number.</p>
       </div>
       <div class="step">
-        <div class="step-ill">preflight(agent_id="researcher",
+        <div class="step-ill">client.preflight(
+    agent_id="researcher",
     task_ref="${RUN.taskRef}",
     estimated_units=12)<span class="res">&rarr; <span class="chip-ok">approved</span> 12 reserved</span></div>
         <h3><i>2</i> Ask before each call</h3>
@@ -517,7 +570,8 @@ ${playgroundSection(codeFrame())}
         approved call reserves its units, so two calls racing cannot both take the last room.</p>
       </div>
       <div class="step">
-        <div class="step-ill">record(agent_id="researcher",
+        <div class="step-ill">client.record(
+    agent_id="researcher",
     task_ref="${RUN.taskRef}",
     units=12)<span class="res">&rarr; settled &middot; 12 used</span></div>
         <h3><i>3</i> Record what it used</h3>
@@ -537,7 +591,7 @@ ${playgroundSection(codeFrame())}
       <li>Retry loops you wrote</li>
       <li>Batch pipelines</li>
     </ul>
-    <p class="icp-note">Examples, not integrations or customers. A call counts only when your code asks preflight.</p>
+    <p class="icp-note">Examples, not integrations or customers. A call is checked only when your code asks preflight.</p>
   </section>
 
   <section class="band">
@@ -562,7 +616,7 @@ ${playgroundSection(codeFrame())}
     </div>
     ${tierCards((tier) => `/app/upgrade/${tier}`)}
     <div class="price-links">
-      <a class="btn-ghost" href="/pricing">Full pricing &rarr;</a>
+      <a class="more-link" href="/pricing">Full pricing &rarr;</a>
     </div>
   </section>
 
@@ -578,7 +632,8 @@ ${playgroundSection(codeFrame())}
           <summary>What AgentBill does not do</summary>
           <ul class="nots">
       <li><b>Sit in your request path.</b> No proxy, no base URL to change, no provider keys held. A call
-      that never asks, or a retry buried in a library, is invisible to the ceiling.</li>
+      that never asks preflight, or a retry buried in a library, is never checked against the ceiling
+      before it runs. If it records, its units still count.</li>
       <li><b>Read your provider bill.</b> No invoice access, and the API never turns units into dollars. The
       estimator above is your rate times your count, run in your browser. Units are yours to define, and
       units refused is not money.</li>
