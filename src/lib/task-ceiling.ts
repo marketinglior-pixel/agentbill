@@ -51,9 +51,10 @@ export type SetTaskCeiling =
 
 /**
  * What a job's numbers count (migration 014). 'unit' is the developer's own
- * unit and the default; 'token' is a count the caller's provider reported.
- * Declared by whoever opens the job and fixed from then on: AgentBill counts
- * nothing itself, this only labels the number the caller sends.
+ * unit and the default; 'token' is a count the caller's provider reported,
+ * which the SDKs' wrap() sends. Declared by whoever opens the job and fixed
+ * from then on: the server counts nothing itself, this only labels the number
+ * the caller sends.
  */
 export const TASK_UNITS = ['unit', 'token'] as const
 export type TaskUnit = (typeof TASK_UNITS)[number]

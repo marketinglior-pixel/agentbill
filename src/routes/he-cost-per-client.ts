@@ -14,9 +14,12 @@ import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 // WHAT IT DELIBERATELY DOES NOT DO. The teardown of the reference asset
 // (B-brain/05-research/2026-09-06-adir-salem-lead-magnet-teardown.md) proposed
 // shipping a real `GET /statement/:customer_ref` render. That endpoint does not
-// exist and the schema holds no price, cost or cents column anywhere: the
-// customers table is id, account_id, customer_ref, limit_units, used_units,
-// created_at, updated_at. Units only. So this page gives away the MANUAL method
+// exist and, when this was written, the schema held no price, cost or cents
+// column anywhere: the customers table is id, account_id, customer_ref,
+// limit_units, used_units, created_at, updated_at. Since migration 017 an event
+// can carry a list-price estimate for a model call recorded through wrap();
+// that is a public list price, not the operator's own rate and not a statement
+// per client, so nothing here changes. So this page gives away the MANUAL method
 // in full, and every money figure on it is the operator's own arithmetic from
 // their own mapping table, stated as such in the frame that carries it.
 //

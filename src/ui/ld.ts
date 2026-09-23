@@ -20,9 +20,11 @@ import { PLAN_ORDER, PLAN_PRICES, PLAN_LIMITS } from '../integrations/polar.js'
 /** The one-sentence description, shared by every node that needs one. */
 const DESCRIPTION =
   'A per-task spend ceiling for AI agents. Your code calls preflight before it calls a provider; ' +
-  'preflight reserves the integer units you estimate against a ceiling bound to a task_ref you ' +
-  'choose, answers approved:false or raises when the reservation would cross it, and your code ' +
-  'decides what happens next. Units are developer-defined and never converted to money.'
+  "preflight reserves an estimate (the integer units you pass, or under the SDK's wrap() the job's " +
+  'running average in tokens) against a ceiling bound to a task_ref you choose, answers ' +
+  'approved:false or raises when the reservation would cross it, and your code decides what happens ' +
+  'next. Units you define are never converted to money; model calls measured by wrap() carry an ' +
+  'estimate at public list price beside their tokens.'
 
 /**
  * SoftwareApplication for / and /pricing. Both emit it under one @id so the two
@@ -78,7 +80,7 @@ export function softwareLd(): unknown {
       'One ceiling per task_ref: every call passing the same task_ref is checked against the same task budget, from any process, any machine and any provider.',
       'A job is opened with its ceiling by the first preflight that names a new task_ref, or from the console before any code runs. A task_ceiling sent on a later preflight is not applied, so a retry cannot raise the number it was meant to respect; the ceiling changes only through the console or PUT /tasks/:task_ref/ceiling, and an approved answer or a task_ceiling_exceeded refusal carries the ceiling in force.',
       'When used plus reserved plus this estimate would cross the task ceiling, preflight answers approved:false with reason task_ceiling_exceeded and the numbers it decided on; the SDK raises TaskCeilingExceededError and the calling code decides what happens next.',
-      'Units are integers the developer defines and passes. AgentBill compares units to a ceiling and never converts them to currency or reads a provider invoice.',
+      'Units are integers the developer defines and passes, or, for model calls measured by the SDK\'s wrap(), the tokens the provider reported. AgentBill compares them to a ceiling, never converts developer-defined units to currency, and never reads a provider invoice; any dollar figure is an estimate at public list price.',
       'The check and the reservation are one conditional UPDATE, so two preflights arriving together cannot both be approved against the same remaining units.',
       'idempotency_key replays a stored decision, so a retried preflight holds one reservation instead of two.',
       'POST /events settles a reservation: success true records the units, success false releases them and records nothing.',

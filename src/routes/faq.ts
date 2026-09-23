@@ -21,10 +21,12 @@ type QA = { q: string; a: string }
 
 const FAQ: readonly QA[] = [
   {
-    // src/routes/preflight.ts: units are an integer the caller passes. Nothing
-    // in the codebase converts them to currency.
+    // src/routes/preflight.ts: units are an integer the caller passes, and
+    // task_budgets.unit says whether a job counts those or tokens (migration
+    // 014). Nothing converts a developer's units to currency; src/lib/prices.ts
+    // prices tokens that wrap() recorded, as a list-price estimate.
     q: 'What is a unit?',
-    a: `An integer you define and pass. AgentBill counts units and compares them to a ceiling; it never converts them to money and never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours.`,
+    a: `By default, an integer you define and pass. AgentBill counts units and compares them to a ceiling; it never converts the units you define into money and never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours. A job can instead be counted in tokens, which is what wrap() does: the numbers are the tokens your provider reported, the ceiling is in tokens, and the job's page shows an estimate at public list price beside them. List price, your invoice may differ.`,
   },
   {
     // src/routes/preflight.ts for the five reason strings and their shapes;
@@ -34,16 +36,18 @@ const FAQ: readonly QA[] = [
     a: `Five things, and each one names itself. ceiling_exceeded means this one call's estimate is over the per-call ceiling. task_ceiling_exceeded means used plus reserved plus this estimate would cross the ceiling on that task_ref. budget_exhausted means that customer's own limit. free_tier_exceeded and plan_limit_exceeded mean our monthly quota ran out, not yours. All five come back as a 200 with approved false, carrying the numbers the decision was made on, and preflight then raises for the three that are your spend rule so a check you forgot to read cannot be silently ignored, and returns the result with an upgrade_url for the two that are ours. What happens next is your code's decision: retry with a smaller estimate, drop to a cheaper model, return what you have, or stop. We are not in your process and cannot end it.`,
   },
   {
-    // Nothing meters itself. Units move only through preflight.ts, events.ts
-    // and step.ts, all of which your code calls. There is no proxy, no sidecar
-    // and no provider credential anywhere in the API surface.
+    // Units move only through preflight.ts, events.ts and step.ts, all of which
+    // your code calls, directly or through the SDKs' wrap(), which calls them
+    // around the model methods it wraps (sdk/python/agentbill/wrap.py,
+    // sdk/node/src/wrap.ts). There is no proxy, no sidecar and no provider
+    // credential anywhere in the API surface.
     q: 'Does AgentBill count my tool calls and GPU time automatically?',
-    a: `No. Nothing is counted unless your code says so. Units move when you call preflight, record an event, or record a step, and they count against a job's ceiling only when the call carries the same task_ref. So a tool, a GPU run or a vector search counts if you instrument it with that task_ref, and does not exist to us if you do not. Nothing sits in your traffic to watch it, which is the trade: you get one number for a whole job across every provider, and you get it because you decided what each step was worth.`,
+    a: `No. Tool calls and GPU time are counted only when your code says so. Units move when you call preflight, record an event, or record a step, and they count against a job's ceiling only when the call carries the same task_ref. So a tool, a GPU run or a vector search counts if you instrument it with that task_ref, and does not exist to us if you do not. Model calls are the one thing counted for you, and only through a client you wrapped with wrap(): OpenAI, Anthropic and Gemini calls through their create methods, recorded from the usage the provider returned to your process. An unwrapped call is not counted. Nothing sits in your traffic to watch it, which is the trade: one number for a whole job across every provider, because your code, or wrap(), reported what each step used.`,
   },
   {
     // llms.txt and preflight.ts both: no provider credentials, no bill access.
     q: 'Does AgentBill see my provider bill?',
-    a: `No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read, estimate or reconcile against your invoice. It knows what your code told it a call was worth. That is a deliberate limit and it is why a unit is whatever you say it is.`,
+    a: `No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read or reconcile against your invoice. It knows what your code told it a call was worth or, through wrap(), the token counts on the response your own process received. The dollar figure beside those tokens is an estimate at public list price, never a reading of your bill: list price, your invoice may differ.`,
   },
   {
     // src/routes/preflight.ts:128-158. One conditional UPDATE, not read-then-write.

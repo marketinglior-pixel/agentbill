@@ -240,6 +240,39 @@ Settle every run, including the ones that fail. `record(..., success=False)` rel
 
 ---
 
+## Automatic metering with `wrap()`
+
+> **Added after 0.6.5.** `wrap()` is in this repository's SDK and not in 0.6.5 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
+
+Wrap your model client once. Every call it makes through `chat.completions.create` and `responses.create` (OpenAI), `messages.create` (Anthropic) or `models.generate_content` and `generate_content_stream` (google-genai, `aio` included), sync or async, streamed or not, is measured from the usage the provider returned: a preflight on the job in tokens before the call, a record of the reported tokens after it. You pass no estimate and record no number.
+
+```python
+from openai import OpenAI
+from agentbill import wrap, TaskCeilingExceededError
+
+# Reads AGENTBILL_API_KEY. The job is counted in tokens; task_ceiling opens it.
+llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher", task_ceiling=50_000)
+
+try:
+    reply = llm.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
+        messages=[{"role": "user", "content": "Summarize the quarter in one line."}],
+    )
+    print(reply.choices[0].message.content)
+except TaskCeilingExceededError as refused:
+    print(refused)  # the call that would have passed the ceiling was not sent
+```
+
+- **The estimate needs no number from you.** Before the job's first measured call in this process it is `default_estimate` (2,000); after, the job's running average per call, never more than the average prompt plus the call's own `max_tokens` (or `max_completion_tokens`, `max_output_tokens`). The prompt is not counted before the call, and no request is added. A call that uses more than it reserved is still recorded at what it used, so one call can take the job past its ceiling, by at most that call for each caller running at the same moment; the next preflight is refused.
+- **After the call** the record carries `idempotency_key` = the provider's response id, the preflight's `reservation_id`, and metadata: provider, model, tokens by type (`input`, `cache_read`, `cache_write`, `output`, `reasoning`), `duration_ms`, and the `step` you named. No prompt, no answer. For another step of the same job, `wrap(llm, step="review")`.
+- **Missing usage is recorded as missing, never as 0.** A provider error releases the reservation. A record that fails after the provider answered warns and still returns the answer. AgentBill's own quota running out never holds the call back; it warns with the upgrade link.
+- **Only wrapped calls are measured.** Another method, an unwrapped client, a tool call or a GPU run counts only if your code records it with the same `task_ref`. A client pointed at another host is recorded as `openai-compatible` (or `anthropic-compatible`) and gets no list price.
+- **The job is counted in tokens.** One opened in units answers 422 `task_unit_mismatch`, and the call is not sent.
+- **What it cost:** `client.get_task("tokens-1").breakdown` has the job by model and by step, with tokens and `list_price_usd_estimate`, an estimate at public list price from a dated price table. List price, your invoice may differ; a model with no list price is counted in `unpriced_calls`, never as $0.
+
+---
+
 ## Node.js
 
 ```typescript

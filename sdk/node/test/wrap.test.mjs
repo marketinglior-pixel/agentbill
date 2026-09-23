@@ -183,7 +183,7 @@ test('a failed record never loses the answer', async () => {
   assert.ok(warnings.some((w) => /could not record/.test(w)), warnings.join(' | '))
 })
 
-test("AgentBill's own quota never stops the call", async () => {
+test("AgentBill's own quota never holds the call back", async () => {
   reset({ '/preflight': QUOTA })
   const oa = new FakeOpenAI()
   const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })

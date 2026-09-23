@@ -95,6 +95,33 @@ The result of `preflight()` has the same method, `result.record({ units, success
 
 > **Added after 0.4.2.** `reservationId`, `result.record()`, `unit`, and `record`'s `idempotencyKey`, `reservationId` and `usageMissing` are in this repository's SDK and not in 0.4.2 or earlier. They also need an AgentBill API that returns `reservation_id`; against one that does not, `reservationId` is absent and records settle as before.
 
+### `wrap(client, options)`
+
+> **Added after 0.4.2.** `wrap()` is in this repository's SDK and not in 0.4.2 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
+
+Automatic metering for a model client. Every call through `chat.completions.create` and `responses.create` (openai), `messages.create` (@anthropic-ai/sdk) or `models.generateContent` and `generateContentStream` (@google/genai), streamed or not, is measured from the usage the provider returned: a preflight on the job in tokens before the call, a record of the reported tokens after it.
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk'
+import { wrap, TaskCeilingExceededError } from 'agentbill'
+
+// Reads AGENTBILL_API_KEY. The job is counted in tokens; taskCeiling opens it.
+const llm = wrap(new Anthropic(), { taskRef: 'tokens-1', agentId: 'writer', step: 'draft', taskCeiling: 50_000 })
+
+try {
+  const msg = await llm.messages.create({
+    model: 'claude-sonnet-4-5', max_tokens: 400,
+    messages: [{ role: 'user', content: 'One line on job ceilings.' }],
+  })
+  console.log(msg.content[0].type === 'text' ? msg.content[0].text : '')
+} catch (e) {
+  if (!(e instanceof TaskCeilingExceededError)) throw e
+  console.log(e.message) // the call was not sent
+}
+```
+
+The estimate is the job's running average per call in this process (`defaultEstimate`, 2,000, before the first), never more than the average prompt plus the call's own `max_tokens`. A refusal throws before the provider call is sent. After it, the record carries the provider's response id as `idempotencyKey`, the preflight's `reservationId`, and metadata (provider, model, tokens by type, `duration_ms`, `step`), never the prompt or the answer. Missing usage is recorded as missing, never as 0. A streamed call is recorded when its loop ends; a Chat Completions stream gets `stream_options.include_usage` when you did not set it, and the usage-only chunk that adds stays out of your loop. Only wrapped calls are measured. The wrapped `create` returns a plain Promise, without the SDK's `withResponse()`. `getTask('tokens-1')` returns the job's `breakdown` by model and by step, with `list_price_usd_estimate`, an estimate at public list price: list price, your invoice may differ.
+
 ### `meter(fn, options)`
 
 Wraps an async function so preflight runs before it and record after it. See `MeterOptions` in the type definitions.

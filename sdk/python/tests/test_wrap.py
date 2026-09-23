@@ -307,7 +307,7 @@ def test_a_failed_record_never_loses_the_answer(server):
     assert reply.id == "chatcmpl-abc123"
 
 
-def test_agentbill_quota_never_stops_the_call(server):
+def test_agentbill_quota_never_holds_the_call_back(server):
     server["preflight"] = QUOTA
     oa = FakeOpenAI()
     llm = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB)

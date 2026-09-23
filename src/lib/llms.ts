@@ -42,13 +42,16 @@ export const SDK_VERSIONS = {
  *  either one gets the same entity, and so a correction lands in both. */
 const SUMMARY =
   'AgentBill is an SDK and HTTP API that puts a spend ceiling on one agent task. ' +
-  'Your code calls preflight before it does expensive work; preflight atomically reserves ' +
-  'the integer units you estimate against a ceiling identified by a task_ref you choose, and ' +
-  'when the reservation would cross that ceiling it refuses, answering approved: false or ' +
-  'raising a typed error, after which your own code decides what happens next. Every process, ' +
-  'machine, provider and agent that passes the same task_ref draws on the same ceiling. Units ' +
-  'are integers you define; AgentBill never converts them to money and never reads your ' +
-  'provider bill. Python and Node SDKs and an MCP server. Free tier: ' +
+  'Before expensive work your code calls preflight, which atomically reserves an estimate ' +
+  'against a ceiling identified by a task_ref you choose: the integer units you pass or, when ' +
+  "the SDK's wrap() is around your OpenAI, Anthropic or Gemini client, the job's running average " +
+  'in tokens. When the reservation would cross that ceiling it refuses, answering approved: false ' +
+  'or raising a typed error, after which your own code decides what happens next. Every process, ' +
+  'machine, provider and agent that passes the same task_ref draws on the same ceiling. After the ' +
+  'call, record settles what it used: your number or, through wrap(), the token counts your ' +
+  'provider reported on the response, which the server prices as an estimate at public list ' +
+  'price (list price, your invoice may differ). AgentBill never reads your provider bill and ' +
+  'never converts units you define into money. Python and Node SDKs and an MCP server. Free tier: ' +
   `${num(PLAN_LIMITS.free)} preflight calls a month.`
 
 const NOT_A = `## What AgentBill is not
@@ -56,24 +59,33 @@ const NOT_A = `## What AgentBill is not
 - **Not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider
   credentials held by us. Your model calls stay direct. AgentBill sees one HTTPS call, made by
   your code, to our API.
-- **Not a reader of your provider bill.** No invoice ingestion, no token counting, no currency
-  field anywhere in the API. Every quantity is an integer unit you defined and sent, so the
-  ceiling is exactly as tight as your estimate.
+- **Not a reader of your provider bill.** No invoice ingestion and no access to your provider
+  account. wrap() reads the usage on the response your own process already received and sends the
+  token counts, the model and the step, never the prompt or the answer. The one dollar field in
+  the API, list_price_usd_estimate on GET /tasks/:task_ref, is an estimate at public list price from
+  a dated price table named in price_versions: list price, your invoice may differ, and a call it
+  cannot price shows no list price, never $0. The ceiling is exactly as tight as the estimate
+  preflight reserves: yours, or the job's running average under wrap().
 - **Not a per-agent budget.** agent_id is an attribution label. It is stored on tasks, steps and
   refusals and can be filtered on, and nothing is capped by it. Two agents sharing a task_ref
   share one ceiling.
-- **Not automatic metering.** Nothing is counted unless your code calls preflight or record. A
-  tool call, a GPU run or a vector search counts against a task ceiling if you instrument it with
-  the same task_ref, and is invisible if you do not. (record_step is a third call your code can
-  make, and it feeds the anomaly baseline only: it takes no task_ref and moves no budget.) A task ceiling is enforced only by preflight
-  calls carrying that task_ref; POST /events with that task_ref moves the task's used_units but
-  never refuses on it, and cannot create a task.
+- **Metering is automatic only for wrapped calls.** wrap() measures the calls a wrapped OpenAI,
+  Anthropic or Gemini client makes through chat.completions.create, responses.create,
+  messages.create, generate_content and generate_content_stream. Nothing else is counted unless
+  your code calls preflight or record: an unwrapped client, another method, a tool call, a GPU run
+  or a vector search counts against a task ceiling if you record it with the same task_ref, and is
+  invisible if you do not. (record_step is a third call your code can make, and it feeds the anomaly
+  baseline only: it takes no task_ref and moves no budget.) A task ceiling is enforced only by
+  preflight calls carrying that task_ref, which wrap() makes before each call it measures; POST
+  /events with that task_ref moves the task's used_units but never refuses on it, and cannot create
+  a task.
 - **Not billing for your end customers.** AgentBill does not charge your users, hold their cards
   or issue them credit. Stripe Connect is not shipped. The per-customer limit_units balance is an
   internal ceiling you set for your own accounting, not an invoice. (AgentBill's own subscription
   runs on Polar: that is us charging you, not you charging anyone.)
-- **Not observability.** No traces, no spans, no prompt capture, no after-the-fact cost report.
-  GET /decisions stores spend decisions, not conversations.
+- **Not observability.** No traces, no spans, no prompt capture. GET /tasks/:task_ref breaks a
+  job down by model and by step (calls, tokens, a list-price estimate), and GET /decisions stores
+  spend decisions, not conversations.
 - **Not a process supervisor.** Nothing here can terminate a run. preflight answers and the SDK
   raises; the except or catch block is what ends the job.`
 
@@ -142,8 +154,8 @@ function links(self: 'short' | 'full'): string {
 ${line('/docs', 'Documentation index|The SDK quick start, the core concepts, and the HTTP reference.')}${line('/docs/task-budgets', 'Task budgets, a hard cost ceiling per agent job|How one task_ref carries one ceiling across every call in a job.')}${line('/docs/limit-cost-per-agent-run', 'How to cap what one agent run can spend|The preflight-and-record pair applied to a single run.')}${line('/docs/langchain-billing', 'How to add billing to a LangChain agent|Wrapping a chain with preflight and record.')}${line('/docs/openai-agent-spend-ceiling', 'How to add a spend ceiling to an OpenAI agent|The same pair around an OpenAI call.')}${line('/faq', 'Questions|What the product does and does not do, answered against the source.')}
 ## Packages
 
-- [agentbill-sdk on PyPI](https://pypi.org/project/agentbill-sdk/): Python SDK ${SDK_VERSIONS.python}. AgentBillClient with preflight, record, gate, get_task, checkpoint, record_step.
-- [agentbill on npm](https://www.npmjs.com/package/agentbill): Node SDK ${SDK_VERSIONS.node}, ESM. Exports preflight, record, getTask, meter.
+- [agentbill-sdk on PyPI](https://pypi.org/project/agentbill-sdk/): Python SDK ${SDK_VERSIONS.python}. AgentBillClient with preflight, record, gate, get_task, checkpoint, record_step, and wrap() for model clients.
+- [agentbill on npm](https://www.npmjs.com/package/agentbill): Node SDK ${SDK_VERSIONS.node}, ESM. Exports preflight, record, getTask, meter and wrap.
 - [agentbill-mcp on PyPI](https://pypi.org/project/agentbill-mcp/): MCP server ${SDK_VERSIONS.mcp}, exposing the preflight and record_event tools to an agent host.
 - [Source repository](https://github.com/marketinglior-pixel/agentbill): The API, this site, and both SDKs. MIT.
 
@@ -170,15 +182,19 @@ still consults one number.
 Integration is two calls. preflight before the work, which reserves and returns a decision, and
 record after it, which settles what the run used or releases the reservation if it failed. Three
 calls carry the whole product: preflight() decides, record() settles, get_task() reads the live
-burn-down.
+burn-down. For model calls, wrap() around the client makes the first two for you, from the usage
+your provider reports.
 
 **AgentBill refuses. Your code decides what happens next**: return a partial result, retry with a
 smaller estimate, drop to a cheaper model, escalate to a human, or stop. There is no kill switch on
 our side, because there is no proxy on our side.
 
-A unit is an integer you define and pass. The common convention is 1 unit = 1 cent, so "this job
-stops at $5" is task_ceiling=500, and nothing in the system knows that: AgentBill compares units to
-a ceiling and never converts them to currency.
+A job counts one of two things, fixed when it opens. In a unit job (the default) a unit is an
+integer you define and pass: with 1 unit = 1 cent, a job worth $5 to you is task_ceiling=500, and
+AgentBill compares those units to the ceiling and never converts them into money. In a token job,
+which is what wrap() opens and records into, the numbers are the tokens your provider reported, the
+ceiling is in tokens, and GET /tasks/:task_ref shows beside them an estimate at public list price
+(list price, your invoice may differ).
 
 ## Install
 
@@ -248,6 +264,45 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
 Python names everything in snake_case and takes api_key as an argument; Node names everything in
 camelCase and reads AGENTBILL_API_KEY only. There is no gate decorator in the Node SDK: the
 explicit pair above is the Node integration path.
+
+## Automatic metering with wrap()
+
+Wrap your model client once and the SDK makes both calls around every call it measures:
+preflight on the job in tokens before it, record with the usage your provider reported after it.
+
+\`\`\`python
+from openai import OpenAI
+from agentbill import wrap, TaskCeilingExceededError
+
+# Reads AGENTBILL_API_KEY. task_ceiling opens the job, counted in tokens.
+llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher", task_ceiling=50_000)
+try:
+    reply = llm.chat.completions.create(model="gpt-4o-mini", max_tokens=300,
+                                        messages=[{"role": "user", "content": "Hello"}])
+except TaskCeilingExceededError as refused:
+    print(refused)   # the call that would have passed the ceiling was not sent
+\`\`\`
+
+\`\`\`typescript
+import OpenAI from 'openai'
+import { wrap } from 'agentbill'
+
+const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', taskCeiling: 50_000 })
+\`\`\`
+
+- Measured: OpenAI chat.completions.create and responses.create, Anthropic messages.create, and
+  google-genai generate_content and generate_content_stream (Python also aio.models), sync, async
+  and streamed. Nothing else a wrapped client does is measured, and neither is an unwrapped client.
+- The estimate preflight reserves needs no number from you: the job's running average per call in
+  your process (default_estimate, 2,000, before the first), never more than the average prompt plus
+  the call's own max_tokens. The prompt is not counted before the call, and no request is added.
+- After the call: idempotency_key is the provider's response id, the reservation is settled whole,
+  and metadata carries provider, model, the tokens by type, duration_ms and step. Missing usage is
+  recorded as missing, never as 0.
+- A refusal raises TaskCeilingExceededError before the provider call is sent. Your code decides.
+- GET /tasks/:task_ref then breaks the job down by model and by step, with tokens and an estimate
+  at public list price. List price, your invoice may differ.
+
 
 ## MCP server
 
@@ -343,9 +398,11 @@ misclassification, so it is drawn rather than asserted:
   ------------------------------------------------------
 \`\`\`
 
-Nothing in step 3 is observed by AgentBill. There is no gateway endpoint, no base URL to point a
+Nothing in step 3 passes through AgentBill. There is no gateway endpoint, no base URL to point a
 provider SDK at, and no credential of yours held by us. That is the trade: you get one ceiling for a
-whole job across every provider, and you get it because your code told us what each step was worth.
+whole job across every provider, and you get it because your code tells us what each step used.
+With wrap(), that is the SDK in your own process reading the usage on the response after it arrives
+and sending the counts in step 4; without it, your code sends the number it chose.
 If AgentBill is unreachable, the SDK raises inside your process rather than failing open, and your
 except block decides whether to run anyway. A gateway would have taken that decision away from you.
 The Python SDK sets a five second timeout on every request; the Node SDK sets none, so it inherits
@@ -451,8 +508,8 @@ Body: agent_id required; customer_id, estimated_units, ceiling, task_ref, task_c
 idempotency_key and unit optional. Omitting estimated_units reserves 1. Omitting customer_id uses
 the customer "default". unit says what the job's numbers count, "unit" (the default) or "token",
 and needs task_ref: it is read when the call opens the job and fixed after, so a later call that
-declares a different unit is 422 task_unit_mismatch, reserving nothing. AgentBill counts nothing
-itself either way; the unit labels the number your code sends.
+declares a different unit is 422 task_unit_mismatch, reserving nothing. The server counts nothing
+itself either way; the unit labels the number your code, or wrap(), sends.
 
 \`\`\`json
 {"approved": true, "reason": null, "estimated_units": 250, "remaining_units": 750,
@@ -493,6 +550,10 @@ event_type here is what the SDKs send agent_id as.
   and task_ref, closed whole. With no reservation open there is nothing to go by and the units sent
   are recorded. Either way the event's metadata says usage_missing, the task counts it in
   usage_missing_calls, and the answer carries usage_missing and units_recorded.
+- metadata in the shape wrap() writes (provider, model, tokens by type) is priced by the server at
+  public list price from a dated snapshot of the LiteLLM price table and stored with the snapshot's
+  name, for GET /tasks/:task_ref. It is an estimate, and a call it cannot price stores no figure and
+  a reason, never 0. The answer to the record does not change.
 - a repeated idempotency_key: {"status":"duplicate_ignored"}, and no budget moves.
 - a customer whose limit_units would be crossed: 402 budget_exhausted, and no event row is written.
   This is the only 402 in the API, and it is the record path refusing, not preflight.
@@ -511,7 +572,11 @@ as an overrun rather than as a save.
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
 remaining_units, exceeded, unit ("unit" or "token"), usage_missing_calls, created_at, updated_at. The list accepts agent_id and limit (default 50,
-max 200). An unknown ref is 404 task_not_found; a task exists from the console or from
+max 200). The single-task read also carries breakdown: calls, units and tokens by type, by_model and
+by_step, list_price_usd_estimate (the sum of the priced calls, null when none is priced, never 0),
+priced_calls and unpriced_calls with unpriced_reasons ("no list price for <model>"),
+price_versions, list_price_label ("list price, your invoice may differ"), and unattributed_units
+for spend recorded before events carried the job's name. An unknown ref is 404 task_not_found; a task exists from the console or from
 PUT /tasks/:task_ref/ceiling, or from a first preflight that passed its task_ref with a task_ceiling.
 
 ### PUT /tasks/:task_ref/ceiling
@@ -593,7 +658,9 @@ client.record(agent_id="researcher", units=250, customer_id="acct_42",
 status = client.get_task("job-142")   # live burn-down
 \`\`\`
 
-Settle with the same number preflight reserved. A smaller number leaves the remainder held until the
+Settle through check.record(units=...), or pass reservation_id=check.reservation_id to record, and
+that reservation closes whole: the units you pass are spent and the rest is released at once.
+Without reservation_id, a number smaller than the one reserved leaves the remainder held until the
 reservation expires. record(success=False) releases without spending. get_task, checkpoint and
 record_step are the other client methods. gate is the decorator form and settles the units it
 reserved, not what the work actually cost, so use the explicit pair when the two differ.
@@ -614,11 +681,54 @@ await record({ agentId: 'researcher', units: 250, customerId: 'acct_42',
                taskRef: 'job-142', success: true })
 \`\`\`
 
-ESM. Exports preflight, record, getTask and meter, and the error classes AgentBillError,
+ESM. Exports preflight, record, getTask, meter and wrap, and the error classes AgentBillError,
 BudgetExhaustedError, CeilingExceededError and TaskCeilingExceededError. There is no typed class for
 the 409 or the 422; both arrive as AgentBillError. The key comes only from AGENTBILL_API_KEY, and
-AGENTBILL_BASE_URL overrides the host. Node's record takes metadata; Python's does not. ceiling is a
-constructor argument in Python and a per-call option in Node.
+AGENTBILL_BASE_URL overrides the host. Both SDKs' record take metadata, idempotency_key and
+reservation_id. ceiling is a constructor argument in Python and a per-call option in Node.
+
+## wrap(), in full
+
+\`\`\`python
+import agentbill
+from anthropic import Anthropic
+
+llm = agentbill.wrap(Anthropic(), task_ref="job-142", agent_id="writer", step="draft",
+                     task_ceiling=200_000)        # opens the job in tokens; not applied once it exists
+review = agentbill.wrap(llm, step="review")      # another step, the same job and running average
+\`\`\`
+
+Python: wrap(client, *, task_ref, agent_id, step=None, customer_id=None, task_ceiling=None,
+default_estimate=None, agentbill_client=None, provider=None). Node: wrap(client, { taskRef, agentId,
+step, customerId, taskCeiling, defaultEstimate, provider }). The key comes from AGENTBILL_API_KEY in
+both unless Python is given agentbill_client. The wrapped client is the original with the measured
+methods replaced: every other attribute is the original's, and the original object is untouched and
+unmeasured.
+
+Before each measured call, preflight with unit "token" and an estimate: the running mean of the
+job's measured calls in this process (default_estimate before the first), never more than the mean
+prompt plus the call's own max_tokens, max_completion_tokens, max_output_tokens or Gemini's
+max_output_tokens. It is an estimate, not a bound: a call with a far bigger prompt than usual uses
+more than it reserved, the record charges what the provider reported, and the job can end past its
+ceiling by that one call for each caller running at the same moment. The next preflight is refused.
+
+After it, record with units = the provider's total, idempotency_key = the provider's response id,
+reservation_id = the one preflight returned, and metadata:
+
+\`\`\`json
+{"provider": "openai", "model": "gpt-4o-mini-2024-07-18", "requested_model": "gpt-4o-mini",
+ "tokens": {"input": 612, "cache_read": 200, "cache_write": 0, "output": 96, "reasoning": 10},
+ "duration_ms": 740, "step": "plan", "service_tier": "default"}
+\`\`\`
+
+input excludes cache reads and writes; output includes reasoning. Anthropic's one-hour cache writes
+are cache_write_1h. Gemini reports thinking outside candidates, so output there is candidates plus
+thoughts. A streamed Chat Completions call gets stream_options.include_usage when the caller did not
+set it, and the usage-only chunk that adds is kept out of the caller's loop; a stream is recorded when
+it ends, is closed, or its loop stops. Usage the provider did not report is recorded with
+usage_missing, never as 0. A provider error releases the reservation. A failed record never loses the
+answer. AgentBill's own quota never holds a call back: it is sent, with a warning. A client pointed at
+another host is recorded as "<provider>-compatible" and is not priced.
 
 ## Two things that are not the task ceiling
 
@@ -640,6 +750,14 @@ ${NOT_A}
 - A reservation not settled inside the TTL, 60 minutes on the hosted service, is reclaimed while
   your call may still be running. The TTL is a server-side setting; only a self-hosted deployment
   can raise it.
+- A dollar figure is an estimate at public list price, not your invoice: contract discounts, batch
+  and regional pricing, and server-side tool fees are not in it, and a model the price table does not
+  have shows no list price.
+- Only wrapped calls are measured automatically. An unwrapped call, a tool, a GPU run counts only
+  if your code records it.
+- One call can pass the ceiling when its estimate was low: preflight reserves an estimate and record
+  charges what the call used, so the overshoot is at most that one call for each caller running at
+  the same moment, and the next preflight is refused.
 - Calls are refused, not reversed. Refusing the next call does not undo the calls that already ran,
   and there is no billing reversal for a result later found to be wrong.
 - Multi-step workflows with state machines, long-running runs measured in hours or days, and

@@ -43,8 +43,8 @@ A failure to record, after the provider answered, never loses the answer: it is
 returned and a RuntimeWarning says the record failed; the reservation then
 stays held until it expires, which keeps the ceiling tighter, not looser.
 
-AgentBill's own quota (free_tier_exceeded, plan_limit_exceeded) never stops
-your call: it goes out, is recorded, and a RuntimeWarning carries upgrade_url.
+AgentBill's own quota (free_tier_exceeded, plan_limit_exceeded) never holds
+your call back: it goes out, is recorded, and a RuntimeWarning carries upgrade_url.
 Same rule as preflight(): your spend rule raises, our billing state does not.
 """
 from __future__ import annotations
@@ -333,8 +333,8 @@ class _Average:
         max_output_tokens, or Gemini's config.max_output_tokens), the estimate
         is never more than the running mean of the prompt plus that maximum:
         the call cannot write more than it asked for.
-    No token counting and no extra request: the estimate is known before the
-    call from what the job already did. It is an estimate, not a bound: a
+    The prompt is not counted and no request is added: the estimate is known
+    before the call from what the job already did. It is an estimate, not a bound: a
     call with a prompt far bigger than the job's usual one uses more than it
     reserved. The record charges what the provider reported, so such a call
     can take the job past its ceiling, by at most that one call for each

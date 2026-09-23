@@ -153,7 +153,7 @@ An approved preflight holds `estimated_units` and returns `reservation_expires_a
 
 **Preflight reservation.** The check and the reservation are one conditional `UPDATE`, so two concurrent calls on the same job cannot both be approved against the last of the budget.
 
-**Units you define.** A unit is an integer you pass. AgentBill reserves the number you send and never converts units to money. `1 unit = 1 cent` is a common convention, not a rule.
+**Units you define, or tokens your provider reported.** In a unit job a unit is an integer you pass: AgentBill reserves the number you send and never converts those units into money (`1 unit = 1 cent` is a common convention, not a rule). In a token job, which is what `wrap()` records into, the numbers are the tokens your provider reported on the response, and `GET /tasks/:task_ref` shows an estimate at public list price beside them. List price, your invoice may differ.
 
 **Per-job ceilings from outside the code.** `PUT /tasks/:task_ref/ceiling` opens a job with a ceiling or changes one; a ceiling under the job's spent plus reserved units is refused with the smallest value that would be accepted.
 
@@ -192,12 +192,12 @@ Read this section before the pitch, not after.
 
 - **It does not reach into a running job.** `preflight()` answers `approved: false` or raises. Your code decides what happens next. Nothing here can terminate a process it never sat in front of.
 - **It is not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider credentials held by us.
-- **No automatic metering.** Tokens, tool calls and GPU time are invisible to AgentBill. Units move only when your code calls `/preflight`, `/events` or `/step`, and they count against a job only when the call carries the same `task_ref`.
-- **It never reads a provider invoice** and never turns units into dollars. There is no currency field anywhere in the API.
-- **The ceiling is only as tight as your estimate.** Preflight reserves the number you send. Send 1, spend 100, and 99 of it was never seen.
+- **Automatic metering covers wrapped model calls only.** `wrap()` records the tokens an OpenAI, Anthropic or Gemini client reports through its create methods. Tool calls, GPU time and any unwrapped call are invisible to AgentBill: they move units only when your code calls `/preflight`, `/events` or `/step`, and they count against a job only when the call carries the same `task_ref`.
+- **It never reads a provider invoice.** Units you define are never turned into dollars. The one dollar figure in the API is `list_price_usd_estimate` on a job read, for calls recorded through `wrap()`: an estimate at public list price from a dated price table. List price, your invoice may differ, and a model with no list price shows none, never $0.
+- **The ceiling is only as tight as the estimate.** Preflight reserves the number you send, or under `wrap()` the job's running average. A call that uses more than that is still recorded at what it used, so one call can take a job past its ceiling: at most that one call for each caller running at the same moment, and the next preflight is refused. Record 1 by hand when you spent 100, and 99 of it was never seen.
 - **No per-agent budget.** `agent_id` is an attribution label. Nothing is capped by it; ceilings live on a `task_ref`, a customer, or a single call.
 - **It is not a payment processor.** It does not move money, hold cards or charge your end customers. Polar bills you for AgentBill; nothing bills anyone on your behalf. Stripe Connect is not shipped.
-- **Not observability.** No traces, no spans, no prompt capture, no after-the-fact cost report.
+- **Not observability.** No traces, no spans, no prompt capture. `GET /tasks/:task_ref` breaks a job down by model and by step with a list-price estimate; it is not a trace of what a call did.
 - **No no-code dashboard.** There is a console; setting a customer's ceiling is API-only, deliberately.
 - **No workflow engine.** No state machines, no reversal or compensation logic. Calls are refused, not reversed.
 - **Recording is not enforcement.** `POST /events` records what happened even past the ceiling, because the spend already happened, and surfaces it as `task_exceeded`. A task ceiling is only ever enforced by preflight. (`POST /events` can refuse on a *customer* limit, with `402 budget_exhausted`.)

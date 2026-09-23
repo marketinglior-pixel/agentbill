@@ -248,7 +248,7 @@ function maxTokens(kind: Kind, body: any): number | undefined {
  *     max_output_tokens, Gemini's config.maxOutputTokens), never more than the
  *     running mean of the prompt plus that maximum.
  *
- * No token counting and no extra request per call. It is an estimate, not a
+ * The prompt is not counted and no request is added. It is an estimate, not a
  * bound: a call with a far bigger prompt than usual uses more than it reserved,
  * and the record charges what the provider reported, so that call can take the
  * job past its ceiling, by at most that one call for each caller running at the
