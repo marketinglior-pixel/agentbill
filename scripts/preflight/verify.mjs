@@ -2898,6 +2898,125 @@ if (nodeSdk) {
   ok('[wrap] node: a job counted in units is a task_unit_mismatch that names both units, and the call is not sent',
      mismatch instanceof nodeSdk.AgentBillError && /422/.test(mismatch.message) && /task_unit_mismatch/.test(mismatch.message) && /tokens/.test(mismatch.message) && sentW === sentBefore,
      `${mismatch?.message} sent ${sentW - sentBefore}`)
+
+  // The account's own monthly quota spent. preflight answers it before it
+  // looks at the job, so no ceiling is checked; each wrapped model call is one
+  // preflight, so the free tier's 1,000 are 1,000 model calls. Reproduced
+  // 2026-09-24 before the fix: 10 calls sent, 0 refused, 12,000 used against a
+  // 3,000 ceiling, one warning. On its own account, so the rest keep their quota.
+  const ACCT_Q = '00000000-0000-0000-0000-0000000000be'
+  const KEY_Q = `agb_wrap_quota_${runW}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_Q}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 0, plan = 'free'`
+  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_Q}, ${KEY_Q}, 'harness-wrap-quota')`
+  const refQ = `wrap-quota-${runW}`
+  const openQ = await fetch(`${API}/tasks/${refQ}/ceiling`, { method: 'PUT', headers: { 'Authorization': `Bearer ${KEY_Q}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ceiling_units: 3_000, unit: 'token' }) })
+  await sql`UPDATE accounts SET monthly_calls = 1000, billing_period_start = date_trunc('month', CURRENT_DATE)::date WHERE id = ${ACCT_Q}`
+  const warnedQ = []
+  const onWarnQ = (w) => { if (w.name === 'AgentBillWarning') warnedQ.push(w.message) }
+  process.on('warning', onWarnQ)
+  process.env.AGENTBILL_API_KEY = KEY_Q
+  const taskQ = async () => (await sql`SELECT used_units, reserved_units, ceiling_units FROM task_budgets WHERE account_id = ${ACCT_Q} AND task_ref = ${refQ}`)[0]
+  try {
+    const sentQ0 = sentW
+    let spentQ = null
+    try { await nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { spentQ = e }
+    const tQ = await taskQ()
+    ok('[wrap] node: with the monthly quota spent (1,000 of 1,000 on free) the call throws FreeTierExceededError with the upgrade link, is not sent, and the job is untouched',
+       openQ.status === 200 && typeof nodeSdk.FreeTierExceededError === 'function' && spentQ instanceof nodeSdk.FreeTierExceededError && /pricing/.test(spentQ.upgradeUrl ?? '') && sentW === sentQ0 &&
+       tQ?.usedUnits === 0 && tQ?.reservedUnits === 0,
+       `put ${openQ.status} ${spentQ?.name}: ${spentQ?.message} sent ${sentW - sentQ0} ${JSON.stringify(tQ)}`)
+    const llmQ = nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e', onQuota: 'send' })
+    for (let i = 0; i < 5; i++) await llmQ.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+    await settle(50)
+    const tQ2 = await taskQ()
+    const quotaWarnings = warnedQ.filter((w) => /quota/.test(w))
+    ok("[wrap] node: onQuota 'send' is the documented carve-out: 5 calls sent unchecked, 6,000 used past the 3,000 ceiling, and one warning that says nothing bounds the job",
+       sentW === sentQ0 + 5 && tQ2?.usedUnits === 6_000 && tQ2?.reservedUnits === 0 && quotaWarnings.length === 1 && /nothing bounds the job/.test(quotaWarnings[0] ?? ''),
+       `sent ${sentW - sentQ0} ${JSON.stringify(tQ2)} warnings ${JSON.stringify(quotaWarnings)}`)
+  } finally {
+    process.env.AGENTBILL_API_KEY = KEYW
+    process.off('warning', onWarnQ)
+  }
+
+  // An OpenAI-compatible server that reuses response ids (Ollama's layer
+  // issues chatcmpl-<0..998>). Keyed by that id, calls 2 and 3 were
+  // duplicate_ignored: 1,200 used of 3,600, 2,400 held until the TTL.
+  let sentC = 0
+  const compatible = {
+    baseURL: 'http://localhost:11434/v1',
+    chat: { completions: { async create() { sentC++; return { id: 'chatcmpl-7', model: 'llama3', choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200 } } } } },
+  }
+  const refC = `wrap-compatible-${runW}`
+  const llmC = nodeSdk.wrap(compatible, { taskRef: refC, agentId: 'node-e2e', taskCeiling: 50_000 })
+  for (let i = 0; i < 3; i++) await llmC.chat.completions.create({ model: 'llama3', messages: [] })
+  const tC = await callW('GET', `/tasks/${refC}`)
+  const keysC = (await sql`SELECT idempotency_key FROM events WHERE task_ref = ${refC}`).map((e) => e.idempotencyKey)
+  ok('[wrap] node: a compatible endpoint that repeats one response id: 3 calls, 3 records under 3 keys, 3,600 used, nothing held',
+     sentC === 3 && tC.body?.used_units === 3_600 && tC.body?.reserved_units === 0 && tC.body?.breakdown?.calls === 3 && new Set(keysC).size === 3,
+     `sent ${sentC} ${JSON.stringify(tC.body && { ...tC.body, breakdown: tC.body.breakdown?.calls })} keys ${keysC.join(' ')}`)
+
+  // The provider's own API reusing an id is not expected, but a duplicate on
+  // a record wrap() made once is a collision whatever the endpoint.
+  const officialDup = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create() { return { id: `chatcmpl-dup-${runW}`, model: 'gpt-4o-mini-2024-07-18', choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200 } } } } },
+  }
+  const refD = `wrap-dup-${runW}`
+  const llmD = nodeSdk.wrap(officialDup, { taskRef: refD, agentId: 'node-e2e', taskCeiling: 50_000 })
+  await llmD.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  await llmD.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const tD = await callW('GET', `/tasks/${refD}`)
+  ok('[wrap] node: a response id the server already has is re-recorded under a random key, so both calls count and nothing is held',
+     tD.body?.used_units === 2_400 && tD.body?.reserved_units === 0 && tD.body?.breakdown?.calls === 2,
+     JSON.stringify(tD.body && { ...tD.body, breakdown: tD.body.breakdown?.calls }))
+
+  // OpenAI cache writes: 40,400 of a 50,000-token gpt-5.6 prompt written to
+  // the cache, priced at the table's cache-write rate ($5/M) and not as input
+  // ($4/M): 1,600 x 4e-6 + 8,000 x 4e-7 + 40,400 x 5e-6 + 400 x 2e-5 = $0.2196.
+  // Read as uncached input it was $0.1792.
+  const cacheWriter = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create() { return { id: `chatcmpl-cw-${runW}`, model: 'gpt-5.6', service_tier: 'default', choices: [],
+      usage: { prompt_tokens: 50_000, completion_tokens: 400, prompt_tokens_details: { cached_tokens: 8_000, cache_write_tokens: 40_400 } } } } } },
+  }
+  const refP = `wrap-cachewrite-${runW}`
+  await nodeSdk.wrap(cacheWriter, { taskRef: refP, agentId: 'node-e2e', taskCeiling: 500_000 }).chat.completions.create({ model: 'gpt-5.6', messages: [] })
+  const evP = (await sql`SELECT units, list_price_usd::text AS usd, metadata::text AS meta FROM events WHERE task_ref = ${refP}`).map((e) => ({ ...e, metadata: JSON.parse(e.meta) }))
+  ok('[price] gpt-5.6 with cache writes is priced at the cache-write rate: 40,400 cache_write tokens, $0.2196 at list price',
+     evP.length === 1 && evP[0].units === 50_400 && evP[0].usd === '0.219600000000' &&
+     sameW(evP[0].metadata?.tokens, { input: 1_600, cache_read: 8_000, cache_write: 40_400, output: 400, reasoning: 0 }),
+     JSON.stringify(evP.map((e) => [e.units, e.usd, e.metadata?.tokens])))
+
+  // Gemini automatic function calling: one generateContent, three model
+  // requests, only the last response returned. Shaped like @google/genai's
+  // Models (public methods are arrows bound in the constructor, each round is
+  // this.generateContentInternal). Before the fix: 1 preflight, 1 record of
+  // the last round's usage.
+  class GenAIModelsW {
+    constructor(apiClient) {
+      this.apiClient = apiClient
+      this.generateContent = async (params) => {
+        let r
+        for (let i = 0; i < 3; i++) { r = await this.generateContentInternal(params); if (!r.functionCalls) break }
+        return r
+      }
+      this.generateContentStream = async (params) => this.generateContentStreamInternal(params)
+    }
+    async generateContentInternal() {
+      const i = this.apiClient.sent++
+      return { responseId: `gem-afc-${runW}-${i}`, modelVersion: 'gemini-2.5-flash', functionCalls: i < 2 ? [{ name: 'lookup' }] : undefined,
+        usageMetadata: { promptTokenCount: 1000 + 100 * i, candidatesTokenCount: 50 } }
+    }
+    async generateContentStreamInternal() { return (async function* () {})() }
+  }
+  const apiW = { sent: 0 }
+  const refG = `wrap-gemini-afc-${runW}`
+  const gemW = nodeSdk.wrap({ models: new GenAIModelsW(apiW) }, { taskRef: refG, agentId: 'node-e2e', taskCeiling: 50_000, provider: 'gemini' })
+  const lastG = await gemW.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [{ callTool: async () => [] }] } })
+  const tG = await callW('GET', `/tasks/${refG}`)
+  ok('[wrap] node: gemini automatic function calling is measured per round: 3 requests, 3 records, 3,450 used, the caller gets the last response',
+     apiW.sent === 3 && lastG?.responseId === `gem-afc-${runW}-2` && tG.body?.used_units === 3_450 && tG.body?.reserved_units === 0 && tG.body?.breakdown?.calls === 3,
+     `sent ${apiW.sent} ${JSON.stringify(tG.body && { ...tG.body, breakdown: tG.body.breakdown?.calls })}`)
 }
 
 // ---------------------------------------------------------------- [wrap] the Python SDK against this server
@@ -2905,7 +3024,12 @@ const { spawnSync: spawnW } = await import('node:child_process')
 const PYW = process.env.WRAP_PYTHON
 const sdkPyW = new URL('../../sdk/python', import.meta.url).pathname
 const e2eW = new URL('./wrap_e2e.py', import.meta.url).pathname
-const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW } }) : null
+// Scenario C needs an account whose monthly quota is spent, planted here.
+const ACCT_QP = '00000000-0000-0000-0000-0000000000bf'
+const KEY_QP = `agb_wrap_quota_py_${runW}`
+await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_QP}, 'free', 1000, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 1000, plan = 'free', billing_period_start = date_trunc('month', CURRENT_DATE)::date`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_QP}, ${KEY_QP}, 'harness-wrap-quota-py')`
+const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW, AGENTBILL_QUOTA_KEY: KEY_QP } }) : null
 let pyOut = null
 try { pyOut = JSON.parse((pyRun?.stdout ?? '').trim().split('\n').pop()) } catch {}
 ok('[wrap] python: the e2e script ran (run.sh sets WRAP_PYTHON to a venv with requests and httpx)',
@@ -2926,6 +3050,22 @@ if (pyOut) {
   ok('[wrap] python: an async stream is recorded from the usage chunk wrap() asked for, and the caller saw only the text chunks',
      JSON.stringify(pyOut.async_stream?.texts) === '["he","llo"]' && pyOut.async_stream?.include_usage === true && tPyS.body?.used_units === 69 && tPyS.body?.reserved_units === 0,
      JSON.stringify({ out: pyOut.async_stream, task: tPyS.body && { ...tPyS.body, breakdown: undefined } }))
+  const eventsQP = await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${ACCT_QP}`
+  ok('[wrap] python: with the monthly quota spent, wrap() raises FreeTierExceededError with the upgrade link, the fake was sent nothing, and nothing was recorded',
+     pyOut.quota?.raised === 'FreeTierExceededError' && /pricing/.test(pyOut.quota?.upgrade_url ?? '') && pyOut.quota?.sent === 0 && eventsQP[0]?.n === 0,
+     JSON.stringify({ quota: pyOut.quota, events: eventsQP }))
+  const tPyB = await callW('GET', `/tasks/wrap-py-break-${runW}`)
+  ok('[wrap] python: a for loop that breaks, with no close() and no with-block, is recorded as usage missing and holds nothing',
+     tPyB.body?.used_units === 700 && tPyB.body?.reserved_units === 0 && tPyB.body?.usage_missing_calls === 1,
+     JSON.stringify(tPyB.body && { ...tPyB.body, breakdown: undefined }))
+  const tPyC = await callW('GET', `/tasks/wrap-py-compatible-${runW}`)
+  ok('[wrap] python: a compatible endpoint that repeats one response id: 3 calls, 3 records, 3,600 used, nothing held',
+     pyOut.compatible?.sent === 3 && tPyC.body?.used_units === 3_600 && tPyC.body?.reserved_units === 0 && tPyC.body?.breakdown?.calls === 3,
+     JSON.stringify(tPyC.body && { ...tPyC.body, breakdown: tPyC.body.breakdown?.calls }))
+  const tPyG = await callW('GET', `/tasks/wrap-py-afc-${runW}`)
+  ok('[wrap] python: gemini automatic function calling is measured per round: 3 requests, 3 records, 3,450 used, the caller gets the last response',
+     pyOut.afc?.sent === 3 && pyOut.afc?.last === `gem-py-afc-${runW}-2` && tPyG.body?.used_units === 3_450 && tPyG.body?.reserved_units === 0 && tPyG.body?.breakdown?.calls === 3,
+     JSON.stringify({ out: pyOut.afc, task: tPyG.body && { ...tPyG.body, breakdown: tPyG.body.breakdown?.calls } }))
 }
 } // end [wrap]
 

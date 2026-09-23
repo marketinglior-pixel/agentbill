@@ -19,6 +19,19 @@ before the fake is called: three calls sent.
 
 Scenario B, async OpenAI stream on a second job: include_usage is turned on
 for the caller, the usage-only chunk is hidden, and the call is recorded.
+
+Scenario C, the account's own monthly quota spent (the key in
+AGENTBILL_QUOTA_KEY belongs to an account verify.mjs planted at 1,000 of
+1,000): wrap() raises FreeTierExceededError and the fake is sent nothing.
+
+Scenario D, a sync stream whose for loop breaks, with no close() and no
+with-block: it is recorded (usage missing) and nothing stays reserved.
+
+Scenario E, an OpenAI-compatible endpoint that returns one response id for
+every call: three calls, three records.
+
+Scenario F, a google-genai-shaped Models whose generate_content runs three
+rounds of automatic function calling: each round is preflighted and recorded.
 """
 import asyncio
 import json
@@ -27,7 +40,7 @@ import sys
 from types import SimpleNamespace as NS
 
 import agentbill
-from agentbill import TaskCeilingExceededError
+from agentbill import AgentBillClient, FreeTierExceededError, TaskCeilingExceededError
 
 suffix = sys.argv[1] if len(sys.argv) > 1 else "x"
 out = {}
@@ -106,4 +119,83 @@ async def scenario_b():
 
 
 out["async_stream"] = asyncio.run(scenario_b())
+
+
+# ---- C: the quota spent
+quota_key = os.environ.get("AGENTBILL_QUOTA_KEY")
+if quota_key:
+    qa = FakeAnthropic()
+    qc = AgentBillClient(api_key=quota_key, base_url=os.environ["AGENTBILL_BASE_URL"])
+    ql = agentbill.wrap(qa, task_ref=f"wrap-py-quota-{suffix}", agent_id="py-e2e", agentbill_client=qc)
+    try:
+        ql.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[])
+        out["quota"] = {"raised": None, "sent": qa.sent}
+    except FreeTierExceededError as e:
+        out["quota"] = {"raised": type(e).__name__, "upgrade_url": e.upgrade_url, "sent": qa.sent}
+
+
+# ---- D: a for loop that breaks
+class SyncStream:
+    def __init__(self, items):
+        self.items = items
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+class BreakCompletions:
+    def create(self, **kw):
+        return SyncStream([chunk("a"), chunk("b"), chunk(None, NS(prompt_tokens=30, completion_tokens=3))])
+
+
+dl = agentbill.wrap(NS(chat=NS(completions=BreakCompletions()), base_url="https://api.openai.com/v1/"),
+                    task_ref=f"wrap-py-break-{suffix}", agent_id="py-e2e", task_ceiling=10_000, default_estimate=700,
+                    provider="openai")
+for c in dl.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True):
+    break
+
+
+# ---- E: a compatible endpoint with one id for every call
+class SameIdCompletions:
+    def __init__(self):
+        self.sent = 0
+
+    def create(self, **kw):
+        self.sent += 1
+        return NS(id="chatcmpl-7", model="llama3", choices=[], usage=NS(prompt_tokens=1000, completion_tokens=200))
+
+
+same = SameIdCompletions()
+el = agentbill.wrap(NS(chat=NS(completions=same), base_url="http://localhost:11434/v1/"),
+                    task_ref=f"wrap-py-compatible-{suffix}", agent_id="py-e2e", task_ceiling=50_000, provider="openai")
+for _ in range(3):
+    el.chat.completions.create(model="llama3", messages=[])
+out["compatible"] = {"sent": same.sent}
+
+
+# ---- F: google-genai-shaped automatic function calling
+class LoopingModels:
+    def __init__(self):
+        self.sent = 0
+
+    def _generate_content(self, *, model, contents, config=None):
+        i = self.sent
+        self.sent += 1
+        return NS(response_id=f"gem-py-afc-{suffix}-{i}", model_version="gemini-2.5-flash", calls_tool=i < 2,
+                  usage_metadata=NS(prompt_token_count=1000 + 100 * i, candidates_token_count=50))
+
+    def generate_content(self, *, model, contents, config=None):
+        r = None
+        for _ in range(3):
+            r = self._generate_content(model=model, contents=contents, config=config)
+            if not r.calls_tool:
+                break
+        return r
+
+
+gm = LoopingModels()
+fl = agentbill.wrap(NS(models=gm), task_ref=f"wrap-py-afc-{suffix}", agent_id="py-e2e", task_ceiling=50_000,
+                    provider="gemini")
+last = fl.models.generate_content(model="gemini-2.5-flash", contents="x")
+out["afc"] = {"sent": gm.sent, "last": last.response_id}
 print(json.dumps(out))
