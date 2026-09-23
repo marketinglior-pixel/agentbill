@@ -785,12 +785,16 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
   all.splice(1, 0, mk(0, 60, 'enricher', 'batch-2211', 'task_overrun_recorded', false, 25, 1000, 1025,
     { recorded: true, task_ref: 'batch-2211', task_used_units: 1025, task_remaining_units: 0, task_exceeded: true, note: 'recorded past the ceiling: preflight was skipped for this call' }))
   const decisions = all.filter((d) => (!f.task || d.taskRef === f.task) && (!f.agent || d.agentId === f.agent) && (f.only !== 'leaks' || !d.blocked))
+  // Heaviest first, the order a real account gets from ORDER BY used_units
+  // DESC in loadConsole(): the list says "heaviest first", and the overview takes
+  // the first five of it as the top customers. Sorted here as well as written
+  // in order, so an edit to a number cannot put the heaviest last again.
   const customers: CustomerRow[] = [
+    { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
     { customerRef: 'cust_acme',     limitUnits: 5000, usedUnits: 4820, reservedUnits: 0 },
     { customerRef: 'cust_globex',   limitUnits: 5000, usedUnits: 2140, reservedUnits: 30 },
     { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
-    { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
-  ]
+  ].sort((x, y) => y.usedUnits - x.usedUnits)
   const tasks: TaskRow[] = [
       { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
       { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
@@ -944,7 +948,11 @@ const CSS = `${KIT}
                           the approved: false line on the plate. What --held was.
        a leak             --signal filled (.chip-fail) or its tint: spend that got
                           past a ceiling, or an account about to stop working.
-       approaching        amber (.chip-near, the near bar): worth a glance.
+                          Its bar is the signal hatched, the homepage's mark for
+                          units past the ceiling, so it never reads as the held bar.
+       approaching        the .chip-near chip, and only the chip: the bar stays ink.
+                          A bar is ink, the signal, or the signal hatched; a third
+                          warm hue beside the signal read as the same colour.
 
      --held: var(--green) is gone from this block: --green is the ink on canvas,
      so held rendered black and meant nothing. */
@@ -976,9 +984,9 @@ ${MARK_CSS}
 
   /* The account card: the white card on the rail's grey, panel in panel. The
      one bar here that is about the account rather than the product; the plan
-     quota's end is a ceiling like any other, so it carries the tick, and it
-     turns amber at 75% and to the signal at 90%, where calls start being
-     refused. */
+     quota's end is a ceiling like any other, so it carries the tick. It is
+     ink below 90% and the signal from 90%, where calls start being refused;
+     the link to raise the ceiling still appears from 75%. */
   .acct { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
           padding: 14px var(--s4) var(--s4); display: grid; gap: var(--s2); min-width: 0; }
   .acct-who { font-size: var(--fs-small); font-weight: 500; color: var(--text); overflow: hidden;
@@ -988,7 +996,6 @@ ${MARK_CSS}
   .acct-m { padding-top: var(--s2); }
   .acct-m .cv-meter { height: 6px; }
   .acct-m .cv-meter > u { top: -5px; height: 16px; }
-  .acct-m.is-near .cv-meter > i { background: var(--amber); }
   .acct-m.is-fail .cv-meter > i { background: var(--signal); }
   .acct-q { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; line-height: 1.55; }
   .acct-q b { color: var(--text); font-weight: 500; }
@@ -1035,10 +1042,9 @@ ${MARK_CSS}
   .note { margin-top: var(--s3); color: var(--dim); max-width: 78ch; }
   .note code, .fine code, .nothing code { color: var(--muted); }
 
-  /* ---- The frame's bar, as this page fills it: an id tag, a fact about the
-     rows, and SAMPLE at the right under sample data. */
+  /* ---- The frame's bar, as this page fills it: the tag that names what the
+     frame holds, and SAMPLE at the right under sample data. */
   .cv-bar-t .tag { flex: none; }
-  .bt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cv-panel + .key { margin-top: var(--s3); }
 
   /* ---- The overview's figures. One card, four cells on hairlines, and the
@@ -1143,7 +1149,7 @@ ${MARK_CSS}
   .cv-table td.id a, .cv-table td.lead a { color: var(--text); }
   .cv-table tr.is-no td.id a, .cv-table tr.is-no td.lead a { color: inherit; }
   .cv-table td.msg { color: var(--muted); min-width: 26ch; }
-  .cv-table td.msg.bad { color: var(--fail-ink); }
+  .cv-table td.msg.bad { color: var(--signal); }
   .cv-table td.lead { font-family: var(--mono); }
   .cv-table tr.zero td { color: var(--dim); }
   /* Hover is for a pointer. On a phone the rows are cards and a sticky
@@ -1161,28 +1167,40 @@ ${MARK_CSS}
   /* The task rows. The name and its agent on one line and the counts under
      them, the units as the frame's figure (used / ceiling), and the burn-down
      as the kit's meter at row size: spent, reserved by a call in flight, and
-     the ceiling as the signal tick at the end. */
+     the ceiling as the signal tick at the end.
+     The job's name is the row's identity and is never cut: "job-88..." cannot
+     be told from job-8871 or job-8864. It wraps inside its cell if it must, and
+     the agent label is what gives way: it drops to its own line when the two
+     do not fit, and takes the ellipsis. */
   .tk { display: grid; gap: 2px; min-width: 0; }
-  .tk-n { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; }
-  .tk-n a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .tk-a { font-family: var(--sans); color: var(--dim); white-space: nowrap; }
+  .tk-n { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--s2); min-width: 0; }
+  .tk-n a { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .tk-a { font-family: var(--sans); color: var(--dim); min-width: 0; max-width: 100%;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tk-f { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
-  tr.is-no .tk-a, tr.is-no .tk-f { color: var(--fail-ink); }
+  tr.is-no .tk-a, tr.is-no .tk-f { color: var(--row-no-ink); }
   td.burn { width: 22%; min-width: 96px; }
   .cv-meter.is-row { height: 6px; }
   .cv-meter.is-row > u { top: -5px; height: 16px; }
   .cv-meter > s { position: absolute; top: 0; bottom: 0; background: var(--res); text-decoration: none; }
-  .cv-meter.near > i { background: var(--amber); }
+  /* Ink plus one signal, as on the homepage. A task within a fifth of its
+     ceiling keeps the ink bar and says so with its chip. The ceiling held is
+     the signal; a leak is the signal hatched, the homepage playground's mark
+     for units past the ceiling (.pg-ghost), so held and leaked differ by more
+     than a shade of the same hue. */
   .cv-meter.held > i { background: var(--signal); }
-  .cv-meter.fail > i { background: var(--fail-ink); }
-  /* The legend under the tasks: the bar's two parts as swatches, and the
-     three states as the marks the rows carry. */
+  .cv-meter.fail > i, .key i.fail { background: repeating-linear-gradient(45deg, var(--signal) 0 3px, transparent 3px 6px); }
+  /* The legend under the tasks: the bar's parts and states as bar swatches,
+     and "within a fifth" as the chip those rows carry, since its bar is ink. */
   .key { display: flex; gap: var(--s2) var(--s4); flex-wrap: wrap; align-items: center; font-family: var(--mono);
          font-size: var(--fs-chip); color: var(--dim); margin: var(--s3) 0 0; }
-  .key span { display: flex; align-items: center; gap: 6px; }
-  .key i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--meter-fill); }
-  .key i.res { background: var(--res); } .key i.near { background: var(--amber); }
-  .key i.held { background: var(--signal); } .key i.fail { background: var(--fail-ink); }
+  .key > span { display: flex; align-items: center; gap: 6px; }
+  .key i { width: 18px; height: 8px; border-radius: var(--r-pill); display: inline-block; flex: none;
+           background: var(--meter-fill); }
+  .key i.res { background: var(--res); } .key i.held { background: var(--signal); }
+  .key i.fail { background-color: var(--meter-track); }
+  /* The row's own chip, at the legend's size so it does not out-weigh the line. */
+  .key .chip-near { font-size: inherit; padding-block: 1px; }
 
   /* Share of spend: one hue for one series, the bar scaled to the heaviest
      customer, the percentage of every customer's lifetime spend beside it. */
@@ -1440,7 +1458,6 @@ ${MARK_CSS}
        the one that can go, the banner and the rail say which mode this is. */
     .acct-row span:last-child { display: none; }
     .cmd { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-    .bt { display: none; }
   }
   @media (max-width: ${BP.xs}px) {
     /* A seven-digit figure needs more than a half-width cell has at 320px;
@@ -1449,6 +1466,9 @@ ${MARK_CSS}
     .tile { border-left: 0; }
     /* At 320 a half track is 120px; an id and its label need their own line. */
     .refusals td.id { grid-column: 1 / -1; }
+    /* The same for a task: the agent goes under the job's name on every row,
+       not only on the rows whose names happen to be long. */
+    .tk-n { flex-direction: column; align-items: flex-start; }
     .tile + .tile { border-top: 1px solid var(--card-line); }
     .btn-key .long { display: none; }
     .btn-key .short { display: inline; }
@@ -1693,8 +1713,8 @@ function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused', cls: s
 
 /**
  * The frame, for anything that shows product data: the warm-grey panel, the
- * white card, and the bar that opens it. `bar` is the left of the bar (an id
- * tag and a fact about the rows); SAMPLE sits at its right under sample data,
+ * white card, and the bar that opens it. `bar` is the left of the bar (the tag
+ * that names what the frame holds); SAMPLE sits at its right under sample data,
  * so a screenshot of any one frame still says the numbers are invented.
  */
 function frame(p: Page, bar: string, body: string, cls = ''): string {
@@ -1703,8 +1723,11 @@ function frame(p: Page, bar: string, body: string, cls = ''): string {
       ${body}
     </div></div>`
 }
-/** A bar's left half: the tag that names what the frame holds, and a muted fact. */
-const barOf = (name: string, fact: string, id = false) => `${tag(name, id)}<span class="bt">${fact}</span>`
+/** A bar's left half: the tag that names what the frame holds. The bar carries
+ *  no fact of its own: every count or order it could state is already in the
+ *  heading, the lede or the note on the same screen, and a second copy is copy
+ *  the restyle added (review, 2026-09-23). */
+const barOf = (name: string, id = false) => tag(name, id)
 
 /** The key a frame belongs to, masked the way every key on this page is. */
 const tailOf = (key: string) => key.slice(0, 8) + '…' + key.slice(-4)
@@ -1764,8 +1787,7 @@ function leakRow(p: Page): string {
 /** The overview's figures: one card whose bar names the account they belong to. */
 function figures(p: Page, rangeLabel: string): string {
   const key = p.demo ? DEMO_KEY : p.v.apiKey
-  const who = p.anon || p.demo ? 'Sample console' : (p.v.email ?? 'no email')
-  return frame(p, barOf(esc(tailOf(key)), esc(who), true), `${kpis(p, rangeLabel)}
+  return frame(p, barOf(esc(tailOf(key)), true), `${kpis(p, rangeLabel)}
       ${leakRow(p)}`, 'figs')
 }
 
@@ -1799,8 +1821,7 @@ function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
     const alt = on && nth++ % 2 === 1 ? ' class="alt"' : ''
     return `<span${alt}>${on ? esc(fmtDay(s.day)) : ''}</span>`
   }).join('')
-  const span = n ? `${esc(fmtDay(series[0].day))} to ${esc(fmtDay(series[n - 1].day))}` : ''
-  return frame(p, barOf(esc(rangeLabel), span), `<div class="chart">
+  return frame(p, barOf(esc(rangeLabel)), `<div class="chart">
       <div class="crow">
         <div class="clab"><b>Units metered</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
         <div class="cplot">
@@ -1823,7 +1844,7 @@ function activityTable(p: Page, series: Series[], rangeLabel: string): string {
       <td class="num">${num(s.blocks)}</td>
       <td class="num">${num(s.refused)}</td>
     </tr>`).join('')
-  return frame(p, barOf(esc(rangeLabel), 'newest first'), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled days">
+  return frame(p, barOf(esc(rangeLabel)), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled days">
     <thead><tr><th>Day</th><th class="num">Metered</th><th class="num">Refused</th><th class="num">Refused units</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`)
@@ -1881,12 +1902,11 @@ function tasksBlock(p: Page, tasks: TaskRow[], side = ''): string {
       : `<a href="${href(p, 'tasks')}">Name a job and give it a ceiling in units</a>`
     return `<div class="cv-empty"><p class="nothing">No jobs yet. One job is one budget. ${where}, then have your code preflight with that <code>task_ref</code>; it appears here and burns down live. A job opened from code, with <code>task_ref</code> and <code>task_ceiling</code> on its first preflight, appears the same way.</p></div>`
   }
-  const n = p.d.taskCount
   const table = `<div class="cv-body flush cv-scroll"><table class="cv-table cards tasks">
     <thead><tr><th>Task</th><th class="num">Units</th><th>Burn-down</th><th>State</th>${editable ? '<th class="num">Ceiling</th>' : ''}</tr></thead>
     <tbody>${tasks.map((t, i) => taskRow(p, t, i, editable)).join('')}</tbody>
   </table></div>`
-  return frame(p, barOf('task_ref', `${num(n)} ${n === 1 ? 'job' : 'jobs'}`, true),
+  return frame(p, barOf('task_ref', true),
     side ? `<div class="cv-split">${table}${side}</div>` : table)
 }
 
@@ -1969,9 +1989,10 @@ function ceilingForm(p: Page): string {
   </div>`
 }
 
-// The legend: the bar's two parts as swatches, then the three colours a bar
-// can turn, named with the same words as before.
-const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
+// The legend: the bar's two parts as swatches, then the three states, named
+// with the same words as before. A bar within a fifth of its ceiling stays
+// ink, so that state's mark is the chip its row carries, not a swatch.
+const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><span class="chip-near">close</span> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
 
 /** The decision a row carries: the refusal chip, outlined in the signal, or
  *  the leak, the signal filled. The rule's name is the chip's text. */
@@ -2007,8 +2028,7 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
       ? 'Nothing on this account matches this filter.'
       : 'Nothing refused yet. Every call AgentBill refuses lands here with the literal JSON your agent received.'}</p></div>`
   }
-  const n = p.d.decisionMatched
-  return `${frame(p, barOf('refusals', `${num(n)}${filtered ? ' that match' : ''}, newest first`), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled refusals">
+  return `${frame(p, barOf('refusals'), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled refusals">
     <thead><tr><th>When</th><th>Rule</th><th>Agent</th><th>Task</th><th>What happened</th><th>What the agent got</th></tr></thead>
     <tbody>${rows.map((r) => refusalRow(p, r, true)).join('')}</tbody>
   </table></div>`)}
@@ -2040,8 +2060,7 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
       <td class="state">${status}</td>
     </tr>`
   }).join('')
-  const n = p.d.customerCount
-  return frame(p, barOf('customer_id', `${num(n)} ${n === 1 ? 'customer' : 'customers'}, heaviest first`, true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
+  return frame(p, barOf('customer_id', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
     <thead><tr><th>Customer</th><th>Share of spend${compact ? '' : ' · all customers'}</th><th class="num">Used</th><th class="num">Limit</th><th class="num">Left</th><th>State</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`)
@@ -2071,7 +2090,7 @@ function keysTable(p: Page, rows: KeyRow[], viewerKey: string): string {
       <td class="when" data-l="last seen from">${k.lastSeenIp ? esc(k.lastSeenIp) : '<span class="none">unused</span>'}</td>
     </tr>`
   }).join('')
-  return frame(p, barOf('keys', `${num(rows.length)} on this account, oldest first`), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
+  return frame(p, barOf('keys'), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
     <thead><tr><th>Key</th><th>Label</th><th>State</th><th>Created</th><th>Expires</th><th>Last seen from</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`)
@@ -2094,7 +2113,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
   const born = v.defaultBudgetUnits == null
     ? 'with no limit'
     : `with <b>${num(v.defaultBudgetUnits)} units</b>, the account default`
-  return `${frame(p, barOf('preflight', 'the four rules, in the order it checks them'), `
+  return `${frame(p, barOf('preflight'), `
       <div class="lim">
         <div class="n">01</div>
         <div>
@@ -2344,7 +2363,7 @@ function overviewView(p: Page, rangeLabel: string): string {
 
     <h2>Latest refusals <a href="${href(p, 'refusals')}">All ${d.decisionTotal ? num(d.decisionTotal) + ' ' : ''}&rarr;</a></h2>
     ${latest.length
-      ? frame(p, barOf('refusals', `latest ${num(latest.length)} of ${num(d.decisionTotal)}, newest first`), refusalRows(p, latest))
+      ? frame(p, barOf('refusals'), refusalRows(p, latest))
       : '<div class="cv-empty"><p class="nothing">Nothing refused yet.</p></div>'}
 
     <h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customerCount ? num(d.customerCount) + ' ' : ''}&rarr;</a></h2>
