@@ -3,6 +3,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { FOUNDER_W, FOUNDER_H } from '../lib/photo.js'
 import { KEY_CTA } from '../ui/chrome.js'
+import { CONTENT_CSS } from '../ui/content.js'
 
 // The honest version of "photos of me and the team".
 //
@@ -37,13 +38,20 @@ export async function aboutRoute(app: FastifyInstance) {
       title: 'About · AgentBill',
       description: 'Who builds AgentBill, why a per-task ceiling exists, and what the product deliberately does not do.',
       current: '',
-      css: `
+      css: `${CONTENT_CSS}
     /* width/height on the img are the real dimensions, so the space is
-       reserved before it loads and nothing below it jumps. */
-    .who-is { display: grid; grid-template-columns: 240px minmax(0, 1fr);
-              gap: var(--s5); align-items: start; margin-block: var(--s4); }
-    .who-photo { width: 100%; height: auto; border-radius: var(--r-frame);
-                 border: 1px solid var(--border); display: block; }
+       reserved before it loads and nothing below it jumps.
+       On canvas (2026-09-23) the person and the sentences about him are one
+       warm-grey panel with the photograph as the card inside it, the
+       homepage's panel-in-panel, instead of a row closed by a hairline. The
+       photograph needs no border of its own on that ground. */
+    .who-is { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s5); align-items: start;
+              margin-block: var(--s4); background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); }
+    .who-photo { width: 100%; height: auto; border-radius: var(--r-inner); display: block; }
+    .who-is p:last-child { margin-bottom: 0; }
+    @media (max-width: 720px) {
+      .who-is { padding: var(--s4); border-radius: var(--r-card-sm); }
+    }
     @media (max-width: 640px) {
       .who-is { grid-template-columns: minmax(0, 1fr); }
       .who-photo { max-width: 200px; }
@@ -80,7 +88,7 @@ export async function aboutRoute(app: FastifyInstance) {
      it, and what happens to the run after that is your code's decision.</p>
 
   <h2>Who is behind it</h2>
-  <div class="who-is row-close">
+  <div class="who-is">
     <img class="who-photo" src="${FOUNDER_PHOTO.src}" alt="${FOUNDER_PHOTO.alt}"
          width="${FOUNDER_PHOTO.w}" height="${FOUNDER_PHOTO.h}" loading="lazy" decoding="async" />
     <div>
@@ -99,7 +107,7 @@ export async function aboutRoute(app: FastifyInstance) {
      mechanism this page describes is a few hundred lines of it, and you can
      read the ones that matter rather than take the description on trust.</p>
 
-  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
+  <p class="end"><a class="btn btn-lg" href="/register">${KEY_CTA}</a></p>
 `,
     }))
   })

@@ -5,6 +5,7 @@ import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { softwareLd } from '../ui/ld.js'
+import { CONTENT_CSS } from '../ui/content.js'
 
 // Questions the docs answer indirectly or not at all, and every answer checked
 // against the source before it was written. The file each claim was read from
@@ -103,6 +104,22 @@ export async function faqRoute(app: FastifyInstance) {
       description: 'What a unit is, what happens when a job dies holding a reservation, how a task budget differs from a monthly cap, and which features are on which plan.',
       current: '',
       mainEntity: 'https://agentbill.dev/faq#faq',
+      // On canvas (2026-09-23) the questions are a list, not eleven section
+      // titles: each question one rung down at the h3 size, in the ink, over a
+      // hairline, so the page reads as a spec sheet of answers rather than as
+      // eleven 40px headings stacked 72px apart. They stay h2 on purpose: the
+      // rail is built from them, and the [faq] gate reads the answer as the
+      // paragraph directly under its question's h2.
+      css: `${CONTENT_CSS}
+  .container h2 { font-size: var(--fs-h3); line-height: 1.3; letter-spacing: -0.01em; max-width: 40ch;
+                  margin: 0 0 var(--s3); padding-top: var(--s6); border-top: 1px solid var(--border); }
+  .container .lede + h2 { margin-top: var(--s7); }
+  .container h2 + p { margin-bottom: var(--s6); }
+  @media (max-width: 960px) {
+    .container h2 { margin-top: 0; padding-top: var(--s5); }
+    .container h2 + p { margin-bottom: var(--s5); }
+  }
+`,
       // softwareLd() rides along so `about` below resolves inside this page.
       // /faq is also the page an answer engine is most likely to fetch on its
       // own, and the product definition is the context every answer needs.
@@ -125,7 +142,7 @@ ${FAQ.map((x) => `
   <h2>${x.q}</h2>
   <p>${x.a}</p>`).join('')}
 
-  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
+  <p class="end"><a class="btn btn-lg" href="/register">${KEY_CTA}</a></p>
 `,
     }))
   })
