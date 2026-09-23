@@ -3,12 +3,10 @@ import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
-import { PLAN_LIMITS } from '../integrations/polar.js'
 
-// The free-tier number is read from the same table preflight enforces, never
-// typed. /docs/langchain-billing used to claim each customer had their own free
-// tier allowance, which is not what PLAN_LIMITS is: it is per ACCOUNT.
-const num = (n: number) => n.toLocaleString('en-US')
+// /docs/langchain-billing and /docs/openai-agent-spend-ceiling lived here until
+// 2026-09-23. They are 301s now, to the LangChain and OpenAI Agents SDK pages in
+// routes/integrations.ts, which replaced them.
 
 // Guides render through the shared content shell in src/ui/docs.ts: one copy
 // of the docs CSS, and an "On this page" rail built from each guide's <h2>s.
@@ -51,10 +49,12 @@ function page(path: string, title: string, description: string, body: string) {
   <div class="also">
     <p>Related guides</p>
     <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
-    <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
-    <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
     <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
-    <a href="/docs/first-run">Every first-run failure, and its fix</a>
+    <a href="/docs/first-run">Every setup failure, and its fix</a>
+    <a href="/integrations">Integrations: the OpenClaw plugin, the MCP server and framework guides</a>
+    <a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a>
+    <a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a>
+    <a href="/integrations/crewai">CrewAI, one ceiling per crew run in model-call hooks</a>
   </div>`,
   })
 }
@@ -79,13 +79,13 @@ export async function guidesRoute(app: FastifyInstance) {
   app.get('/docs/first-run', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       '/docs/first-run',
-      'Every first-run failure, and its fix',
-      'The errors between installing agentbill-sdk and seeing your first refusal: pip missing or externally managed, the Python version floor, how to run the sample, the key not reaching your code on Windows, and why a second run is refused from its first call.',
+      'Every setup failure, and its fix',
+      'The errors between installing agentbill-sdk and seeing the SDK refuse a call: pip missing or externally managed, the Python version floor, how to run the sample, the key not reaching your code on Windows, and why a second run is refused from its opening call.',
       `
-  <h1>Every first-run failure, and its fix</h1>
+  <h1>Every setup failure, and its fix</h1>
   <p class="lede">Each of these is a real failure on the path from
-  <a href="/docs#step-install">the quick start</a> to your first refusal, in roughly the order you
-  would meet it. Nothing here is needed by a run that works.</p>
+  <a href="/docs#step-install">the quick start</a> to the refusal it is written to end on, in
+  roughly the order you would meet it. Nothing here is needed by a run that works.</p>
 
   <h2>pip is missing, or refuses to install</h2>
   <p>The most common failure on the page, and it has two faces:
@@ -149,7 +149,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
 
   <h2>It worked once, and the second run is refused immediately</h2>
   <p>Correct, and it is the mechanism rather than a fault. <b>A job ceiling has no clock.</b> After
-  one run of the quick start, <span class="inline">job-1</span> has used 3 of 3, so the first
+  one run of the quick start, <span class="inline">job-1</span> has used 3 of 3, so the opening
   preflight of a second run is the call that would cross the ceiling. Nothing resets it at midnight
   or at the start of a month, because a budget that resets tomorrow is exactly the thing a task
   ceiling exists not to be.</p>
@@ -194,8 +194,8 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   <span class="inline">on_quota="send"</span> sends it unchecked instead.</p>
 
   <h2>Getting back to the three-step screen</h2>
-  <p>The link to it disappears from the console once you have had a first refusal, because it is a
-  first-run screen. The address still works:
+  <p>The link to it disappears from the console once the account has had a refusal, because it is a
+  setup screen. The address still works:
   <span class="inline">agentbill.dev/app?view=start</span>. And if you no longer have the key at
   all, <a href="/recover">/recover</a> shows the filled-in export line again to whoever can read the
   email the account was registered with.</p>
@@ -230,7 +230,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
 
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>
-  <p>1, A job is opened with its ceiling: by the first preflight that names a new
+  <p>1, A job is opened with its ceiling: by the preflight that names a new
   <span class="inline">task_ref</span> with a <span class="inline">task_ceiling</span>, or in the
   console (or <span class="inline">PUT /tasks/:task_ref/ceiling</span>) before any code runs. After
   that the console's last save is the ceiling in force; a later value from code is not applied.<br>
@@ -241,7 +241,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   silently dropped.</p>
 
   <h2>Quick start, curl</h2>
-  <div class="code"><pre><span class="comment"># First call creates the task with a ceiling of 50 units</span>
+  <div class="code"><pre><span class="comment"># This call opens the task with a ceiling of 50 units</span>
 curl -X POST https://agentbill.dev/preflight \\
   -H "Authorization: Bearer agb_your_key" \\
   -H "Content-Type: application/json" \\
@@ -312,7 +312,7 @@ def guarded(step: str, units: int, work):
                 agent_id="researcher",
                 customer_id=CUSTOMER,
                 task_ref=TASK,
-                task_ceiling=CEILING,             <span class="comment"># opens the job on the first call; the console can change it</span>
+                task_ceiling=CEILING,             <span class="comment"># opens the job if it is new; the console can change it</span>
                 estimated_units=units,
                 idempotency_key=f"{TASK}:{step}", <span class="comment"># stable across retries: one reservation</span>
             )
@@ -349,7 +349,7 @@ try:
         guarded(f"crawl-{page}", 4, lambda: call_tool("crawl"))
 except TaskCeilingExceededError as e:
     <span class="comment"># Not an error to swallow. This is the product working.</span>
-    print(f"stopped at {e.task_used_units}/{e.task_ceiling} units")</pre></div>
+    print(f"refused at {e.task_used_units}/{e.task_ceiling} units")</pre></div>
 
   <h3>Two workers on the same task</h3>
   <p>Nothing above changes when two processes share a <span class="inline">task_ref</span>. The
@@ -366,7 +366,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
         try:
             future.result()
         except TaskCeilingExceededError:
-            print("blocked, the other worker took the last units")</pre></div>
+            print("refused, the other worker took the last units")</pre></div>
 
   <h3>What happens if the process dies</h3>
   <p>If it dies between <span class="inline">preflight()</span> and
@@ -382,13 +382,13 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   <h3>POST /preflight, extra fields</h3>
   <p><span class="inline">task_ref</span>, job identifier (1-128 chars). Same ref = same budget.<br>
   <span class="inline">task_ceiling</span>, opens a new task_ref with that ceiling, required then
-  unless the job was opened first from the console; not applied once the job exists. An approved answer
+  unless the job was opened beforehand from the console; not applied once the job exists. An approved answer
   and a <span class="inline">task_ceiling_exceeded</span> refusal carry the ceiling in force as
   <span class="inline">task_ceiling</span>.<br>
   <span class="inline">idempotency_key</span>, optional (1-128 chars). Same key = same decision,
   one reservation, so a retried preflight cannot reserve twice. A retry that arrives while the
   original is still being decided gets <span class="inline">409 preflight_in_progress</span>,
-  which is not a block and reserves nothing.<br>
+  which is not a refusal and reserves nothing.<br>
   Approved responses include <span class="inline">task_remaining_units</span> and
   <span class="inline">reservation_expires_at</span>, the point after which the sweeper reclaims
   the reservation. A refused call returns
@@ -434,8 +434,8 @@ with ThreadPoolExecutor(max_workers=2) as pool:
       <h2>Give the run an id, and give that id a ceiling</h2>
       <p>Two parameters do the work. <span class="inline">task_ref</span> is your name for this run,
       and every call that passes it is checked against the same ceiling.
-      <span class="inline">task_ceiling</span> is that ceiling, in units you define. The first
-      preflight of a new run opens it, or the console does before the run starts; once the run
+      <span class="inline">task_ceiling</span> is that ceiling, in units you define. The
+      preflight that names a new run opens it, or the console does before the run starts; once the run
       exists a value from code is not applied, so a retry cannot raise the ceiling it was meant to
       respect, and the console's last save is the one in force.</p>
       <div class="code"><pre>
@@ -496,7 +496,7 @@ except TaskCeilingExceededError as e:
       <p>There is a second, narrower ceiling: <span class="inline">ceiling</span> on the client
       refuses any <em>single</em> call whose <span class="inline">estimated_units</span> exceed it.
       It is a sanity check on one bad estimate. It is not the cross-call ceiling above, and on its
-      own it will not stop a loop that makes two hundred individually reasonable calls.</p>
+      own it lets through a loop of two hundred individually reasonable calls.</p>
       <div class="code"><pre>
 <span class="comment"># No single call may cost more than 50 units. The run still needs a task_ceiling.</span>
 client = AgentBillClient(api_key="agb_your_key", ceiling=50)
@@ -511,260 +511,13 @@ client = AgentBillClient(api_key="agb_your_key", ceiling=50)
 import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
 
 <span class="comment">// The run has 500 units across every call that passes job-142.</span>
-<span class="comment">// A refused call throws, so your catch block decides what happens next.</span>
+<span class="comment">// A refused call throws, so your catch clause decides what happens next.</span>
 await preflight({ agentId: 'researcher', taskRef: 'job-142',
                   taskCeiling: 500, estimatedUnits: 12 })
 
 const result = await runAgent()
 
 await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
-      </pre></div>
-
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
-      `
-    ))
-  })
-
-  app.get('/docs/langchain-billing', publicRoute(), async (_, reply) => {
-    return reply.type('text/html').send(page(
-      '/docs/langchain-billing',
-      'How to add billing to a LangChain agent',
-      'Add preflight spend checks and usage billing to any LangChain agent in Python. Works with LCEL chains, AgentExecutor, RetrievalQA, and LangGraph.',
-      `
-      <h1>How to add billing to a LangChain agent</h1>
-      <span class="badge">Python</span><span class="badge">LangChain</span><span class="badge">LCEL</span>
-      <p>Adding billing to a LangChain agent takes two calls: one before the chain runs, one after. No middleware, no monkey-patching. Works with any LangChain component, LCEL chains, AgentExecutor, RetrievalQA, or custom runnables.</p>
-
-      <h2>Install</h2>
-      <div class="code"><pre>pip install agentbill-sdk langchain-openai langchain-core</pre></div>
-
-      <h2>Pattern 1, Manual preflight + record</h2>
-      <p>The explicit pattern. Check budget before the chain runs, record units after it completes.</p>
-      <div class="code"><pre>
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from agentbill import AgentBillClient
-
-<span class="comment"># ceiling=50: refuse any single call estimated at more than 50 units</span>
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-
-def run_research_agent(customer_id: str, topic: str) -> str:
-    <span class="comment"># 1. Preflight, consulted before the provider call goes out</span>
-    check = client.preflight(
-        agent_id="research_chain",
-        estimated_units=10,
-        customer_id=customer_id
-    )
-    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError</span>
-    <span class="comment"># above; nothing to check here</span>
-
-    <span class="comment"># 2. Run the LangChain chain normally (LCEL syntax)</span>
-    llm = ChatOpenAI(model="gpt-4o")
-    prompt = ChatPromptTemplate.from_template("Research this topic in depth: {topic}")
-    chain = prompt | llm
-    result = chain.invoke({"topic": topic})
-
-    <span class="comment"># 3. Record units used</span>
-    client.record(agent_id="research_chain", units=10, customer_id=customer_id)
-    return result.content
-      </pre></div>
-
-      <h2>Pattern 2, @gate decorator (cleanest)</h2>
-      <p>The <span class="inline">@client.gate()</span> decorator handles preflight and record automatically. Zero boilerplate inside the function.</p>
-      <div class="code"><pre>
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from agentbill import AgentBillClient
-
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-
-@client.gate(agent_id="research_chain", estimated_units=10, customer_id="user_123")
-def run_research_agent(topic: str) -> str:
-    llm = ChatOpenAI(model="gpt-4o")
-    prompt = ChatPromptTemplate.from_template("Research: {topic}")
-    chain = prompt | llm
-    return chain.invoke({"topic": topic}).content
-
-<span class="comment"># preflight runs before, record runs after, automatically</span>
-result = run_research_agent("quantum computing")
-      </pre></div>
-
-      <h2>Pattern 3, Mid-run checkpoint for long chains</h2>
-      <p>For agents that run many steps, use <span class="inline">checkpoint()</span> to enforce a ceiling mid-run. The call is refused if the task has already recorded too many units.</p>
-      <div class="code"><pre>
-from agentbill import AgentBillClient
-
-client = AgentBillClient(api_key="agb_your_key")
-
-def run_multi_step_agent(customer_id: str, tasks: list) -> list:
-    client.preflight(agent_id="multi_step", estimated_units=len(tasks),
-                     customer_id=customer_id)
-
-    results = []
-    for i, task in enumerate(tasks):
-        result = run_single_task(task)
-        results.append(result)
-
-        <span class="comment"># Check mid-run, stop if ceiling is hit</span>
-        cp = client.checkpoint(
-            agent_id="multi_step",
-            units_so_far=i + 1,
-            ceiling=20,
-            customer_id=customer_id
-        )
-        if not cp.approved:
-            break  <span class="comment"># stopped early, no runaway cost</span>
-
-    client.record(agent_id="multi_step", units=len(results), customer_id=customer_id)
-    return results
-      </pre></div>
-
-      <h2>Error handling</h2>
-      <div class="code"><pre>
-from agentbill import (
-    AgentBillClient, BudgetExhaustedError, CeilingExceededError, FreeTierExceededError,
-)
-
-try:
-    result = run_research_agent("user_123", "quantum computing")
-except CeilingExceededError:
-    return {"error": "run exceeds your per-request ceiling"}
-except BudgetExhaustedError:
-    return {"error": "customer budget exhausted, top up to continue"}
-except FreeTierExceededError as e:
-    return {"error": "free tier limit reached", "upgrade_url": e.upgrade_url}
-      </pre></div>
-
-      <h2>Works with any LangChain component</h2>
-      <p>AgentBill wraps at the invocation level, it doesn't care what's inside the chain. Use it with:</p>
-      <p>
-        <span class="inline">LLMChain</span> &nbsp;
-        <span class="inline">AgentExecutor</span> &nbsp;
-        <span class="inline">RetrievalQA</span> &nbsp;
-        <span class="inline">ConversationalChain</span> &nbsp;
-        <span class="inline">LangGraph</span>
-      </p>
-
-      <h2>Per-customer ceilings</h2>
-      <p>Pass <span class="inline">customer_id</span> to keep a separate ceiling per user of your
-      product. Each customer carries their own counters, and you set that ceiling yourself with
-      <span class="inline">PUT /budget</span>. It is an internal number for your own accounting:
-      AgentBill does not charge your users, hold their cards or issue them credit. And the free
-      tier is ${num(PLAN_LIMITS.free)} preflight calls a month for the whole account, not per
-      customer.</p>
-      <div class="code"><pre>
-<span class="comment"># Different customers, isolated budgets</span>
-check_alice = client.preflight(agent_id="research", estimated_units=10,
-                               customer_id="alice")
-check_bob   = client.preflight(agent_id="research", estimated_units=10, customer_id="bob")
-      </pre></div>
-
-      <h2>LangGraph support</h2>
-      <p>For LangGraph workflows, call <span class="inline">preflight()</span> before entering the graph and <span class="inline">record()</span> after the final node completes. Use <span class="inline">checkpoint()</span> inside nodes to enforce ceilings mid-graph.</p>
-
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
-      `
-    ))
-  })
-
-  app.get('/docs/openai-agent-spend-ceiling', publicRoute(), async (_, reply) => {
-    return reply.type('text/html').send(page(
-      '/docs/openai-agent-spend-ceiling',
-      'How to add a spend ceiling to an OpenAI agent',
-      'A spend ceiling bound to one OpenAI agent task, consulted before each call, on units you define. Not a project and not a calendar month.',
-      `
-      <h1>How to add a spend ceiling to an OpenAI agent</h1>
-      <span class="badge">Python</span><span class="badge">Node.js</span><span class="badge">OpenAI</span>
-      <p>OpenAI ships hard spend limits, and they fire: past one, the API returns <span class="inline">429 project_spend_limit_exceeded</span>. What they are bound to is a project or the organization. AgentBill adds a ceiling bound to one task, consulted before each call.</p>
-
-      <h2>Use OpenAI's spend limits. This is a different scope.</h2>
-      <p>Turn them on and keep them on. Their enforcement boundary is the project or the organization, and their own documentation notes that enforcement &ldquo;is not instantaneous, so recorded spend can slightly exceed the configured amount&rdquo;. AgentBill's ceiling is bound to a <span class="inline">task_ref</span>, consulted before each call, on units you define. It never reads your provider bill and it cannot tell you what a refused call would have cost.</p>
-
-      <h2>Install</h2>
-      <div class="code"><pre>pip install agentbill-sdk openai</pre></div>
-
-      <h2>Add a preflight check to any OpenAI call</h2>
-      <div class="code"><pre>
-from openai import OpenAI
-from agentbill import AgentBillClient
-
-<span class="comment"># ceiling=100: refuse any single call estimated at more than 100 units</span>
-agentbill = AgentBillClient(api_key="agb_your_key", ceiling=100)
-openai_client = OpenAI()
-
-def run_agent(customer_id: str, task: str) -> str:
-    <span class="comment"># Consulted before any OpenAI tokens are spent</span>
-    check = agentbill.preflight(
-        agent_id="openai_assistant",
-        estimated_units=10,
-        customer_id=customer_id
-    )
-    <span class="comment"># a refused call raised BudgetExhaustedError / CeilingExceededError</span>
-    <span class="comment"># above; nothing to check here</span>
-
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": task}]
-    )
-
-    agentbill.record(
-        agent_id="openai_assistant",
-        units=10,
-        customer_id=customer_id
-    )
-    return response.choices[0].message.content
-      </pre></div>
-
-      <h2>Use the @gate decorator</h2>
-      <p>The <span class="inline">@client.gate()</span> decorator wraps the function with preflight + record automatically.</p>
-      <div class="code"><pre>
-from openai import OpenAI
-from agentbill import AgentBillClient
-
-agentbill = AgentBillClient(api_key="agb_your_key", ceiling=100)
-openai_client = OpenAI()
-
-@agentbill.gate(agent_id="openai_assistant", estimated_units=10, customer_id="user_123")
-def run_agent(task: str) -> str:
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": task}]
-    )
-    return response.choices[0].message.content
-      </pre></div>
-
-      <h2>Handle the refusals</h2>
-      <div class="code"><pre>
-from agentbill import AgentBillClient, BudgetExhaustedError, CeilingExceededError
-
-try:
-    result = run_agent("user_123", "summarize this document")
-except CeilingExceededError:
-    return {"error": "run exceeds per-request ceiling"}
-except BudgetExhaustedError:
-    return {"error": "customer budget exhausted"}
-      </pre></div>
-
-      <h2>Node.js</h2>
-      <div class="code"><pre>
-import OpenAI from 'openai'
-import { preflight, record } from 'agentbill'  <span class="comment">// reads AGENTBILL_API_KEY</span>
-
-const openai = new OpenAI()
-
-async function runAgent(customerId: string, task: string): Promise&lt;string&gt; {
-  <span class="comment">// A refused call throws before this line returns, so no OpenAI call is made.</span>
-  await preflight({ agentId: 'openai_assistant', estimatedUnits: 10,
-                    ceiling: 100, customerId })
-
-  const res = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [{ role: 'user', content: task }]
-  })
-
-  await record({ agentId: 'openai_assistant', units: 10, customerId })
-  return res.choices[0].message.content ?? ''
-}
       </pre></div>
 
       <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>

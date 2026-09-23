@@ -33,9 +33,10 @@ const num = (n: number) => n.toLocaleString('en-US')
  *  a machine-readable file that is ahead of the registry describes something no
  *  reader can install. Bump in the same commit as the publish or delete the line. */
 export const SDK_VERSIONS = {
-  python: '0.6.4', // pypi.org/pypi/agentbill-sdk/0.6.3/json, published and checked 2026-09-09
-  node: '0.4.1',   // registry.npmjs.org/agentbill, published and checked 2026-09-09
-  mcp: '0.2.1',    // pypi.org/pypi/agentbill-mcp/0.2.1/json, published and checked 2026-09-09
+  python: '0.6.5',   // pypi.org/pypi/agentbill-sdk/json info.version, checked 2026-09-23
+  node: '0.4.1',     // registry.npmjs.org/agentbill dist-tags.latest, checked 2026-09-23; the repo's 0.4.2 is unpublished
+  mcp: '0.2.2',      // pypi.org/pypi/agentbill-mcp/json info.version, checked 2026-09-23
+  openclaw: '0.1.0', // clawhub.ai/agentbill/plugins/openclaw, the version its artifact serves, checked 2026-09-23
 } as const
 
 /** The one-paragraph definition. Shared by both files so an engine that reads
@@ -155,12 +156,16 @@ function links(self: 'short' | 'full'): string {
   const line = (p: string, text: string) => (has(p) ? `- [${text.split('|')[0]}](${abs(p)}): ${text.split('|')[1]}\n` : '')
   return `## Docs
 
-${line('/docs', 'Documentation index|The SDK quick start, the core concepts, and the HTTP reference.')}${line('/docs/task-budgets', 'Task budgets, a hard cost ceiling per agent job|How one task_ref carries one ceiling across every call in a job.')}${line('/docs/limit-cost-per-agent-run', 'How to cap what one agent run can spend|The preflight-and-record pair applied to a single run.')}${line('/docs/langchain-billing', 'How to add billing to a LangChain agent|Wrapping a chain with preflight and record.')}${line('/docs/openai-agent-spend-ceiling', 'How to add a spend ceiling to an OpenAI agent|The same pair around an OpenAI call.')}${line('/faq', 'Questions|What the product does and does not do, answered against the source.')}
+${line('/docs', 'Documentation index|The SDK quick start, the core concepts, and the HTTP reference.')}${line('/docs/task-budgets', 'Task budgets, a hard cost ceiling per agent job|How one task_ref carries one ceiling across every call in a job.')}${line('/docs/limit-cost-per-agent-run', 'How to cap what one agent run can spend|The preflight-and-record pair applied to a single run.')}${line('/docs/first-run', 'Every setup failure, and its fix|The errors between installing the SDK and its refusal of a call, each with its fix.')}${line('/faq', 'Questions|What the product does and does not do, answered against the source.')}
+## Integrations
+
+${line('/integrations', 'Integrations|What AgentBill publishes and where to install it; framework rows are guides that use the plain SDK, not packages.')}${line('/integrations/openclaw', 'OpenClaw plugin|One ceiling per OpenClaw session: the plugin asks before every tool call, and before every model turn on the embedded and CLI runners. OpenClaw does not run or send what the ceiling refused; on the Codex and Copilot harnesses only tool calls are asked.')}${line('/integrations/langchain', 'LangChain|A wrap_model_call middleware that asks before each model call, with the task_ref taken from the job.')}${line('/integrations/openai-agents-sdk', 'OpenAI Agents SDK|A RunHooks class that asks in on_llm_start, before each model request Runner.run makes.')}${line('/integrations/crewai', 'CrewAI|PRE_MODEL_CALL and POST_MODEL_CALL hooks; the refusal is raised as HookAborted because CrewAI runs hooks fail-open.')}${line('/integrations/mcp', 'MCP server|Two tools the host model can call; record_event takes no task_ref, so settle a job from the SDK or POST /events.')}
 ## Packages
 
 - [agentbill-sdk on PyPI](https://pypi.org/project/agentbill-sdk/): Python SDK ${SDK_VERSIONS.python}. AgentBillClient with preflight, record, gate, get_task, checkpoint, record_step, and wrap() for model clients.
 - [agentbill on npm](https://www.npmjs.com/package/agentbill): Node SDK ${SDK_VERSIONS.node}, ESM. Exports preflight, record, getTask, meter and wrap.
 - [agentbill-mcp on PyPI](https://pypi.org/project/agentbill-mcp/): MCP server ${SDK_VERSIONS.mcp}, exposing the preflight and record_event tools to an agent host.
+- [@agentbill/openclaw on ClawHub](https://clawhub.ai/agentbill/plugins/openclaw): OpenClaw plugin ${SDK_VERSIONS.openclaw}, one ceiling per session. Install with openclaw plugins install clawhub:@agentbill/openclaw.
 - [Source repository](https://github.com/marketinglior-pixel/agentbill): The API, this site, and both SDKs. MIT.
 
 ## Optional
