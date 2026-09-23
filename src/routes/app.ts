@@ -19,6 +19,7 @@ import {
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 import { INSTALL_PY } from '../ui/site.js'
+import { usageByEventType, type EventTypeUsage } from '../lib/usage.js'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -114,6 +115,9 @@ export async function appRoute(app: FastifyInstance) {
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
     const view = typeof q?.view === 'string' && Object.hasOwn(VIEWS, q.view) ? (q.view as ViewKey) : DEFAULT_VIEW
     const filter = readFilter(q)
+    // The order belongs to the tasks view alone: the overview's "Recent tasks"
+    // reads the same rows and must stay recent whatever the query says.
+    const sort: TaskSort = view === 'tasks' && q?.sort === 'used' ? 'used' : 'recent'
     const flash = readFlash(q)
     const viewer = await loadSession(request)
 
@@ -124,19 +128,19 @@ export async function appRoute(app: FastifyInstance) {
     // made ?demo=1 reachable only to people who had already signed up.
     if (!viewer) {
       if (demo) {
-        const sample = demoConsole(filter, RANGES[range].days)
-        return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter,
+        const sample = demoConsole(filter, RANGES[range].days, sort)
+        return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter, sort,
                                         suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
       }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
     }
 
-    const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
+    const data = demo ? demoConsole(filter, RANGES[range].days, sort) : await loadConsole(viewer.accountId, RANGES[range].days, filter, sort)
     // The tasks view's suggested ceilings: the account's own finished jobs,
     // or, under sample data, the sample rows the same view lists below.
     const suggest = view !== 'tasks' ? null
       : readSuggest(demo ? demoHistory(data.tasks) : await loadHistory(viewer.accountId), q)
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest }))
   })
 
@@ -456,7 +460,7 @@ const VIEWS = {
   // "overview" is two names for the same first screen.
   start:     { title: 'Start',        lede: 'A job, a ceiling, the lines that run into it, and the refusal they produce.', hidden: true },
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
-  activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day.' },
+  activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day, and the units split by event_type.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
   refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, and every one that ran past a ceiling, newest first, with the literal body the agent got.' },
   customers: { title: 'Customers',    lede: 'One balance per customer_id. Balances are lifetime, not a period.' },
@@ -477,6 +481,13 @@ const DEFAULT_RANGE = '30d'
 
 /** Narrowing the refusals view. Both ids are opaque strings the caller chose. */
 type Filter = { task?: string; agent?: string; only?: 'leaks' }
+
+/** The tasks view's order. recent: most recently touched first, the order it
+ *  always had. used: most used_units first, the ranking GET /tasks?sort=used
+ *  gives too. Ties break the way each surface's default orders: by recency
+ *  here, by creation on the API. */
+type TaskSort = 'recent' | 'used'
+const TASK_SORTS: Record<TaskSort, string> = { recent: 'Recent', used: 'Most used' }
 
 function readFilter(q: Record<string, unknown>): Filter {
   const f: Filter = {}
@@ -607,7 +618,11 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
   return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs } : null }
 }
 
-type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
+/** firstSeen, lastSeen and preflights describe the preflights AgentBill saw
+ *  for this job, approved or refused. See loadConsole for where they come
+ *  from and why task_budgets' own timestamps are not them. */
+type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date
+                 firstSeen: Date | null; lastSeen: Date | null; preflights: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date }
@@ -637,13 +652,17 @@ type Console = {
   customerWithLimit: number
   customerTotal: number
   keys: KeyRow[]
+  /** The window's recorded units split by event_type (src/lib/usage.ts, the
+   *  same function GET /usage runs). Its total is the units-metered sum of
+   *  `series`, because both read events over the same window. */
+  usage: EventTypeUsage
   decisions: DecisionRow[]
   /** Rows matching the current filter, across the whole account. */
   decisionMatched: number
   truncated: boolean
 }
 
-async function loadConsole(accountId: string, days: number, f: Filter): Promise<Console> {
+async function loadConsole(accountId: string, days: number, f: Filter, sort: TaskSort = 'recent'): Promise<Console> {
   const [totals] = await sql`
     SELECT count(*)                                AS total,
            count(*) FILTER (WHERE NOT blocked)     AS overruns,
@@ -686,12 +705,40 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     WHERE account_id = ${accountId} AND blocked AND created_at >= current_date - ${days - 1}::int
     GROUP BY reason
   `
+  // The page of jobs, then when AgentBill saw each one's preflights. An
+  // approved preflight leaves a reservations row and a refused one a
+  // preflight_decisions row with source 'preflight'; both are stamped at
+  // insert and neither is ever deleted (a settle or the sweeper only releases
+  // a reservation). task_budgets' own timestamps are not used, on purpose:
+  // created_at is when the job was opened, from code or from the console, and
+  // updated_at also moves on a ceiling save and when the sweeper releases an
+  // expired reservation, neither of which is a call. An ordinary record()
+  // leaves no per-task timestamp (events carry no task_ref; only a record
+  // that lands past the ceiling leaves a decision row, with source 'events'),
+  // which is why the row counts preflights and says preflight, not call.
+  const order = () => sort === 'used' ? sql`used_units DESC, updated_at DESC` : sql`updated_at DESC`
   const tasks = await sql`
-    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
-    FROM task_budgets
-    WHERE account_id = ${accountId}
-    ORDER BY updated_at DESC
-    LIMIT 20
+    WITH page AS (
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+      ORDER BY ${order()}
+      LIMIT 20
+    ), spans AS (
+      SELECT task_ref, min(at) AS first_seen, max(at) AS last_seen, count(*) AS preflights
+      FROM (
+        SELECT task_ref, created_at AS at FROM reservations
+        WHERE account_id = ${accountId} AND task_ref IN (SELECT task_ref FROM page)
+        UNION ALL
+        SELECT task_ref, created_at AS at FROM preflight_decisions
+        WHERE account_id = ${accountId} AND source = 'preflight' AND task_ref IN (SELECT task_ref FROM page)
+      ) seen
+      GROUP BY task_ref
+    )
+    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.updated_at,
+           spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights
+    FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
+    ORDER BY ${order()}
   `
   const customers = await sql`
     SELECT customer_ref, limit_units, used_units, reserved_units
@@ -731,6 +778,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     WHERE account_id = ${accountId}
     ORDER BY created_at ASC
   `
+  const usage = await usageByEventType(accountId, days, 20)
   const decisions = await sql`
     SELECT agent_id, task_ref, reason, blocked, estimated_units, ceiling_units,
            used_units, snapshot::text AS snapshot, created_at
@@ -751,7 +799,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     prevBlocked: Number(prev?.blocks ?? 0),
     series: (series as unknown as Series[]).map((s) => ({ day: s.day, blocks: Number(s.blocks), units: Number(s.units), refused: Number(s.refused) })),
     byReason,
-    tasks: tasks as unknown as TaskRow[],
+    tasks: (tasks as unknown as TaskRow[]).map((t) => ({ ...t, preflights: Number(t.preflights) })),
     taskCount: Number(ttotal?.n ?? 0),
     taskLive: Number(ttotal?.live ?? 0),
     taskNear: Number(ttotal?.near ?? 0),
@@ -760,6 +808,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     customerWithLimit: Number(ctotal?.withLimit ?? 0),
     customerTotal: Number(ctotal?.total ?? 0),
     keys: keys as unknown as KeyRow[],
+    usage,
     decisions: decisions as unknown as DecisionRow[],
     decisionMatched: Number(matched?.n ?? 0),
     // From the count, not the page length: exactly 100 matching rows is a
@@ -811,7 +860,7 @@ const DEMO_AVG_ASK = 173
 // Exported so the homepage can render the same task and refusal rows this
 // console shows under ?demo=1. Two pages that describe one sample account must
 // read one source, or the numbers drift apart the first time either is edited.
-export function demoConsole(f: Filter = {}, days = 30): Console {
+export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'): Console {
   const day = (back: number) => new Date(Date.now() - back * 86_400_000)
   const iso = (back: number) => day(back).toISOString().slice(0, 10)
   const shape30 = [0,0,3,1,0,6,4,2,9,5,3,12,7,4,18,11,6,9,14,8,21,13,7,16,24,12,9,19,15,11]
@@ -876,13 +925,47 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
     { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
     { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
   ]
-  const tasks: TaskRow[] = [
-      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
-      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
-      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
-      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
-      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1025, reservedUnits: 0, updatedAt: new Date(Date.now() - 60 * 60_000) },
+  const ago = (mins: number) => new Date(Date.now() - mins * 60_000)
+  // lastSeen is the latest preflight the sample job made, approved or
+  // refused, so it agrees with the refusal rows above: job-8871 was refused
+  // 22 minutes ago, nightly-crawl 74, batch-2211 190. batch-2211 was touched
+  // more recently than that (updatedAt, 60 minutes) by the record that
+  // leaked, and a record is not a preflight, so its span stops at 190.
+  const sampleTasks: TaskRow[] = [
+      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: ago(22),
+        firstSeen: ago(240), lastSeen: ago(22), preflights: 13 },
+      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: ago(180),
+        firstSeen: ago(205), lastSeen: ago(180), preflights: 9 },
+      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: ago(300),
+        firstSeen: ago(430), lastSeen: ago(74), preflights: 11 },
+      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1),
+        firstSeen: ago(1920), lastSeen: ago(1440), preflights: 4 },
+      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1025, reservedUnits: 0, updatedAt: ago(60),
+        firstSeen: ago(340), lastSeen: ago(190), preflights: 41 },
   ]
+  // The two orders loadConsole gives, applied to the sample rows, so the
+  // toggle means the same thing under sample data.
+  const recent = (a: TaskRow, b: TaskRow) => b.updatedAt.getTime() - a.updatedAt.getTime()
+  const tasks = [...sampleTasks].sort(sort === 'used' ? (a, b) => b.usedUnits - a.usedUnits || recent(a, b) : recent)
+  // The window's units split by event_type, cut from the same total the
+  // chart and the tiles sum, so the split cannot disagree with them. The
+  // labels are the sample agents because that is what record() sends as
+  // event_type; the last one takes the remainder so the parts sum exactly.
+  const metered = series.reduce((a, x) => a + x.units, 0)
+  const split: Array<[string, number, number]> = [['crawler', 0.5, 50], ['enricher', 0.28, 25], ['researcher', 0.18, 40], ['summarizer', 0, 12]]
+  let rest = metered
+  const groups = split.map(([eventType, frac, perRecord], i) => {
+    const units = i === split.length - 1 ? rest : Math.round(metered * frac)
+    rest -= units
+    return { eventType, units, events: units > 0 ? Math.max(1, Math.round(units / perRecord)) : 0 }
+  }).filter((g) => g.units > 0).sort((a, b) => b.units - a.units || a.eventType.localeCompare(b.eventType))
+  const usage: EventTypeUsage = {
+    since: iso(days - 1),
+    totalUnits: metered,
+    totalEvents: groups.reduce((a, g) => a + g.events, 0),
+    groupCount: groups.length,
+    groups,
+  }
   return {
     decisionTotal: all.length,
     overruns: all.filter((d) => !d.blocked).length,
@@ -903,6 +986,7 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
       { apiKey: DEMO_KEY, label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
       { apiKey: DEMO_KEY_CI, label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
     ],
+    usage,
     decisions,
     decisionMatched: decisions.length,
     truncated: false,
@@ -1248,6 +1332,10 @@ ${MARK_CSS}
   .track i.res { background: var(--res); }
   .bfoot { margin-top: 6px; font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
            display: flex; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+  /* When AgentBill saw the job's preflights: a line of its own under the
+     foot, so it reads the same at every width and never sits beside the
+     relative time as if the two were one figure. */
+  .bfoot .bseen { flex-basis: 100%; }
   .key { display: flex; gap: var(--s4); flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-chip);
          color: var(--dim); margin: var(--s3) 0 0; }
   .key span { display: flex; align-items: center; gap: 6px; }
@@ -1707,16 +1795,20 @@ function handoffPage(tier: string, to: string): string {
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null; suggest?: Suggest | null }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; sort: TaskSort; flash?: Flash | null; suggest?: Suggest | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; history: string; pick: Pick }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
   if (view !== DEFAULT_VIEW) q.push(`view=${view}`)
+  // The order is the tasks view's. It survives a link back to the same view
+  // (the sample-data toggle, the rail's current item) and no other.
+  const sort = extra.sort ?? (view === p.view ? p.sort : 'recent')
+  if (view === 'tasks' && sort === 'used') q.push('sort=used')
   const range = extra.range ?? p.range
   if (range !== DEFAULT_RANGE) q.push(`range=${encodeURIComponent(range)}`)
   if (extra.task) q.push(`task=${encodeURIComponent(extra.task)}`)
@@ -1819,6 +1911,13 @@ function rail(p: Page): string {
         ${action}
       </div>
     </aside>`
+}
+
+/** The tasks view's order, in the header slot the period control takes on
+ *  the views that carry a window. Same segmented control, same 44px. */
+function sortControl(p: Page): string {
+  return `<span class="seg" aria-label="Order">${(Object.keys(TASK_SORTS) as TaskSort[]).map((k) =>
+    `<a class="${k === p.sort ? 'on' : ''}" href="${href(p, 'tasks', { sort: k })}"${k === p.sort ? ' aria-current="true"' : ''}>${esc(TASK_SORTS[k])}</a>`).join('')}</span>`
 }
 
 function periodControl(p: Page): string {
@@ -1945,6 +2044,28 @@ function activityTable(series: Series[]): string {
   </table></div>`
 }
 
+/** "2h 30m", as HTML: the two parts are joined by a no-break space so a
+ *  narrow row never splits the figure across lines. Minutes are floored, so a
+ *  span never reads longer than the rows it was measured from. */
+function fmtSpan(ms: number): string {
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 1) return 'under a minute'
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  if (h < 48) return `${h}h&nbsp;${mins % 60}m`
+  return `${Math.floor(h / 24)}d&nbsp;${h % 24}h`
+}
+
+/** How long AgentBill has been seeing this job, labelled as exactly that:
+ *  the span from the first preflight it saw to the last, approved or refused.
+ *  It is not the job's own duration. AgentBill sees the calls your code asks
+ *  about, not when the job started or when it finished. */
+function seenLine(t: TaskRow): string {
+  if (!t.preflights || !t.firstSeen || !t.lastSeen) return 'no preflight seen yet'
+  if (t.preflights === 1) return 'one preflight seen'
+  return `${fmtSpan(new Date(t.lastSeen).getTime() - new Date(t.firstSeen).getTime())}, first to last preflight seen`
+}
+
 function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   const ceiling = Number(t.ceilingUnits)
   const used = Number(t.usedUnits)
@@ -1983,6 +2104,7 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
           <button class="btn-out" type="submit">Save</button>
         </form>` : ''}
         <span>${rel(t.updatedAt)}</span>
+        <span class="bseen">${seenLine(t)}</span>
       </div>
     </div>`
 }
@@ -2139,6 +2261,30 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
     <tbody>${body}</tbody>
   </table></div>
   ${truncated ? `<p class="note">The latest 100 of ${num(p.d.decisionMatched)}${p.filter.task || p.filter.agent || p.filter.only ? ' that match' : ''}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
+}
+
+/** The window's units by event_type. The bar is scaled to the heaviest
+ *  group, the percentage is of every unit in the window, the same shape the
+ *  customers table uses for share of spend. */
+function usageTable(u: EventTypeUsage, rangeLabel: string): string {
+  if (u.groups.length === 0) {
+    return `<div class="frame"><p class="nothing">Nothing recorded in the last ${esc(rangeLabel)}. Each event your code records lands here under its <code>event_type</code>.</p></div>`
+  }
+  const heaviest = Math.max(1, ...u.groups.map((g) => g.units))
+  const body = u.groups.map((g) => {
+    const share = u.totalUnits > 0 ? (g.units / u.totalUnits) * 100 : 0
+    const pct = share > 0 && share < 1 ? '&lt;1%' : `${Math.round(share)}%`
+    return `<tr>
+      <td class="id lead" title="${esc(g.eventType)}">${esc(g.eventType)}</td>
+      <td class="wide"><div class="share"><span class="sbar"><i style="width:${Math.max(2, Math.round((g.units / heaviest) * 100))}%"></i></span><span>${pct} of units</span></div></td>
+      <td class="num" data-l="units">${num(g.units)}</td>
+      <td class="num" data-l="records">${num(g.events)}</td>
+    </tr>`
+  }).join('')
+  return `<div class="frame tw cards"><table>
+    <thead><tr><th>event_type</th><th>Share of units</th><th class="num">Units</th><th class="num">Records</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`
 }
 
 function customersTable(p: Page, rows: CustomerRow[], total: number, compact = false): string {
@@ -2481,16 +2627,26 @@ function overviewView(p: Page, rangeLabel: string): string {
 }
 
 function activityView(p: Page, rangeLabel: string): string {
+  const u = p.d.usage
+  const more = u.groupCount > u.groups.length ? `The ${num(u.groups.length)} heaviest of ${num(u.groupCount)} event_types. ` : ''
   return `${chartBlock(p.d.series)}
+    <h2>By event_type <span>the last ${esc(rangeLabel)}, heaviest first</span></h2>
+    <p class="lede">The units recorded in this window, in the units your code reported, grouped by the <code>event_type</code> each record carried. <code>record()</code> in both SDKs sends its <code>agent_id</code> as the <code>event_type</code>, so for those calls this is a split by agent; <code>meter()</code> and a direct <code>POST /events</code> carry the event name your code passed.</p>
+    ${usageTable(u, rangeLabel)}
+    ${u.groups.length ? `<p class="note">${more}Shares are of all ${num(u.totalUnits)} units recorded in the window. The same split is on <code>GET /usage?by=event_type</code>.</p>` : ''}
     <h2>Day by day <span>the last ${esc(rangeLabel)}, newest first</span></h2>
     ${activityTable(p.d.series)}`
 }
 
 function tasksView(p: Page): string {
+  const used = p.sort === 'used'
+  const page = p.d.taskCount > p.d.tasks.length
+    ? `The ${num(p.d.tasks.length)} ${used ? 'with the most units used' : 'most recently touched'} of ${num(p.d.taskCount)} tasks.`
+    : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, ${used ? 'most units used first' : 'most recently touched first'}.`
   return `${ceilingForm(p)}
     ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
-    <p class="note">${p.d.taskCount > p.d.tasks.length ? `The ${num(p.d.tasks.length)} most recently touched of ${num(p.d.taskCount)} tasks.` : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, most recently touched first.`} The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
+    <p class="note">${page} Units are the ones your code reported. The time on a row runs from the first to the last preflight AgentBill saw for that job, approved or refused; it is not the job's own duration, and a record() does not move it. The full attribution is on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
 }
 
 function refusalsView(p: Page): string {
@@ -2559,13 +2715,13 @@ function consolePage(p: Page): string {
       <div class="wrap">
         <header class="vh">
           <div><h1>${meta.title}</h1><p class="sub">${meta.lede}</p></div>
-          ${RANGED.has(p.view) && !asStart ? periodControl(p) : ''}
+          ${RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
         </header>
         ${banner}
         ${body}
         <div class="foot">
           Every number on this page is on the API too:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/usage?by=event_type</code> for the split by event_type, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
     </main>

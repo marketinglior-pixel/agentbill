@@ -46,6 +46,12 @@ const PAGES = [
   // rather than add to it, which looks identical in this output.
   ['register-done', '/register'],
   ['console-demo', '/app?demo=1'],
+  // The two views the jobs-by-spend lane (2026-09-23) added to: the tasks
+  // view under its Most used order, where every row carries a second foot line
+  // for the preflight span, and the activity view with the event_type split.
+  // Sample data, so the rows exist without an account.
+  ['console-demo-tasks', '/app?demo=1&view=tasks&sort=used'],
+  ['console-demo-activity', '/app?demo=1&view=activity'],
   ['blog', '/blog'],
   ['about', '/about'],
   ['faq', '/faq'],

@@ -2647,6 +2647,249 @@ ok('[suggest] everything the suggestion prints is in units: no money word, and n
    [...moneyS, ...bannedS].join(', ') || `${newCopyS.length} chars, docs paragraph ${docsParaS.length}`)
 await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
 
+// ---------------------------------------------------------------- jobs: which job used the most, 2026-09-23
+// From a builder's interview (vault, B-brain/05-research/2026-09-23-shahar-elhadad-interview.md,
+// 04:24 to 05:10): he wants to be shown which process costs the most and which takes the
+// longest, without working it out himself. Until this, the console ranked customers only:
+// tasks were listed by updated_at, GET /tasks by created_at, and nothing split the units by
+// event_type. What is asserted, each on what the server actually serves:
+//   1. GET /tasks keeps its order for a client that sends no sort; sort=used ranks by
+//      used_units; any other sort is a 422.
+//   2. The tasks view's Recent is the order it always had; Most used ranks the same rows.
+//   3. A row's time is the span between the first and the last preflight AgentBill stored for
+//      that job (reservations, plus preflight-source decisions), and nothing else moves it:
+//      not task_budgets' own timestamps, not a record, not another account's rows.
+//   4. GET /usage?by=event_type and the activity view split this account's units the same
+//      way, and another account's records never appear in either.
+console.log('\n[jobs] which job used the most, and what the units were recorded under')
+await reset()
+await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
+const KEYJ = (await post('/keys/generate', { label: 'harness-jobs' })).body.api_key
+if (typeof KEYJ !== 'string' || !KEYJ.startsWith('agb_')) throw new Error('[jobs] could not mint its key')
+const OTHERJ = '00000000-0000-0000-0000-0000000000dd'
+const OTHERKEYJ = 'agb_testkey_other_account_jobs_0003'
+await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
+          VALUES (${OTHERJ}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHERJ}, ${OTHERKEYJ}, 'other-jobs') ON CONFLICT DO NOTHING`
+const authJ = (key) => ({ 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' })
+const preJ = (body, key = KEYJ) => fetch(`${API}/preflight`, { method: 'POST', headers: authJ(key), body: JSON.stringify(body) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+let seqJ = 0
+const recJ = (body, key = KEYJ) => fetch(`${API}/events`, { method: 'POST', headers: authJ(key),
+  body: JSON.stringify({ customer_id: 'default', idempotency_key: `jobs-${seqJ++}`, ...body }) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+const ceilJ = (ref, body, key = KEYJ) => fetch(`${API}/tasks/${encodeURIComponent(ref)}/ceiling`, { method: 'PUT', headers: authJ(key), body: JSON.stringify(body) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+const getJ = (path, key = KEYJ) => fetch(`${API}${path}`, { headers: key ? { 'Authorization': `Bearer ${key}` } : {} })
+  .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }))
+const T0 = Date.now()
+const agoJ = (mins) => new Date(T0 - mins * 60_000)
+
+// 1. Three jobs, created in one order, used in a second, touched in a third, so each
+//    order is a claim of its own and no two can pass for each other, including the two
+//    alpha jobs on their own (created: mid, old; used: old, mid).
+for (const [ref, agent, units] of [['jobs-old', 'alpha', 300], ['jobs-mid', 'alpha', 50], ['jobs-new', 'beta', 10]]) {
+  await ceilJ(ref, { ceiling_units: 1000, agent_id: agent })
+  await preJ({ agent_id: agent, task_ref: ref, estimated_units: units })
+  await recJ({ event_type: agent, units, task_ref: ref })
+}
+await sql`UPDATE task_budgets SET created_at = ${agoJ(180)}, updated_at = ${agoJ(1)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-old'`
+await sql`UPDATE task_budgets SET created_at = ${agoJ(120)}, updated_at = ${agoJ(10)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-mid'`
+await sql`UPDATE task_budgets SET created_at = ${agoJ(60)},  updated_at = ${agoJ(5)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-new'`
+const refsJ = (r) => (r.body?.tasks ?? []).map((t) => t.task_ref).join(',')
+const plainJ = await getJ('/tasks')
+ok('[jobs] GET /tasks with no sort is still newest job first, as every existing client got it',
+   plainJ.status === 200 && refsJ(plainJ) === 'jobs-new,jobs-mid,jobs-old', `${plainJ.status} ${refsJ(plainJ)}`)
+const createdJ = await getJ('/tasks?sort=created')
+ok('[jobs] and sort=created is that same order, named', refsJ(createdJ) === 'jobs-new,jobs-mid,jobs-old', refsJ(createdJ))
+const usedJ = await getJ('/tasks?sort=used')
+ok('[jobs] GET /tasks?sort=used ranks the jobs by used_units',
+   usedJ.status === 200 && refsJ(usedJ) === 'jobs-old,jobs-mid,jobs-new' && usedJ.body.tasks.map((t) => t.used_units).join(',') === '300,50,10',
+   `${usedJ.status} ${JSON.stringify(usedJ.body?.tasks?.map((t) => [t.task_ref, t.used_units]))}`)
+const alphaJ = await getJ('/tasks?agent_id=alpha&sort=used')
+ok('[jobs] sort=used composes with agent_id', refsJ(alphaJ) === 'jobs-old,jobs-mid', refsJ(alphaJ))
+const badSortJ = await getJ('/tasks?sort=cost')
+ok('[jobs] an unknown sort is a 422, not a silent default', badSortJ.status === 422 && badSortJ.body?.error === 'validation_error',
+   `${badSortJ.status} ${JSON.stringify(badSortJ.body).slice(0, 120)}`)
+
+// 2. The same three rows on the console.
+const loginJ = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEYJ}` })
+const cookieJ = (loginJ.headers.get('set-cookie') ?? '').split(';')[0]
+ok('[jobs] login for the console views', cookieJ.startsWith('agentbill_app='), cookieJ.slice(0, 20))
+const pageJ = (path) => nav8(path, { headers: { cookie: cookieJ } }).then((r) => r.text())
+const rowsJ = (h) => [...h.matchAll(/<div class="btask"><a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1]).join(',')
+const recentJ = await pageJ('/app?view=tasks')
+ok('[jobs] the tasks view opens on Recent, most recently touched first, the order it always had',
+   rowsJ(recentJ) === 'jobs-old,jobs-new,jobs-mid' && recentJ.includes('<a class="on" href="/app?view=tasks" aria-current="true">Recent</a>'),
+   rowsJ(recentJ))
+const mostJ = await pageJ('/app?view=tasks&sort=used')
+ok('[jobs] Most used ranks the same rows by units used, and says so under them',
+   rowsJ(mostJ) === 'jobs-old,jobs-mid,jobs-new' && mostJ.includes('<a class="on" href="/app?view=tasks&amp;sort=used" aria-current="true">Most used</a>')
+     && mostJ.includes('most units used first'), rowsJ(mostJ))
+ok('[jobs] the order belongs to the tasks view: no link to another view carries it',
+   !/href="\/app\?view=(?!tasks)[a-z]+&amp;sort=used/.test(mostJ) && mostJ.includes('href="/app?view=activity"'), 'a link to another view kept sort=used')
+
+// 3. The span, on a job opened with a ceiling and no call yet.
+await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'alpha' })
+const rowOfJ = (h, ref) => {
+  const i = h.indexOf(`>${ref}</a>`)
+  if (i < 0) return ''
+  const j = h.indexOf('<div class="brow">', i)
+  return h.slice(i, j < 0 ? undefined : j)
+}
+const seenJ = async (ref) => visible8((rowOfJ(await pageJ('/app?view=tasks'), ref).match(/<span class="bseen">([\s\S]*?)<\/span>/) ?? [])[1] ?? '')
+  .replace(/\s+/g, ' ').trim()
+const decisionRowJ = async (ref, source, account = ACCT) => {
+  const started = Date.now()
+  let rows = []
+  while (Date.now() - started < PAGE_DEADLINE_MS) {
+    rows = await sql`SELECT id FROM preflight_decisions WHERE account_id = ${account} AND task_ref = ${ref} AND source = ${source} ORDER BY id`
+    if (rows.length) break
+    await settle(POLL_MS)
+  }
+  return rows
+}
+let seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a job opened with no preflight says so and shows no span', seenNowJ === 'no preflight seen yet', seenNowJ || 'no seen line on the row')
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] one preflight is one preflight, not a span', seenNowJ === 'one preflight seen', seenNowJ)
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+const resJ = await sql`SELECT id FROM reservations WHERE account_id = ${ACCT} AND task_ref = 'jobs-span' ORDER BY id`
+ok('[jobs] setup: three approved preflights left three reservation rows', resJ.length === 3, String(resJ.length))
+await sql`UPDATE reservations SET created_at = ${agoJ(180)} WHERE id = ${resJ[0]?.id ?? 0}`
+await sql`UPDATE reservations SET created_at = ${agoJ(120)} WHERE id = ${resJ[1]?.id ?? 0}`
+await sql`UPDATE reservations SET created_at = ${agoJ(60)}  WHERE id = ${resJ[2]?.id ?? 0}`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] the span runs from the first stored preflight to the last, and is labelled as that',
+   seenNowJ === '2h 0m, first to last preflight seen', seenNowJ)
+const refusedJ = await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 500 })
+const refusedRowJ = await decisionRowJ('jobs-span', 'preflight')
+await sql`UPDATE preflight_decisions SET created_at = ${agoJ(30)} WHERE id = ${refusedRowJ[0]?.id ?? 0}`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a refused preflight is a preflight AgentBill saw, so it extends the span',
+   refusedJ.body.reason === 'task_ceiling_exceeded' && refusedRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen',
+   `${refusedJ.body.reason} ${refusedRowJ.length} "${seenNowJ}"`)
+// task_budgets' own timestamps are not the span: a ceiling save moves updated_at, and
+// created_at is when the job was opened, not a call.
+const saveJ = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookieJ }, body: 'task_ref=jobs-span&ceiling_units=150' })
+await sql`UPDATE task_budgets SET created_at = ${agoJ(600)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-span'`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a ceiling save and the job\'s created_at do not move it',
+   saveJ.status === 303 && seenNowJ === '2h 30m, first to last preflight seen', `${saveJ.status} "${seenNowJ}"`)
+// A record is not a preflight, even one that lands past the ceiling and leaves a row.
+const leakJ = await recJ({ event_type: 'alpha', units: 200, task_ref: 'jobs-span' })
+const leakRowJ = await decisionRowJ('jobs-span', 'events')
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a record, even one that leaks and leaves a decision row, does not move it',
+   leakJ.body.task_exceeded === true && leakRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen',
+   `${JSON.stringify(leakJ.body).slice(0, 80)} ${leakRowJ.length} "${seenNowJ}"`)
+// Another account's job of the same name is its own, and so are its rows.
+await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'other' }, OTHERKEYJ)
+await preJ({ agent_id: 'other', task_ref: 'jobs-span', estimated_units: 5 }, OTHERKEYJ)
+await preJ({ agent_id: 'other', task_ref: 'jobs-span', estimated_units: 500 }, OTHERKEYJ)
+const otherRefusalJ = await decisionRowJ('jobs-span', 'preflight', OTHERJ)
+await sql`UPDATE reservations SET created_at = ${agoJ(1000)} WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-span'`
+await sql`UPDATE preflight_decisions SET created_at = ${agoJ(2)} WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-span'`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] another account\'s preflights on the same task_ref never enter this span',
+   otherRefusalJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen', `${otherRefusalJ.length} "${seenNowJ}"`)
+
+// 4. What the units were recorded under.
+await reset()
+for (const [event_type, units] of [['search', 20], ['search', 10], ['summarize', 10], ['archive', 500]]) await recJ({ event_type, units })
+await sql`UPDATE events SET created_at = now() - interval '40 days' WHERE account_id = ${ACCT} AND event_type = 'archive'`
+await recJ({ event_type: 'other-tenant-secret', units: 9999 }, OTHERKEYJ)
+const noKeyJ = await getJ('/usage?by=event_type', null)
+const badKeyJ = await getJ('/usage?by=event_type', 'agb_not_a_real_key_for_jobs_000')
+ok('[jobs] GET /usage is a bearer route: no key and a wrong key are both 401',
+   noKeyJ.status === 401 && badKeyJ.status === 401, `${noKeyJ.status} ${badKeyJ.status}`)
+const noByJ = await getJ('/usage')
+const byCustJ = await getJ('/usage?by=customer')
+const days0J = await getJ('/usage?by=event_type&days=0')
+const days91J = await getJ('/usage?by=event_type&days=91')
+ok('[jobs] by=event_type is required and days is 1 to 90, each a 422',
+   [noByJ, byCustJ, days0J, days91J].every((r) => r.status === 422 && r.body?.error === 'validation_error'),
+   [noByJ, byCustJ, days0J, days91J].map((r) => r.status).join(','))
+const u30J = await getJ('/usage?by=event_type')
+const groupsJ = (b) => JSON.stringify((b?.groups ?? []).map((g) => [g.event_type, g.units, g.events, g.share]))
+ok('[jobs] GET /usage splits the window by event_type, heaviest first, each with its share of the total',
+   u30J.status === 200 && u30J.body.by === 'event_type' && u30J.body.days === 30 && /^\d{4}-\d{2}-\d{2}$/.test(u30J.body.since)
+     && u30J.body.total_units === 40 && u30J.body.total_events === 3 && u30J.body.group_count === 2
+     && groupsJ(u30J.body) === JSON.stringify([['search', 30, 2, 0.75], ['summarize', 10, 1, 0.25]]),
+   JSON.stringify(u30J.body))
+const u90J = await getJ('/usage?by=event_type&days=90')
+ok('[jobs] the window is days: a record from 40 days ago is in 90 and not in 30',
+   u90J.body?.total_units === 540 && u90J.body.groups?.[0]?.event_type === 'archive' && !groupsJ(u30J.body).includes('archive'),
+   JSON.stringify(u90J.body))
+const u1J = await getJ('/usage?by=event_type&limit=1')
+ok('[jobs] a limit cuts the groups, never the totals',
+   u1J.body?.groups?.length === 1 && u1J.body.group_count === 2 && u1J.body.total_units === 40, JSON.stringify(u1J.body))
+ok('[jobs] another account\'s records never appear in this account\'s split, nor in its totals',
+   !JSON.stringify(u30J.body).includes('other-tenant-secret') && !JSON.stringify(u90J.body).includes('other-tenant-secret') && u90J.body?.total_units === 540,
+   JSON.stringify(u90J.body))
+const uOtherJ = await getJ('/usage?by=event_type', OTHERKEYJ)
+ok('[jobs] and that account sees its own records and none of this one\'s',
+   uOtherJ.body?.total_units === 9999 && groupsJ(uOtherJ.body) === JSON.stringify([['other-tenant-secret', 9999, 1, 1]]), JSON.stringify(uOtherJ.body))
+// The console reads the same function, so the page says what the API says.
+const splitJ = (h) => {
+  const s = h.slice(h.indexOf('<h2>By event_type'), h.indexOf('<h2>Day by day'))
+  return [...s.matchAll(/<td class="id lead" title="[^"]*">([^<]+)<\/td>[\s\S]*?<span>([^<]+) of units<\/span>[\s\S]*?<td class="num" data-l="units">([0-9,]+)<\/td>\s*<td class="num" data-l="records">([0-9,]+)<\/td>/g)]
+    .map((m) => [m[1], m[2], Number(m[3].replace(/,/g, '')), Number(m[4].replace(/,/g, ''))])
+}
+const dayUnitsJ = (h) => [...h.slice(h.indexOf('<div class="frame tw days">')).matchAll(/<td class="when">[\s\S]*?<\/td>\s*<td class="num">([0-9,]+)<\/td>/g)]
+  .reduce((a, m) => a + Number(m[1].replace(/,/g, '')), 0)
+const sumJ = (rows) => rows.reduce((a, r) => a + r[2], 0)
+const actJ = await pageJ('/app?view=activity')
+ok('[jobs] the activity view shows the same split, each share of every unit in the window',
+   JSON.stringify(splitJ(actJ)) === JSON.stringify([['search', '75%', 30, 2], ['summarize', '25%', 10, 1]]), JSON.stringify(splitJ(actJ)))
+ok('[jobs] and never another account\'s event_type', !actJ.includes('other-tenant-secret'))
+ok('[jobs] the split sums to the day-by-day units over the same window', sumJ(splitJ(actJ)) === dayUnitsJ(actJ) && dayUnitsJ(actJ) === 40,
+   `${sumJ(splitJ(actJ))} vs ${dayUnitsJ(actJ)}`)
+const act90J = await pageJ('/app?view=activity&range=90d')
+ok('[jobs] and it moves with the period control', splitJ(act90J)[0]?.[0] === 'archive' && sumJ(splitJ(act90J)) === dayUnitsJ(act90J) && dayUnitsJ(act90J) === 540,
+   `${JSON.stringify(splitJ(act90J))} vs ${dayUnitsJ(act90J)}`)
+const splitTextJ = visible8(actJ.slice(actJ.indexOf('<h2>By event_type'), actJ.indexOf('<h2>Day by day'))).replace(/\s+/g, ' ')
+ok('[jobs] the split says whose units they are and what event_type holds',
+   splitTextJ.includes('in the units your code reported') && splitTextJ.includes('record() in both SDKs sends its agent_id as the event_type')
+     && splitTextJ.includes('GET /usage?by=event_type'), splitTextJ.slice(0, 200))
+
+// The sample console shows both, from its own labelled sample rows.
+const demoUsedJ = await fetch(`${API}/app?demo=1&view=tasks&sort=used`).then((r) => r.text())
+ok('[jobs] the sample console ranks its sample jobs by Most used, inside the sample frame',
+   rowsJ(demoUsedJ) === 'nightly-crawl,batch-2211,job-8871,job-8864,job-8870' && demoUsedJ.includes('<b>Sample data</b>')
+     && demoUsedJ.includes('<a class="on" href="/app?demo=1&amp;view=tasks&amp;sort=used" aria-current="true">Most used</a>'), rowsJ(demoUsedJ))
+const demoRecentJ = await fetch(`${API}/app?demo=1&view=tasks`).then((r) => r.text())
+ok('[jobs] and Recent there is most recently touched first, as its note says', rowsJ(demoRecentJ) === 'job-8871,batch-2211,job-8870,nightly-crawl,job-8864',
+   rowsJ(demoRecentJ))
+const demoSeenJ = [...demoUsedJ.matchAll(/<span class="bseen">([\s\S]*?)<\/span>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' ').trim())
+ok('[jobs] every sample row carries its span, labelled the same way', demoSeenJ.length === 5 && demoSeenJ.every((s) => /^\S+( \S+)?, first to last preflight seen$/.test(s)),
+   JSON.stringify(demoSeenJ))
+for (const range of ['7d', '30d', '90d']) {
+  const h = await fetch(`${API}/app?demo=1&view=activity&range=${range}`).then((r) => r.text())
+  ok(`[jobs] the sample split sums to the sample day-by-day units (${range})`,
+     h.includes('<b>Sample data</b>') && splitJ(h).length === 4 && sumJ(splitJ(h)) === dayUnitsJ(h) && dayUnitsJ(h) > 0,
+     `${sumJ(splitJ(h))} vs ${dayUnitsJ(h)}`)
+}
+
+// The words. Everything this lane added that a reader sees: the tasks note and seen lines,
+// the split on the activity view, and the two API sections on /docs.
+const docsJ = await fetch(`${API}/docs`).then((r) => r.text())
+const docsNewJ = docsJ.slice(docsJ.indexOf('<h3 id="get-tasks">'), docsJ.indexOf('<h3 id="put-budget">'))
+const tasksNoteJ = (mostJ.match(/<p class="note">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const newCopyJ = visible8([tasksNoteJ, demoSeenJ.join(' '), actJ.slice(actJ.indexOf('<h2>By event_type'), actJ.indexOf('<h2>Day by day')), docsNewJ].join(' '))
+ok('[jobs] /docs documents GET /tasks?sort and GET /usage', docsNewJ.includes('<h3 id="get-usage">GET /usage</h3>') && docsNewJ.includes('sort=used'), docsNewJ.slice(0, 80) || 'no new docs sections')
+ok('[jobs] the new copy never says stop, block, kill, halt or cut off, and names no money',
+   newCopyJ.length > 400 && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(newCopyJ),
+   (newCopyJ.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/gi) ?? []).join(', '))
+// server.ts: the canonical-host redirect skips only paths on this list, and a cross-host
+// 301 drops the Authorization header, so a bearer GET missing from it breaks on the old host.
+const prefixesJ = (readFileSync9(`${ROOT9}/src/server.ts`, 'utf8').match(/const API_PREFIXES = \[([\s\S]*?)\]/) ?? [])[1] ?? ''
+ok('[jobs] /usage is on the API prefix list, so the canonical-host redirect never strips its bearer header',
+   /'\/usage'/.test(prefixesJ), prefixesJ.replace(/\s+/g, ' '))
+await sql`DELETE FROM accounts WHERE id = ${OTHERJ}`
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)
