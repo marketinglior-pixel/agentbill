@@ -13,7 +13,9 @@ import { sql } from '../db/index.js'
 // reclaims exactly what a row holds or reclaims nothing, and no path can drive
 // a counter below the units still genuinely in flight.
 
-const SWEEP_INTERVAL_MS = 5 * 60_000  // 5 minutes
+// Exported for the console, which says how long an unsettled call can keep
+// its job out of a suggested ceiling: the TTL, plus up to one sweep.
+export const SWEEP_INTERVAL_MS = 5 * 60_000  // 5 minutes
 const BATCH_LIMIT = 500               // bound the work per tick
 
 /**
