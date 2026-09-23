@@ -2146,6 +2146,164 @@ ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_
      && node10.includes('free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw'),
    'an SDK branches on a quota refusal, so the /faq answer may no longer be true')
 
+// ---------------------------------------------------------------- integrations: the pages that name what we plug into, 2026-09-23
+// /integrations and its pages, plus every guide under /docs/. No gate read the
+// guides at all: /docs/task-budgets printed "blocked, the other worker took the
+// last units" and "stopped at ...", and /docs/langchain-billing said "stop if
+// ceiling is hit" in a comment, with main green. These are the pages that name a
+// framework or a host next to our product, which is where "blocks the run" or
+// "works with Claude Code" is one careless sentence away.
+//
+// The scope is read from the sitemap, so a new page under either path is in it
+// the day it ships, and the first assertion proves the slice is not empty.
+//
+// What counts as OUR sentence, and why the word ban reads only that:
+//   - prose: the page's <title> and meta description, the text of <main> with
+//     code blocks, inline code and <blockquote>s cut out, the attribute text a
+//     screen reader or tooltip shows, and every comment inside a code block;
+//   - sentences inside samples: a string literal with a space in it, like
+//     print("blocked, the other worker took the last units").
+// Left out, on purpose: identifiers and API field names a sample must spell the
+// way the API does ("blocked": true on GET /decisions, "is_blocked" on /budget,
+// OpenClaw's outcome: 'block'); a vendor's own words inside a <blockquote>; and
+// an output line (class="out-*") that is the SDK's or the plugin's own refusal
+// text, which is what a reader's terminal will print. That allowance is read
+// from source, not typed: the prefixes are the ones client.py and ceiling.ts
+// build their refusal sentences with, and an output line without one is
+// checked like any other sentence. "first" is banned in prose only, because in
+// code it is a file name (first-run.mjs), not a claim.
+console.log('\n[integrations] the pages that name what AgentBill plugs into say what it does, and nothing it does not')
+const decode11 = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+const text11 = (h) => decode11(h.replace(/<[^>]+>/g, ' ')).replace(/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/gi, ' ')
+const WORDS11 = /\b(stop|stops|stopped|stopping|block|blocks|blocked|blocking|kill|kills|killed|killing|halt|halts|halted|halting)\b|\bcut(?:s|ting)? off\b/gi
+const FIRST11 = /\bfirst\b/gi
+const NAMED11 = /\bn8n\b|\bclaude[\s_-]*code\b/gi
+const DASH11 = /—|&mdash;|&#8212;|&#x2014;/gi
+const py11 = readFileSync9(`${ROOT9}/sdk/python/agentbill/client.py`, 'utf8')
+const claw11 = readFileSync9(`${ROOT9}/plugins/openclaw/src/ceiling.ts`, 'utf8')
+const SDK_OUT11 = [['Refused (', /f"Refused \(task_ceiling_exceeded\): task /.test(py11)],
+                   ['AgentBill refused (', /`AgentBill refused \(\$\{/.test(claw11)]]
+ok('[integrations] the refusal prefixes the output-line allowance trusts are still what the SDK and the plugin print',
+   SDK_OUT11.every(([, found]) => found), SDK_OUT11.filter(([, f]) => !f).map(([p]) => p).join(', '))
+const sdkOut11 = (line) => SDK_OUT11.some(([p, found]) => found && line.trimStart().startsWith(p))
+
+const map11 = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const scope11 = [...map11.matchAll(/<loc>https:\/\/agentbill\.dev([^<]*)<\/loc>/g)].map((m) => m[1])
+  .filter((p) => p === '/integrations' || p.startsWith('/integrations/') || p.startsWith('/docs/'))
+const WANT11 = ['/integrations', '/integrations/openclaw', '/integrations/langchain', '/integrations/openai-agents-sdk',
+                '/integrations/crewai', '/integrations/mcp']
+ok('[integrations] the sitemap carries the hub, the five integration pages and the guides under /docs/',
+   WANT11.every((p) => scope11.includes(p)) && scope11.filter((p) => p.startsWith('/docs/')).length >= 3,
+   `in scope: ${scope11.join(' ')}`)
+
+const pages11 = []
+for (const path of scope11) {
+  const res = await fetch(`${API}${path}`)
+  const html = await res.text()
+  const at = html.indexOf('<main class="container">')
+  const main = at < 0 ? '' : html.slice(at, html.indexOf('</main>', at))
+  const pres = [...main.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => m[1])
+  const lines = pres.flatMap((p) => p.split('\n'))
+  const code = lines.filter((l) => !/class="out-/.test(l)).map(text11)
+  const out = lines.filter((l) => /class="out-/.test(l)).map(text11)
+  const comments = [...pres.flatMap((p) => [...p.matchAll(/<span class="comment">([\s\S]*?)<\/span>/g)].map((m) => text11(m[1]))),
+                    ...code.map((l) => (l.match(/(?:^|\s)(?:#|\/\/) (.*)$/) ?? [])[1] ?? '')]
+  const strings = code.flatMap((l) => [...l.matchAll(/"([^"\n]*\s[^"\n]*)"|'([^'\n]*\s[^'\n]*)'/g)].map((m) => m[1] ?? m[2]))
+  const proseHtml = main.replace(/<pre[\s\S]*?<\/pre>/g, ' ').replace(/<blockquote[\s\S]*?<\/blockquote>/g, ' ')
+    .replace(/<span class="inline">[\s\S]*?<\/span>/g, ' ').replace(/<code>[\s\S]*?<\/code>/g, ' ')
+  const prose = [(html.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? '',
+                 (html.match(/<meta name="description" content="([^"]*)"/) ?? [])[1] ?? '',
+                 text11(proseHtml),
+                 ...[...main.matchAll(/(?:aria-label|title|alt|placeholder)="([^"]*)"/gi)].map((m) => m[1]),
+                 ...comments].join('\n')
+  pages11.push({ path, status: res.status, html, main, pres: pres.map((p) => decode11(p.replace(/<[^>]+>/g, ''))),
+                 prose, sentences: [...strings, ...out.filter((l) => !sdkOut11(l))].join('\n'), code: code.join('\n') })
+}
+const hits11 = (re, pick) => pages11.flatMap((p) => (pick(p).match(re) ?? []).map((w) => `${p.path}: ${w}`))
+{
+  const h = [...hits11(WORDS11, (p) => p.prose), ...hits11(WORDS11, (p) => p.sentences)]
+  ok('[integrations] no page says stop, block, kill, halt or cut off, in its prose, its comments or the sentences in its samples',
+     pages11.length >= WANT11.length && pages11.every((p) => p.status === 200 && p.main.length > 0) && h.length === 0,
+     h.join('; ') || pages11.filter((p) => p.status !== 200 || !p.main).map((p) => `${p.path} ${p.status}`).join(', '))
+}
+{
+  const h = hits11(FIRST11, (p) => p.prose)
+  ok('[integrations] no page says "first" in its prose or its comments', pages11.length > 0 && h.length === 0, h.join('; '))
+}
+{
+  const h = hits11(DASH11, (p) => p.html)
+  ok('[integrations] no em dash anywhere on these pages, literal or entity', pages11.length > 0 && h.length === 0, h.join('; '))
+}
+{
+  const h = [...hits11(NAMED11, (p) => p.prose), ...hits11(NAMED11, (p) => p.main), ...hits11(NAMED11, (p) => p.code)]
+  ok('[integrations] n8n and Claude Code are named nowhere on these pages: nothing we ship installs into either',
+     pages11.length > 0 && h.length === 0, [...new Set(h)].join('; '))
+}
+
+// The install line and the config a reader copies from /integrations/openclaw
+// are the plugin README's own fenced blocks, byte for byte, and so is the
+// refusal sample. The README is what ClawHub shows; two copies that drift is a
+// page teaching a config the listing does not.
+const fenced11 = (file) => [...readFileSync9(`${ROOT9}/${file}`, 'utf8').matchAll(/^```[\w-]*\n([\s\S]*?)\n^```/gm)].map((m) => m[1])
+const page11 = (path) => pages11.find((p) => p.path === path) ?? { pres: [], prose: '', main: '', html: '' }
+const clawDoc11 = fenced11('plugins/openclaw/README.md')
+const clawWant11 = [clawDoc11.find((b) => b.startsWith('openclaw plugins install')),
+                    clawDoc11.find((b) => b.includes('"allowConversationAccess": true')),
+                    clawDoc11.find((b) => b.startsWith('AgentBill refused ('))]
+const clawPres11 = page11('/integrations/openclaw').pres.map((p) => p.trim())
+const clawLog11 = (readFileSync9(`${ROOT9}/plugins/openclaw/README.md`, 'utf8').replace(/\s+/g, ' ')
+  .match(/`(\[agentbill\] ceiling [^`]+)`/) ?? [])[1] ?? 'no log line in the README'
+ok('[integrations] /integrations/openclaw carries the README\'s install line, config and refusal sample byte for byte, and its log line',
+   clawWant11.every((b) => b && clawPres11.includes(b)) && text11(page11('/integrations/openclaw').main).replace(/\s+/g, ' ').includes(clawLog11),
+   clawWant11.map((b, i) => (b && clawPres11.includes(b) ? '' : `README block ${i + 1} not on the page`)).filter(Boolean).join('; ') || `log line "${clawLog11}" not on the page`)
+const mcpDoc11 = fenced11('mcp/README.md')
+const mcpWant11 = [mcpDoc11.find((b) => b === 'uvx agentbill-mcp'), mcpDoc11.find((b) => b.includes('"mcpServers"'))]
+const mcpPres11 = page11('/integrations/mcp').pres.map((p) => p.trim())
+ok('[integrations] /integrations/mcp carries the MCP README\'s install line and server map byte for byte',
+   mcpWant11.every((b) => b && mcpPres11.includes(b)),
+   mcpWant11.map((b, i) => (b && mcpPres11.includes(b) ? '' : `README block ${i + 1} not on the page`)).filter(Boolean).join('; '))
+
+// The samples teach the order the product has now: the job's ceiling is set
+// beforehand, code passes task_ref and what the call is worth. None of what the
+// replaced guides taught: customer_id, a per-call ceiling, checkpoint() as a
+// task ceiling, and exceptions nothing raises (FreeTierExceededError since 0.6.0).
+{
+  const RETIRED11 = /customer_id\s*=|customerId\s*:|\bceiling\s*=|\btask_ceiling\s*=|taskCeiling\s*:|\.checkpoint\(|FreeTierExceededError|BudgetExhaustedError|\bCeilingExceededError/g
+  const h = pages11.filter((p) => p.path.startsWith('/integrations')).flatMap((p) => (p.code.match(RETIRED11) ?? []).map((w) => `${p.path}: ${w}`))
+  ok('[integrations] the integration samples pass task_ref and none of the retired pattern', h.length === 0, h.join('; '))
+}
+
+// The two guides these pages replaced answer 301, to the page that replaced
+// each, and are in no sitemap entry: a redirect listed as a page is a sitemap
+// whose URLs do not answer 200.
+{
+  const moved = [['/docs/langchain-billing', '/integrations/langchain'], ['/docs/openai-agent-spend-ceiling', '/integrations/openai-agents-sdk']]
+  const got = await Promise.all(moved.map(([from]) => fetch(`${API}${from}`, { redirect: 'manual' })))
+  const seen = moved.map(([from, to], i) => ({ from, to, status: got[i].status, location: got[i].headers.get('location'),
+                                                listed: map11.includes(`agentbill.dev${from}<`) }))
+  const bad = seen.filter((m) => m.status !== 301 || m.location !== m.to || m.listed)
+  ok('[integrations] the two replaced guides answer 301 to the pages that replaced them, and are out of the sitemap',
+     bad.length === 0, bad.map((m) => `${m.from} -> ${m.status} ${m.location}${m.listed ? ', still in the sitemap' : ''}`).join('; '))
+}
+
+// The hub: every version it shows is SDK_VERSIONS, the one copy that is checked
+// against the registries, and a framework row is a Guide with no registry link,
+// because there is no package for it and the table must not suggest one.
+{
+  const { SDK_VERSIONS } = await import('../../dist/lib/llms.js')
+  const hub = page11('/integrations').main
+  const rows = [...hub.matchAll(/<tr><td>([\s\S]*?)<\/td><td>([^<]*)<\/td><td>[\s\S]*?<\/td><td>([\s\S]*?)<\/td><td>/g)]
+    .map((m) => ({ name: text11(m[1]).replace(/\s+/g, ' ').trim(), kind: m[2], registry: m[3] }))
+  const shown = rows.flatMap((r) => r.name.match(/\d+\.\d+\.\d+/g) ?? [])
+  const guides = rows.filter((r) => /^(LangChain|OpenAI Agents SDK|CrewAI)$/.test(r.name))
+  ok('[integrations] the hub renders its versions from SDK_VERSIONS and lists each framework as a Guide with no registry',
+     shown.length === Object.keys(SDK_VERSIONS).length && shown.every((v) => Object.values(SDK_VERSIONS).includes(v))
+       && Object.values(SDK_VERSIONS).every((v) => shown.includes(v))
+       && guides.length === 3 && guides.every((r) => r.kind === 'Guide' && !/<a /.test(r.registry)),
+   `versions shown ${shown.join(', ')} vs ${Object.values(SDK_VERSIONS).join(', ')}; guides ${guides.map((r) => `${r.name}=${r.kind}`).join(', ')}`)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

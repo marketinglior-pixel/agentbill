@@ -16,7 +16,7 @@ const HTML_CACHE: ReadonlyArray<readonly [test: (p: string) => boolean, value: s
   // a number you can check is worth more than a number you are told.
   [(p) => p === '/' || p === '/pricing', 'public, max-age=0, must-revalidate'],
   // Prose. Nothing on these pages is derived from live state.
-  [(p) => p.startsWith('/docs') || p.startsWith('/blog') || p === '/faq' ||
+  [(p) => p.startsWith('/docs') || p.startsWith('/integrations') || p.startsWith('/blog') || p === '/faq' ||
           p === '/about' || p === '/terms' || p === '/privacy', 'public, max-age=600'],
 ]
 
