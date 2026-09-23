@@ -33,8 +33,10 @@ before(async () => {
     .intercept({ path: () => true, method: () => true })
     .reply((req) => {
       const path = new URL(req.path, ORIGIN).pathname
-      sent.push({ path, body: req.body ? JSON.parse(String(req.body)) : null })
-      const body = answer[path] ?? (path === '/preflight' ? APPROVED : RECORDED)
+      const reqBody = req.body ? JSON.parse(String(req.body)) : null
+      sent.push({ path, body: reqBody })
+      const a = answer[path]
+      const body = typeof a === 'function' ? a(reqBody) : a ?? (path === '/preflight' ? APPROVED : RECORDED)
       return { statusCode: status[path] ?? 200, data: JSON.stringify(body), responseOptions: { headers: { 'content-type': 'application/json' } } }
     })
     .persist()
@@ -183,15 +185,39 @@ test('a failed record never loses the answer', async () => {
   assert.ok(warnings.some((w) => /could not record/.test(w)), warnings.join(' | '))
 })
 
-test("AgentBill's own quota never holds the call back", async () => {
+test('a spent quota throws by default, and the call is not sent', async () => {
+  // Once the account's monthly quota is spent, preflight answers before it
+  // looks at the job: no ceiling is checked. Sending anyway would turn the
+  // ceiling off without a word, so the default throws.
   reset({ '/preflight': QUOTA })
   const oa = new FakeOpenAI()
   const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })
-  await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
-  assert.equal(oa.sent.length, 1)
-  assert.equal('reservation_id' in events()[0], false)
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) =>
+    e instanceof sdk.FreeTierExceededError && e.upgradeUrl === QUOTA.upgrade_url &&
+    /job 'job-7'/.test(e.message) && /not sent/.test(e.message) && /onQuota: 'send'/.test(e.message))
+  reset({ '/preflight': { ...QUOTA, reason: 'plan_limit_exceeded', plan: 'starter' } })
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), sdk.PlanLimitExceededError)
+  assert.equal(oa.sent.length, 0)
+  assert.equal(events().length, 0)
+})
+
+test("onQuota 'send' sends unchecked, and warns once per job", async () => {
+  reset({ '/preflight': QUOTA })
+  const oa = new FakeOpenAI()
+  const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r', onQuota: 'send' })
+  const other = sdk.wrap(llm, { taskRef: 'job-8' })         // a view of it: onQuota carries over
+  for (let i = 0; i < 3; i++) await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  await other.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
   await tick()
-  assert.ok(warnings.some((w) => /Upgrade/.test(w)), warnings.join(' | '))
+  const quota = warnings.filter((w) => /quota/.test(w))
+  assert.equal(quota.length, 2, quota.join(' | '))
+  assert.ok(/'job-7'/.test(quota[0]) && /'job-8'/.test(quota[1]) && /nothing bounds the job/.test(quota[0]) && quota[0].includes(QUOTA.upgrade_url))
+  assert.equal(oa.sent.length, 4)
+  assert.ok(events().every((e) => !('reservation_id' in e)))   // nothing was reserved
+})
+
+test("onQuota is 'raise' or 'send'", () => {
+  assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r', onQuota: 'ignore' }), /onQuota/)
 })
 
 // ------------------------------------------------------------- the estimate
@@ -346,4 +372,155 @@ test('getTask carries the breakdown when the server sends one, and nothing when 
   assert.deepEqual((await sdk.getTask('job-7')).breakdown, { calls: 1, by_model: [] })
   reset({ '/tasks/job-7': base })
   assert.equal('breakdown' in (await sdk.getTask('job-7')), false)
+})
+
+// ------------------------------------------------------------- the record's key
+
+test('a compatible endpoint gets a random key, even when its ids repeat', async () => {
+  // Ollama's OpenAI compatibility layer issues chatcmpl-<0..998>: ids repeat.
+  reset()
+  const oa = new FakeOpenAI({ reply: chatCompletion({ id: 'chatcmpl-7' }) })
+  oa.baseURL = 'http://localhost:11434/v1'
+  const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })
+  for (let i = 0; i < 3; i++) await llm.chat.completions.create({ model: 'llama3', messages: [] })
+  const keys = events().map((e) => e.idempotency_key)
+  assert.equal(new Set(keys).size, 3)
+  assert.ok(keys.every((k) => k.startsWith('r_')), keys.join(' '))
+})
+
+test('a duplicate answer is a collision, and the call is recorded again under its own key', async () => {
+  reset({ '/events': (b) => (b.idempotency_key === 'chatcmpl-abc123' ? { event_id: null, status: 'duplicate_ignored' } : RECORDED) })
+  const llm = sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r' })
+  await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const [first, again] = events()
+  assert.equal(first.idempotency_key, 'chatcmpl-abc123')
+  assert.ok(again.idempotency_key.startsWith('r_'))
+  assert.equal(again.reservation_id, RID); assert.equal(first.reservation_id, RID)
+  assert.equal(again.units, 908); assert.deepEqual(again.metadata, first.metadata)
+  await tick()
+  assert.ok(warnings.some((w) => /reused a response id/.test(w)), warnings.join(' | '))
+})
+
+// ------------------------------------------------------------- OpenAI cache writes
+
+test('openai cache writes are their own token type, plain and streamed, both APIs', async () => {
+  reset()
+  const u = { prompt_tokens: 50_000, completion_tokens: 400, prompt_tokens_details: { cached_tokens: 8_000, cache_write_tokens: 40_400 } }
+  const ru = { input_tokens: 50_000, output_tokens: 400, input_tokens_details: { cached_tokens: 8_000, cache_write_tokens: 40_400 }, output_tokens_details: { reasoning_tokens: 0 } }
+  const done = { id: 'resp_cw', model: 'gpt-5.6', usage: ru }
+  const llm = sdk.wrap(new FakeOpenAI({
+    reply: { id: 'chatcmpl-cw', model: 'gpt-5.6', usage: u, choices: [] },
+    chunks: [chunk('a'), chunk(null, u)], response: done, events: [{ type: 'response.completed', response: done }],
+  }), { taskRef: 'job-7', agentId: 'r' })
+  await llm.chat.completions.create({ model: 'gpt-5.6', messages: [] })
+  for await (const _ of await llm.chat.completions.create({ model: 'gpt-5.6', messages: [], stream: true })) { /* read */ }
+  await llm.responses.create({ model: 'gpt-5.6', input: 'x' })
+  for await (const _ of await llm.responses.create({ model: 'gpt-5.6', input: 'x', stream: true })) { /* read */ }
+  assert.equal(events().length, 4)
+  for (const ev of events()) {
+    assert.deepEqual(ev.metadata.tokens, { input: 1_600, cache_read: 8_000, cache_write: 40_400, output: 400, reasoning: 0 })
+    assert.equal(ev.units, 50_400)
+  }
+})
+
+test('cache writes never make input negative', async () => {
+  reset()
+  const u = { prompt_tokens: 100, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 70, cache_write_tokens: 90 } }
+  await sdk.wrap(new FakeOpenAI({ reply: { id: 'c', model: 'gpt-5.6', usage: u, choices: [] } }), { taskRef: 'job-7', agentId: 'r' })
+    .chat.completions.create({ model: 'gpt-5.6', messages: [] })
+  const t = events()[0].metadata.tokens
+  assert.deepEqual([t.input, t.cache_read, t.cache_write], [0, 70, 30])
+})
+
+// ------------------------------------------------------------- Gemini automatic function calling
+
+// Shaped like @google/genai's Models: the public methods are arrow functions
+// made in the constructor, bound to the instance, and each round of automatic
+// function calling is one this.generateContentInternal (or ...StreamInternal).
+// Only the last response comes back, with only the last round's usage.
+const gemRound = (i, callsTool) => ({ ...geminiResponse({ prompt: 1000 + 100 * i, cand: 50, id: `gem-round-${i}` }), callsTool })
+class FakeGenAIModels {
+  constructor(apiClient) {
+    this.apiClient = apiClient
+    this.generateContent = async (params) => {
+      let response
+      for (let i = 0; i < this.apiClient.rounds.length; i++) {
+        response = await this.generateContentInternal(params)
+        if (!response.callsTool) break
+      }
+      return response
+    }
+    this.generateContentStream = async (params) => {
+      const self = this
+      return (async function* () {
+        for (let i = 0; i < self.apiClient.rounds.length; i++) {
+          let last
+          for await (const c of await self.generateContentInternalStreamShim(params)) { last = c; yield c }
+          if (!last.callsTool) return
+        }
+      })()
+    }
+  }
+  generateContentInternalStreamShim(params) { return this.generateContentStreamInternal(params) }
+  async generateContentInternal(params) { return this.apiClient.next(params) }
+  async generateContentStreamInternal(params) { const r = this.apiClient.next(params); return (async function* () { yield r })() }
+}
+function loopingGenAI(n) {
+  const rounds = Array.from({ length: n }, (_, i) => gemRound(i, i < n - 1))
+  const apiClient = { rounds, sent: [], next(params) { this.sent.push(params.model); return rounds[(this.sent.length - 1) % rounds.length] } }
+  return { models: new FakeGenAIModels(apiClient), apiClient }
+}
+
+test('gemini: each round of automatic function calling is a measured call', async () => {
+  reset()
+  const g = loopingGenAI(3)
+  const before = { generateContent: g.models.generateContent, internal: g.models.generateContentInternal }
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
+  const reply = await llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'use the tool' })
+  assert.equal(reply.responseId, 'gem-round-2')               // the caller still gets the last response
+  assert.equal(g.apiClient.sent.length, 3)
+  assert.equal(preflights().length, 3)                        // one preflight per round sent
+  assert.deepEqual(events().map((e) => e.idempotency_key), ['gem-round-0', 'gem-round-1', 'gem-round-2'])
+  assert.deepEqual(events().map((e) => e.units), [1050, 1150, 1250])
+  // the client itself is untouched: its own methods are not the measured ones
+  assert.equal(g.models.generateContent, before.generateContent)
+  assert.equal(g.models.generateContentInternal, before.internal)
+  assert.equal(Object.prototype.hasOwnProperty.call(g.models, 'generateContentInternal'), false)
+  reset()
+  await g.models.generateContent({ model: 'gemini-2.5-flash', contents: 'unwrapped' })
+  assert.equal(sent.length, 0)
+})
+
+test('gemini: each round is measured when streamed too', async () => {
+  reset()
+  const g = loopingGenAI(2)
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
+  const ids = []
+  for await (const c of await llm.models.generateContentStream({ model: 'gemini-2.5-flash', contents: 'x' })) ids.push(c.responseId)
+  assert.deepEqual(ids, ['gem-round-0', 'gem-round-1'])
+  assert.deepEqual(events().map((e) => e.idempotency_key), ['gem-round-0', 'gem-round-1'])
+  assert.equal(preflights().length, 2)
+})
+
+test('gemini: a refusal on a later round throws, with the earlier rounds recorded', async () => {
+  let n = 0
+  reset({ '/preflight': () => (n++ === 0 ? APPROVED : REFUSED) })
+  const g = loopingGenAI(3)
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
+  await assert.rejects(llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x' }), sdk.TaskCeilingExceededError)
+  assert.equal(g.apiClient.sent.length, 1)                    // round 2 was not sent
+  assert.deepEqual(events().map((e) => e.idempotency_key), ['gem-round-0'])
+})
+
+test('gemini: a client without the per-round methods refuses a call that would loop', async () => {
+  reset()
+  const g = new FakeGoogleGenAI()
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r' })
+  const tool = { tool: async () => ({}), callTool: async () => [] }  // a CallableTool
+  await assert.rejects(llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [tool] } }),
+    (e) => e instanceof TypeError && /automaticFunctionCalling/.test(e.message))
+  assert.equal(g.sent.length, 0); assert.equal(sent.length, 0)  // not sent, not even preflighted
+  await llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [tool], automaticFunctionCalling: { disable: true } } })
+  await llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [{ functionDeclarations: [] }] } })
+  assert.equal(g.sent.length, 2); assert.equal(events().length, 2)
 })

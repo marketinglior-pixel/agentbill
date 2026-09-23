@@ -16,7 +16,8 @@ import pytest
 import requests
 
 import agentbill.client as client_module
-from agentbill import AgentBillClient, TaskCeilingExceededError, wrap
+from agentbill import (AgentBillClient, FreeTierExceededError, PlanLimitExceededError,
+                       TaskCeilingExceededError, wrap)
 from agentbill.wrap import DEFAULT_ESTIMATE
 
 FAKE_KEY = "agb_" + uuid.uuid4().hex
@@ -55,7 +56,10 @@ def server(monkeypatch):
         path = url.rsplit("/", 1)[-1]
         state["sent"].append((path, json))
         if path == "preflight":
-            return _Resp(200, state["preflight"])
+            answer = state["preflight"]
+            return _Resp(200, answer() if callable(answer) else answer)
+        if "events_body" in state:        # a callable of the request body
+            return _Resp(200, state["events_body"](json))
         return _Resp(state["events_status"], RECORDED if state["events_status"] == 200 else {"error": "boom"})
 
     monkeypatch.setattr(client_module.requests, "post", fake_post)
@@ -307,15 +311,44 @@ def test_a_failed_record_never_loses_the_answer(server):
     assert reply.id == "chatcmpl-abc123"
 
 
-def test_agentbill_quota_never_holds_the_call_back(server):
+def test_a_spent_quota_raises_by_default_and_the_call_is_not_sent(server):
+    # Once the account's monthly quota is spent, preflight answers before it
+    # looks at the job: no ceiling is checked. Sending anyway would turn the
+    # ceiling off without a word, so the default raises.
     server["preflight"] = QUOTA
     oa = FakeOpenAI()
     llm = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB)
-    with pytest.warns(RuntimeWarning, match="upgrade|Upgrade"):
+    with pytest.raises(FreeTierExceededError) as spent:
         llm.chat.completions.create(model="gpt-4o-mini", messages=[])
-    assert len(oa.sent) == 1
-    [ev] = server["events"]()
-    assert "reservation_id" not in ev                       # nothing was reserved
+    assert oa.sent == [] and server["events"]() == []
+    assert spent.value.upgrade_url == QUOTA["upgrade_url"]
+    assert "job-7" in str(spent.value) and "not sent" in str(spent.value) and 'on_quota="send"' in str(spent.value)
+    server["preflight"] = {**QUOTA, "reason": "plan_limit_exceeded", "plan": "starter"}
+    with pytest.raises(PlanLimitExceededError):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert oa.sent == []
+
+
+def test_on_quota_send_sends_unchecked_and_warns_once_per_job(server):
+    server["preflight"] = QUOTA
+    oa = FakeOpenAI()
+    llm = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB, on_quota="send")
+    other = wrap(llm, task_ref="job-8")                     # a view of it: on_quota carries over
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(3):
+            llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+        other.chat.completions.create(model="gpt-4o-mini", messages=[])
+    quota = [str(w.message) for w in caught if "quota" in str(w.message)]
+    assert len(quota) == 2 and "'job-7'" in quota[0] and "'job-8'" in quota[1]
+    assert "nothing bounds the job" in quota[0] and QUOTA["upgrade_url"] in quota[0]
+    assert len(oa.sent) == 4
+    assert all("reservation_id" not in ev for ev in server["events"]())   # nothing was reserved
+
+
+def test_on_quota_takes_raise_or_send():
+    with pytest.raises(ValueError, match="on_quota"):
+        wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", agentbill_client=AB, on_quota="ignore")
 
 
 # ---------------------------------------------------------------- the estimate
@@ -562,3 +595,245 @@ def test_a_long_or_absent_response_id_still_makes_a_valid_key(server):
     a, b = [e["idempotency_key"] for e in server["events"]()]
     assert a.startswith("resp-") and len(a) <= 128
     assert b.startswith("r-") and len(b) <= 128
+
+
+# ---------------------------------------------------------------- the record's key
+
+def test_a_compatible_endpoint_gets_a_random_key_even_when_its_ids_repeat(server):
+    # Ollama's OpenAI compatibility layer issues chatcmpl-<0..998>: ids repeat.
+    # Keyed by them, the second call would be a duplicate the server ignores.
+    oa = FakeOpenAI(reply=chat_completion(id="chatcmpl-7"))
+    oa.base_url = "http://localhost:11434/v1/"
+    llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=AB)
+    for _ in range(3):
+        llm.chat.completions.create(model="llama3", messages=[])
+    keys = [e["idempotency_key"] for e in server["events"]()]
+    assert len(set(keys)) == 3 and all(k.startswith("r-") for k in keys)
+    assert all(e["metadata"]["provider"] == "openai-compatible" for e in server["events"]())
+
+
+def test_a_duplicate_answer_is_a_collision_and_the_call_is_recorded_again(server):
+    seen = []
+
+    def events(body):
+        seen.append(body["idempotency_key"])
+        dup = body["idempotency_key"] == "chatcmpl-abc123"
+        return {"event_id": None, "status": "duplicate_ignored"} if dup else RECORDED
+    server["events_body"] = events
+    llm = wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", agentbill_client=AB)
+    with pytest.warns(RuntimeWarning, match="reused a response id"):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    first, again = server["events"]()
+    assert first["idempotency_key"] == "chatcmpl-abc123" and again["idempotency_key"].startswith("r-")
+    assert again["reservation_id"] == first["reservation_id"] == RID
+    assert again["units"] == first["units"] == 908 and again["metadata"] == first["metadata"]
+
+
+# ---------------------------------------------------------------- OpenAI cache writes
+
+def test_openai_cache_writes_are_their_own_token_type(server):
+    # Both APIs report the prompt whole, with cached_tokens and
+    # cache_write_tokens inside it; the price table prices a write above input.
+    u = NS(prompt_tokens=50_000, completion_tokens=400, prompt_tokens_details=NS(cached_tokens=8_000, cache_write_tokens=40_400),
+           completion_tokens_details=NS(reasoning_tokens=0))
+    reply = NS(id="chatcmpl-cw", model="gpt-5.6", service_tier="default", usage=u, choices=[])
+    usage = NS(input_tokens=50_000, output_tokens=400,
+               input_tokens_details=NS(cached_tokens=8_000, cache_write_tokens=40_400), output_tokens_details=NS(reasoning_tokens=0))
+    done = NS(id="resp_cw", model="gpt-5.6", service_tier="default", usage=usage)
+
+    def chunks(kw):
+        yield _chunk("a")
+        yield _chunk(None, u)
+    events = [NS(type="response.completed", response=done)]
+    llm = wrap(FakeOpenAI(reply=reply, chunks=chunks, response=done, events=events), task_ref="job-7", agent_id="r",
+               agentbill_client=AB)
+    llm.chat.completions.create(model="gpt-5.6", messages=[])
+    list(llm.chat.completions.create(model="gpt-5.6", messages=[], stream=True))
+    llm.responses.create(model="gpt-5.6", input="x")
+    list(llm.responses.create(model="gpt-5.6", input="x", stream=True))
+    evs = server["events"]()
+    assert len(evs) == 4
+    for ev in evs:
+        assert ev["metadata"]["tokens"] == {"input": 1_600, "cache_read": 8_000, "cache_write": 40_400,
+                                            "output": 400, "reasoning": 0}
+        assert ev["units"] == 50_400
+
+
+def test_cache_writes_never_make_input_negative(server):
+    u = NS(prompt_tokens=100, completion_tokens=1, prompt_tokens_details=NS(cached_tokens=70, cache_write_tokens=90))
+    llm = wrap(FakeOpenAI(reply=NS(id="c", model="gpt-5.6", usage=u, choices=[])), task_ref="job-7", agent_id="r",
+               agentbill_client=AB)
+    llm.chat.completions.create(model="gpt-5.6", messages=[])
+    t = server["events"]()[0]["metadata"]["tokens"]
+    assert (t["input"], t["cache_read"], t["cache_write"]) == (0, 70, 30)
+
+
+# ---------------------------------------------------------------- a loop that stops early
+
+def test_a_for_loop_that_breaks_is_recorded_without_close_or_with(server):
+    def chunks(kw):
+        yield _chunk("a")
+        yield _chunk("b")
+        yield _chunk(None, NS(prompt_tokens=10, completion_tokens=2))
+    llm = wrap(FakeOpenAI(chunks=chunks), task_ref="job-7", agent_id="r", agentbill_client=AB)
+    stream = llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)
+    for c in stream:
+        break
+    [ev] = server["events"]()                               # recorded when the loop let go
+    assert ev["usage_missing"] is True and ev["reservation_id"] == RID
+
+    def stop(s):
+        for c in s:
+            return c.choices[0].delta.content
+    assert stop(llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)) == "a"
+    assert len(server["events"]()) == 2
+
+
+def test_an_async_for_that_breaks_is_recorded(server):
+    chunks = [_chunk("a"), _chunk("b"), _chunk(None, NS(prompt_tokens=20, completion_tokens=5))]
+    llm = wrap(FakeAsyncOpenAI(chunks=chunks), task_ref="job-7", agent_id="r", agentbill_client=AB)
+
+    async def go():
+        stream = await llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)
+        async for c in stream:
+            break
+        await asyncio.sleep(0.05)                           # the loop closes the abandoned generator
+        return len(server["events"]())
+
+    assert run(go()) == 1
+    [ev] = server["events"]()
+    assert ev["usage_missing"] is True and ev["reservation_id"] == RID
+
+
+# ---------------------------------------------------------------- Gemini automatic function calling
+
+def _gem_round(i, calls_tool):
+    r = gemini_response(prompt=1000 + 100 * i, cand=50, id=f"gem-round-{i}")
+    r.calls_tool = calls_tool
+    return r
+
+
+class LoopingModels:
+    """Shaped like google-genai's Models: generate_content loops over rounds of
+    automatic function calling, one self._generate_content per round, and
+    returns only the last response. So does the stream, per round."""
+
+    def __init__(self, rounds):
+        self.rounds, self.sent = rounds, []
+
+    def _next_round(self, model):
+        self.sent.append(model)
+        return self.rounds[(len(self.sent) - 1) % len(self.rounds)]
+
+    def _generate_content(self, *, model, contents, config=None):
+        return self._next_round(model)
+
+    def generate_content(self, *, model, contents, config=None):
+        response = None
+        for _ in self.rounds:
+            response = self._generate_content(model=model, contents=contents, config=config)
+            if not response.calls_tool:
+                break
+        return response
+
+    def _generate_content_stream(self, *, model, contents, config=None):
+        yield self._next_round(model)
+
+    def generate_content_stream(self, *, model, contents, config=None):
+        for _ in self.rounds:
+            last = None
+            for chunk in self._generate_content_stream(model=model, contents=contents, config=config):
+                last = chunk
+                yield chunk
+            if not last.calls_tool:
+                return
+
+
+class AsyncLoopingModels(LoopingModels):
+    async def _generate_content(self, *, model, contents, config=None):
+        return self._next_round(model)
+
+    async def generate_content(self, *, model, contents, config=None):
+        response = None
+        for _ in self.rounds:
+            response = await self._generate_content(model=model, contents=contents, config=config)
+            if not response.calls_tool:
+                break
+        return response
+
+    async def _generate_content_stream(self, *, model, contents, config=None):
+        this = self._next_round(model)
+
+        async def one():
+            yield this
+        return one()
+
+    async def generate_content_stream(self, *, model, contents, config=None):
+        async def agen():
+            for _ in self.rounds:
+                last = None
+                async for chunk in await self._generate_content_stream(model=model, contents=contents, config=config):
+                    last = chunk
+                    yield chunk
+                if not last.calls_tool:
+                    return
+        return agen()
+
+
+def _looping_client(n=3):
+    rounds = [_gem_round(i, calls_tool=i < n - 1) for i in range(n)]
+    return NS(models=LoopingModels(rounds), aio=NS(models=AsyncLoopingModels(rounds)))
+
+
+def test_each_round_of_automatic_function_calling_is_a_measured_call(server):
+    g = _looping_client(3)
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
+    reply = llm.models.generate_content(model="gemini-2.5-flash", contents="use the tool")
+    assert reply.response_id == "gem-round-2"               # the caller still gets the last response
+    assert len(g.models.sent) == 3
+    assert len(server["preflights"]()) == 3                 # one preflight per round sent
+    assert [e["idempotency_key"] for e in server["events"]()] == ["gem-round-0", "gem-round-1", "gem-round-2"]
+    assert [e["units"] for e in server["events"]()] == [1050, 1150, 1250]
+
+
+def test_a_refusal_on_a_later_round_raises_with_the_earlier_rounds_recorded(server):
+    answers = iter([APPROVED, REFUSED])
+    server["preflight"] = lambda: next(answers)
+    g = _looping_client(3)
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
+    with pytest.raises(TaskCeilingExceededError):
+        llm.models.generate_content(model="gemini-2.5-flash", contents="use the tool")
+    assert len(g.models.sent) == 1                          # round 2 was not sent
+    assert [e["idempotency_key"] for e in server["events"]()] == ["gem-round-0"]
+
+
+def test_each_round_is_measured_streamed_and_async_too(server):
+    g = _looping_client(2)
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
+    assert [c.response_id for c in llm.models.generate_content_stream(model="gemini-2.5-flash", contents="x")] == \
+        ["gem-round-0", "gem-round-1"]
+
+    async def go():
+        await llm.aio.models.generate_content(model="gemini-2.5-flash", contents="x")
+        stream = await llm.aio.models.generate_content_stream(model="gemini-2.5-flash", contents="x")
+        return [c.response_id async for c in stream]
+
+    assert run(go()) == ["gem-round-0", "gem-round-1"]
+    keys = [e["idempotency_key"] for e in server["events"]()]
+    assert keys == ["gem-round-0", "gem-round-1"] * 3
+    assert len(server["preflights"]()) == 6
+
+
+def test_a_gemini_client_without_the_per_round_method_refuses_a_call_that_would_loop(server):
+    g = FakeGenAI()
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB)
+
+    def get_weather(city: str) -> str:
+        return "sunny"
+    with pytest.raises(TypeError, match="automatic_function_calling"):
+        llm.models.generate_content(model="gemini-2.5-flash", contents="x", config={"tools": [get_weather]})
+    assert g.sent == [] and server["sent"] == []            # not sent, not even preflighted
+    llm.models.generate_content(model="gemini-2.5-flash", contents="x",
+                                config={"tools": [get_weather], "automatic_function_calling": {"disable": True}})
+    llm.models.generate_content(model="gemini-2.5-flash", contents="x", config={"tools": [{"function_declarations": []}]})
+    assert len(g.sent) == 2 and len(server["events"]()) == 2

@@ -133,29 +133,31 @@ class PreflightInProgressError(Exception):
         )
 
 class FreeTierExceededError(Exception):
-    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
-    and `except` clauses do not break on upgrade.
+    """Not raised by preflight() as of 0.6.0, which returns
+    `approved=False, reason="free_tier_exceeded"` with `.upgrade_url` set:
+    check `result.approved` there. Running out of AgentBill's free tier is our
+    billing state, not your spend rule, and preflight() must not be able to
+    crash your agent over it.
 
-    Running out of AgentBill's free tier is our billing state, not your spend
-    rule, and it must not be able to crash your agent. preflight() now returns
-    `approved=False, reason="free_tier_exceeded"` with `.upgrade_url` set.
-    Check `result.approved` instead of catching this.
+    Raised by a client made with wrap() (on_quota="raise", the default) before
+    the model call is sent: once the quota is spent no ceiling can be checked,
+    and wrap() exists to check one. wrap(..., on_quota="send") sends the call
+    unchecked instead.
     """
-    def __init__(self, upgrade_url: Optional[str] = None):
+    def __init__(self, upgrade_url: Optional[str] = None, message: Optional[str] = None):
         self.upgrade_url = upgrade_url
-        super().__init__("Free tier limit reached. Upgrade to continue.")
+        super().__init__(message or "Free tier limit reached. Upgrade to continue.")
 
 class PlanLimitExceededError(Exception):
-    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
-    and `except` clauses do not break on upgrade. See FreeTierExceededError.
-
-    preflight() now returns `approved=False, reason="plan_limit_exceeded"`
-    with `.upgrade_url` set.
+    """Not raised by preflight() as of 0.6.0, which returns
+    `approved=False, reason="plan_limit_exceeded"` with `.upgrade_url` set.
+    Raised by a client made with wrap(), as FreeTierExceededError is: see there.
     """
-    def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None):
+    def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None,
+                 message: Optional[str] = None):
         self.plan = plan
         self.upgrade_url = upgrade_url
-        super().__init__(f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
+        super().__init__(message or f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
 
 class TaskCeilingExceededError(Exception):
     """The cross-call ceiling for this task is spent: preflight refused this

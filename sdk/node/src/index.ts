@@ -71,6 +71,33 @@ export class TaskCeilingExceededError extends Error {
   }
 }
 
+/**
+ * AgentBill's own free tier is spent. preflight() never throws this: it returns
+ * `approved: false, reason: 'free_tier_exceeded'` with `upgradeUrl`, so our
+ * billing state cannot crash your agent. A client made with wrap() throws it
+ * (onQuota: 'raise', the default) before the model call is sent: once the quota
+ * is spent no ceiling can be checked, and wrap() exists to check one.
+ */
+export class FreeTierExceededError extends Error {
+  readonly upgradeUrl?: string
+  constructor(upgradeUrl?: string, message?: string) {
+    super(message ?? 'Free tier limit reached. Upgrade to continue.')
+    this.name = 'FreeTierExceededError'
+    this.upgradeUrl = upgradeUrl
+  }
+}
+
+/** A paid plan's monthly quota is spent. Thrown by a wrap() client, as
+ *  FreeTierExceededError is; preflight() returns it instead. */
+export class PlanLimitExceededError extends Error {
+  readonly upgradeUrl?: string
+  constructor(upgradeUrl?: string, message?: string) {
+    super(message ?? 'Monthly plan quota reached. Upgrade to continue.')
+    this.name = 'PlanLimitExceededError'
+    this.upgradeUrl = upgradeUrl
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

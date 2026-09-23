@@ -20,21 +20,26 @@ calls to AgentBill:
   after   POST /events with the usage the provider reported on the response
           your process received: input, cache reads, cache writes, output
           (reasoning included, and counted separately where the provider says
-          how much of it was reasoning), with idempotency_key = the provider's
-          response id and the reservation_id preflight returned, so the record
-          settles that reservation whole. metadata carries provider, model, the
-          token breakdown, duration_ms and step. Nothing else: no prompt, no
-          answer, no header, no key.
+          how much of it was reasoning), with the reservation_id preflight
+          returned, so the record settles that reservation whole, and an
+          idempotency_key (see _idempotency_key). metadata carries provider,
+          model, the token breakdown, duration_ms and step. Nothing else: no
+          prompt, no answer, no header, no key.
 
 Measured methods:
   OpenAI     chat.completions.create, responses.create
   Anthropic  messages.create
   Gemini     models.generate_content, models.generate_content_stream,
              aio.models.generate_content, aio.models.generate_content_stream
-             (the google-genai client)
+             (the google-genai client). With automatic function calling one
+             of these sends a model request per round; each round is its own
+             measured call (see _GEMINI_ROUNDS).
 sync and async clients alike, streaming included. Any other method, or a
 client you did not wrap, is not measured. That is the honest limit of this
 module, and the docs say so.
+
+Each measured call is one preflight, so it uses one preflight of the
+account's monthly quota.
 
 Missing usage is recorded as missing, never as 0: the record carries
 usage_missing=True and the server charges the call at least its reservation.
@@ -43,9 +48,14 @@ A failure to record, after the provider answered, never loses the answer: it is
 returned and a RuntimeWarning says the record failed; the reservation then
 stays held until it expires, which keeps the ceiling tighter, not looser.
 
-AgentBill's own quota (free_tier_exceeded, plan_limit_exceeded) never holds
-your call back: it goes out, is recorded, and a RuntimeWarning carries upgrade_url.
-Same rule as preflight(): your spend rule raises, our billing state does not.
+AgentBill's own quota (free_tier_exceeded, plan_limit_exceeded): once it is
+spent, preflight answers before it looks at the job, so no ceiling can be
+checked. By default (on_quota="raise") wrap() raises FreeTierExceededError or
+PlanLimitExceededError, with upgrade_url, and the call is not sent: a ceiling
+that silently stopped being checked is the failure a ceiling exists to
+prevent. With on_quota="send" the call is sent unchecked and recorded, with a
+RuntimeWarning once per job, and nothing bounds the job until the quota resets
+or the plan is upgraded. preflight() itself never raises on the quota.
 """
 from __future__ import annotations
 
@@ -58,10 +68,10 @@ import threading
 import time
 import uuid
 import warnings
-from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, Optional, Tuple, TypeVar
 from urllib.parse import urlparse
 
-from .client import BASE_URL, AgentBillClient
+from .client import BASE_URL, AgentBillClient, FreeTierExceededError, PlanLimitExceededError
 
 T = TypeVar("T")
 
@@ -89,8 +99,29 @@ _METHODS: Dict[str, Dict[Tuple[str, ...], str]] = {
         ("models", "generate_content_stream"): "gemini_stream",
         ("aio", "models", "generate_content"): "gemini",
         ("aio", "models", "generate_content_stream"): "gemini_stream",
+        # The one-request methods behind the four above (see _GEMINI_ROUNDS).
+        ("models", "_generate_content"): "gemini",
+        ("models", "_generate_content_stream"): "gemini_stream",
+        ("aio", "models", "_generate_content"): "gemini",
+        ("aio", "models", "_generate_content_stream"): "gemini_stream",
     },
 }
+
+# google-genai's generate_content runs automatic function calling (on by
+# default when Python callables are passed as tools): a loop that sends one
+# model request per round and returns only the LAST response, whose
+# usage_metadata is that last request's. Measured at the public method, every
+# earlier round would be sent unpreflighted and never recorded: an undercount,
+# the direction a ceiling must never drift. So the public method is run with
+# the wrapped resource as self, and the one-request method it calls each round
+# (Models._generate_content, _generate_content_stream, and the AsyncModels
+# twins) is the measured one: one preflight and one record per round, and a
+# refusal on a later round raises out of generate_content with the earlier
+# rounds recorded. When the resource has no such method (a stand-in, or a
+# version that renamed it), the public method is measured and a call that
+# would loop is refused before it is sent (_would_loop).
+_GEMINI_ROUNDS = {"generate_content": "_generate_content",
+                  "generate_content_stream": "_generate_content_stream"}
 
 # A copy of the client (with_options, copy) is the same client with other
 # request settings, so it stays wrapped with the same meter.
@@ -151,14 +182,25 @@ def _prompt(t: Dict[str, int]) -> int:
 # Each returns the normalised token dict, or None when the provider reported
 # no usage. None is recorded as usage_missing, never as 0.
 
+def _openai_prompt_split(prompt: int, details: Any) -> Tuple[int, int, int]:
+    """(input, cache_read, cache_write) of an OpenAI prompt count. Both APIs
+    report the prompt whole and say inside it how much was read from the cache
+    (cached_tokens) and how much was written to it (cache_write_tokens), and
+    the price table prices a cache write at its own rate, above plain input
+    on the models that charge for it. Clamped so the three add up to prompt."""
+    cached = min(_count(details, "cached_tokens") or 0, prompt)
+    written = min(_count(details, "cache_write_tokens") or 0, prompt - cached)
+    return prompt - cached - written, cached, written
+
+
 def _usage_openai_chat(u: Any) -> Optional[Dict[str, int]]:
     prompt, completion = _count(u, "prompt_tokens"), _count(u, "completion_tokens")
     if prompt is None and completion is None:
         return None
     prompt, completion = prompt or 0, completion or 0
     pd, cd = _get(u, "prompt_tokens_details"), _get(u, "completion_tokens_details")
-    cached = min(_count(pd, "cached_tokens") or 0, prompt)
-    return _tokens(input=prompt - cached, cache_read=cached, output=completion,
+    inp, cached, written = _openai_prompt_split(prompt, pd)
+    return _tokens(input=inp, cache_read=cached, cache_write=written, output=completion,
                    reasoning=_count(cd, "reasoning_tokens") or 0,
                    audio_input=_count(pd, "audio_tokens") or 0, audio_output=_count(cd, "audio_tokens") or 0)
 
@@ -168,8 +210,8 @@ def _usage_openai_responses(u: Any) -> Optional[Dict[str, int]]:
     if inp is None and out is None:
         return None
     inp, out = inp or 0, out or 0
-    cached = min(_count(_get(u, "input_tokens_details"), "cached_tokens") or 0, inp)
-    return _tokens(input=inp - cached, cache_read=cached, output=out,
+    uncached, cached, written = _openai_prompt_split(inp, _get(u, "input_tokens_details"))
+    return _tokens(input=uncached, cache_read=cached, cache_write=written, output=out,
                    reasoning=_count(_get(u, "output_tokens_details"), "reasoning_tokens") or 0)
 
 
@@ -338,7 +380,10 @@ class _Average:
     call with a prompt far bigger than the job's usual one uses more than it
     reserved. The record charges what the provider reported, so such a call
     can take the job past its ceiling, by at most that one call for each
-    caller running at the same moment; the next preflight is refused.
+    caller running at the same moment; the next preflight is refused. That
+    bound needs preflight to check the ceiling: with on_quota="send" and the
+    account's monthly quota spent, nothing is checked and nothing bounds the
+    job until the quota resets or the plan is upgraded.
     A call with no usage reported does not move the average.
     """
 
@@ -365,32 +410,49 @@ class _Average:
 
 # ---------------------------------------------------------------- the meter
 
-def _idempotency_key(response_id: Any, agent_id: str) -> str:
-    """The provider's response id, as the record's idempotency key: a retried
-    record of the same response is one event. A random key when the provider
-    gave no id; a digest when the id is longer than the API's 128 characters."""
+def _random_key(agent_id: str) -> str:
+    return f"{agent_id}-{uuid.uuid4()}"
+
+
+def _idempotency_key(response_id: Any, agent_id: str, endpoint: str) -> str:
+    """The record's idempotency key.
+
+    On the provider's own API, its response id: unique per response there,
+    so a retried record of the same response is one event (a digest when the
+    id is longer than the API's 128 characters). On a "<provider>-compatible"
+    endpoint the id is not the provider's and need not be unique: Ollama's
+    compatibility layer, for one, issues chatcmpl-<0..998>, and a repeated key
+    is a duplicate the server ignores, so that call's usage would never count
+    and its reservation would stay held. There, and whenever the id is
+    missing, a random key made once for this record. wrap() never retries a
+    record, so a random key loses nothing."""
+    if endpoint.endswith("-compatible"):
+        return _random_key(agent_id)
     if isinstance(response_id, str) and response_id and response_id.isprintable():
         if len(response_id) <= 128:
             return response_id
         return "resp-" + hashlib.sha256(response_id.encode()).hexdigest()[:40]
-    return f"{agent_id}-{uuid.uuid4()}"
+    return _random_key(agent_id)
+
+
+_ON_QUOTA = ("raise", "send")
 
 
 class _Meter:
     def __init__(self, *, ab: AgentBillClient, provider: str, endpoint: str, task_ref: str, agent_id: str,
                  customer_id: Optional[str], step: Optional[str], task_ceiling: Optional[int],
-                 default_estimate: int, averages: Dict[str, _Average], lock: threading.Lock,
+                 default_estimate: int, on_quota: str, averages: Dict[str, _Average], lock: threading.Lock,
                  warned: Dict[str, bool]):
         self.ab, self.provider, self.endpoint = ab, provider, endpoint
         self.task_ref, self.agent_id, self.customer_id, self.step = task_ref, agent_id, customer_id, step
-        self.task_ceiling, self.default_estimate = task_ceiling, default_estimate
+        self.task_ceiling, self.default_estimate, self.on_quota = task_ceiling, default_estimate, on_quota
         self._averages, self._lock, self._warned = averages, lock, warned
 
     def replace(self, **changes: Any) -> "_Meter":
         fields = dict(ab=self.ab, provider=self.provider, endpoint=self.endpoint, task_ref=self.task_ref,
                       agent_id=self.agent_id, customer_id=self.customer_id, step=self.step,
                       task_ceiling=self.task_ceiling, default_estimate=self.default_estimate,
-                      averages=self._averages, lock=self._lock, warned=self._warned)
+                      on_quota=self.on_quota, averages=self._averages, lock=self._lock, warned=self._warned)
         fields.update({k: v for k, v in changes.items() if v is not None})
         return _Meter(**fields)
 
@@ -409,14 +471,33 @@ class _Meter:
         estimate = self.average.estimate(self.default_estimate, _max_tokens(kind, kwargs))
         result = self.ab.preflight(self.agent_id, estimated_units=estimate, customer_id=self.customer_id,
                                    task_ref=self.task_ref, task_ceiling=self.task_ceiling, unit="token")
-        if not result.approved and not self._warned.get("quota"):
-            # Only AgentBill's own quota comes back unraised (your spend rules
-            # raise inside preflight()). The call still goes out.
-            self._warned["quota"] = True
+        if result.approved:
+            return result
+        # Only AgentBill's own quota comes back unraised (your spend rules
+        # raise inside preflight()). The server answers it before it looks at
+        # the job, so this call's ceiling was not checked and nothing was
+        # reserved.
+        if self.on_quota == "raise":
+            error = FreeTierExceededError if result.reason == "free_tier_exceeded" else PlanLimitExceededError
+            message = (
+                f"Refused ({result.reason}): this account's monthly preflight quota is spent, so the ceiling of "
+                f"job {self.task_ref!r} cannot be checked, and the call was not sent. Upgrade: {result.upgrade_url} "
+                f"(or wrap(..., on_quota=\"send\") to send calls unchecked).")
+            if error is FreeTierExceededError:
+                raise FreeTierExceededError(result.upgrade_url, message)
+            raise PlanLimitExceededError(None, result.upgrade_url, message)
+        # on_quota="send": sent unchecked. Once per job, and the job is in the
+        # message, so Python's once-per-text warning filter shows it for each.
+        key = f"quota:{self.task_ref}"
+        with self._lock:
+            first = not self._warned.get(key)
+            self._warned[key] = True
+        if first:
             warnings.warn(
-                f"AgentBill preflight answered {result.reason}: this account's own monthly quota is spent, "
-                f"so the job's ceiling was not checked for this call and the call is sent anyway. "
-                f"Upgrade: {result.upgrade_url}", RuntimeWarning, stacklevel=4)
+                f"AgentBill preflight answered {result.reason}: this account's monthly preflight quota is spent, "
+                f"so no ceiling is checked for job {self.task_ref!r}. Its calls are sent (on_quota=\"send\") and "
+                f"recorded, and nothing bounds the job until the quota resets or you upgrade: {result.upgrade_url}",
+                RuntimeWarning, stacklevel=4)
         return result
 
     def release(self, pre: Any) -> None:
@@ -445,11 +526,25 @@ class _Meter:
         if facts.get("tier"):
             metadata["service_tier"] = str(facts["tier"])
         units = _total(tokens) if tokens is not None else 0
+
+        def send(key: str) -> Any:
+            return self.ab.record(self.agent_id, units=min(units, _INT4_MAX), customer_id=self.customer_id,
+                                  task_ref=self.task_ref, idempotency_key=key,
+                                  reservation_id=pre.reservation_id if pre.approved else None,
+                                  metadata=metadata, usage_missing=tokens is None)
+
+        key = _idempotency_key(facts.get("id"), self.agent_id, self.endpoint)
         try:
-            self.ab.record(self.agent_id, units=min(units, _INT4_MAX), customer_id=self.customer_id,
-                           task_ref=self.task_ref, idempotency_key=_idempotency_key(facts.get("id"), self.agent_id),
-                           reservation_id=pre.reservation_id if pre.approved else None,
-                           metadata=metadata, usage_missing=tokens is None)
+            answer = send(key)
+            if isinstance(answer, dict) and answer.get("status") == "duplicate_ignored":
+                # wrap() sends each record once, so a duplicate here is another
+                # response that carried the same id: a collision, not a retry.
+                # Ignored, its usage would never count and its reservation
+                # would stay held, so it is recorded again under a key of its own.
+                warnings.warn(
+                    f"AgentBill already had a record keyed {key!r}, so the provider reused a response id. "
+                    f"This call is recorded again under a random key.", RuntimeWarning, stacklevel=4)
+                send(_random_key(self.agent_id))
         except Exception as e:  # noqa: BLE001 - the answer is already paid for; never lose it
             warnings.warn(
                 f"AgentBill could not record this call ({e}). The response is returned; the call's reservation "
@@ -459,11 +554,20 @@ class _Meter:
 
     # -- the wrapped method
 
-    def method(self, fn: Callable, kind: str, owner: Any) -> Callable:
+    def method(self, fn: Callable, kind: str, owner: Any, whole_loop: bool = False) -> Callable:
+        """fn measured as one model request. whole_loop: fn is a public Gemini
+        method measured as a whole because the per-round method behind it was
+        not found, so a call that would loop over rounds is refused here."""
         is_async = _is_async(fn, owner)
         meter = self
 
         def prepare(kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool, bool]:
+            if whole_loop and _would_loop(kwargs.get("config")):
+                raise TypeError(
+                    "agentbill.wrap() cannot measure each round of automatic function calling on this client: "
+                    "the response carries only the last round's usage. Pass config with "
+                    "automatic_function_calling={'disable': True} and run the tool loop yourself, so each "
+                    "round is a measured call. The call was not sent.")
             streamed = kind == "gemini_stream" or kwargs.get("stream") is True
             swallow = False
             if kind == "openai_chat" and streamed:
@@ -519,6 +623,22 @@ class _Meter:
         return wrapped
 
 
+def _would_loop(config: Any) -> bool:
+    """Whether google-genai would run automatic function calling for this
+    config: a tool that is a Python callable (or an MCP session), and AFC not
+    turned off. Mirrors _extra_utils.should_disable_afc."""
+    afc = _get(config, "automatic_function_calling", "automaticFunctionCalling")
+    if _get(afc, "disable") is True:
+        return False
+    most = _get(afc, "maximum_remote_calls", "maximumRemoteCalls")
+    if isinstance(most, int) and not isinstance(most, bool) and most <= 0:
+        return False
+    tools = _get(config, "tools")
+    if not isinstance(tools, (list, tuple)):
+        return False
+    return any(callable(t) or type(t).__name__ == "ClientSession" for t in tools)
+
+
 def _is_async(fn: Callable, owner: Any) -> bool:
     # The provider SDKs decorate their async methods with plain wrappers, so
     # iscoroutinefunction on the bound method can read False; the function
@@ -567,15 +687,28 @@ class _StreamBase:
 class _Stream(_StreamBase):
     """A provider stream, unchanged for the caller, that records when it ends.
 
-    It is recorded when iteration finishes, when it is closed, or when its
-    with-block exits. A stream dropped half-read without either keeps its
-    reservation until the reservation expires, and one that ended before its
-    usage arrived is recorded as usage missing."""
+    It is recorded when iteration finishes, when it is closed, when its
+    with-block exits, or when a for loop over it stops early (break, return,
+    an exception in the loop body): iter() hands out a generator whose finally
+    records, and CPython closes an abandoned generator as soon as the loop
+    lets go of it. One that ended before its usage arrived is recorded as
+    usage missing. Only next() called by hand on a stream that is then
+    dropped, without close() or a with-block, is not recorded; its
+    reservation stays held until it expires, which keeps the ceiling tighter."""
 
     _it = None
 
-    def __iter__(self) -> "_Stream":
-        return self
+    def __iter__(self) -> Iterator[Any]:
+        try:
+            while True:
+                try:
+                    item = self.__next__()
+                except StopIteration:
+                    return
+                yield item
+        finally:
+            # A no-op when __next__ already recorded (end, or an error).
+            self._finish()
 
     def __next__(self) -> Any:
         if self._it is None:
@@ -624,12 +757,23 @@ class _Stream(_StreamBase):
 
 
 class _AsyncStream(_StreamBase):
-    """The async twin of _Stream."""
+    """The async twin of _Stream. An async for that stops early abandons the
+    async generator __aiter__ handed out, and the event loop closes it (asyncio
+    schedules aclose() for an abandoned one, and asyncio.run closes the rest
+    before it returns), which runs its finally and records."""
 
     _ait = None
 
-    def __aiter__(self) -> "_AsyncStream":
-        return self
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        try:
+            while True:
+                try:
+                    item = await self.__anext__()
+                except StopAsyncIteration:
+                    return
+                yield item
+        finally:
+            await self._finish()
 
     async def __anext__(self) -> Any:
         if self._ait is None:
@@ -700,6 +844,22 @@ class _Wrapped:
         path = object.__getattribute__(self, "_agentbill_path") + (name,)
         attr = getattr(target, name)
         methods = _METHODS[meter.provider]
+        if meter.provider == "gemini" and name in _GEMINI_ROUNDS and path in methods:
+            public = getattr(type(target), name, None)
+            if inspect.isfunction(public) and callable(getattr(target, _GEMINI_ROUNDS[name], None)):
+                # The public method, run with this wrapped resource as self:
+                # each round it sends goes through self._generate_content*,
+                # which this proxy measures (see _GEMINI_ROUNDS). Calling it
+                # returns what it always does (a response, a coroutine, a
+                # generator or an async generator).
+                resource = self
+
+                def rounds(*args: Any, **kwargs: Any) -> Any:
+                    return public(resource, *args, **kwargs)
+                rounds.__name__, rounds.__doc__ = name, getattr(public, "__doc__", None)
+                rounds.__wrapped__ = attr  # type: ignore[attr-defined]
+                return rounds
+            return meter.method(attr, methods[path], owner=target, whole_loop=True)
         if path in methods:
             return meter.method(attr, methods[path], owner=target)
         if len(path) == 1 and name in _COPIES[meter.provider] and callable(attr):
@@ -770,7 +930,7 @@ def _endpoint(client: Any, provider: str) -> str:
 def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] = None,
          step: Optional[str] = None, customer_id: Optional[str] = None, task_ceiling: Optional[int] = None,
          default_estimate: Optional[int] = None, agentbill_client: Optional[AgentBillClient] = None,
-         provider: Optional[str] = None) -> T:
+         provider: Optional[str] = None, on_quota: Optional[str] = None) -> T:
     """Meter every call a model client makes through its create methods, in tokens.
 
     task_ref: the job every call is counted against. The job is counted in
@@ -791,9 +951,17 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
         AGENTBILL_API_KEY (and AGENTBILL_BASE_URL, when set).
     provider: "openai", "anthropic" or "gemini", when detection from the
         client cannot tell.
+    on_quota: what a measured call does once this account's monthly preflight
+        quota is spent (each measured call is one preflight), when no ceiling
+        can be checked. "raise", the default: FreeTierExceededError or
+        PlanLimitExceededError, with upgrade_url, and the call is not sent.
+        "send": the call is sent unchecked and recorded, with a RuntimeWarning
+        once per job, and nothing bounds the job until the quota resets.
 
     Returns the client, wrapped. The original is untouched and unmeasured.
     """
+    if on_quota is not None and on_quota not in _ON_QUOTA:
+        raise ValueError('on_quota is "raise" or "send".')
     if isinstance(client, _Wrapped):
         target = object.__getattribute__(client, "_agentbill_target")
         base: _Meter = object.__getattribute__(client, "_agentbill_meter")
@@ -803,7 +971,8 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
             raise TypeError("A wrapped client keeps its AgentBill client and provider; wrap the original to change them.")
         return _Wrapped(target, base.replace(task_ref=task_ref, agent_id=agent_id, step=step,
                                              customer_id=customer_id, task_ceiling=task_ceiling,
-                                             default_estimate=default_estimate))  # type: ignore[return-value]
+                                             default_estimate=default_estimate,
+                                             on_quota=on_quota))  # type: ignore[return-value]
 
     if not task_ref or not agent_id:
         raise TypeError("agentbill.wrap() needs task_ref and agent_id: the job to count against, and the label.")
@@ -819,6 +988,6 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
                                            base_url=os.environ.get("AGENTBILL_BASE_URL") or BASE_URL)
     meter = _Meter(ab=agentbill_client, provider=kind, endpoint=_endpoint(client, kind), task_ref=task_ref,
                    agent_id=agent_id, customer_id=customer_id, step=step, task_ceiling=task_ceiling,
-                   default_estimate=default_estimate or DEFAULT_ESTIMATE, averages={}, lock=threading.Lock(),
-                   warned={})
+                   default_estimate=default_estimate or DEFAULT_ESTIMATE, on_quota=on_quota or "raise",
+                   averages={}, lock=threading.Lock(), warned={})
     return _Wrapped(client, meter)  # type: ignore[return-value]
