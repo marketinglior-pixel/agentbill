@@ -2656,9 +2656,10 @@ await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
 //   1. GET /tasks keeps its order for a client that sends no sort; sort=used ranks by
 //      used_units; any other sort is a 422.
 //   2. The tasks view's Recent is the order it always had; Most used ranks the same rows.
-//   3. A row's time is the span between the first and the last preflight AgentBill stored for
-//      that job (reservations, plus preflight-source decisions), and nothing else moves it:
-//      not task_budgets' own timestamps, not a record, not another account's rows.
+//   3. A row's time is the span between the first and the last preflight on record for that
+//      job (reservations, plus preflight-source decisions), and nothing else moves it: not
+//      task_budgets' own timestamps, not a record, not another account's rows. It says "on
+//      record", never "seen", and the footer names it as the number GET /tasks does not return.
 //   4. GET /usage?by=event_type and the activity view split this account's units the same
 //      way, and another account's records never appear in either.
 console.log('\n[jobs] which job used the most, and what the units were recorded under')
@@ -2696,6 +2697,16 @@ for (const [ref, agent, units] of [['jobs-old', 'alpha', 300], ['jobs-mid', 'alp
 await sql`UPDATE task_budgets SET created_at = ${agoJ(180)}, updated_at = ${agoJ(1)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-old'`
 await sql`UPDATE task_budgets SET created_at = ${agoJ(120)}, updated_at = ${agoJ(10)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-mid'`
 await sql`UPDATE task_budgets SET created_at = ${agoJ(60)},  updated_at = ${agoJ(5)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-new'`
+// Another account's job, the newest, the most recently touched and the most used in the
+// database, under the agent label alpha this account also uses, so a list query that lost
+// its account filter would put it at the top of every order below. Until 2026-09-23 no
+// other account had a task when GET /tasks was called, and the review found that replacing
+// `account_id = ${accountId}` with `true` in the list query left the whole harness green.
+await ceilJ('jobs-other', { ceiling_units: 10000, agent_id: 'alpha' }, OTHERKEYJ)
+await sql`UPDATE task_budgets SET used_units = 9999, created_at = now(), updated_at = now() WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-other'`
+const otherTaskJ = await getJ('/tasks/jobs-other', OTHERKEYJ)
+ok('[jobs] setup: another account holds jobs-other, at 9999 units used', otherTaskJ.status === 200 && otherTaskJ.body?.used_units === 9999,
+   `${otherTaskJ.status} ${JSON.stringify(otherTaskJ.body).slice(0, 120)}`)
 const refsJ = (r) => (r.body?.tasks ?? []).map((t) => t.task_ref).join(',')
 const plainJ = await getJ('/tasks')
 ok('[jobs] GET /tasks with no sort is still newest job first, as every existing client got it',
@@ -2711,6 +2722,11 @@ ok('[jobs] sort=used composes with agent_id', refsJ(alphaJ) === 'jobs-old,jobs-m
 const badSortJ = await getJ('/tasks?sort=cost')
 ok('[jobs] an unknown sort is a 422, not a silent default', badSortJ.status === 422 && badSortJ.body?.error === 'validation_error',
    `${badSortJ.status} ${JSON.stringify(badSortJ.body).slice(0, 120)}`)
+const listsJ = [['/tasks', plainJ], ['?sort=created', createdJ], ['?sort=used', usedJ], ['?agent_id=alpha&sort=used', alphaJ]]
+const otherHereJ = await getJ('/tasks/jobs-other')
+ok('[jobs] another account\'s job is in none of GET /tasks, ?sort=created, ?sort=used or ?agent_id=alpha&sort=used, and is 404 by name',
+   listsJ.every(([, r]) => r.status === 200 && !refsJ(r).split(',').includes('jobs-other')) && otherHereJ.status === 404,
+   `${listsJ.map(([q, r]) => `${q}: ${refsJ(r)}`).join(' | ')} | /tasks/jobs-other: ${otherHereJ.status}`)
 
 // 2. The same three rows on the console.
 const loginJ = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEYJ}` })
@@ -2726,6 +2742,9 @@ const mostJ = await pageJ('/app?view=tasks&sort=used')
 ok('[jobs] Most used ranks the same rows by units used, and says so under them',
    rowsJ(mostJ) === 'jobs-old,jobs-mid,jobs-new' && mostJ.includes('<a class="on" href="/app?view=tasks&amp;sort=used" aria-current="true">Most used</a>')
      && mostJ.includes('most units used first'), rowsJ(mostJ))
+ok('[jobs] and another account\'s job is on neither order of this account\'s tasks view',
+   !recentJ.includes('jobs-other') && !mostJ.includes('jobs-other') && rowsJ(recentJ) !== '' && rowsJ(mostJ) !== '',
+   `recent: ${rowsJ(recentJ)} | most used: ${rowsJ(mostJ)}`)
 ok('[jobs] the order belongs to the tasks view: no link to another view carries it',
    !/href="\/app\?view=(?!tasks)[a-z]+&amp;sort=used/.test(mostJ) && mostJ.includes('href="/app?view=activity"'), 'a link to another view kept sort=used')
 
@@ -2750,10 +2769,10 @@ const decisionRowJ = async (ref, source, account = ACCT) => {
   return rows
 }
 let seenNowJ = await seenJ('jobs-span')
-ok('[jobs] a job opened with no preflight says so and shows no span', seenNowJ === 'no preflight seen yet', seenNowJ || 'no seen line on the row')
+ok('[jobs] a job opened with no preflight says so and shows no span', seenNowJ === 'no preflight on record', seenNowJ || 'no seen line on the row')
 await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
 seenNowJ = await seenJ('jobs-span')
-ok('[jobs] one preflight is one preflight, not a span', seenNowJ === 'one preflight seen', seenNowJ)
+ok('[jobs] one preflight is one preflight, not a span', seenNowJ === 'one preflight on record', seenNowJ)
 await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
 await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
 const resJ = await sql`SELECT id FROM reservations WHERE account_id = ${ACCT} AND task_ref = 'jobs-span' ORDER BY id`
@@ -2763,13 +2782,13 @@ await sql`UPDATE reservations SET created_at = ${agoJ(120)} WHERE id = ${resJ[1]
 await sql`UPDATE reservations SET created_at = ${agoJ(60)}  WHERE id = ${resJ[2]?.id ?? 0}`
 seenNowJ = await seenJ('jobs-span')
 ok('[jobs] the span runs from the first stored preflight to the last, and is labelled as that',
-   seenNowJ === '2h 0m, first to last preflight seen', seenNowJ)
+   seenNowJ === '2h 0m, first to last preflight on record', seenNowJ)
 const refusedJ = await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 500 })
 const refusedRowJ = await decisionRowJ('jobs-span', 'preflight')
 await sql`UPDATE preflight_decisions SET created_at = ${agoJ(30)} WHERE id = ${refusedRowJ[0]?.id ?? 0}`
 seenNowJ = await seenJ('jobs-span')
-ok('[jobs] a refused preflight is a preflight AgentBill saw, so it extends the span',
-   refusedJ.body.reason === 'task_ceiling_exceeded' && refusedRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen',
+ok('[jobs] a refused preflight is a preflight on record, so it extends the span',
+   refusedJ.body.reason === 'task_ceiling_exceeded' && refusedRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record',
    `${refusedJ.body.reason} ${refusedRowJ.length} "${seenNowJ}"`)
 // task_budgets' own timestamps are not the span: a ceiling save moves updated_at, and
 // created_at is when the job was opened, not a call.
@@ -2777,13 +2796,13 @@ const saveJ = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, co
 await sql`UPDATE task_budgets SET created_at = ${agoJ(600)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-span'`
 seenNowJ = await seenJ('jobs-span')
 ok('[jobs] a ceiling save and the job\'s created_at do not move it',
-   saveJ.status === 303 && seenNowJ === '2h 30m, first to last preflight seen', `${saveJ.status} "${seenNowJ}"`)
+   saveJ.status === 303 && seenNowJ === '2h 30m, first to last preflight on record', `${saveJ.status} "${seenNowJ}"`)
 // A record is not a preflight, even one that lands past the ceiling and leaves a row.
 const leakJ = await recJ({ event_type: 'alpha', units: 200, task_ref: 'jobs-span' })
 const leakRowJ = await decisionRowJ('jobs-span', 'events')
 seenNowJ = await seenJ('jobs-span')
 ok('[jobs] a record, even one that leaks and leaves a decision row, does not move it',
-   leakJ.body.task_exceeded === true && leakRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen',
+   leakJ.body.task_exceeded === true && leakRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record',
    `${JSON.stringify(leakJ.body).slice(0, 80)} ${leakRowJ.length} "${seenNowJ}"`)
 // Another account's job of the same name is its own, and so are its rows.
 await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'other' }, OTHERKEYJ)
@@ -2794,7 +2813,49 @@ await sql`UPDATE reservations SET created_at = ${agoJ(1000)} WHERE account_id = 
 await sql`UPDATE preflight_decisions SET created_at = ${agoJ(2)} WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-span'`
 seenNowJ = await seenJ('jobs-span')
 ok('[jobs] another account\'s preflights on the same task_ref never enter this span',
-   otherRefusalJ.length === 1 && seenNowJ === '2h 30m, first to last preflight seen', `${otherRefusalJ.length} "${seenNowJ}"`)
+   otherRefusalJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record', `${otherRefusalJ.length} "${seenNowJ}"`)
+// The rows are fewer than the preflights: reservations begin with migration 006 on
+// 2026-09-03, and a refusal row is written fire-and-forget. The review's reproduction: a
+// job a preflight opened and spent under, whose reservation row is then removed, as if it
+// ran before 006. The job exists only because a preflight opened it, so "no preflight seen"
+// would be false. What is true is that none is on record.
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-prerec', task_ceiling: 100, estimated_units: 10 })
+await recJ({ event_type: 'alpha', units: 10, task_ref: 'jobs-prerec' })
+const goneJ = await sql`DELETE FROM reservations WHERE account_id = ${ACCT} AND task_ref = 'jobs-prerec' AND released_at IS NOT NULL RETURNING id`
+const prerecRowJ = visible8(rowOfJ(await pageJ('/app?view=tasks'), 'jobs-prerec')).replace(/\s+/g, ' ')
+seenNowJ = await seenJ('jobs-prerec')
+ok('[jobs] a job whose preflights left no row shows its spend and says no preflight is on record, not that none was seen',
+   goneJ.length === 1 && /\b10 \/ 100\b/.test(prerecRowJ) && seenNowJ === 'no preflight on record',
+   `${goneJ.length} "${seenNowJ}" ${prerecRowJ.slice(0, 160)}`)
+// The footer says every number on the page is on the API too, and the span is not on it:
+// GET /tasks and GET /tasks/:task_ref serialize the budget and its two timestamps, and no
+// route returns reservations. So the footer and the served JSON must agree. While the JSON
+// carries no span field, each page that draws a span names it as the exception and a page
+// that draws none does not; if GET /tasks ever returns the span, the exception must go.
+const oneTaskJ = await getJ('/tasks/jobs-span')
+const listTaskJ = await getJ('/tasks')
+const servedKeysJ = [...Object.keys(oneTaskJ.body ?? {}), ...(listTaskJ.body?.tasks ?? []).flatMap((t) => Object.keys(t))]
+const spanKeysJ = [...new Set(servedKeysJ.filter((k) => /preflight|seen|span|first|last/i.test(k)))]
+const footJ = (h) => visible8((h.match(/<div class="foot">([\s\S]*?)<\/div>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+const EXCEPTION_J = 'except the preflight span on a task row, which the API does not return'
+const footPagesJ = []
+for (const [path, cookie, draws] of [['/app?view=tasks', cookieJ, true], ['/app', cookieJ, true], ['/app?view=keys', cookieJ, false],
+                                      ['/app?demo=1&view=tasks', null, true], ['/app?demo=1', null, true], ['/app?demo=1&view=activity', null, false]]) {
+  const h = await nav8(path, cookie ? { headers: { cookie } } : {}).then((r) => r.text())
+  footPagesJ.push({ path, draws: h.includes('<span class="bseen">'), expected: draws, foot: footJ(h) })
+}
+ok('[jobs] the footer and the served JSON agree: GET /tasks returns no preflight span, so each page that draws one names it as the exception, and a page that draws none does not',
+   oneTaskJ.status === 200 && servedKeysJ.includes('used_units')
+     && footPagesJ.every((f) => f.draws === f.expected && f.foot.startsWith('Every number on this page is on the API too')
+       && f.foot.includes(EXCEPTION_J) === (f.draws && spanKeysJ.length === 0)),
+   `served span fields ${JSON.stringify(spanKeysJ)} | ${footPagesJ.map((f) => `${f.path} draws=${f.draws} "${f.foot.slice(0, 120)}"`).join(' | ')}`)
+const tasksPageJ = await pageJ('/app?view=tasks')
+const noteNowJ = [...tasksPageJ.matchAll(/<p class="note">([\s\S]*?)<\/p>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' '))
+  .find((t) => t.includes('Units are the ones your code reported')) ?? ''
+ok('[jobs] the tasks note says the time is from records that begin 2026-09-03, that GET /tasks has the rows without it, and never "full attribution" or "seen"',
+   noteNowJ.includes('first to the last preflight on record') && noteNowJ.includes('Those records begin 2026-09-03')
+     && noteNowJ.includes('The same rows, without that time, are on GET /tasks') && !/full attribution|\bseen\b/i.test(noteNowJ),
+   noteNowJ || 'no tasks note')
 
 // 4. What the units were recorded under.
 await reset()
@@ -2864,7 +2925,7 @@ const demoRecentJ = await fetch(`${API}/app?demo=1&view=tasks`).then((r) => r.te
 ok('[jobs] and Recent there is most recently touched first, as its note says', rowsJ(demoRecentJ) === 'job-8871,batch-2211,job-8870,nightly-crawl,job-8864',
    rowsJ(demoRecentJ))
 const demoSeenJ = [...demoUsedJ.matchAll(/<span class="bseen">([\s\S]*?)<\/span>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' ').trim())
-ok('[jobs] every sample row carries its span, labelled the same way', demoSeenJ.length === 5 && demoSeenJ.every((s) => /^\S+( \S+)?, first to last preflight seen$/.test(s)),
+ok('[jobs] every sample row carries its span, labelled the same way', demoSeenJ.length === 5 && demoSeenJ.every((s) => /^\S+( \S+)?, first to last preflight on record$/.test(s)),
    JSON.stringify(demoSeenJ))
 for (const range of ['7d', '30d', '90d']) {
   const h = await fetch(`${API}/app?demo=1&view=activity&range=${range}`).then((r) => r.text())

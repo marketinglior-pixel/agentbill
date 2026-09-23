@@ -489,6 +489,11 @@ type Filter = { task?: string; agent?: string; only?: 'leaks' }
 type TaskSort = 'recent' | 'used'
 const TASK_SORTS: Record<TaskSort, string> = { recent: 'Recent', used: 'Most used' }
 
+/** The day the preflight span's records begin: migration 006 (99f0934) gave
+ *  every approved preflight a reservations row. Refusal rows begin a day
+ *  earlier, with 005, so this is the later of the two. */
+const PREFLIGHT_RECORDS_SINCE = '2026-09-03'
+
 function readFilter(q: Record<string, unknown>): Filter {
   const f: Filter = {}
   // Postgres rejects a NUL in a text parameter, so a control character in an
@@ -618,9 +623,10 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
   return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs } : null }
 }
 
-/** firstSeen, lastSeen and preflights describe the preflights AgentBill saw
- *  for this job, approved or refused. See loadConsole for where they come
- *  from and why task_budgets' own timestamps are not them. */
+/** firstSeen, lastSeen and preflights describe the preflights on record for
+ *  this job, approved or refused. See loadConsole for where they come from,
+ *  why they can be fewer than the preflights the job made, and why
+ *  task_budgets' own timestamps are not them. */
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date
                  firstSeen: Date | null; lastSeen: Date | null; preflights: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
@@ -705,11 +711,17 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     WHERE account_id = ${accountId} AND blocked AND created_at >= current_date - ${days - 1}::int
     GROUP BY reason
   `
-  // The page of jobs, then when AgentBill saw each one's preflights. An
+  // The page of jobs, then the preflights on record for each one. An
   // approved preflight leaves a reservations row and a refused one a
   // preflight_decisions row with source 'preflight'; both are stamped at
   // insert and neither is ever deleted (a settle or the sweeper only releases
-  // a reservation). task_budgets' own timestamps are not used, on purpose:
+  // a reservation). "On record" and not "seen", because the rows are fewer
+  // than the preflights: reservations exist from PREFLIGHT_RECORDS_SINCE
+  // (migration 006), so a job a preflight opened before then has no row for
+  // it, and a refusal row is written fire-and-forget (recordDecision), so a
+  // failed write drops that refusal. GET /tasks returns none of this, and
+  // the footer says so on every page that draws a span.
+  // task_budgets' own timestamps are not used, on purpose:
   // created_at is when the job was opened, from code or from the console, and
   // updated_at also moves on a ceiling save and when the sweeper releases an
   // expired reservation, neither of which is a call. An ordinary record()
@@ -2056,14 +2068,16 @@ function fmtSpan(ms: number): string {
   return `${Math.floor(h / 24)}d&nbsp;${h % 24}h`
 }
 
-/** How long AgentBill has been seeing this job, labelled as exactly that:
- *  the span from the first preflight it saw to the last, approved or refused.
- *  It is not the job's own duration. AgentBill sees the calls your code asks
- *  about, not when the job started or when it finished. */
+/** The span of this job's preflights, labelled as exactly what it is: from
+ *  the first preflight on record to the last, approved or refused. "On
+ *  record", not "seen": a job can have made preflights that left no row (see
+ *  loadConsole), and "none seen" would be false for it. It is not the job's
+ *  own duration either: AgentBill has the calls your code asks about, not
+ *  when the job started or when it finished. */
 function seenLine(t: TaskRow): string {
-  if (!t.preflights || !t.firstSeen || !t.lastSeen) return 'no preflight seen yet'
-  if (t.preflights === 1) return 'one preflight seen'
-  return `${fmtSpan(new Date(t.lastSeen).getTime() - new Date(t.firstSeen).getTime())}, first to last preflight seen`
+  if (!t.preflights || !t.firstSeen || !t.lastSeen) return 'no preflight on record'
+  if (t.preflights === 1) return 'one preflight on record'
+  return `${fmtSpan(new Date(t.lastSeen).getTime() - new Date(t.firstSeen).getTime())}, first to last preflight on record`
 }
 
 function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
@@ -2646,7 +2660,7 @@ function tasksView(p: Page): string {
   return `${ceilingForm(p)}
     ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
-    <p class="note">${page} Units are the ones your code reported. The time on a row runs from the first to the last preflight AgentBill saw for that job, approved or refused; it is not the job's own duration, and a record() does not move it. The full attribution is on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
+    <p class="note">${page} Units are the ones your code reported. The time on a row runs from the first to the last preflight on record for that job, approved or refused; it is not the job's own duration, and a record() does not move it. Those records begin ${PREFLIGHT_RECORDS_SINCE}, so a job older than that shows only its preflights since then. The same rows, without that time, are on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
 }
 
 function refusalsView(p: Page): string {
@@ -2706,6 +2720,11 @@ function consolePage(p: Page): string {
     : p.view === 'customers' ? customersView(p)
     : p.view === 'keys' ? keysView(p)
     : limitsBlock(p, rangeLabel)
+  // The footer says every number here is on the API too. The preflight span
+  // under a task row is not: GET /tasks serializes the budget and its two
+  // timestamps, and no route returns reservations. So a page that draws a
+  // span names it as the exception. taskRow is what draws one.
+  const spanShown = body.includes('<span class="bseen">')
 
   return `${HEAD(meta.title)}
 <body>
@@ -2720,7 +2739,7 @@ function consolePage(p: Page): string {
         ${banner}
         ${body}
         <div class="foot">
-          Every number on this page is on the API too:
+          Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
           <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/usage?by=event_type</code> for the split by event_type, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
