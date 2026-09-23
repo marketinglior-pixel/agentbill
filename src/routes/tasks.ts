@@ -4,6 +4,7 @@ import { sql } from '../db/index.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
 import { setTaskCeiling, TASK_UNITS, asTaskUnit, unitWord, unitMismatchMessage } from '../lib/task-ceiling.js'
 import { unitsOf } from '../db/int8.js'
+import { taskBreakdown } from '../lib/task-breakdown.js'
 
 const TaskParams = z.object({ task_ref: zId() })
 
@@ -112,7 +113,13 @@ export async function tasksRoute(app: FastifyInstance) {
       })
     }
 
-    return reply.send(serialize(row as any))
+    // Additive: every key above is unchanged, and breakdown is the job's
+    // recorded calls by model and by step, with tokens and an estimate at
+    // public list price labelled as one. Only on this single-task read, not
+    // on the list: it costs three aggregates over the job's events.
+    const task = serialize(row as any)
+    const breakdown = await taskBreakdown(accountId, taskRef, task.used_units)
+    return reply.send({ ...task, breakdown })
   })
 
   // Set a job's ceiling from outside the calling code.

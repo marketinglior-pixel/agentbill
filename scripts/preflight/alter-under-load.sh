@@ -7,8 +7,8 @@
 #
 # run.sh cannot see this failure: it applies every migration before the
 # server starts, so no connection ever holds a statement prepared against the
-# old column types. Here the chain stops before ALTER_MIGRATION (default 016),
-# the server starts and is warmed, and the migration is applied UNDER LOAD
+# old column types. Here the chain is applied except ALTER_MIGRATION (default
+# 016), the server starts and is warmed, and the migration is applied UNDER LOAD
 # with the window setting the deploy order in 016 prescribes
 # (DATABASE_PREPARE=false). Then the window closes (restart with prepared
 # statements back on) and the same traffic runs again. Every answer in every
@@ -52,17 +52,21 @@ fi
 TARGET="$ROOT/src/db/migrations/$ALTER_MIGRATION"
 [ -f "$TARGET" ] || { echo "no such migration: $TARGET" >&2; exit 2; }
 
-# Everything before the target, in the order run.sh applies it. The target and
-# anything numbered after it are left for the rehearsal.
+# Everything except the target, in the order run.sh applies it. The target is
+# left for the rehearsal. Migrations numbered after it are applied first,
+# because they are additive and the code under test needs them: 017 adds the
+# events columns every record now writes, so leaving it out would rehearse a
+# deploy that production never runs (the code before its own migration) and
+# fail on that instead of on the ALTER. None of them touches a column type.
 applied=0
 while IFS= read -r f; do
   case "$f" in
-    "$ROOT"/src/db/migrations/*) [[ "$(basename "$f")" < "$ALTER_MIGRATION" ]] || continue ;;
+    "$ROOT"/src/db/migrations/*) [ "$(basename "$f")" != "$ALTER_MIGRATION" ] || continue ;;
   esac
   psql < "$f" >/dev/null
   applied=$((applied + 1))
 done <<< "$("$ROOT/scripts/preflight/schema-files.sh")"
-echo "schema applied up to, not including, $ALTER_MIGRATION ($applied files)"
+echo "schema applied except $ALTER_MIGRATION ($applied files)"
 
 psql <<SQL >/dev/null
 INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)

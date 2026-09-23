@@ -174,7 +174,8 @@ jobs:
     # The preflight job migrates before its server starts, so no connection
     # ever holds a statement prepared against the old column types, and it
     # cannot see what an ALTER ... TYPE does to a pool that is serving. This
-    # stops the chain before 016, warms a real server, applies 016 under load
+    # applies every migration except 016 (the later ones are additive and the
+    # code needs them), warms a real server, applies 016 under load
     # inside the DATABASE_PREPARE=false window that 016's header prescribes,
     # restarts with prepared statements back on, and asserts every answer.
     # With the window skipped (PLANT_SKIP_WINDOW=1) it is red.

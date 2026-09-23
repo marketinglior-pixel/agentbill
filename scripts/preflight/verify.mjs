@@ -2654,6 +2654,153 @@ const numsM = {
 const notNumM = Object.entries(numsM).filter(([, v]) => typeof v !== 'number')
 ok('[meter] every unit field on preflight, events, tasks, budget, checkpoint and decisions is a JSON number', notNumM.length === 0, JSON.stringify(Object.fromEntries(notNumM)))
 
+// ---------------------------------------------------------------- [price] list price on the record
+// Stage B, 2026-09-24. A record whose metadata names a model call (provider,
+// model, tokens: the shape wrap() writes, and any HTTP client may write) is
+// priced by the server at public list price from a dated snapshot, and the
+// figure is stored beside the snapshot's name. The one rule every gate below
+// leans on: a call that cannot be priced is NEVER $0. It stores no figure and
+// a sentence saying why, and every reader counts it as unpriced.
+{ // [price], in its own block scope so its names cannot collide with the sections above
+console.log('\n[price] a model call is priced at list price, exactly, and a call that cannot be priced is never $0')
+const { PRICE_VERSION: PV, priceCall: priceCallP, usdFromPico: usdP } = await import('../../dist/lib/prices.js')
+const KEYP = (await post('/keys/generate', { label: 'harness-section-price' })).body.api_key
+if (typeof KEYP !== 'string' || !KEYP.startsWith('agb_')) throw new Error('[price] could not mint its key')
+const callP = (method, path, body) => fetch(`${API}${path}`, {
+  method, headers: { 'Authorization': `Bearer ${KEYP}`, 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(async r => { const text = await r.text(); let json = null; try { json = JSON.parse(text) } catch {} return { status: r.status, body: json, text } })
+let seqP = 0
+const keyP = (p) => `${p}-${Date.now()}-${++seqP}`
+const recP = (taskRef, metadata, extra = {}) => callP('POST', '/events', {
+  customer_id: 'price-c', event_type: 'price', idempotency_key: keyP(taskRef), units: extra.units ?? 1, task_ref: taskRef,
+  ...(metadata === undefined ? {} : { metadata }), ...extra,
+})
+const rowP = async (key) => (await sql`
+  SELECT task_ref AS ref, price_version AS version, list_price_usd::text AS usd, price_note AS note, units FROM events
+  WHERE account_id = ${ACCT} AND idempotency_key = ${key}`)[0]
+const toks = (o) => ({ input: 0, cache_read: 0, cache_write: 0, output: 0, reasoning: 0, ...o })
+// One record, then its row, by the key it was sent with.
+const pricedRow = async (taskRef, metadata, extra = {}) => {
+  const k = keyP(taskRef)
+  const r = await callP('POST', '/events', { customer_id: 'price-c', event_type: 'price', idempotency_key: k, units: extra.units ?? 1,
+    task_ref: taskRef, ...(metadata === undefined ? {} : { metadata }), ...extra })
+  return { answer: r, row: await rowP(k) }
+}
+
+await callP('PUT', '/tasks/price-job/ceiling', { ceiling_units: 10_000_000, unit: 'token' })
+
+const mini = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini-2024-07-18', requested_model: 'gpt-4o-mini', step: 'plan',
+  tokens: toks({ input: 1000, cache_read: 200, output: 500 }) }, { units: 1700 })
+ok('[price] gpt-4o-mini: 1,000 input, 200 cache read, 500 output is $0.000465 exactly, stored as NUMERIC with the snapshot name',
+   mini.row?.usd === '0.000465000000' && mini.row?.version === PV && mini.row?.note === null && mini.row?.ref === 'price-job',
+   JSON.stringify(mini.row))
+ok('[price] and the record answer is the old answer: pricing adds no key to it',
+   Object.keys(mini.answer.body ?? {}).sort().join(',') === 'customer_created,customer_remaining_units,event_id,status,task_exceeded,task_remaining_units,task_used_units',
+   Object.keys(mini.answer.body ?? {}).sort().join(','))
+
+const unknown = await pricedRow('price-job', { provider: 'openai', model: 'gpt-9-imaginary', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok('[price] a model the table does not have: no figure, and the note says "no list price for" that model, not $0',
+   unknown.row?.usd === null && unknown.row?.note === 'no list price for gpt-9-imaginary' && unknown.row?.version === PV, JSON.stringify(unknown.row))
+
+const zero = await pricedRow('price-job', { provider: 'gemini', model: 'gemma-4-31b-it', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok('[price] a model the table lists at 0 is not priced at $0: the table writes 0 for unknown prices too',
+   zero.row?.usd === null && /^no list price for gemma-4-31b-it: the price table lists 0/.test(zero.row?.note ?? ''), JSON.stringify(zero.row))
+
+const longCtx = await pricedRow('price-job', { provider: 'anthropic', model: 'claude-sonnet-4-5-20250929',
+  tokens: toks({ input: 150_000, cache_read: 60_000, output: 1_000 }) }, { units: 211_000 })
+ok('[price] a 210k-token prompt on claude-sonnet-4-5 is priced at the above-200k rates for every token: $0.9585, not the base $0.483',
+   longCtx.row?.usd === '0.958500000000', JSON.stringify(longCtx.row))
+const oneHour = await pricedRow('price-job', { provider: 'anthropic', model: 'claude-sonnet-4-5',
+  tokens: toks({ input: 1000, cache_write: 1000, cache_write_1h: 1000, output: 100 }) }, { units: 3100 })
+ok('[price] a one-hour cache write is priced at its own rate: 1,000 input + 1,000 five-minute + 1,000 one-hour writes + 100 output = $0.01425',
+   oneHour.row?.usd === '0.014250000000', JSON.stringify(oneHour.row))
+
+const gap = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5.4', service_tier: 'priority', tokens: toks({ input: 300_000, output: 10 }) }, { units: 300_010 })
+ok('[price] above a tier at a service tier the table has no rate for: not priced, and the note names both',
+   gap.row?.usd === null && gap.row?.note === 'no list price for gpt-5.4 above 272k input tokens and at service tier priority (input tokens)', JSON.stringify(gap.row))
+
+const flex = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5-mini', service_tier: 'flex', tokens: toks({ input: 1000, output: 100 }) }, { units: 1100 })
+ok('[price] a flex call is priced at the flex rates: $0.000225, not the standard $0.00045', flex.row?.usd === '0.000225000000', JSON.stringify(flex.row))
+const scale = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5-mini', service_tier: 'scale', tokens: toks({ input: 1000, output: 100 }) }, { units: 1100 })
+ok('[price] a service tier the pricer does not know is not priced', scale.row?.usd === null && scale.row?.note === 'no list price for gpt-5-mini at service tier scale', JSON.stringify(scale.row))
+
+const thinking = await pricedRow('price-job', { provider: 'gemini', model: 'gemini-robotics-er-2-preview', step: 'think',
+  tokens: toks({ output: 100, reasoning: 60 }) }, { units: 100 })
+ok('[price] reasoning with its own rate: 40 output at $5/M + 60 reasoning at $10/M = $0.0008',
+   thinking.row?.usd === '0.000800000000', JSON.stringify(thinking.row))
+
+const missingP = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini' }, { units: 0, usage_missing: true })
+ok('[price] usage missing: no figure, and the note says there was nothing to price',
+   missingP.row?.usd === null && /^usage missing/.test(missingP.row?.note ?? ''), JSON.stringify(missingP.row))
+
+const compat = await pricedRow('price-job', { provider: 'openai-compatible', model: 'gpt-4o-mini', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok("[price] a call through another host is not priced at OpenAI's list price",
+   compat.row?.usd === null && compat.row?.note === "no list price for gpt-4o-mini: it was called through an endpoint other than OpenAI's own API", JSON.stringify(compat.row))
+
+const junk = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini', tokens: { input: 1.5, output: 'many' } }, { units: 5 })
+ok('[price] token counts that are not whole numbers are not priced, and the record still lands',
+   junk.answer.status === 200 && junk.row?.usd === null && /whole numbers/.test(junk.row?.note ?? ''), `${junk.answer.status} ${JSON.stringify(junk.row)}`)
+
+const plain = await pricedRow('price-job', undefined, { units: 7 })
+ok('[price] a record with no model named is not a model call: task_ref stored, no price columns',
+   plain.row?.ref === 'price-job' && plain.row?.usd === null && plain.row?.version === null && plain.row?.note === null, JSON.stringify(plain.row))
+
+// The pure pricer agrees with the stored rows, from the same code the server runs.
+const pure = priceCallP({ provider: 'openai', model: 'gpt-4o-mini', tokens: { input: 1000, cache_read: 200, cache_write: 0, cache_write_1h: 0, output: 500, reasoning: 0, audio_input: 0, audio_output: 0 } })
+ok('[price] the pricer is exact integer arithmetic: 465,000,000 picodollars', pure.ok === true && pure.picoUsd === 465_000_000n && usdP(pure.picoUsd) === '0.000465000000', JSON.stringify({ ...pure, picoUsd: String(pure.picoUsd) }))
+
+// ---------------------------------------------------------------- [price] the read side
+const taskP = await callP('GET', '/tasks/price-job')
+const bd = taskP.body?.breakdown
+const oldTaskKeys = 'agent_id,ceiling_units,created_at,exceeded,remaining_units,reserved_units,task_ref,unit,updated_at,usage_missing_calls,used_units'
+ok('[price] GET /tasks/:task_ref is the old answer plus breakdown, nothing else changed',
+   taskP.status === 200 && Object.keys(taskP.body).filter((k) => k !== 'breakdown').sort().join(',') === oldTaskKeys && typeof bd === 'object',
+   `${taskP.status} ${Object.keys(taskP.body ?? {}).sort().join(',')}`)
+const listP = await callP('GET', '/tasks?limit=5')
+ok('[price] the list endpoint carries no breakdown', listP.status === 200 && listP.body.tasks.every((t) => !('breakdown' in t)), JSON.stringify(listP.body?.tasks?.[0] ?? {}))
+const expectUsd = 0.000465 + 0.9585 + 0.01425 + 0.000225 + 0.0008
+// 13 records on price-job: 5 priced (mini, longCtx, oneHour, flex, thinking), 8 not.
+const callsP = 13
+ok('[price] the job total is the exact sum of the priced calls, and unpriced calls are counted, never added as $0',
+   bd?.calls === callsP && bd?.priced_calls === 5 && bd?.unpriced_calls === 8 && Math.abs(bd?.list_price_usd_estimate - expectUsd) < 1e-12,
+   JSON.stringify({ calls: bd?.calls, priced: bd?.priced_calls, unpriced: bd?.unpriced_calls, usd: bd?.list_price_usd_estimate, expectUsd }))
+ok('[price] the estimate carries its label and the snapshot it came from',
+   /your invoice may differ/.test(bd?.list_price_label ?? '') && /never counted as \$0/.test(bd?.list_price_label ?? '') && JSON.stringify(bd?.price_versions) === JSON.stringify([PV]),
+   JSON.stringify({ label: bd?.list_price_label, versions: bd?.price_versions }))
+const m4 = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini-2024-07-18')
+ok('[price] by model: the gpt-4o-mini row has its tokens by type and its own estimate',
+   m4?.provider === 'openai' && m4?.calls === 1 && m4?.units === 1700 && JSON.stringify(m4?.tokens) === JSON.stringify({ input: 1000, cache_read: 200, cache_write: 0, cache_write_1h: 0, output: 500, reasoning: 0 }) && m4?.list_price_usd_estimate === 0.000465,
+   JSON.stringify(m4))
+const mUnknown = bd?.by_model?.find((m) => m.model === 'gpt-9-imaginary')
+ok('[price] a row whose every call is unpriced shows null, not 0, and says why',
+   mUnknown?.list_price_usd_estimate === null && mUnknown?.unpriced_calls === 1 && mUnknown?.unpriced_reasons?.[0] === 'no list price for gpt-9-imaginary', JSON.stringify(mUnknown))
+const mNone = bd?.by_model?.find((m) => m.model === null)
+ok('[price] the record with no model is its own row, unpriced, with that reason',
+   mNone?.calls === 1 && mNone?.units === 7 && mNone?.list_price_usd_estimate === null && /no model named/.test(mNone?.unpriced_reasons?.[0] ?? ''), JSON.stringify(mNone))
+// openai/gpt-4o-mini holds the usage_missing record and the malformed one; the
+// openai-compatible call with the same model name is a row of its own.
+const mMissing = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini' && m.provider === 'openai')
+const mCompat = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini' && m.provider === 'openai-compatible')
+ok('[price] a usage_missing call is counted as such in its row, and a compatible endpoint is a row of its own',
+   mMissing?.calls === 2 && mMissing?.usage_missing_calls === 1 && mMissing?.list_price_usd_estimate === null && mCompat?.calls === 1 && mCompat?.list_price_usd_estimate === null,
+   JSON.stringify({ mMissing, mCompat }))
+const sPlan = bd?.by_step?.find((s) => s.step === 'plan'), sThink = bd?.by_step?.find((s) => s.step === 'think'), sNone = bd?.by_step?.find((s) => s.step === null)
+ok('[price] by step: plan, think, and the calls with no step, each with its own estimate',
+   sPlan?.calls === 1 && sPlan?.list_price_usd_estimate === 0.000465 && sThink?.list_price_usd_estimate === 0.0008 && sNone?.calls === 11 && bd?.by_step?.length === 3,
+   JSON.stringify(bd?.by_step?.map((s) => [s.step, s.calls, s.list_price_usd_estimate])))
+const usedP = taskP.body?.used_units
+ok('[price] every unit of this job is attributed: unattributed_units is 0 and the rows add up to used_units',
+   bd?.unattributed_units === 0 && bd?.units === usedP, `units ${bd?.units} used ${usedP} unattributed ${bd?.unattributed_units}`)
+// A job that existed before events carried task_ref: its units are not hidden.
+await callP('PUT', '/tasks/price-old/ceiling', { ceiling_units: 1000 })
+await sql`UPDATE task_budgets SET used_units = 40 WHERE account_id = ${ACCT} AND task_ref = 'price-old'`
+const oldP = (await callP('GET', '/tasks/price-old')).body?.breakdown
+ok('[price] units recorded before migration 017 are reported as unattributed, not dropped',
+   oldP?.unattributed_units === 40 && oldP?.calls === 0 && oldP?.list_price_usd_estimate === null && Array.isArray(oldP?.by_model) && oldP.by_model.length === 0, JSON.stringify(oldP))
+
+} // end [price]
+
 // ---------------------------------------------------------------- every answer sent once
 // Found while fixing the replay above, 2026-09-23. replay() returned the
 // Fastify reply, which is a thenable that resolves to undefined once sent, so

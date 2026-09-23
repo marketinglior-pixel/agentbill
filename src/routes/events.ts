@@ -7,6 +7,7 @@ import { mailOwner, ownerMailReady } from '../lib/mail.js'
 import { recordDecision } from '../lib/decisions.js'
 import { consumeReservations, findNamedReservation, oldestOpenReservationUnits, settleNamedReservation, type NamedReservation } from '../lib/reservations.js'
 import { jsonbSafe } from '../lib/jsonb.js'
+import { priceEvent } from '../lib/prices.js'
 
 const ALERT_THRESHOLD = 800
 
@@ -77,6 +78,14 @@ export async function eventsRoute(app: FastifyInstance) {
     const safeMetadata = metadata !== undefined ? jsonbSafe(metadata) as Record<string, unknown> : undefined
     const rowMetadata = usageMissing ? { ...(safeMetadata ?? {}), usage_missing: true } : safeMetadata
     const metadataText = rowMetadata !== undefined ? JSON.stringify(rowMetadata) : null
+    // A record whose metadata names a model call (provider, model, tokens:
+    // the shape wrap() writes) is priced here at public list price, from the
+    // caller's own metadata and before the transaction, so nothing in it can
+    // roll the record back. The figure is an estimate and is stored beside
+    // the name of the price table it came from; a call that cannot be priced
+    // stores no figure and a sentence saying why, never 0. See lib/prices.ts
+    // and migration 017.
+    const price = priceEvent(safeMetadata, usageMissing)
     const accountId = request.accountId
     const defaultBudget: number | null = null
     const taskRef = task_ref ?? null
@@ -212,9 +221,14 @@ export async function eventsRoute(app: FastifyInstance) {
         //    a NUL or a lone surrogate in any string was accepted inside the
         //    old JSON string and is a 22P05 / 22P02 as an object. See
         //    lib/jsonb.ts; metadataText is built before the transaction.
+        //    task_ref, and the list-price columns, from migration 017: the
+        //    row says which job it was recorded for, which is what
+        //    GET /tasks/:task_ref breaks down by model and by step.
         const [event] = await tx`
-          INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata)
-          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataText}::text::jsonb)
+          INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata,
+                              task_ref, price_version, list_price_usd, price_note)
+          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataText}::text::jsonb,
+                  ${taskRef}, ${price.priceVersion}, ${price.listPriceUsd}::numeric, ${price.note})
           ON CONFLICT (account_id, idempotency_key) DO NOTHING
           RETURNING id
         `
