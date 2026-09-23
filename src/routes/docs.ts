@@ -280,9 +280,12 @@ WHERE account_id = :account
   <p>Each reservation is a row with a TTL, returned to you as
   <span class="inline">reservation_expires_at</span> on every approved preflight. Default is 60
   minutes, set <span class="inline">RESERVATION_TTL_MINUTES</span> to change it. If
-  <span class="inline">record()</span> never arrives, a sweeper reclaims the units. Settling closes
-  reservation rows FIFO and decrements by what those rows actually held, not by what you passed, so
-  a late settle after a sweep cannot release the same units twice.</p>
+  <span class="inline">record()</span> never arrives, a sweeper reclaims the units. Every approved
+  preflight also returns <span class="inline">reservation_id</span>: a record over HTTP that passes it
+  back closes that reservation whole and releases what it held beyond the units recorded. Without it,
+  settling closes reservation rows FIFO by the units passed. Both decrement by what the closed rows
+  actually held, not by what you passed, so a late settle after a sweep cannot release the same units
+  twice.</p>
 
   <p>Note which way this fails. An abandoned reservation makes your ceiling <em>tighter</em>, never
   looser. The gate does not open by accident.
@@ -323,6 +326,7 @@ WHERE account_id = :account
   "estimated_units": 12,
   "remaining_units": null,
   "reservation_expires_at": "2026-09-11T12:00:00.000Z",
+  "reservation_id": "3f1c2b7a-8d4e-4b1a-9c2d-5e6f7a8b9c0d",
   "task_ref": "job-142",
   "task_ceiling": 500,
   "task_remaining_units": 488

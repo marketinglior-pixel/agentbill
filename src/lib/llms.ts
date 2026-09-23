@@ -399,9 +399,13 @@ The reservation becomes a row, not just a counter bump, which is what makes an a
 reclaimable. Each carries an expiry, returned on every approved answer as reservation_expires_at. It
 is 60 minutes on the hosted service. RESERVATION_TTL_MINUTES is a server-side setting, so a
 self-hosted deployment can change it and a hosted account cannot. A sweeper runs every five minutes and reclaims up to 500
-expired reservations a pass, decrementing the counters by what those rows actually held. Settling
-closes reservation rows FIFO and decrements by what they held rather than by the number you passed,
-so a late settle after a sweep cannot release the same units twice.
+expired reservations a pass, decrementing the counters by what those rows actually held. Every
+approved answer also carries reservation_id. A record that passes it back closes that reservation
+whole: the units recorded move used_units and whatever the reservation held beyond them is released
+at once. A record without it closes the task's reservation rows FIFO by the units it passes, so a
+reservation bigger than the actual keeps the difference held until it expires. Both decrement by
+what the closed rows held rather than by the number you passed, so a late settle after a sweep
+cannot release the same units twice.
 
 Note the direction of every failure here: an abandoned reservation makes the ceiling TIGHTER, never
 looser. The gate does not open by accident. The cost is that a run longer than the TTL can have its
@@ -427,8 +431,8 @@ rate_limit_exceeded.
 Identifiers (agent_id, customer_id, task_ref, idempotency_key, event_type, step_name) are 1 to 128
 characters with no control characters. The exception is customer_id on /preflight, /checkpoint and
 /step, where an empty string is accepted and means the customer "default". Unit and ceiling fields are integers up to 2,147,483,647;
-they are positive except units_so_far on /checkpoint, which may be 0, and limit_units on PUT
-/budget, which may be 0 or null. A schema failure is 422 validation_error.
+they are positive except units on POST /events and units_so_far on /checkpoint, which may be 0, and
+limit_units on PUT /budget, which may be 0 or null. A schema failure is 422 validation_error.
 
 ### POST /preflight
 
@@ -443,15 +447,21 @@ curl -sS ${ORIGIN}/preflight \\
        "idempotency_key":"job-142-step-3"}'
 \`\`\`
 
-Body: agent_id required; customer_id, estimated_units, ceiling, task_ref, task_ceiling and
-idempotency_key optional. Omitting estimated_units reserves 1. Omitting customer_id uses the
-customer "default".
+Body: agent_id required; customer_id, estimated_units, ceiling, task_ref, task_ceiling,
+idempotency_key and unit optional. Omitting estimated_units reserves 1. Omitting customer_id uses
+the customer "default". unit says what the job's numbers count, "unit" (the default) or "token",
+and needs task_ref: it is read when the call opens the job and fixed after, so a later call that
+declares a different unit is 422 task_unit_mismatch, reserving nothing. AgentBill counts nothing
+itself either way; the unit labels the number your code sends.
 
 \`\`\`json
 {"approved": true, "reason": null, "estimated_units": 250, "remaining_units": 750,
  "reservation_expires_at": "2026-09-08T12:00:00.000Z",
+ "reservation_id": "3f1c2b7a-8d4e-4b1a-9c2d-5e6f7a8b9c0d",
  "task_ref": "job-142", "task_ceiling": 5000, "task_remaining_units": 4750}
 \`\`\`
+
+reservation_id is a random handle for this call's reservation. Pass it back on POST /events.
 
 \`\`\`json
 {"approved": false, "reason": "task_ceiling_exceeded", "estimated_units": 250,
@@ -466,11 +476,20 @@ request carried a task_ref.
 
 Settle a reservation, release it, or record usage that had no preflight.
 
-Body: customer_id, event_type and idempotency_key required; units (default 1), success (default
-true), task_ref and metadata optional. Note event_type here is what the SDKs send agent_id as.
+Body: customer_id, event_type and idempotency_key required; units (default 1, and 0 is allowed),
+success (default true), task_ref, metadata, reservation_id and usage_missing optional. Note
+event_type here is what the SDKs send agent_id as.
 
 - success true: records the event, moves used_units by units, closes the reservation rows.
 - success false: releases the reservation and records nothing. Answers {"status":"released"}.
+- reservation_id, from the preflight: that reservation closes whole, and the answer carries
+  reservation_status (settled, already_closed when an earlier record or the sweeper closed it and
+  nothing more is released, or not_found) with reservation_released_units. A reservation_id that
+  is not this customer's and this task_ref's is not_found, and the record settles FIFO as one
+  without an id does.
+- usage_missing true: the provider reported no usage for the call. It is not recorded as 0: the
+  call is charged at least what its reservation held, the event's metadata says usage_missing, the
+  task counts it in usage_missing_calls, and the answer carries usage_missing and units_recorded.
 - a repeated idempotency_key: {"status":"duplicate_ignored"}, and no budget moves.
 - a customer whose limit_units would be crossed: 402 budget_exhausted, and no event row is written.
   This is the only 402 in the API, and it is the record path refusing, not preflight.
@@ -488,14 +507,15 @@ as an overrun rather than as a save.
 ### GET /tasks and GET /tasks/:task_ref
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
-remaining_units, exceeded, created_at, updated_at. The list accepts agent_id and limit (default 50,
+remaining_units, exceeded, unit ("unit" or "token"), usage_missing_calls, created_at, updated_at. The list accepts agent_id and limit (default 50,
 max 200). An unknown ref is 404 task_not_found; a task exists from the console or from
 PUT /tasks/:task_ref/ceiling, or from a first preflight that passed its task_ref with a task_ceiling.
 
 ### PUT /tasks/:task_ref/ceiling
 
-Opens a job with a ceiling or changes one. Body: ceiling_units (required, positive integer) and
-agent_id (optional, read only when this call opens the job). Returns the task as GET does plus
+Opens a job with a ceiling or changes one. Body: ceiling_units (required, positive integer),
+agent_id (optional, read only when this call opens the job) and unit (optional, "unit" or "token",
+read when this call opens the job; a different unit on an existing job is 422 task_unit_mismatch). Returns the task as GET does plus
 task_created. The last save through the endpoint or the console is the ceiling in force; a task_ceiling sent on a later preflight is not applied. A ceiling under used_units +
 reserved_units is 409 ceiling_below_committed carrying minimum_ceiling_units; nothing is clamped
 and no reservation in flight is rewritten. The console's task budgets view runs this same
