@@ -3,6 +3,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { probeDb } from '../lib/db-watchdog.js'
 import { COMMIT } from '../lib/version.js'
+import { chip } from '../ui/kit.js'
 
 // A status page that measures rather than asserts.
 //
@@ -37,23 +38,27 @@ export function statusBody(checks: readonly Check[], checkedAt: string): string 
   <p class="lede">Checked when you loaded this page, not on a schedule. Nothing
      below is cached.</p>
 
-  <div class="st-head ${allOk ? 'ok' : 'down'}">
-    <span class="st-dot"></span>
-    <span>${allOk ? 'All checks passing' : 'Something is down'}</span>
-  </div>
-
-  <div class="st-list">
-${checks.map((c) => `    <div class="st-row ${c.ok ? 'ok' : 'down'}">
-      <span class="st-name">${c.name}</span>
-      <span class="st-detail">${c.detail}</span>
-      <span class="st-ms">${c.ms === null ? '' : `${c.ms} ms`}</span>
-    </div>`).join('\n')}
-  </div>
-  <p class="st-when">Checked ${checkedAt} UTC. Latency is one round trip from this server, including
-     connection setup when the pool is cold.</p>
-  <p class="st-when">Serving commit <code>${COMMIT}</code>. ${COMMIT === 'unknown'
+  <div class="cv-panel st-panel">
+    <div class="cv-card">
+      <div class="cv-bar">
+        <span class="st-head ${allOk ? 'ok' : 'down'}"><span class="st-dot"></span><span>${allOk ? 'All checks passing' : 'Something is down'}</span></span>
+      </div>
+      <div class="st-list">
+${checks.map((c) => `        <div class="st-row ${c.ok ? 'ok' : 'down'}">
+          <span class="st-name">${c.name}</span>
+          <span class="st-detail">${chip(c.ok ? 'ok' : 'fail', c.detail)}</span>
+          <span class="st-ms">${c.ms === null ? '' : `${c.ms} ms`}</span>
+        </div>`).join('\n')}
+      </div>
+      <div class="st-foot">
+        <p class="st-when">Checked ${checkedAt} UTC. Latency is one round trip from this server, including
+           connection setup when the pool is cold.</p>
+        <p class="st-when">Serving commit <code>${COMMIT}</code>. ${COMMIT === 'unknown'
     ? 'Unknown means this image was built without its GIT_SHA build argument, not that anything is wrong with it.'
     : 'That is the commit this image was built from, so what is deployed can be checked against the repository from outside.'}</p>
+      </div>
+    </div>
+  </div>
 
   <h2>What this page does not know</h2>
   <p>It has no history. Nothing here records past availability, so there is no
@@ -88,28 +93,42 @@ const STATUS_CSS = `
        Scoped here rather than to .inline in docs.ts, where a longer token on a
        guide could then overflow the mobile column. */
     .inline { white-space: nowrap; }
-    .st-head { display: flex; align-items: center; gap: var(--s3); margin-block: var(--s5) var(--s4);
-               font-family: var(--display); font-size: var(--fs-h3); font-weight: 600; }
-    .st-head.ok { color: var(--green); }
+    /* The checks in the frame, 2026-09-23: a white card on the warm-grey
+       panel, the verdict in its bar, one row per check in the frame's log
+       voice (mono name, the answer as a chip, the latency right-aligned), and
+       when and what was checked on the side ground under them. No SAMPLE tag:
+       these numbers are this request's own. A passing check is .chip-ok,
+       neutral, because a pass is not a colour; a failing one is .chip-fail,
+       the one filled signal, because it needs a human. */
+    .st-panel { max-width: 720px; margin-block: var(--s5) var(--s4); }
+    .st-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: var(--fs-body);
+               font-weight: 500; color: var(--text); }
     .st-head.down { color: var(--red); }
-    .st-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: none; }
-    .st-list { border: 1px solid var(--border); border-radius: var(--r-frame);
-               background: var(--surface); box-shadow: var(--edge), var(--lift); }
-    .st-row { display: grid; grid-template-columns: 1fr auto 84px; gap: var(--s4);
-              align-items: baseline; padding: 14px 18px;
-              border-bottom: 1px solid var(--border-soft); }
-    .st-row:last-child { border-bottom: 0; }
+    .st-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+    .st-list { padding: var(--s3) 20px; }
+    .st-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 72px; gap: var(--s4);
+              align-items: center; padding: 9px 10px; }
     .st-name { font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
-    .st-detail { font-family: var(--mono); font-size: var(--fs-micro); }
-    .st-row.ok .st-detail { color: var(--green); }
-    .st-row.down .st-detail { color: var(--red); }
-    .st-ms { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
+    .st-row.down .st-name { color: var(--red); }
+    .st-ms { font-family: var(--mono); font-size: var(--fs-small); color: var(--muted);
              text-align: right; font-variant-numeric: tabular-nums; }
-    .st-when { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
-               margin-top: var(--s3); }
+    .st-foot { background: var(--side-bg); border-top: 1px solid var(--card-line); padding: var(--s4) 20px;
+               display: grid; gap: var(--s2); }
+    .container .st-when { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
+                          line-height: 1.6; margin: 0; max-width: 72ch; }
+    .st-when code { font-family: var(--mono); color: var(--text); }
     @media (max-width: 640px) {
-      .st-row { grid-template-columns: 1fr auto; }
-      .st-ms { grid-column: 2; }
+      .st-list { padding: var(--s2) var(--s2) 10px; }
+      .st-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px var(--s2); padding-inline: 6px; }
+      .st-ms { min-width: 5ch; }
+      .st-foot { padding: 14px var(--s3); }
+    }
+    /* Under 380 the latency moves under its chip: a failing row carries the
+       widest chip and the widest number at once, and at 320 the three need
+       about 250px of a 234px row. 390 holds all three with room. */
+    @media (max-width: 380px) {
+      .st-row { grid-template-columns: minmax(0, 1fr) auto; }
+      .st-ms { grid-column: 2; min-width: 0; }
     }
 `
 

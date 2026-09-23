@@ -5,6 +5,7 @@ import { sql } from '../db/index.js'
 import { publicRoute } from '../middleware/auth.js'
 import { sameOrigin } from './app.js'
 import { docsShell } from '../ui/docs.js'
+import { BP } from '../ui/theme.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent, clearRecoveryMark } from '../lib/register-limiter.js'
 import { ORIGIN } from '../ui/site.js'
@@ -186,24 +187,40 @@ function page(title: string, body: string): string {
     current: '',
     rail: false,
     css: `
-    .rec { max-width: 46ch; }
-    .rec form { display: grid; gap: var(--s2); margin-block: var(--s4); }
-    .rec label { font-weight: 600; color: var(--text); }
-    .rec input { min-height: 44px; background: var(--bg); color: var(--text);
-                 border: 1px solid var(--border-strong); border-radius: var(--r-control);
-                 padding: 0 14px; font-family: var(--sans); font-size: var(--fs-body); }
-    .rec input::placeholder { color: var(--dim); }
-    .rec input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-    .rec .btn, .rec .btn-ghost { min-height: 44px; border-radius: var(--r-control); padding: 0 22px;
-                 font-family: var(--sans); font-size: var(--fs-body); font-weight: 700; cursor: pointer;
-                 justify-self: start; }
-    .rec .btn { background: var(--green); color: var(--green-ink); border: 0; }
-    .rec .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border-strong); }
-    .rec .choice { border-top: 1px solid var(--border-soft); padding-top: var(--s4); margin-top: var(--s4); }
-    .rec .keyout { font-family: var(--mono); font-size: var(--fs-small); color: var(--code-ink);
-                   background: var(--surface2); border: 1px solid var(--border-soft);
-                   border-radius: var(--r-frame); padding: 14px 18px; overflow-wrap: anywhere; }
+    /* Canvas, 2026-09-23. The form sits on the warm-grey panel with white
+       fields, the recipe /register and the homepage's estimator use; the two
+       choices a recovery link offers are two white cards on that panel, side
+       by side, the lesser one (replace) on the outlined pill. A key and the
+       line that sets it are in the code frame the docs use for what a reader
+       copies. Every value is a token, every control the kit's. */
+    /* 880 so the two choice cards sit side by side; the prose keeps its own
+       measure (54ch from the docs shell, the lede 52ch). */
+    .rec { max-width: 880px; }
+    .rec .lede { max-width: 52ch; }
+    .rec-form { display: grid; gap: 0; max-width: 520px; margin-block: var(--s5) var(--s4);
+                background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); }
+    .rec-form .btn { justify-self: start; margin-top: var(--s4); }
+    .rec .choices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4);
+                    margin-top: var(--s6); }
+    /* A column, so each card's button sits on the card's floor and the two
+       line up whatever the paragraph above them runs to. */
+    .rec .choice { padding: var(--s5); display: flex; flex-direction: column; gap: var(--s3); }
+    .rec .choice h2 { font-size: var(--fs-h3); letter-spacing: -0.01em; margin: 0; }
+    .rec .choice p { font-size: var(--fs-small); margin: 0; }
+    .rec .choice form { margin-top: auto; padding-top: var(--s2); }
+    /* Code in a sentence: the docs' inline chip, for the bare code the key
+       page writes (AGENTBILL_API_KEY, the client call, the header). */
+    .rec p code { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
+                  font-size: .875em; color: var(--text); overflow-wrap: anywhere; }
+    .rec .keyout { font-family: var(--mono); font-size: var(--fs-code); line-height: 1.6; color: var(--code-ink);
+                   background: var(--snip-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
+                   padding: var(--s4) 20px; overflow-wrap: anywhere; max-width: 640px; margin-block: var(--s4) var(--s5); }
     .rec .fine { color: var(--dim); font-size: var(--fs-small); }
+    @media (max-width: ${BP.md}px) {
+      .rec-form { padding: var(--s4); }
+      .rec .choices { grid-template-columns: minmax(0, 1fr); }
+      .rec .choice { padding: 20px var(--s4); }
+    }
 `,
     body: `<div class="rec">
 ${body}
@@ -246,10 +263,10 @@ export async function recoverRoute(app: FastifyInstance) {
   <h1>Get back into your account.</h1>
   <p class="lede">Your API key is shown once when you register, and it is also how you open the
      console. If you no longer have it, put in the address you registered with.</p>
-  <form method="POST" action="/recover">
-    <label for="email">Email</label>
-    <input id="email" name="email" type="email" placeholder="you@company.com" required autocomplete="email" autofocus />
-    <button class="btn" type="submit">Send me a link</button>
+  <form class="rec-form" method="POST" action="/recover">
+    <label class="cv-flabel" for="email">Email</label>
+    <input class="cv-field" id="email" name="email" type="email" placeholder="you@company.com" required autocomplete="email" autofocus />
+    <button class="btn btn-lg" type="submit">Send me a link</button>
   </form>
   <p class="fine">The link works once and expires in ${TTL_MINUTES} minutes. It carries no key.</p>`))
   })
@@ -320,7 +337,8 @@ export async function recoverRoute(app: FastifyInstance) {
   <h1>You are back in.</h1>
   <p class="lede">This link is good for one of the two things below, then it stops working.</p>
 
-  <div class="choice">
+  <div class="cv-panel choices">
+  <div class="cv-card choice">
     <h2>Lost your copy of the key</h2>
     <p>Nothing has leaked, you just do not have it any more. Whatever is already deployed
        keeps running on it.</p>
@@ -330,7 +348,7 @@ export async function recoverRoute(app: FastifyInstance) {
     </form>
   </div>
 
-  <div class="choice">
+  <div class="cv-card choice">
     <h2>The key may have leaked</h2>
     <p>The account gets a new key and the old one stops working straight away. Any agent still
        calling with the old key is refused until you deploy the new one.</p>
@@ -338,6 +356,7 @@ export async function recoverRoute(app: FastifyInstance) {
       <input type="hidden" name="action" value="replace" />
       <button class="btn-ghost" type="submit">Replace my key</button>
     </form>
+  </div>
   </div>`))
   })
 

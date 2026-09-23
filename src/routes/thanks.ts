@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
+import { BP } from '../ui/theme.js'
 import { sql } from '../db/index.js'
 import { isUuid } from '../lib/ids.js'
 import { checkoutIsPaid, getCheckoutSummary, PLAN_LIMITS, PLAN_PRICES } from '../integrations/polar.js'
@@ -43,6 +44,21 @@ function allowance(tier: string): string {
   if (limit === undefined) return 'Every preflight call is metered, with no monthly cap.'
   return `Your account now includes <b>${num(limit)}</b> preflight calls a month, at $${PLAN_PRICES[tier]} a month.`
 }
+
+/* Canvas, 2026-09-23. A receipt is the page's close, so it takes the
+   homepage's close: the warm-grey band at --r-card, the heading and its
+   sentences centred in it. The links stay the prose links the docs shell
+   draws; nothing here is a second action. */
+const THANKS_CSS = `
+    .thx { background: var(--panel-bg); border-radius: var(--r-card); padding: 80px var(--s7);
+           display: grid; justify-items: center; text-align: center; }
+    .thx h1 { max-width: 22ch; margin-bottom: var(--s4); }
+    .thx p { margin-inline: auto; max-width: 52ch; text-wrap: pretty; }
+    .thx p:last-child { margin-bottom: 0; }
+    @media (max-width: ${BP.md}px) {
+      .thx { padding: var(--s7) 20px; }
+    }
+`
 
 export async function thanksRoute(app: FastifyInstance) {
   app.get('/thanks', publicRoute(), async (request, reply) => {
@@ -127,9 +143,12 @@ export async function thanksRoute(app: FastifyInstance) {
         current: '',
         rail: false,
         navCta: !paid,
+        css: THANKS_CSS,
         body: `
+  <div class="thx">
   <h1>${heading}</h1>
 ${body}
+  </div>
 `,
       }))
   })
