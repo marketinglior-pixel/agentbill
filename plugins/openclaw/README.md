@@ -56,16 +56,27 @@ block, including that flag, so after a reinstall set it again.
 ## What one unit is
 
 `units: "tokens"` (default). Every model call records the usage total OpenClaw
-reports in its `llm_output` hook. Tool calls record nothing on their own; the
-model call around them is what costs. A ceiling of `500000` is half a million
-tokens for the session.
+reports in its `llm_output` hook. Tool calls add nothing to the total on their
+own; the model call around them is what costs. A ceiling of `500000` is half a
+million tokens for the session.
 
 `units: "calls"`. Every model call and every tool call is one unit. A ceiling
 of `40` is forty calls.
 
 The plugin measures no provider and no tool itself. It records what OpenClaw
 already counts, and refuses when the running total plus the next call's
-estimate would cross the ceiling.
+estimate would cross the ceiling. The provider and model OpenClaw names on the
+`llm_output` event go on the record as metadata; nothing else about the call
+does.
+
+Each record settles the reservation its own preflight made, when the AgentBill
+API returns one (`reservation_id`): a model turn's reservation closes on the
+`llm_output` that settles the turn, and a tool call's on its `after_tool_call`,
+at 0 tokens in tokens mode. What the estimate held beyond what was used is released then,
+instead of staying held until the server's 60 minute expiry. An `llm_output`
+with no usage in it is recorded as `usage_missing`, which the server charges at
+the reservation rather than at 0. Against a server that returns no
+`reservation_id` the plugin records exactly as 0.1.0 did.
 
 ## What a refusal looks like
 
@@ -106,8 +117,8 @@ ceiling can be raised from the console at any time.
 | `subagent_spawned` | observe | links the child session to the parent's task_ref |
 | `before_agent_run` | gate | `POST /preflight`; refused returns `{ outcome: "block", message }` |
 | `before_tool_call` | gate | `POST /preflight`; refused returns `{ block: true, blockReason }` |
-| `llm_output` | observe | `POST /events` with the usage total |
-| `after_tool_call` | observe | `POST /events` with `toolCallUnits`, when above zero |
+| `llm_output` | observe | `POST /events` with the usage total, the provider and model, and the turn's `reservation_id` when there is one |
+| `after_tool_call` | observe | `POST /events` with `toolCallUnits` when above zero, and at 0 when the call's preflight returned a `reservation_id`, to settle it |
 | `session_end` | observe | forgets the session |
 
 Hook names and kinds are from `docs/plugins/hooks/reference.md` in openclaw

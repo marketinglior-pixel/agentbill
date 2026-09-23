@@ -229,3 +229,117 @@ test('without hooks.allowConversationAccess the plugin says the host blocks the 
   assert.ok(!on.logs.some((l) => l.includes('allowConversationAccess is not true')), on.logs.join('\n'))
   assert.ok(on.logs.some((l) => l.includes('conversation hooks allowed')))
 })
+
+// ---- 2026-09-23: each hook settles the reservation its own preflight made ----
+//
+// Until this, a tool call in tokens mode recorded nothing (0 units, and the
+// server refused 0), so the reservation before_tool_call took stayed held
+// until the server's sweeper reclaimed it an hour later. A session with many
+// tool calls was refused long before it had spent its ceiling.
+
+const RID_TOOL = '11111111-1111-4111-8111-111111111111'
+const RID_RUN = '22222222-2222-4222-8222-222222222222'
+const approvedWith = (rid: string) => ({ status: 200, json: { ...approved.json, reservation_id: rid } })
+
+test('tokens mode: after_tool_call settles the tool call\'s own reservation at 0 units', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_TOOL)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_tool_call', { toolName: 'exec', params: {}, toolCallId: 'tc1' }, { runId: 'r1', sessionKey: 'k', toolName: 'exec', toolCallId: 'tc1' })
+    await fire('after_tool_call', { toolName: 'exec', params: {}, durationMs: 5 }, { runId: 'r1', sessionKey: 'k', toolName: 'exec', toolCallId: 'tc1' })
+    const rec = srv.calls.filter((c) => c.path === '/events')
+    assert.equal(rec.length, 1, 'the tool call is recorded so its reservation closes')
+    assert.equal(rec[0]!.body.units, 0)
+    assert.equal(rec[0]!.body.reservation_id, RID_TOOL)
+    assert.equal(rec[0]!.body.idempotency_key, 'openclaw:k:r1:tool:tc1')
+    // A second after_tool_call for the same id has nothing held any more and
+    // falls back to the 0.1.0 rule: 0 units and nothing named, no event.
+    await fire('after_tool_call', { toolName: 'exec', params: {}, durationMs: 5 }, { runId: 'r1', sessionKey: 'k', toolName: 'exec', toolCallId: 'tc1' })
+    assert.equal(srv.calls.filter((c) => c.path === '/events').length, 1)
+  })
+})
+
+test('against a server that returns no reservation_id, a tokens-mode tool call still records nothing (0.1.0 behaviour)', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_tool_call', { toolName: 'exec', params: {}, toolCallId: 'tc1' }, { runId: 'r1', sessionKey: 'k', toolName: 'exec', toolCallId: 'tc1' })
+    await fire('after_tool_call', { toolName: 'exec', params: {}, durationMs: 5 }, { runId: 'r1', sessionKey: 'k', toolName: 'exec', toolCallId: 'tc1' })
+    assert.equal(srv.calls.filter((c) => c.path === '/events').length, 0)
+  })
+})
+
+test('llm_output settles the turn\'s reservation once, and names the provider and model the host sent', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r7', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r7', sessionId: 's', provider: 'anthropic', model: 'claude-sonnet-4-5', assistantTexts: [], usage: { input: 900, output: 100 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r7', sessionId: 's', provider: 'anthropic', model: 'claude-sonnet-4-5', assistantTexts: [], usage: { total: 400 } }, { sessionKey: 'k' })
+    const [first, second] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(first!.reservation_id, RID_RUN)
+    assert.equal(first!.units, 1000)
+    assert.deepEqual(first!.metadata, { kind: 'model_call', provider: 'anthropic', model: 'claude-sonnet-4-5' })
+    assert.equal('reservation_id' in second!, false, 'the second model call of the run has no reservation of its own left')
+    assert.equal(second!.units, 400)
+  })
+})
+
+test('llm_output passes provider and model only as non-empty strings: absent, empty or not a string adds nothing', async () => {
+  // An absent field would vanish from the JSON anyway; the guard is for what
+  // the host's type does not promise at runtime, so the test sends that too.
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('llm_output', { runId: 'r', sessionId: 's', assistantTexts: [], usage: { total: 10 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: '', model: null, assistantTexts: [], usage: { total: 10 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: 42, model: { id: 'm' }, assistantTexts: [], usage: { total: 10 } }, { sessionKey: 'k' })
+    const metas = srv.calls.filter((c) => c.path === '/events').map((c) => c.body.metadata)
+    assert.deepEqual(metas, [{ kind: 'model_call' }, { kind: 'model_call' }, { kind: 'model_call' }])
+  })
+})
+
+test('llm_output with no usage from the host is not a 0: it settles the reservation as usage_missing and leaves the estimate alone', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r8', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r8', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] }, { sessionKey: 'k' })
+    const [rec] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(rec!.usage_missing, true)
+    assert.equal(rec!.reservation_id, RID_RUN)
+    assert.equal(rec!.units, 0)
+    await fire('before_tool_call', { toolName: 'exec', params: {} }, { runId: 'r8', sessionKey: 'k', toolName: 'exec', toolCallId: 't' })
+    const pfs = srv.calls.filter((c) => c.path === '/preflight')
+    assert.equal(pfs[pfs.length - 1]!.body.estimated_units, 2000, 'a call with no count does not move the running average')
+  })
+})
+
+test('llm_output reporting 0 tokens is a real 0: settled, and not flagged as missing', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r9', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r9', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [], usage: { input: 0, output: 0 } }, { sessionKey: 'k' })
+    const [rec] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(rec!.units, 0)
+    assert.equal(rec!.reservation_id, RID_RUN)
+    assert.equal('usage_missing' in rec!, false)
+  })
+})
+
+test('llm_output with no usage and no reservation records nothing, as 0.1.0 did', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] }, { sessionKey: 'k' })
+    assert.equal(srv.calls.filter((c) => c.path === '/events').length, 0)
+  })
+})

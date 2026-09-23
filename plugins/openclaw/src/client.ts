@@ -30,6 +30,9 @@ export type PreflightDecision = {
   taskUsedUnits?: number
   taskRemainingUnits?: number
   upgradeUrl?: string
+  /** The handle of the reservation this preflight made. Absent when nothing
+   *  was reserved, or when the server predates reservation_id. */
+  reservationId?: string
 }
 
 export type RecordRequest = {
@@ -39,6 +42,10 @@ export type RecordRequest = {
   idempotencyKey: string
   customerId?: string
   metadata?: Record<string, unknown>
+  /** Settles that reservation whole, unused part released now. */
+  reservationId?: string
+  /** The host reported no usage for the call: charged at least the reservation. */
+  usageMissing?: boolean
 }
 
 export class AgentBillUnreachable extends Error {
@@ -103,25 +110,33 @@ export class AgentBillClient {
       taskUsedUnits: numberOrUndefined(data.task_used_units),
       taskRemainingUnits: numberOrUndefined(data.task_remaining_units),
       upgradeUrl: typeof data.upgrade_url === 'string' ? data.upgrade_url : undefined,
+      reservationId: typeof data.reservation_id === 'string' ? data.reservation_id : undefined,
     }
   }
 
   /**
-   * Record what the call actually cost. Settles the reservation preflight
-   * opened for this task_ref. The server dedupes on idempotency_key, so a
-   * retried record is one event, not two.
+   * Record what the call actually cost. With reservationId it settles the
+   * reservation that call's preflight made, whole; without one it settles
+   * the task_ref's oldest reservations by `units`, as 0.1.0 did. The server
+   * dedupes on idempotency_key, so a retried record is one event, not two.
    */
   async record(req: RecordRequest): Promise<void> {
-    if (req.units < 1) return // the server refuses units 0 (CHECK units >= 1); nothing to settle
+    // 0 units is only sent with a reservationId. A server that returned one
+    // accepts 0 (migration 015) and the record closes that reservation; a
+    // server that did not is one that refuses 0 with a 422, and with nothing
+    // named there is nothing a 0 could settle anyway.
+    if (req.units < 1 && !req.reservationId) return
     const body: Record<string, unknown> = {
       customer_id: req.customerId ?? 'default',
       event_type: req.agentId,
-      units: Math.round(req.units),
+      units: Math.max(0, Math.round(req.units)),
       success: true,
       idempotency_key: req.idempotencyKey,
       task_ref: req.taskRef,
     }
     if (req.metadata) body.metadata = req.metadata
+    if (req.reservationId) body.reservation_id = req.reservationId
+    if (req.usageMissing) body.usage_missing = true
     const res = await this.post('/events', body)
     if (!res.ok) throw new AgentBillUnreachable(`events returned ${res.status}`)
   }
