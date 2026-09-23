@@ -113,10 +113,16 @@ export async function faqRoute(app: FastifyInstance) {
       css: `${CONTENT_CSS}
   .container h2 { font-size: var(--fs-h3); line-height: 1.3; letter-spacing: -0.01em; max-width: 40ch;
                   margin: 0 0 var(--s3); padding-top: var(--s6); border-top: 1px solid var(--border); }
-  .container .lede + h2 { margin-top: var(--s7); }
+  .container .lede + h2,
+  .container .doc-head:has(> .lede:last-child) ~ .doc-body > h2:first-child { margin-top: var(--s7); }
   .container h2 + p { margin-bottom: var(--s6); }
   @media (max-width: 960px) {
     .container h2 { margin-top: 0; padding-top: var(--s5); }
+    /* On a phone the rail sits right above the first question and its bottom
+       hairline is that question's rule; a second one 48px under it read as a
+       gap in the list. 24px under the rule, as every other question sits. */
+    .container .doc-head:has(> .lede:last-child) ~ .doc-body > h2:first-child { margin-top: 0; padding-top: 0;
+                                                                                  border-top: 0; }
     .container h2 + p { margin-bottom: var(--s5); }
   }
 `,

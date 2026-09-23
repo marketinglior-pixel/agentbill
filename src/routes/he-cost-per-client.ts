@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { publicRoute } from '../middleware/auth.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
@@ -66,6 +66,23 @@ function statementRows(): string {
           <td class="n bal${left < 0 ? ' neg' : ''}">${leftTxt}</td>
         </tr>`
   }).join('')
+}
+
+/**
+ * Give every body cell its column's label, read from the same table's <thead>,
+ * so the phone layout can print the label beside the value (the console's
+ * `.cards` device) and a label can never drift from the header it repeats.
+ * Applied to every <table> on the page, after the page is rendered.
+ */
+function labelCells(table: string): string {
+  const thead = table.match(/<thead>[\s\S]*?<\/thead>/)?.[0] ?? ''
+  const labels = [...thead.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)]
+    .map((m) => m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().replace(/"/g, '&quot;'))
+  return table.replace(/<tbody>[\s\S]*?<\/tbody>/, (tbody) =>
+    tbody.replace(/<tr([^>]*)>([\s\S]*?)<\/tr>/g, (_row, attrs: string, cells: string) => {
+      let i = 0
+      return `<tr${attrs}>${cells.replace(/<td(?=[\s>])/g, () => `<td data-l="${labels[i++] ?? ''}"`)}</tr>`
+    }))
 }
 
 const CHECKLIST = [
@@ -262,11 +279,43 @@ const CSS = `
       .close { padding: var(--s5) var(--s4); border-radius: var(--r-card-sm); }
       .cp { max-width: none; }
     }
+
+    /* The tables on a phone: the same rows, laid out as cards, the console's
+       .cards device. At 390 all three scrolled sideways with no hint, and the
+       statement's last two columns, "מה גביתי" and "מה נשאר", sat off the
+       edge; the second holds the red figure the copy sends the reader down
+       the column to find. One DOM: each cell carries its column's label
+       (labelCells, read from the table's own header), the first cell is the
+       card's title, a figure prints as label and value on one line like a
+       receipt, a sentence prints under its label. A blank cell in the
+       fill-in table gets a line to write on. BP.sm, not a narrower width:
+       the statement, inside its panel, needs a 605px viewport before it
+       fits as a table, so a 560 switch left it scrolling at 600. */
+    @media (max-width: ${BP.sm}px) {
+      .tw { overflow-x: visible; }
+      table { min-width: 0; }
+      table, tbody, tr, td { display: block; }
+      thead { display: none; }
+      tr { padding: var(--s4); border-bottom: 1px solid var(--row-line); }
+      tbody tr:last-child { border-bottom: 0; }
+      /* The body's 1.85 is a paragraph's leading; a card is lines of figures. */
+      td { padding: 0; border: 0; line-height: 1.6; }
+      td:first-child { color: var(--text); font-weight: 500; margin-bottom: var(--s2); }
+      td + td { padding-block: 3px; }
+      td + td::before { content: attr(data-l); color: var(--th-ink); font-family: var(--he); font-size: var(--fs-micro);
+                        font-weight: 500; }
+      td.n, td:empty { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s4); }
+      td.n::before { white-space: nowrap; }
+      td + td:not(.n):not(:empty)::before { display: block; margin-bottom: 2px; }
+      .blank td { height: auto; }
+      .blank td:empty::after { content: ''; flex: 1 1 auto; max-width: 50%; border-bottom: 1px solid var(--border-strong);
+                               align-self: flex-end; margin-bottom: 4px; }
+    }
 `
 
 export async function heCostPerClientRoute(app: FastifyInstance) {
   app.get('/he/cost-per-client', publicRoute(), async (_request, reply) => {
-    return reply.type('text/html').send(`${head({
+    const html = `${head({
       title: 'כמה כל לקוח עולה לך · AgentBill',
       description: 'שיטה ידנית בת שלושה שלבים למפעילי אוטומציה על n8n ו-Make: להוציא עלות אמיתית לכל לקוח מהנתונים שכבר יושבים אצלך בחשבון. בלי להירשם לכלום.',
       path: '/he/cost-per-client',
@@ -553,6 +602,7 @@ curl -s "https://eu2.make.com/api/v2/scenarios/SCENARIO_ID/logs?from=17855424000
 ${COPY_JS}
 </body>
 </html>
-`)
+`
+    return reply.type('text/html').send(html.replace(/<table>[\s\S]*?<\/table>/g, labelCells))
   })
 }
