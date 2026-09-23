@@ -404,6 +404,53 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
   Nothing is clamped and nothing in flight is rewritten: each reservation settles through
   <span class="inline">record()</span> or expires, and the next preflight reads the new ceiling.</p>
 
+  <h3 id="get-tasks">GET /tasks</h3>
+  <p>Lists this account's jobs, each with the fields <span class="inline">GET /tasks/:task_ref</span>
+  returns: <span class="inline">ceiling_units</span>, <span class="inline">used_units</span>,
+  <span class="inline">reserved_units</span>, <span class="inline">remaining_units</span>,
+  <span class="inline">exceeded</span>, <span class="inline">created_at</span> and
+  <span class="inline">updated_at</span>.</p>
+  <table>
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td>agent_id</td><td>string <span class="tag">optional</span></td><td>Only the jobs that carry this agent label.</td></tr>
+    <tr><td>limit</td><td>int <span class="tag">optional</span></td><td>1 to 200. Default: 50.</td></tr>
+    <tr><td>sort</td><td>string <span class="tag">optional</span></td><td><span class="inline">created</span> (the default): newest job first. <span class="inline">used</span>: the most <span class="inline">used_units</span> first, ties newest first, in the units your code reported. Any other value is a 422.</td></tr>
+  </table>
+
+  <div class="code"><pre>
+curl "https://agentbill.dev/tasks?sort=used&amp;limit=5" \\
+  -H "Authorization: Bearer agb_your_key"
+  </pre></div>
+
+  <h3 id="get-usage">GET /usage</h3>
+  <p>The units your code recorded over a window, split by the <span class="inline">event_type</span>
+  each record carried, heaviest first. It counts the units your code reported and nothing else.
+  <span class="inline">record()</span> in both SDKs sends its <span class="inline">agent_id</span> as
+  the <span class="inline">event_type</span>, so for those calls this is a split by agent;
+  <span class="inline">meter()</span> and a direct <span class="inline">POST /events</span> carry the
+  event name your code passed. The console's activity view shows the same split.</p>
+  <table>
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td>by</td><td>string</td><td>Required. <span class="inline">event_type</span>, the one split there is.</td></tr>
+    <tr><td>days</td><td>int <span class="tag">optional</span></td><td>1 to 90 calendar days, today included. Default: 30.</td></tr>
+    <tr><td>limit</td><td>int <span class="tag">optional</span></td><td>1 to 200 groups. Default: 50. The totals always cover the whole window.</td></tr>
+  </table>
+
+  <div class="code"><pre>
+curl "https://agentbill.dev/usage?by=event_type&amp;days=7" \\
+  -H "Authorization: Bearer agb_your_key"
+
+<span class="comment"># {"by":"event_type","days":7,"since":"2026-09-17",</span>
+<span class="comment">#  "total_units":1200,"total_events":41,"group_count":3,"groups":[</span>
+<span class="comment">#   {"event_type":"crawler","units":600,"events":12,"share":0.5},</span>
+<span class="comment">#   {"event_type":"researcher","units":360,"events":9,"share":0.3},</span>
+<span class="comment">#   {"event_type":"summarizer","units":240,"events":20,"share":0.2}]}</span>
+  </pre></div>
+
+  <p><span class="inline">share</span> is a fraction of <span class="inline">total_units</span>, to four
+  places. <span class="inline">group_count</span> is how many event_types the window holds, so a
+  response with fewer groups than that was cut by <span class="inline">limit</span>.</p>
+
   <h3 id="put-budget">PUT /budget</h3>
   <p>Sets one customer's ceiling, and creates that customer if it has never been seen. The per-request
   ceiling is an argument to <span class="inline">preflight()</span> and has no endpoint.</p>
