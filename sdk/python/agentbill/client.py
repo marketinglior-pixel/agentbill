@@ -96,6 +96,10 @@ class TaskStatus:
     # Calls recorded with usage_missing=True, charged at least the reservation
     # they settled (at the units sent when none was open).
     usage_missing_calls: int = 0
+    # The job's recorded calls by model and by step, with tokens and an
+    # estimate at public list price (list price, your invoice may differ), as
+    # GET /tasks/<task_ref> returns it. None from a server that predates it.
+    breakdown: Optional[dict] = None
 
 @dataclass
 class StepResult:
@@ -274,6 +278,10 @@ class AgentBillClient:
             data = resp.json()
             if data.get("error") == "task_ceiling_required":
                 raise TaskCeilingRequiredError(data.get("message", "task_ceiling required for a new task_ref"))
+            if data.get("error") == "task_unit_mismatch":
+                # Still an HTTPError, as documented, but carrying the server's
+                # sentence: which unit the job is counted in and what to send.
+                raise requests.HTTPError(f"422 task_unit_mismatch: {data.get('message', '')}", response=resp)
         if resp.status_code == 409:
             raise PreflightInProgressError(idempotency_key or "")
         _raise_for_status(resp)
@@ -402,6 +410,7 @@ class AgentBillClient:
             exceeded=data["exceeded"],
             unit=data.get("unit", "unit"),
             usage_missing_calls=data.get("usage_missing_calls", 0),
+            breakdown=data.get("breakdown"),
         )
 
     def checkpoint(

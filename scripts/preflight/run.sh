@@ -20,6 +20,7 @@ ADMIN_SECRET="preflight-verify-admin-secret"
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
   [ "$MODE" = "docker" ] && docker rm -f agentbill-preflight-test >/dev/null 2>&1 || true
+  [ -n "${WRAP_VENV:-}" ] && rm -rf "$(dirname "$WRAP_VENV")" || true
 }
 trap cleanup EXIT
 
@@ -58,6 +59,17 @@ ON CONFLICT DO NOTHING;
 SQL
 
 (cd "$ROOT" && npm run build --silent)
+
+# The [wrap] gates run both SDKs' wrap() against this server: the Node SDK as
+# built from sdk/node, and the Python SDK from sdk/python in a throwaway venv
+# with its two dependencies. A gate that needed either and found it missing
+# fails rather than skips, so neither step here is optional.
+[ -d "$ROOT/sdk/node/node_modules" ] || (cd "$ROOT/sdk/node" && npm ci --silent --no-audit --no-fund)
+(cd "$ROOT/sdk/node" && npm run build --silent)
+WRAP_VENV="$(mktemp -d)/venv"
+python3 -m venv "$WRAP_VENV"
+"$WRAP_VENV/bin/pip" install -q --disable-pip-version-check "requests>=2.28" "httpx>=0.27"
+export WRAP_PYTHON="$WRAP_VENV/bin/python"
 
 # APP_SESSION_SECRET so the console login is real in the harness: without it
 # every login answers err=unavailable and the checkout hand-off cannot be tested.

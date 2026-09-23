@@ -157,6 +157,9 @@ jobs:
         run: python -c "import agentbill_mcp; print('MCP server OK')"
 
   preflight:
+    # Also runs both SDKs' wrap() against the server it starts ([wrap] gates):
+    # run.sh builds sdk/node and makes a throwaway venv with the Python SDK's
+    # two dependencies, so this job needs Python as well as Node.
     name: Preflight gate correctness against a real Postgres
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -166,6 +169,9 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
       - run: npm ci
       - name: Migrate a scratch DB, start the server, assert the gate
         run: ./scripts/preflight/run.sh

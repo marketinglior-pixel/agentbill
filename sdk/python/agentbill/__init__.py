@@ -10,6 +10,7 @@ from .client import (
     PreflightResult,
     TaskStatus,
 )
+from .wrap import wrap
 
 __all__ = [
     "meter",
@@ -25,4 +26,5 @@ __all__ = [
     "PreflightInProgressError",
     "PreflightResult",
     "TaskStatus",
+    "wrap",
 ]

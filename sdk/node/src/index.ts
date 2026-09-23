@@ -323,7 +323,10 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
     throw new AgentBillError(String(data.message ?? 'preflight_in_progress, retry in a moment'))
   }
   if (!res.ok) {
-    throw new AgentBillError(`AgentBill /preflight returned ${res.status}`)
+    // The server's own sentence when it sent one: a 422 task_unit_mismatch
+    // says which unit the job is counted in and what to send instead.
+    const why = typeof data?.message === 'string' ? `: ${data.error ?? ''} ${data.message}`.replace(/: +/, ': ') : ''
+    throw new AgentBillError(`AgentBill /preflight returned ${res.status}${why}`)
   }
 
   if (!data.approved) {
@@ -441,6 +444,11 @@ export interface TaskStatus {
   /** Calls recorded with usageMissing, charged at least the reservation they
    *  settled (units as sent when none was open). getTask always sets it. */
   usageMissingCalls?: number
+  /** The job's recorded calls by model and by step, with tokens and an
+   *  estimate at public list price (list price, your invoice may differ), as
+   *  GET /tasks/:task_ref returns it, snake_case keys included. Absent from a
+   *  server that predates it. */
+  breakdown?: Record<string, unknown>
 }
 
 /** Live burn-down of one job's budget. */
@@ -460,6 +468,7 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
     exceeded: Boolean(data.exceeded),
     unit: data.unit === 'token' ? 'token' : 'unit',
     usageMissingCalls: typeof data.usage_missing_calls === 'number' ? data.usage_missing_calls : 0,
+    ...(data.breakdown && typeof data.breakdown === 'object' ? { breakdown: data.breakdown } : {}),
   }
 }
 
@@ -530,3 +539,10 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
     return result
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public: wrap(), automatic metering for a model client. See ./wrap.ts.
+// ---------------------------------------------------------------------------
+
+export { wrap, DEFAULT_ESTIMATE } from './wrap.js'
+export type { WrapOptions, WrapProvider } from './wrap.js'

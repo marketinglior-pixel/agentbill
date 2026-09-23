@@ -2801,6 +2801,134 @@ ok('[price] units recorded before migration 017 are reported as unattributed, no
 
 } // end [price]
 
+{ // [wrap], in its own block scope for the same reason
+// ---------------------------------------------------------------- [wrap] the Node SDK against this server
+// The built Node SDK (sdk/node/dist, built by run.sh), a fake OpenAI client
+// shaped like the real one, and everything on AgentBill's side real.
+console.log('\n[wrap] wrap() against a real server: the refused call is not sent, the rest is recorded and priced')
+const KEYW = (await post('/keys/generate', { label: 'harness-section-wrap' })).body.api_key
+if (typeof KEYW !== 'string' || !KEYW.startsWith('agb_')) throw new Error('[wrap] could not mint its key')
+process.env.AGENTBILL_BASE_URL = API
+process.env.AGENTBILL_API_KEY = KEYW
+const { existsSync: existsW } = await import('node:fs')
+const sdkPathW = new URL('../../sdk/node/dist/index.js', import.meta.url)
+const nodeSdk = existsW(sdkPathW) ? await import(sdkPathW.href) : null
+ok('[wrap] the Node SDK is built (run.sh builds sdk/node before this runs)', typeof nodeSdk?.wrap === 'function', sdkPathW.pathname)
+const callW = (method, path, body) => fetch(`${API}${path}`, {
+  method, headers: { 'Authorization': `Bearer ${KEYW}`, 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }))
+const runW = Date.now().toString(36)
+// jsonb keeps its own key order, so objects read back are compared by entries.
+const sameW = (a, b) => a != null && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
+
+if (nodeSdk) {
+  // 1,200 tokens a call (1,000 prompt of which 200 cached, 200 completion);
+  // ceiling 5,000; default estimate 1,000. Calls 1-4 fit (4,800), and the 5th
+  // (4,800 + 1,200 > 5,000) is refused before the fake is called.
+  let sentW = 0
+  const fakeOpenAI = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create(body) {
+      sentW++
+      if (body.stream) {
+        const withUsage = body.stream_options?.include_usage === true
+        return { async *[Symbol.asyncIterator]() {
+          yield { id: `chatcmpl-w-${runW}-s`, model: 'gpt-4o-mini-2024-07-18', choices: [{ delta: { content: 'a' } }], usage: null }
+          if (withUsage) yield { id: `chatcmpl-w-${runW}-s`, model: 'gpt-4o-mini-2024-07-18', choices: [], usage: { prompt_tokens: 40, completion_tokens: 5 } }
+        } }
+      }
+      if (body.messages?.[0]?.content === 'no usage') return { id: `chatcmpl-w-${runW}-nou`, model: 'gpt-4o-mini-2024-07-18', choices: [] }
+      return { id: `chatcmpl-w-${runW}-${sentW}`, model: 'gpt-4o-mini-2024-07-18', service_tier: 'default', choices: [{ message: { content: 'x' } }],
+        usage: { prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 200 }, completion_tokens_details: { reasoning_tokens: 0 } } }
+    } } },
+  }
+  const refW = `wrap-node-${runW}`
+  const llmW = nodeSdk.wrap(fakeOpenAI, { taskRef: refW, agentId: 'node-e2e', step: 'plan', taskCeiling: 5_000, defaultEstimate: 1_000 })
+  let refusedAt = null, refusedErr = null
+  for (let i = 1; i <= 8; i++) {
+    try { await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }] }) }
+    catch (e) { refusedAt = i; refusedErr = e; break }
+  }
+  ok('[wrap] node: the 5th call is refused with TaskCeilingExceededError, and the fake provider was sent 4 calls, not 5',
+     refusedAt === 5 && refusedErr instanceof nodeSdk.TaskCeilingExceededError && sentW === 4, `refusedAt=${refusedAt} sent=${sentW} ${refusedErr?.message}`)
+  const tW = await callW('GET', `/tasks/${refW}`)
+  ok('[wrap] node: the job is a tokens job with 4,800 used and nothing left reserved',
+     tW.body?.unit === 'token' && tW.body?.used_units === 4_800 && tW.body?.reserved_units === 0 && tW.body?.ceiling_units === 5_000, JSON.stringify(tW.body && { ...tW.body, breakdown: undefined }))
+  // metadata as text: the harness pool camel-cases the keys of a jsonb value it parses.
+  const evW = (await sql`SELECT idempotency_key, units, list_price_usd::text AS usd, metadata::text AS meta FROM events WHERE task_ref = ${refW} ORDER BY created_at`)
+    .map((e) => ({ ...e, metadata: JSON.parse(e.meta) }))
+  ok('[wrap] node: 4 events, each keyed by the provider response id, each priced at $0.000255',
+     evW.length === 4 && evW.every((e, i) => e.idempotencyKey === `chatcmpl-w-${runW}-${i + 1}` && e.units === 1_200 && e.usd === '0.000255000000'),
+     JSON.stringify(evW.map((e) => [e.idempotencyKey, e.units, e.usd])))
+  ok('[wrap] node: the metadata on the row is what wrap() sent: provider, model, the token breakdown, step, duration, and nothing of the conversation',
+     evW[0]?.metadata?.provider === 'openai' && evW[0]?.metadata?.model === 'gpt-4o-mini-2024-07-18' && evW[0]?.metadata?.step === 'plan' &&
+     sameW(evW[0]?.metadata?.tokens, { input: 800, cache_read: 200, cache_write: 0, output: 200, reasoning: 0 }) &&
+     Number.isInteger(evW[0]?.metadata?.duration_ms) && !JSON.stringify(evW).includes('"go"'),
+     JSON.stringify(evW[0]?.metadata))
+  const bW = tW.body?.breakdown
+  ok('[wrap] node: GET /tasks breaks the job down by model and by step: 4 calls, $0.00102 at list price',
+     bW?.by_model?.length === 1 && bW.by_model[0].model === 'gpt-4o-mini-2024-07-18' && bW.by_model[0].calls === 4 && bW.list_price_usd_estimate === 0.00102 &&
+     bW?.by_step?.[0]?.step === 'plan' && bW.by_step[0].tokens.output === 800, JSON.stringify(bW && { ...bW, list_price_label: undefined }))
+
+  // A stream: include_usage turned on, the usage chunk hidden, the call recorded.
+  const refS = `wrap-node-stream-${runW}`
+  const streamW = nodeSdk.wrap(fakeOpenAI, { taskRef: refS, agentId: 'node-e2e', taskCeiling: 5_000 })
+  const seenW = []
+  for await (const c of await streamW.chat.completions.create({ model: 'gpt-4o-mini', messages: [], stream: true })) seenW.push(c.choices.length)
+  const tS = await callW('GET', `/tasks/${refS}`)
+  ok('[wrap] node: a streamed call is recorded from its usage chunk, and the caller never saw that chunk',
+     JSON.stringify(seenW) === '[1]' && tS.body?.used_units === 45 && tS.body?.reserved_units === 0, `${JSON.stringify(seenW)} ${JSON.stringify(tS.body && { ...tS.body, breakdown: undefined })}`)
+
+  // No usage: recorded as missing, charged at the reservation, never 0.
+  const refN = `wrap-node-nousage-${runW}`
+  const nou = nodeSdk.wrap(fakeOpenAI, { taskRef: refN, agentId: 'node-e2e', taskCeiling: 5_000, defaultEstimate: 900 })
+  await nou.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'no usage' }] })
+  const tN = await callW('GET', `/tasks/${refN}`)
+  ok('[wrap] node: a response with no usage is charged its 900-token reservation, counted as usage missing, and not priced',
+     tN.body?.used_units === 900 && tN.body?.reserved_units === 0 && tN.body?.usage_missing_calls === 1 &&
+     tN.body?.breakdown?.list_price_usd_estimate === null && /^usage missing/.test(tN.body?.breakdown?.by_model?.[0]?.unpriced_reasons?.[0] ?? ''),
+     JSON.stringify(tN.body))
+
+  // A job opened in units cannot be counted in tokens: the call is not sent.
+  await callW('PUT', `/tasks/wrap-units-${runW}/ceiling`, { ceiling_units: 100 })
+  const sentBefore = sentW
+  let mismatch = null
+  try { await nodeSdk.wrap(fakeOpenAI, { taskRef: `wrap-units-${runW}`, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { mismatch = e }
+  ok('[wrap] node: a job counted in units is a task_unit_mismatch that names both units, and the call is not sent',
+     mismatch instanceof nodeSdk.AgentBillError && /422/.test(mismatch.message) && /task_unit_mismatch/.test(mismatch.message) && /tokens/.test(mismatch.message) && sentW === sentBefore,
+     `${mismatch?.message} sent ${sentW - sentBefore}`)
+}
+
+// ---------------------------------------------------------------- [wrap] the Python SDK against this server
+const { spawnSync: spawnW } = await import('node:child_process')
+const PYW = process.env.WRAP_PYTHON
+const sdkPyW = new URL('../../sdk/python', import.meta.url).pathname
+const e2eW = new URL('./wrap_e2e.py', import.meta.url).pathname
+const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW } }) : null
+let pyOut = null
+try { pyOut = JSON.parse((pyRun?.stdout ?? '').trim().split('\n').pop()) } catch {}
+ok('[wrap] python: the e2e script ran (run.sh sets WRAP_PYTHON to a venv with requests and httpx)',
+   pyRun?.status === 0 && pyOut !== null, PYW ? `status ${pyRun?.status} ${(pyRun?.stderr ?? '').slice(-400)}` : 'WRAP_PYTHON is not set')
+if (pyOut) {
+  ok('[wrap] python: the 4th Anthropic call is refused and the fake was sent 3',
+     pyOut.sync?.sent === 3 && pyOut.sync?.refused?.at_call === 4 && pyOut.sync?.refused?.used === 3_900, JSON.stringify(pyOut.sync))
+  const tPy = await callW('GET', `/tasks/wrap-py-${runW}`)
+  const evPy = await sql`SELECT idempotency_key, units, list_price_usd::text AS usd FROM events WHERE task_ref = ${`wrap-py-${runW}`} ORDER BY created_at`
+  ok('[wrap] python: 3 records of 1,300 tokens, keyed by the message id, each $0.00738 at list price, nothing left reserved',
+     tPy.body?.unit === 'token' && tPy.body?.used_units === 3_900 && tPy.body?.reserved_units === 0 && evPy.length === 3 &&
+     evPy.every((e, i) => e.idempotencyKey === `msg_e2e_${runW}_${i + 1}` && e.units === 1_300 && e.usd === '0.007380000000'),
+     JSON.stringify({ task: tPy.body && { ...tPy.body, breakdown: undefined }, ev: evPy }))
+  const pre3 = (await sql`SELECT estimated_units FROM preflight_decisions WHERE account_id = ${ACCT} AND task_ref = ${`wrap-py-${runW}`}`)[0]
+  ok('[wrap] python: the refused preflight asked for the running average, 1,300, not a number the developer typed',
+     pre3?.estimatedUnits === 1_300, JSON.stringify(pre3))
+  const tPyS = await callW('GET', `/tasks/wrap-py-stream-${runW}`)
+  ok('[wrap] python: an async stream is recorded from the usage chunk wrap() asked for, and the caller saw only the text chunks',
+     JSON.stringify(pyOut.async_stream?.texts) === '["he","llo"]' && pyOut.async_stream?.include_usage === true && tPyS.body?.used_units === 69 && tPyS.body?.reserved_units === 0,
+     JSON.stringify({ out: pyOut.async_stream, task: tPyS.body && { ...tPyS.body, breakdown: undefined } }))
+}
+} // end [wrap]
+
 // ---------------------------------------------------------------- every answer sent once
 // Found while fixing the replay above, 2026-09-23. replay() returned the
 // Fastify reply, which is a thenable that resolves to undefined once sent, so
