@@ -4,6 +4,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { byPath, ORIGIN } from '../ui/site.js'
 import { softwareLd, sourceLd } from '../ui/ld.js'
+import { HISTORY_JOBS } from '../lib/ceiling-suggest.js'
 
 // /docs carried no page-level structured data at all, while every guide under
 // it emitted a TechArticle. It is the second-highest priority page in the
@@ -228,6 +229,12 @@ except TaskCeilingExceededError as e:
   <p>Note which identifier is doing the work there. <span class="inline">agent_id</span> is a label
   for attribution and carries no budget of its own; two different agents that share a
   <span class="inline">task_ref</span> share one ceiling. The job is what costs money, not the agent.</p>
+
+  <p>Not sure what a job needs? The task budgets view suggests a ceiling from your own history: for
+  each agent, the p50, p90 and max <span class="inline">used_units</span> of its last ${HISTORY_JOBS}
+  finished jobs, where finished means the job has spent units and holds no reservation. Pick one and
+  it goes in the ceiling field with that agent's label, still editable, and nothing is saved until
+  you press Set ceiling. An agent with no finished job gets no suggestion.</p>
 
   <h3>Per-request ceiling</h3>
   <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>

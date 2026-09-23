@@ -2355,6 +2355,249 @@ ok('[integrations] /integrations/mcp carries the MCP README\'s install line and 
    `versions shown ${shown.join(', ')} vs ${Object.values(SDK_VERSIONS).join(', ')}; guides ${guides.map((r) => `${r.name}=${r.kind}`).join(', ')}`)
 }
 
+// ---------------------------------------------------------------- suggest: a ceiling from the account's own finished jobs, 2026-09-23
+// The task budgets view lists, per agent, the p50, p90 and max used_units of
+// its last HISTORY_JOBS finished jobs (spent units, no reservation, not the
+// console placeholder label), in units, and a click puts one in the ceiling
+// field, still editable. Nothing here writes, and ?demo=1 shows the same
+// suggestion worked out from the sample rows. Each gate below was made red
+// once by a planted break and green again after restoring from a copy; the
+// breaks are listed in the commit that added them.
+console.log('\n[suggest] a suggested ceiling from the account\'s own finished jobs, in units')
+await reset()
+const { HISTORY_JOBS: JOBS_S, percentileDisc: pdS } = await import('../../dist/lib/ceiling-suggest.js')
+const { RESERVATION_TTL_MINUTES: TTL_S } = await import('../../dist/lib/reservations.js')
+const { SWEEP_INTERVAL_MS: SWEEP_S } = await import('../../dist/lib/reservation-sweeper.js')
+const getS = (path, cookie = cookie8) => nav8(path, { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, html: await r.text() }))
+// visible8 turns every tag into a space, so "used_units</code>, as" reads
+// "used_units , as"; a browser draws no space there, and neither does this.
+const shownS = (h) => visible8(h).replace(/\s+/g, ' ').replace(/ ([,.;:])/g, '$1').trim()
+// The suggestion block, from its frame to the form's own fine print after it.
+const histOfS = (h) => {
+  const a = h.indexOf('<div class="hist">')
+  if (a === -1) return ''
+  const b = h.indexOf('<p class="fine">One job, one budget', a)
+  return h.slice(a, b === -1 ? undefined : b)
+}
+// One row per agent: its label, the agent as printed, and each figure's name,
+// number and link. A one-job row has one figure, named "one" here.
+const rowsOfS = (block) => [...block.matchAll(/<div class="hrow"><span class="hw">([^<]*)<b class="ha">([^<]*)<\/b><\/span><span class="hp">([\s\S]*?)<\/span><\/div>/g)]
+  .map((m) => ({
+    label: m[1], agent: m[2],
+    figs: Object.fromEntries([...m[3].matchAll(/<a class="pk[^"]*" href="[^"]*"[^>]*>(p50 |p90 |max |)<b>([0-9,]+)<\/b><\/a>/g)].map((f) => [f[1].trim() || 'one', f[2]])),
+    hrefs: [...m[3].matchAll(/href="([^"]*)"/g)].map((f) => f[1]),
+  }))
+const rowOfS = (block, agent) => rowsOfS(block).find((r) => r.agent === agent)
+const figsS = (r) => (r ? JSON.stringify(r.figs) : 'no row')
+const ceilFieldS = (h) => (h.match(/<input id="t-ceil"[^>]*>/) ?? [''])[0]
+const agentFieldS = (h) => (h.match(/<input id="t-agent"[^>]*>/) ?? [''])[0]
+const pickLineS = (h) => (h.match(/<p class="conv">[\s\S]*?<\/p>/) ?? [''])[0]
+
+// Another account, whose finished jobs sit under this account's agent label
+// and one of its own, each with a count no job here has. Present from the
+// start, so the "hidden" gate below reads an account whose neighbour HAS history.
+const OTHER_S = '00000000-0000-0000-0000-0000000000ee'
+await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
+          VALUES (${OTHER_S}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${OTHER_S}, 'summarizer', 'sg-b-1', 100000, 5555, 0, now()), (${OTHER_S}, 'tenant-b-agent', 'sg-b-2', 100000, 4242, 0, now())`
+
+// Hidden without history: jobs exist on this account and none is finished.
+// One opened and never spent under, one with a call in flight (spent, then
+// reserved again through the real preflight path), one spent under the
+// console's placeholder label. Each stays in the fixture below as a row that
+// must not count.
+await putCeil('sg-zero', { ceiling_units: 50, agent_id: 'crawler' })
+await putCeil('sg-flight', { ceiling_units: 100000, agent_id: 'summarizer' })
+await pre8({ agent_id: 'summarizer', task_ref: 'sg-flight', estimated_units: 7777, idempotency_key: 'sg-flight-pre-1' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-flight-rec-1', units: 7777, task_ref: 'sg-flight' })
+await pre8({ agent_id: 'summarizer', task_ref: 'sg-flight', estimated_units: 5, idempotency_key: 'sg-flight-pre-2' })
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units)
+          VALUES (${ACCT}, 'console', 'sg-console', 100000, 8888, 0)`
+const flightS = await task8('sg-flight')
+const bareS = await getS('/app?view=tasks')
+const barePickS = await getS('/app?view=tasks&history=summarizer&pick=p90')
+ok('[suggest] hidden while no job on this account is finished: jobs exist, one in flight, one never spent under, one under the console label, and a neighbour account has history',
+   bareS.status === 200 && flightS?.usedUnits === 7777 && flightS?.reservedUnits === 5
+     && bareS.html.includes('sg-flight') && bareS.html.includes('sg-zero') && bareS.html.includes('action="/app/tasks"')
+     && !bareS.html.includes('class="hist"') && !bareS.html.includes('Suggested ceilings') && !bareS.html.includes('from your last')
+     && !bareS.html.includes('A suggested ceiling is')
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(barePickS.html)) && pickLineS(barePickS.html) === '',
+   `${bareS.status} ${JSON.stringify(flightS)} hist=${bareS.html.includes('class="hist"')} | ${histOfS(bareS.html).slice(0, 200)}`)
+
+// The fixture. summarizer: 21 finished jobs, the oldest far outside the rest
+// (99,999), so it must fall off the last 20; the newer twenty used 10, 20,
+// ..., 200, so p50 is the 10th smallest (100), p90 the 18th (180), max 200.
+// crawler: two jobs written here and one settled through the real PUT,
+// preflight and record path: 30, 40, 50, so p50 40, p90 50, max 50, and a
+// counted sg-zero (0) would make that four jobs and a p50 of 30. And an agent
+// label made of markup, opened and settled through the real path: one job, 30.
+for (let i = 0; i < 21; i++) {
+  await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+            VALUES (${ACCT}, 'summarizer', ${`sg-s-${i}`}, 100000, ${i === 0 ? 99999 : i * 10}, 0, now() - ${`${200 - i} minutes`}::interval)`
+}
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${ACCT}, 'crawler', 'sg-c-1', 1000, 30, 0, now() - interval '150 minutes'),
+                 (${ACCT}, 'crawler', 'sg-c-2', 1000, 50, 0, now() - interval '140 minutes')`
+await putCeil('sg-c-api', { ceiling_units: 100, agent_id: 'crawler' })
+await pre8({ agent_id: 'crawler', task_ref: 'sg-c-api', estimated_units: 40, idempotency_key: 'sg-c-api-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-c-api-rec', units: 40, task_ref: 'sg-c-api' })
+const HOSTILE_S = '"><img src=x>'
+const HOSTILE_ESC_S = '&quot;&gt;&lt;img src=x&gt;'
+const HOSTILE_URI_S = encodeURIComponent(HOSTILE_S)
+const hostilePutS = await putCeil('sg-hostile', { ceiling_units: 100, agent_id: HOSTILE_S })
+await pre8({ agent_id: HOSTILE_S, task_ref: 'sg-hostile', estimated_units: 30, idempotency_key: 'sg-hostile-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-hostile-rec', units: 30, task_ref: 'sg-hostile' })
+
+const pageS = await getS('/app?view=tasks')
+const blockS = histOfS(pageS.html)
+const sumS = rowOfS(blockS, 'summarizer')
+const crawlS = rowOfS(blockS, 'crawler')
+const hostRowS = rowOfS(blockS, HOSTILE_ESC_S)
+// Every figure shown is one real finished job's used_units under that agent
+// on this account, read back from the table with a query of the gate's own.
+const realS = async (agent) => new Set((await sql`SELECT used_units FROM task_budgets WHERE account_id = ${ACCT} AND agent_id = ${agent}
+                                                AND used_units > 0 AND reserved_units = 0`).map((r) => r.usedUnits.toLocaleString('en-US')))
+const sumRealS = await realS('summarizer')
+const crawlRealS = await realS('crawler')
+ok('[suggest] p50, p90 and max come from the right rows: an agent\'s last 20 finished jobs, never one in flight, never one with nothing spent, never an older one, never the console label',
+   pageS.status === 200 && rowsOfS(blockS).length === 3
+     && sumS?.label === 'from your last 20 jobs of ' && sumS.figs.p50 === '100' && sumS.figs.p90 === '180' && sumS.figs.max === '200'
+     && crawlS?.label === 'from your last 3 jobs of ' && crawlS.figs.p50 === '40' && crawlS.figs.p90 === '50' && crawlS.figs.max === '50'
+     && hostRowS?.label === 'from your last job of ' && hostRowS.figs.one === '30' && Object.keys(hostRowS.figs).length === 1
+     && !/99,999|7,777|8,888/.test(blockS) && !rowOfS(blockS, 'console')
+     && Object.values(sumS.figs).every((v) => sumRealS.has(v)) && Object.values(crawlS.figs).every((v) => crawlRealS.has(v)),
+   `summarizer ${figsS(sumS)} "${sumS?.label}", crawler ${figsS(crawlS)} "${crawlS?.label}", markup ${figsS(hostRowS)}, rows ${rowsOfS(blockS).map((r) => r.agent).join(' | ') || blockS.slice(0, 200)}`)
+
+// The rank rule on its own, against Postgres's percentile_disc, which is what
+// p50 and p90 mean here: 400 sets of 1 to 40 values with repeats.
+let seedS = 20260923
+const randS = (n) => { seedS ^= seedS << 13; seedS ^= seedS >>> 17; seedS ^= seedS << 5; return (seedS >>> 0) % n }
+const setsS = Array.from({ length: 400 }, (_, i) => Array.from({ length: 1 + (i % 40) }, () => 1 + randS(300)))
+const pgS = await sql`
+  SELECT t.i, percentile_disc(0.5) WITHIN GROUP (ORDER BY t.v) AS p50, percentile_disc(0.9) WITHIN GROUP (ORDER BY t.v) AS p90
+  FROM (SELECT (e.ord - 1)::int AS i, x.value::int AS v
+        FROM json_array_elements((${JSON.stringify(setsS)}::text)::json) WITH ORDINALITY AS e(arr, ord),
+             json_array_elements_text(e.arr) AS x(value)) t
+  GROUP BY t.i ORDER BY t.i`
+const rankMissS = pgS.filter((r) => {
+  const sorted = [...setsS[r.i]].sort((a, b) => a - b)
+  return pdS(sorted, 50) !== Number(r.p50) || pdS(sorted, 90) !== Number(r.p90)
+}).map((r) => `n=${setsS[r.i].length}: pg ${r.p50}/${r.p90}, ours ${pdS([...setsS[r.i]].sort((a, b) => a - b), 50)}/${pdS([...setsS[r.i]].sort((a, b) => a - b), 90)}`)
+ok('[suggest] p50 and p90 are Postgres\'s percentile_disc over 400 random sets of 1 to 40 values, so every figure is a value a job used',
+   pgS.length === 400 && rankMissS.length === 0, rankMissS.slice(0, 3).join('; ') || `${pgS.length} sets`)
+
+// Isolation: the neighbour's 5,555 under this account's own label and its
+// 4,242 under a label of its own never reach this page, and a link naming
+// the neighbour's agent fills nothing.
+const foreignPickS = await getS('/app?view=tasks&history=tenant-b-agent&pick=max')
+ok('[suggest] another account\'s jobs never count: not under this account\'s agent label, not under its own, and a pick naming its agent fills nothing',
+   !pageS.html.includes('tenant-b-agent') && !pageS.html.includes('5,555') && !pageS.html.includes('4,242')
+     && sumS?.label === 'from your last 20 jobs of ' && sumS.figs.max === '200' && sumS.figs.p50 === '100'
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(foreignPickS.html)) && pickLineS(foreignPickS.html) === ''
+     && !foreignPickS.html.includes('5,555') && !foreignPickS.html.includes('4,242'),
+   `tenant-b-agent ${pageS.html.includes('tenant-b-agent')}, 5,555 ${pageS.html.includes('5,555')}, 4,242 ${pageS.html.includes('4,242')}, summarizer ${figsS(sumS)}, foreign pick "${ceilFieldS(foreignPickS.html)}"`)
+
+// Escaping: a label made of markup is text in its row and its link, and,
+// once picked, in the agent field and the line under the form.
+const hostPickS = await getS(`/app?view=tasks&history=${HOSTILE_URI_S}&pick=max`)
+ok('[suggest] an agent label made of markup is printed as text: in its row, its link, the agent field and the line under the form',
+   hostilePutS.status === 200 && !pageS.html.includes('<img src=x>') && !hostPickS.html.includes('<img src=x>')
+     && blockS.includes(`<b class="ha">${HOSTILE_ESC_S}</b>`) && (hostRowS?.hrefs[0] ?? '').includes(`history=${HOSTILE_URI_S}&amp;pick=max`)
+     && agentFieldS(hostPickS.html).includes(`value="${HOSTILE_ESC_S}"`) && /value="30"/.test(ceilFieldS(hostPickS.html))
+     && pickLineS(hostPickS.html).includes(`what your last job of ${HOSTILE_ESC_S} used`),
+   `${hostilePutS.status} ${(hostPickS.html.match(/[^\n]*<img src=x>[^\n]*/) ?? [pickLineS(hostPickS.html) || 'no line'])[0].slice(0, 200)}`)
+
+// A click fills the field. Picking p90 puts 180 and the summarizer label in
+// the form, both editable, marks the figure that is in the field, writes
+// nothing, and a pick the rows do not back fills nothing. Then the form saves
+// it through the one write it always had.
+const countS = async () => Number((await sql`SELECT count(*) AS n FROM task_budgets WHERE account_id = ${ACCT}`)[0].n)
+const beforeS = await countS()
+const pickedS = await getS('/app?view=tasks&history=summarizer&pick=p90')
+const afterS = await countS()
+const noFillS = async (q) => { const h = (await getS(`/app?view=tasks&${q}`)).html; return !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(h)) && pickLineS(h) === '' }
+const unbackedS = await Promise.all(['history=nobody&pick=p90', 'history=summarizer&pick=p99', 'history=console&pick=max', 'pick=max', 'history=summarizer'].map(noFillS))
+const savedS = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=sg-next&ceiling_units=180&agent_id=summarizer' })
+const nextS = await task8('sg-next')
+ok('[suggest] picking p90 fills 180 and the summarizer label, both editable, writes nothing, and a pick the rows do not back fills nothing; the save is the form\'s own',
+   /value="180"/.test(ceilFieldS(pickedS.html)) && !/readonly|disabled/.test(ceilFieldS(pickedS.html))
+     && /value="summarizer"/.test(agentFieldS(pickedS.html)) && !/readonly|disabled/.test(agentFieldS(pickedS.html))
+     && pickedS.html.includes('<a class="pk on" href="/app?view=tasks&amp;history=summarizer&amp;pick=p90" aria-current="true">')
+     && shownS(pickLineS(pickedS.html)).includes('In the ceiling field: 180 units, the p90 of your last 20 jobs of summarizer')
+     && shownS(pickLineS(pickedS.html)).includes('Nothing is saved until you press Set ceiling')
+     && pickedS.html.includes('action="/app/tasks"') && beforeS === afterS && unbackedS.every(Boolean)
+     && savedS.headers.get('location') === '/app?view=tasks&saved=sg-next&created=1' && nextS?.ceilingUnits === 180 && nextS?.agentId === 'summarizer',
+   `${ceilFieldS(pickedS.html)} ${agentFieldS(pickedS.html)} | ${shownS(pickLineS(pickedS.html))} | unbacked ${unbackedS.join(',')} | ${beforeS}->${afterS} | ${savedS.headers.get('location')}`)
+
+// ?demo=1: the same suggestion, worked out from the labelled sample rows the
+// view lists below it, with no form that can save. researcher has two
+// settled sample jobs (118 and 492) and enricher one (1,025); summarizer and
+// crawler each have a call in flight in the sample, so neither is offered.
+// Signed in or not, the sample never shows this account's figures.
+const demoS = await getS('/app?demo=1&view=tasks', null)
+const demoBlockS = histOfS(demoS.html)
+const demoResS = rowOfS(demoBlockS, 'researcher')
+const demoEnrS = rowOfS(demoBlockS, 'enricher')
+const demoPickS = await getS('/app?demo=1&view=tasks&history=researcher&pick=p90', null)
+const demoInS = await getS('/app?demo=1&view=tasks')
+ok('[suggest] ?demo=1 shows the suggestion from the labelled sample rows, a click fills the field there too, and nothing on it can save',
+   demoS.status === 200 && demoS.html.includes('Sample data') && rowsOfS(demoBlockS).length === 2
+     && demoResS?.label === 'from your last 2 jobs of ' && demoResS.figs.p50 === '118' && demoResS.figs.p90 === '492' && demoResS.figs.max === '492'
+     && demoEnrS?.label === 'from your last job of ' && demoEnrS.figs.one === '1,025'
+     && !rowOfS(demoBlockS, 'summarizer') && !rowOfS(demoBlockS, 'crawler')
+     && demoResS.hrefs.every((u) => u.startsWith('/app?demo=1&amp;view=tasks&amp;history=researcher&amp;pick='))
+     && !/method="POST"/i.test(demoS.html) && !demoS.html.includes('action="/app/tasks"') && demoS.html.includes('<a class="btn" href="/register">')
+     && /value="492"/.test(ceilFieldS(demoPickS.html)) && /value="researcher"/.test(agentFieldS(demoPickS.html)) && !/method="POST"/i.test(demoPickS.html)
+     && shownS(pickLineS(demoPickS.html)).includes('the p90 of your last 2 jobs of researcher') && shownS(pickLineS(demoPickS.html)).includes('This is sample data, so nothing here is saved')
+     && histOfS(demoInS.html) === demoBlockS && !demoInS.html.includes('action="/app/tasks"'),
+   `${demoS.status} researcher ${figsS(demoResS)} "${demoResS?.label}", enricher ${figsS(demoEnrS)}, rows ${rowsOfS(demoBlockS).map((r) => r.agent).join(' | ') || 'none'}, POST form ${/method="POST"/i.test(demoS.html)}`)
+
+// The words say what the code computes. The footer and the fine print name
+// the same N, the same test for finished and the same held-out time as the
+// constants the server runs on, /docs says it in one paragraph, and no served
+// surface keeps the old review's sentence, which named GET /tasks?agent_id=
+// (created_at order, every job) as what the percentile was taken over.
+const heldS = TTL_S + Math.ceil(SWEEP_S / 60_000)
+const footS = shownS((pageS.html.match(/<div class="foot">[\s\S]*?<\/div>/) ?? [''])[0])
+const fineS = shownS((blockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0])
+const docsS = shownS(await fetch(`${API}/docs`).then((r) => r.text()))
+const OLD_S = /percentile of the used_units that GET \/tasks\?agent_id=|GET \/tasks\?agent_id= returns/i
+const sitemapS = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const pathsS = [...new Set([...sitemapS.matchAll(/<loc>https?:\/\/[^/<]+(\/[^<]*)<\/loc>/g)].map((m) => m[1]))]
+const oldSaidS = []
+for (const path of [...pathsS, '/llms.txt', '/llms-full.txt']) {
+  const hit = shownS(await fetch(`${API}${path}`).then((r) => r.text())).match(OLD_S)
+  if (hit) oldSaidS.push(`${path}: "${hit[0]}"`)
+}
+for (const [name, h] of [['tasks', pageS.html], ['tasks+pick', pickedS.html], ['demo', demoS.html]]) {
+  const hit = shownS(h).match(OLD_S)
+  if (hit) oldSaidS.push(`${name}: "${hit[0]}"`)
+}
+ok('[suggest] the footer, the fine print and /docs say what the code computes: one job\'s used_units, the last N finished jobs of one agent, finished defined, and the time an open reservation holds a job out',
+   footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
+     && fineS.includes(`Each row is the p50, p90 and max used_units of one agent's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
+     && fineS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
+     && fineS.includes(`a call still in flight keeps its job out until it records, or for up to ${heldS} minutes if it never does, until its reservation expires and is released.`)
+     && fineS.includes('Jobs with the placeholder label console are left out.')
+     && docsS.includes(`for each agent, the p50, p90 and max used_units of its last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
+     && pathsS.length >= 10 && oldSaidS.length === 0,
+   oldSaidS.join('; ') || `foot: ${footS.slice(-260)} | fine: ${fineS.slice(0, 160)}`)
+
+// Units only, and the house words. Everything this change prints, read as
+// served: the suggestion on the real and the sample view, both lines under
+// the form, the sample's button, the footer sentence and the /docs paragraph.
+// No money word of any kind, and none of the house's banned words.
+const docsParaS = (docsS.match(/Not sure what a job needs\?[^]*?gets no suggestion\./) ?? [''])[0]
+const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html),
+  (demoS.html.match(/<a class="btn" href="\/register">[^<]*<\/a>/) ?? [''])[0], (footS.match(/A suggested ceiling is[^]*$/) ?? [''])[0]].map(shownS).join(' ') + ' ' + docsParaS
+const moneyS = newCopyS.match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
+const bannedS = newCopyS.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
+ok('[suggest] everything the suggestion prints is in units: no money word, and none of the banned house words',
+   newCopyS.length > 1500 && docsParaS.length > 200 && moneyS.length === 0 && bannedS.length === 0,
+   [...moneyS, ...bannedS].join(', ') || `${newCopyS.length} chars, docs paragraph ${docsParaS.length}`)
+await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)

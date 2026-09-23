@@ -10,6 +10,9 @@ import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
+import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
+import { SWEEP_INTERVAL_MS } from '../lib/reservation-sweeper.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -40,6 +43,9 @@ import { INSTALL_PY } from '../ui/site.js'
 // arrived because the empty state below used to send a reader back to their
 // editor to set a budget, and the founder, dogfooding, said that was the
 // product's whole problem. Every other number here is still read-only.
+// The suggested ceiling on the tasks view (2026-09-23) adds no write: it is a
+// link that reloads this view with one of the account's own used_units in the
+// ceiling field, and the save is still the reader's. See loadHistory below.
 // This page loads no script at all and the CSP below has no script-src; the
 // chart's hover layer is CSS. Corrected 2026-09-10: that sentence used to
 // justify itself with "a live key is rendered into it", which stopped being
@@ -118,13 +124,21 @@ export async function appRoute(app: FastifyInstance) {
     // check must stay ABOVE the login return: it used to sit below it, which
     // made ?demo=1 reachable only to people who had already signed up.
     if (!viewer) {
-      if (demo) return reply.send(consolePage({ v: DEMO_VIEWER, d: demoConsole(filter, RANGES[range].days), demo: true, anon: true, range, view, filter }))
+      if (demo) {
+        const sample = demoConsole(filter, RANGES[range].days)
+        return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter,
+                                        suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
+      }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
     }
 
     const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
+    // The tasks view's suggested ceilings: the account's own finished jobs,
+    // or, under sample data, the sample rows the same view lists below.
+    const suggest = view !== 'tasks' ? null
+      : readSuggest(demo ? demoHistory(data.tasks) : await loadHistory(viewer.accountId), q)
     return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter,
-                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash) }))
+                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest }))
   })
 
   // The console's one write: open a job with a ceiling, or change one. A plain
@@ -519,6 +533,79 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
   `
   if (!row) return { ...f, saved: f.saved ? '' : undefined, ref: undefined, min: undefined }
   return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
+}
+
+// ---------------------------------------------------------------------------
+// The tasks view's suggested ceiling (2026-09-23): per agent, the p50, p90
+// and max used_units of its last HISTORY_JOBS finished jobs, from this
+// account's own rows, in units. It writes nothing. Each figure is a link that
+// reloads the tasks view with that number in the ceiling field and the
+// agent's label beside it, both still editable, and the save is the reader's,
+// through the same form. The arithmetic is src/lib/ceiling-suggest.ts.
+//
+// "Finished" has to be defined here, because no event marks a job as done.
+// A job counts once it has spent units and holds no reservation
+// (used_units > 0 AND reserved_units = 0), and a job still carrying the
+// console's placeholder label is left out, because no agent has claimed it.
+// So a job resting between two calls counts, and a call that never records
+// keeps its job out until its reservation expires (RESERVATION_TTL_MINUTES)
+// and the sweeper releases it (every SWEEP_INTERVAL_MS). The fine print under
+// the suggestion says the same, from the same constants.
+// ---------------------------------------------------------------------------
+
+/** What the tasks view shows beside its form: the rows, and a figure the reader picked. */
+type Suggest = {
+  history: AgentHistory[]
+  /** Recomputed from the rows on every load, never read off the URL. */
+  pick: { agentId: string; which: Pick; units: number; jobs: number } | null
+}
+
+/**
+ * This account's finished jobs, HISTORY_JOBS per agent, for the
+ * HISTORY_AGENTS agents whose latest finished job is the most recent. The
+ * account clause is what keeps another account's jobs, under the same agent
+ * label or any other, out of this account's figures; the harness holds it.
+ */
+async function loadHistory(accountId: string): Promise<HistoryJob[]> {
+  const rows = await sql`
+    WITH finished AS (
+      SELECT agent_id, used_units, updated_at,
+             row_number() OVER (PARTITION BY agent_id ORDER BY updated_at DESC, id DESC) AS rn
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+        AND used_units > 0
+        AND reserved_units = 0
+        AND agent_id <> ${CONSOLE_AGENT}
+    ),
+    agents AS (
+      SELECT agent_id, max(updated_at) AS last_at
+      FROM finished
+      GROUP BY agent_id
+      ORDER BY last_at DESC, agent_id COLLATE "C"
+      LIMIT ${HISTORY_AGENTS}
+    )
+    SELECT f.agent_id, f.used_units, f.updated_at
+    FROM finished f JOIN agents a ON a.agent_id = f.agent_id
+    WHERE f.rn <= ${HISTORY_JOBS}
+  `
+  return rows.map((r) => ({ agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date) }))
+}
+
+/** The same test as loadHistory, on the sample rows ?demo=1 lists, so the
+ *  sample suggestion is worked out from the jobs on the same page. */
+function demoHistory(tasks: TaskRow[]): HistoryJob[] {
+  return tasks
+    .filter((t) => Number(t.usedUnits) > 0 && Number(t.reservedUnits) === 0 && t.agentId !== CONSOLE_AGENT)
+    .map((t) => ({ agentId: t.agentId, usedUnits: Number(t.usedUnits), updatedAt: new Date(t.updatedAt) }))
+}
+
+/** The pick names an agent and a statistic; the number comes from the rows,
+ *  so a link naming an agent this account has no finished job for fills nothing. */
+function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
+  const history = summarizeHistory(rows)
+  const which = PICKS.find((k) => k === q?.pick)
+  const row = isId(q?.history) ? history.find((h) => h.agentId === q.history) : undefined
+  return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs } : null }
 }
 
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
@@ -1328,9 +1415,31 @@ ${MARK_CSS}
   .bset label { display: inline; margin: 0; }
   .bset input { width: 9ch; margin: 0; min-height: 34px; padding: 4px var(--s2); font-size: var(--fs-micro); }
   .bset .btn-out { min-height: 34px; padding: 4px var(--s3); font-size: var(--fs-micro); cursor: pointer; }
+  /* Under sample data the form's button is a link, so it needs the box a
+     button gets for free. */
+  .setf a.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+  /* The suggested ceilings under the form. Each figure is a link that reloads
+     this view with it in the field, so it is drawn as a control the size of a
+     row's own Save, and the one in the field wears the green. */
+  .conv { color: var(--muted); margin-top: var(--s3); overflow-wrap: anywhere; }
+  .conv b { color: var(--text); }
+  .hist { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--border); }
+  .hist .lbl { margin-bottom: var(--s2); }
+  .hrow { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); align-items: center; gap: var(--s2) var(--s4);
+          padding: var(--s2) 0; border-bottom: 1px solid var(--border-soft); }
+  .hrow:last-of-type { border-bottom: none; }
+  .hp { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+  .pk { display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 6px var(--s3);
+        border: 1px solid var(--border-strong); border-radius: var(--r-control); color: var(--muted); }
+  .pk b { color: var(--text); font-weight: 600; }
+  .pk:hover { border-color: var(--green); }
+  .pk.on { border-color: var(--green); color: var(--green); }
+  .hw { color: var(--dim); font-size: var(--fs-small); min-width: 0; overflow-wrap: anywhere; }
+  .hw .ha { color: var(--text); font-family: var(--mono); font-weight: 600; }
   @media (max-width: ${BP.lg}px) {
     .setf { grid-template-columns: minmax(0, 1fr); }
     .setf .btn { width: 100%; }
+    .hrow { grid-template-columns: minmax(0, 1fr); }
   }
 
   /* The three-step start screen. One column at every width: these rows are
@@ -1599,12 +1708,12 @@ function handoffPage(tier: string, to: string): string {
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null; suggest?: Suggest | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; history: string; pick: Pick }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
@@ -1614,6 +1723,10 @@ function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: stri
   if (extra.task) q.push(`task=${encodeURIComponent(extra.task)}`)
   if (extra.agent) q.push(`agent=${encodeURIComponent(extra.agent)}`)
   if (extra.only) q.push(`only=${encodeURIComponent(extra.only)}`)
+  // A suggested ceiling's link: which agent, which figure. The number itself
+  // is never on the URL; readSuggest looks it up in the rows.
+  if (extra.history) q.push(`history=${encodeURIComponent(extra.history)}`)
+  if (extra.pick) q.push(`pick=${extra.pick}`)
   return q.length ? `/app?${q.join('&amp;')}` : '/app'
 }
 
@@ -1900,9 +2013,14 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
     : 'That ceiling is under what the job has already committed: spent, plus reserved by calls in flight. Set it at or above that number, or wait for the reservations to settle or expire.',
 }
 
-/** The form that opens a job or changes its ceiling. Tasks view only, and
- *  never under sample data, where a save would write to the real account
- *  behind a page that says nothing on it is real.
+/** The form that opens a job or changes its ceiling, with the suggested
+ *  ceilings under it. Tasks view only.
+ *
+ *  Under sample data the same fields render with no form around them and a
+ *  link where the button was (2026-09-23), so a prospect can try the
+ *  suggestion and nothing can be saved: a save there would write to the real
+ *  account behind a page that says nothing on it is real. Until then the
+ *  sample tasks view showed no form at all.
  *
  *  Until 2026-09-12 this doubled as the three-step first run for an account
  *  that had spent nothing, because POST /app/tasks always landed here. The
@@ -1919,16 +2037,66 @@ function ceilingForm(p: Page): string {
     : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const keep = f?.err && f.ref ? esc(f.ref) : ''
+  // A picked suggestion fills the ceiling and the agent label. Neither is
+  // read-only, and nothing is saved until the reader presses the button.
+  const pick = p.suggest?.pick ?? null
+  const fields = `
+      <div><label for="t-ref">Job <code>task_ref</code></label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
+      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${pick ? `value="${pick.units}"` : 'placeholder="500"'} required /></div>
+      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128"${pick ? ` value="${esc(pick.agentId)}"` : ''} /></div>`
+  const form = p.demo
+    ? `<div class="setf">${fields}
+      <a class="btn" href="${p.anon ? '/register' : href(p, 'tasks', { demo: false })}">${p.anon ? 'Get an API key to set it' : 'Set it on your account'}</a>
+    </div>`
+    : `<form method="POST" action="/app/tasks" class="setf" autocomplete="off">${fields}
+      <button class="btn" type="submit">Set ceiling</button>
+    </form>`
   return `<div class="frame setc">
     ${said}${pointer}
-    <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
-      <div><label for="t-ref">Job <code>task_ref</code></label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
-      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
-      <button class="btn" type="submit">Set ceiling</button>
-    </form>
+    ${form}
+    ${pickLine(p)}
+    ${historyBlock(p)}
     <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
+}
+
+/** The line under the form once a suggestion is in the field: which figure,
+ *  from which jobs, and that it is still the reader's to change. */
+function pickLine(p: Page): string {
+  const k = p.suggest?.pick
+  if (!k) return ''
+  const from = k.jobs === 1
+    ? `what your last job of ${esc(k.agentId)} used`
+    : `the ${k.which} of your last ${num(k.jobs)} jobs of ${esc(k.agentId)}`
+  return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${k.units === 1 ? 'unit' : 'units'}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
+}
+
+/** Minutes an unrecorded call can keep its job out of the suggestion: the
+ *  reservation's TTL, plus up to one sweep before it is released. */
+const HELD_OUT_MINUTES = RESERVATION_TTL_MINUTES + Math.ceil(SWEEP_INTERVAL_MS / 60_000)
+
+/**
+ * The suggested ceilings. Hidden when no agent has a finished job, because a
+ * suggestion from no history would be a number made up. Each figure is a
+ * link that puts it in the ceiling field with that agent's label; the page
+ * then looks it up in the rows again rather than trusting the link.
+ */
+function historyBlock(p: Page): string {
+  const s = p.suggest
+  if (!s || s.history.length === 0) return ''
+  const rows = s.history.map((h) => {
+    const on = (k: Pick) => s.pick?.agentId === h.agentId && s.pick.which === k
+    const link = (k: Pick, name: string) =>
+      `<a class="pk${on(k) ? ' on' : ''}" href="${href(p, 'tasks', { history: h.agentId, pick: k })}"${on(k) ? ' aria-current="true"' : ''}>${name}<b>${num(h[k])}</b></a>`
+    // One job has one figure; three equal links would be noise.
+    const figures = h.jobs === 1 ? link('max', '') : PICKS.map((k) => link(k, `${k} `)).join('')
+    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">units</span></span></div>`
+  }).join('')
+  return `<div class="hist">
+      <p class="lbl">Suggested ceilings</p>
+      ${rows}
+      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or for up to ${num(HELD_OUT_MINUTES)} minutes if it never does, until its reservation expires and is released. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
+    </div>`
 }
 
 const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
@@ -2321,7 +2489,7 @@ function activityView(p: Page, rangeLabel: string): string {
 }
 
 function tasksView(p: Page): string {
-  return `${p.demo ? '' : ceilingForm(p)}
+  return `${ceilingForm(p)}
     ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
     <p class="note">${p.d.taskCount > p.d.tasks.length ? `The ${num(p.d.tasks.length)} most recently touched of ${num(p.d.taskCount)} tasks.` : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, most recently touched first.`} The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
@@ -2399,7 +2567,7 @@ function consolePage(p: Page): string {
         ${body}
         <div class="foot">
           Every number on this page is on the API too:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
     </main>
