@@ -2159,34 +2159,52 @@ ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_
 //
 // What counts as OUR sentence, and why the word ban reads only that:
 //   - prose: the page's <title> and meta description, the text of <main> with
-//     code blocks, inline code and <blockquote>s cut out, the attribute text a
-//     screen reader or tooltip shows, and every comment inside a code block;
-//   - sentences inside samples: a string literal with a space in it, like
-//     print("blocked, the other worker took the last units").
+//     code blocks and <blockquote>s cut out, inline code with a space in it
+//     (a phrase like "kickoff() is blocked here" is a sentence, not a name),
+//     the attribute text a screen reader or tooltip shows, and every comment
+//     inside a code block;
+//   - sentences inside samples: every string literal that is not a key, so
+//     print("stopped") counts as much as print("blocked, the other worker took
+//     the last units"). A key is a string between {, a comma or the start of
+//     the line, and a colon.
 // Left out, on purpose: identifiers and API field names a sample must spell the
 // way the API does ("blocked": true on GET /decisions, "is_blocked" on /budget,
 // OpenClaw's outcome: 'block'); a vendor's own words inside a <blockquote>; and
-// an output line (class="out-*") that is the SDK's or the plugin's own refusal
-// text, which is what a reader's terminal will print. That allowance is read
-// from source, not typed: the prefixes are the ones client.py and ceiling.ts
-// build their refusal sentences with, and an output line without one is
-// checked like any other sentence. "first" is banned in prose only, because in
-// code it is a file name (first-run.mjs), not a claim.
+// the words of the SDK's or the plugin's own refusal sentence in an output line
+// (class="out-*"), which is what a reader's terminal will print. That allowance
+// is read from source, not typed: each sentence is rebuilt from the template
+// client.py and ceiling.ts build it with, every placeholder one unspaced value,
+// and only a line that is the whole sentence is let through. Even then the
+// values it filled in are checked, because they are ours. "first" is banned
+// wherever the word ban reads, except inside a file name (first-run.mjs), which
+// is a name and not a claim.
 console.log('\n[integrations] the pages that name what AgentBill plugs into say what it does, and nothing it does not')
 const decode11 = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
 const text11 = (h) => decode11(h.replace(/<[^>]+>/g, ' ')).replace(/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/gi, ' ')
 const WORDS11 = /\b(stop|stops|stopped|stopping|block|blocks|blocked|blocking|kill|kills|killed|killing|halt|halts|halted|halting)\b|\bcut(?:s|ting)? off\b/gi
-const FIRST11 = /\bfirst\b/gi
+const FIRST11 = /\bfirst\b(?![\w-]*\.(?:mjs|cjs|js|ts|py)\b)/gi
 const NAMED11 = /\bn8n\b|\bclaude[\s_-]*code\b/gi
 const DASH11 = /—|&mdash;|&#8212;|&#x2014;/gi
 const py11 = readFileSync9(`${ROOT9}/sdk/python/agentbill/client.py`, 'utf8')
 const claw11 = readFileSync9(`${ROOT9}/plugins/openclaw/src/ceiling.ts`, 'utf8')
-const SDK_OUT11 = [['Refused (', /f"Refused \(task_ceiling_exceeded\): task /.test(py11)],
-                   ['AgentBill refused (', /`AgentBill refused \(\$\{/.test(claw11)]]
-ok('[integrations] the refusal prefixes the output-line allowance trusts are still what the SDK and the plugin print',
-   SDK_OUT11.every(([, found]) => found), SDK_OUT11.filter(([, f]) => !f).map(([p]) => p).join(', '))
-const sdkOut11 = (line) => SDK_OUT11.some(([p, found]) => found && line.trimStart().startsWith(p))
+// client.py joins three f-string pieces; ceiling.ts writes one template literal.
+const HOLE11 = /\$\{[^{}]*\}|\{[^{}]*\}/g
+const pyTpl11 = [...((py11.match(/f"Refused \(task_ceiling_exceeded\): [^"]*"(?:\s*f"[^"]*")*/) ?? [''])[0]).matchAll(/f"([^"]*)"/g)]
+  .map((m) => m[1]).join('')
+const clawTpl11 = (claw11.match(/`(AgentBill refused \(\$\{[^`]*)`/) ?? [])[1] ?? ''
+const esc11 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const SDK_OUT11 = [['client.py', pyTpl11], ['ceiling.ts', clawTpl11]].map(([file, tpl]) => ({
+  file, holes: (tpl.match(HOLE11) ?? []).length, re: new RegExp(`^${tpl.split(HOLE11).map(esc11).join('(\\S+)')}$`),
+}))
+ok('[integrations] the refusal sentences the output-line allowance trusts are still built in client.py and ceiling.ts',
+   SDK_OUT11.every((t) => t.holes >= 3), SDK_OUT11.filter((t) => t.holes < 3).map((t) => t.file).join(', '))
+/** An output line that is one of those sentences whole reads as its values; any other line reads as itself. */
+const sdkOut11 = (line) => {
+  for (const t of SDK_OUT11) { const m = line.trim().match(t.re); if (m) return m.slice(1).join(' ') }
+  return line
+}
+const isKey11 = (l, m) => /^\s*:/.test(l.slice(m.index + m[0].length)) && /(?:^|[{,])\s*$/.test(l.slice(0, m.index))
 
 const map11 = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
 const scope11 = [...map11.matchAll(/<loc>https:\/\/agentbill\.dev([^<]*)<\/loc>/g)].map((m) => m[1])
@@ -2209,16 +2227,16 @@ for (const path of scope11) {
   const out = lines.filter((l) => /class="out-/.test(l)).map(text11)
   const comments = [...pres.flatMap((p) => [...p.matchAll(/<span class="comment">([\s\S]*?)<\/span>/g)].map((m) => text11(m[1]))),
                     ...code.map((l) => (l.match(/(?:^|\s)(?:#|\/\/) (.*)$/) ?? [])[1] ?? '')]
-  const strings = code.flatMap((l) => [...l.matchAll(/"([^"\n]*\s[^"\n]*)"|'([^'\n]*\s[^'\n]*)'/g)].map((m) => m[1] ?? m[2]))
+  const strings = code.flatMap((l) => [...l.matchAll(/"([^"\n]*)"|'([^'\n]*)'/g)].filter((m) => !isKey11(l, m)).map((m) => m[1] ?? m[2]))
   const proseHtml = main.replace(/<pre[\s\S]*?<\/pre>/g, ' ').replace(/<blockquote[\s\S]*?<\/blockquote>/g, ' ')
-    .replace(/<span class="inline">[\s\S]*?<\/span>/g, ' ').replace(/<code>[\s\S]*?<\/code>/g, ' ')
+    .replace(/<span class="inline">([\s\S]*?)<\/span>|<code>([\s\S]*?)<\/code>/g, (_, a, b) => (/\s/.test((a ?? b).trim()) ? ` ${a ?? b} ` : ' '))
   const prose = [(html.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? '',
                  (html.match(/<meta name="description" content="([^"]*)"/) ?? [])[1] ?? '',
                  text11(proseHtml),
                  ...[...main.matchAll(/(?:aria-label|title|alt|placeholder)="([^"]*)"/gi)].map((m) => m[1]),
                  ...comments].join('\n')
   pages11.push({ path, status: res.status, html, main, pres: pres.map((p) => decode11(p.replace(/<[^>]+>/g, ''))),
-                 prose, sentences: [...strings, ...out.filter((l) => !sdkOut11(l))].join('\n'), code: code.join('\n') })
+                 prose, sentences: [...strings, ...out.map(sdkOut11)].join('\n'), code: code.join('\n') })
 }
 const hits11 = (re, pick) => pages11.flatMap((p) => (pick(p).match(re) ?? []).map((w) => `${p.path}: ${w}`))
 {
@@ -2228,8 +2246,9 @@ const hits11 = (re, pick) => pages11.flatMap((p) => (pick(p).match(re) ?? []).ma
      h.join('; ') || pages11.filter((p) => p.status !== 200 || !p.main).map((p) => `${p.path} ${p.status}`).join(', '))
 }
 {
-  const h = hits11(FIRST11, (p) => p.prose)
-  ok('[integrations] no page says "first" in its prose or its comments', pages11.length > 0 && h.length === 0, h.join('; '))
+  const h = [...hits11(FIRST11, (p) => p.prose), ...hits11(FIRST11, (p) => p.sentences)]
+  ok('[integrations] no page says "first" in its prose, its comments or the sentences in its samples',
+     pages11.length > 0 && h.length === 0, h.join('; '))
 }
 {
   const h = hits11(DASH11, (p) => p.html)
@@ -2257,6 +2276,25 @@ const clawLog11 = (readFileSync9(`${ROOT9}/plugins/openclaw/README.md`, 'utf8').
 ok('[integrations] /integrations/openclaw carries the README\'s install line, config and refusal sample byte for byte, and its log line',
    clawWant11.every((b) => b && clawPres11.includes(b)) && text11(page11('/integrations/openclaw').main).replace(/\s+/g, ' ').includes(clawLog11),
    clawWant11.map((b, i) => (b && clawPres11.includes(b) ? '' : `README block ${i + 1} not on the page`)).filter(Boolean).join('; ') || `log line "${clawLog11}" not on the page`)
+// OpenClaw runs before_agent_run, the hook that refuses a model turn, only on
+// its embedded and CLI runners (docs/plugins/hooks.md in openclaw 2026.9.4: "do
+// not rely on it as a Codex or Copilot input gate"). The page said, with no
+// condition, that OpenClaw does not send a refused turn, and so did the hub and
+// llms.txt. Each place a reader meets that claim names the runners it holds
+// on, in the same paragraph, and each place must be found for this to pass.
+{
+  const claw = page11('/integrations/openclaw')
+  const llms = await fetch(`${API}/llms.txt`).then((r) => r.text())
+  const said = [
+    ['the OpenClaw description', decode11((claw.html.match(/<meta name="description" content="([^"]*)"/) ?? [])[1] ?? '')],
+    ['the OpenClaw lede', text11((claw.main.match(/<p class="lede">([\s\S]*?)<\/p>/) ?? [])[1] ?? '')],
+    ['the hub', text11((page11('/integrations').main.match(/<p><b>Your agent runs inside OpenClaw\.<\/b>([\s\S]*?)<\/p>/) ?? [])[1] ?? '')],
+    ['llms.txt', (llms.match(/^- \[OpenClaw plugin\].*$/m) ?? [''])[0]],
+  ].map(([where, s]) => [where, s.replace(/\s+/g, ' ').trim()])
+  const bad = said.filter(([, s]) => !s || (/\bsend\b/.test(s) && !s.includes('embedded and CLI runners')))
+  ok('[integrations] wherever OpenClaw is said not to send a refused turn, the same paragraph names the runners where that holds',
+     bad.length === 0, bad.map(([where, s]) => (s ? `${where}: "${s}"` : `${where}: not found`)).join('; '))
+}
 const mcpDoc11 = fenced11('mcp/README.md')
 const mcpWant11 = [mcpDoc11.find((b) => b === 'uvx agentbill-mcp'), mcpDoc11.find((b) => b.includes('"mcpServers"'))]
 const mcpPres11 = page11('/integrations/mcp').pres.map((p) => p.trim())
