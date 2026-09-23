@@ -2065,9 +2065,11 @@ function ceilingForm(p: Page): string {
 function pickLine(p: Page): string {
   const k = p.suggest?.pick
   if (!k) return ''
+  // The label is escaped once, here, so neither branch below can print it raw.
+  const who = esc(k.agentId)
   const from = k.jobs === 1
-    ? `what your last job of ${esc(k.agentId)} used`
-    : `the ${k.which} of your last ${num(k.jobs)} jobs of ${esc(k.agentId)}`
+    ? `what your last job of ${who} used`
+    : `the ${k.which} of your last ${num(k.jobs)} jobs of ${who}`
   return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${k.units === 1 ? 'unit' : 'units'}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
 }
 
@@ -2095,7 +2097,7 @@ function historyBlock(p: Page): string {
   return `<div class="hist">
       <p class="lbl">Suggested ceilings</p>
       ${rows}
-      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or for up to ${num(HELD_OUT_MINUTES)} minutes if it never does, until its reservation expires and is released. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
+      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. At most ${num(HISTORY_AGENTS)} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or for up to ${num(HELD_OUT_MINUTES)} minutes if it never does, until its reservation expires and is released. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
     </div>`
 }
 
