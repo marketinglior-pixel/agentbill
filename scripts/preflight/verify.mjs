@@ -2323,6 +2323,19 @@ ok('[integrations] /integrations/mcp carries the MCP README\'s install line and 
   const bad = seen.filter((m) => m.status !== 301 || m.location !== m.to || m.listed)
   ok('[integrations] the two replaced guides answer 301 to the pages that replaced them, and are out of the sitemap',
      bad.length === 0, bad.map((m) => `${m.from} -> ${m.status} ${m.location}${m.listed ? ', still in the sitemap' : ''}`).join('; '))
+  // A tagged link to an old path keeps its label through the redirect, the way
+  // /upgrade forwards to /pricing: site_pulse reads ?src= from the page it lands on.
+  const tagged = await Promise.all(moved.map(([from]) => fetch(`${API}${from}?src=dir-test`, { redirect: 'manual' })))
+  const lost = moved.map(([from, to], i) => ({ from, want: `${to}?src=dir-test`, got: tagged[i].headers.get('location') }))
+    .filter((m) => m.got !== m.want)
+  ok('[integrations] the two old guide paths carry ?src= through the 301',
+     lost.length === 0, lost.map((m) => `${m.from} -> ${m.got}`).join('; '))
+  // And nothing else travels: a label outside cleanSource()'s shape, or any
+  // other parameter, is dropped, so the Location is always our own path.
+  const junk = await Promise.all(moved.map(([from]) => fetch(`${API}${from}?src=%2F%2Fevil.example&next=https://evil.example`, { redirect: 'manual' })))
+  const leaked = moved.map(([from, to], i) => ({ from, to, got: junk[i].headers.get('location') })).filter((m) => m.got !== m.to)
+  ok('[integrations] the old guide paths forward no parameter but a valid ?src=',
+     leaked.length === 0, leaked.map((m) => `${m.from} -> ${m.got}`).join('; '))
 }
 
 // The hub: every version it shows is SDK_VERSIONS, the one copy that is checked

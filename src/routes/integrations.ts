@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath, ORIGIN } from '../ui/site.js'
@@ -6,6 +6,7 @@ import { KEY_CTA } from '../ui/chrome.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { SDK_VERSIONS } from '../lib/llms.js'
+import { cleanSource } from '../lib/source.js'
 
 // /integrations and the pages under it, 2026-09-23.
 //
@@ -195,8 +196,7 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   decides what the job does next. The OpenClaw plugin hands the refusal to OpenClaw, and the MCP
   server returns it to the model as a value. Over the HTTP API, the answer is the JSON body.</p>
   <p>Units are integers you assign to each call, except in the OpenClaw plugin's tokens mode, which
-  counts the token totals OpenClaw reports. AgentBill never converts units to money and never reads
-  your provider bill.</p>
+  counts the token totals OpenClaw reports. AgentBill never reads your provider bill.</p>
 
   ${cta('integrations')}
 `,
@@ -292,8 +292,7 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   runner makes that report once per model turn (once per attempt, if it retries one), however many
   model calls the turn made, so a ceiling of 40 is forty turns and tool calls together, not forty
   provider requests.</p>
-  <p>The plugin measures no provider and no tool. It records what OpenClaw already counts, and
-  nothing converts that number to dollars.</p>
+  <p>The plugin measures no provider and no tool. It records what OpenClaw already counts.</p>
 
   <h2>What a refusal looks like</h2>
   <p>Before a model turn, preflight answers <span class="inline">approved: false</span> with
@@ -369,7 +368,6 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <ul class="plain">
     <li>It measures no provider and reads no bill. In tokens mode it records the usage OpenClaw
     reports; in calls mode it counts calls.</li>
-    <li>It never converts units to dollars.</li>
     <li>It cannot reach into a turn that is already running. It asks before the next one.</li>
   </ul>
 
@@ -456,7 +454,7 @@ def agentbill_ceiling(request, handler):
 agent = create_agent(model, tools=tools, middleware=[agentbill_ceiling], context_schema=Job)</pre></div>
   <p><span class="inline">model</span> is any LangChain chat model and
   <span class="inline">tools</span> your tool list. <span class="inline">UNITS</span> is your own
-  estimate for one model call; AgentBill never converts it to money.</p>
+  estimate for one model call.</p>
 
   <h2>Run a job, and decide what a refusal means</h2>
   <div class="code"><pre>from agentbill import TaskCeilingExceededError
@@ -564,7 +562,7 @@ graph.invoke({"messages": [{"role": "user", "content": "Research the topic"}]},
   <ul class="plain">
     <li>It does not count tokens. <span class="inline">UNITS</span> is the number you assign to one
     call.</li>
-    <li>It does not meter the provider or read its bill, and it never converts units to money.</li>
+    <li>It does not meter the provider or read its bill.</li>
     <li>It does not end the run. Preflight answers, the SDK raises, and your code decides.</li>
     <li>A refusal from AgentBill's own monthly quota is returned, not raised, so this middleware
     lets that call run. Check <span class="inline">approved</span> on what preflight returns if you
@@ -689,7 +687,7 @@ asyncio.run(main())</pre></div>
   <ul class="plain">
     <li>It does not count tokens. <span class="inline">UNITS</span> is the number you assign to one
     model request.</li>
-    <li>It does not read your OpenAI bill, and it never converts units to money.</li>
+    <li>It does not read your OpenAI bill.</li>
     <li>It does not end the run. Preflight answers, the SDK raises, and your code decides.</li>
     <li>A refusal from AgentBill's own monthly quota is returned, not raised, so these hooks let that
     request run.</li>
@@ -804,7 +802,7 @@ except HookAborted as e:
   <ul class="plain">
     <li>It does not count tokens. <span class="inline">UNITS</span> is the number you assign to one
     model call.</li>
-    <li>It does not meter the provider or read its bill, and it never converts units to money.</li>
+    <li>It does not meter the provider or read its bill.</li>
     <li>It does not end the crew. Preflight answers, the hook raises, and your code decides.</li>
     <li>A refusal from AgentBill's own monthly quota is returned, not raised, so these hooks let that
     call run.</li>
@@ -904,6 +902,13 @@ except HookAborted as e:
   // (customer_id, a per-call ceiling, and FreeTierExceededError, which nothing
   // has raised since 0.6.0), and the OpenAI one described a task ceiling its
   // code never passed. A 301 keeps whatever links and rankings they earned.
-  app.get('/docs/langchain-billing', publicRoute(), async (_, reply) => reply.redirect('/integrations/langchain', 301))
-  app.get('/docs/openai-agent-spend-ceiling', publicRoute(), async (_, reply) => reply.redirect('/integrations/openai-agents-sdk', 301))
+  // A tagged link to an old path keeps its site_pulse label through the
+  // redirect. Only ?src= travels, and only in the one shape cleanSource()
+  // accepts, so the Location is always our own path plus our own label.
+  const moved = (to: string) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const src = cleanSource((request.query as Record<string, unknown>).src)
+    return reply.redirect(src ? `${to}?src=${src}` : to, 301)
+  }
+  app.get('/docs/langchain-billing', publicRoute(), moved('/integrations/langchain'))
+  app.get('/docs/openai-agent-spend-ceiling', publicRoute(), moved('/integrations/openai-agents-sdk'))
 }
