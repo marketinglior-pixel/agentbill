@@ -153,7 +153,7 @@ An approved preflight holds `estimated_units` and returns `reservation_expires_a
 
 **Preflight reservation.** The check and the reservation are one conditional `UPDATE`, so two concurrent calls on the same job cannot both be approved against the last of the budget.
 
-**Units you define.** A unit is an integer you pass. AgentBill reserves the number you send and never converts units to money. `1 unit = 1 cent` is a common convention, not a rule.
+**Units you define.** A unit is an integer you pass. AgentBill reserves the number you send and stores units only. `1 unit = 1 cent` is a common convention, not a rule. If you think in dollars, you declare the rate: the console's task budgets view turns a dollar amount and your `dollars_per_unit` into a whole number of units, rounded down, and saves only the units.
 
 **Per-job ceilings from outside the code.** `PUT /tasks/:task_ref/ceiling` opens a job with a ceiling or changes one; a ceiling under the job's spent plus reserved units is refused with the smallest value that would be accepted.
 
@@ -193,7 +193,7 @@ Read this section before the pitch, not after.
 - **It does not reach into a running job.** `preflight()` answers `approved: false` or raises. Your code decides what happens next. Nothing here can terminate a process it never sat in front of.
 - **It is not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider credentials held by us.
 - **No automatic metering.** Tokens, tool calls and GPU time are invisible to AgentBill. Units move only when your code calls `/preflight`, `/events` or `/step`, and they count against a job only when the call carries the same `task_ref`.
-- **It never reads a provider invoice** and never turns units into dollars. There is no currency field anywhere in the API.
+- **It never reads a provider invoice** and keeps no price table. There is no currency field anywhere in the API. The console can show units as dollars, and take a ceiling in dollars, only at a rate you type into it; that is your estimate at your rate, it is stored nowhere, and your invoices may differ.
 - **The ceiling is only as tight as your estimate.** Preflight reserves the number you send. Send 1, spend 100, and 99 of it was never seen.
 - **No per-agent budget.** `agent_id` is an attribution label. Nothing is capped by it; ceilings live on a `task_ref`, a customer, or a single call.
 - **It is not a payment processor.** It does not move money, hold cards or charge your end customers. Polar bills you for AgentBill; nothing bills anyone on your behalf. Stripe Connect is not shipped.

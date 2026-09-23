@@ -10,6 +10,7 @@ import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { unitsFromDollars, dollarsFromUnits } from '../lib/dollar-rate.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -40,6 +41,9 @@ import { INSTALL_PY } from '../ui/site.js'
 // arrived because the empty state below used to send a reader back to their
 // editor to set a budget, and the founder, dogfooding, said that was the
 // product's whole problem. Every other number here is still read-only.
+// The dollars on the tasks view (2026-09-23) add no write: they are a
+// calculator on a GET, at a rate the reader types, that fills the same unit
+// field and saves nothing, the rate included. See readCalc below.
 // This page loads no script at all and the CSP below has no script-src; the
 // chart's hover layer is CSS. Corrected 2026-09-10: that sentence used to
 // justify itself with "a live key is rendered into it", which stopped being
@@ -123,8 +127,11 @@ export async function appRoute(app: FastifyInstance) {
     }
 
     const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
+    // The tasks view's suggestion and dollars calculator read the real
+    // account only; under sample data the view has no form to fill.
+    const calc = !demo && view === 'tasks' ? await readCalc(viewer.accountId, q) : null
     return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter,
-                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash) }))
+                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash), calc }))
   })
 
   // The console's one write: open a job with a ceiling, or change one. A plain
@@ -149,7 +156,14 @@ export async function appRoute(app: FastifyInstance) {
     // nothing and lands where it always has. An allowlist of two, not an echo:
     // the value goes into a redirect.
     const backTo = body?.back === 'start' ? 'start' : 'tasks'
-    const to = (extra: string) => reply.redirect(`/app?view=${backTo}&${extra}`, 303)
+    // The rate the tasks view was showing dollars at, carried into the
+    // redirect so the page after a save still shows them. Shape-checked and
+    // echoed, nothing more: it is never read as money here, and the write
+    // below takes ceiling_units and nothing else. A ceiling_dollars field on
+    // this POST is ignored; the calculator on the tasks view is a GET that
+    // fills the unit field, so a dollar amount never reaches setTaskCeiling.
+    const keepRate = ratePart(body?.dollars_per_unit)
+    const to = (extra: string) => reply.redirect(`/app?view=${backTo}&${extra}${keepRate ? `&dollars_per_unit=${encodeURIComponent(keepRate)}` : ''}`, 303)
     const fail = (code: string) => to(`err=${code}${isId(ref) ? `&ref=${encodeURIComponent(ref)}` : ''}`)
 
     // The same 100/min bucket the API applies to this key, so the console is
@@ -521,6 +535,129 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
   return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
 }
 
+// ---------------------------------------------------------------------------
+// The tasks view's two helpers: a suggested ceiling from the account's own
+// history, and dollars at a rate the reader declares (ticket T3, 2026-09-23).
+//
+// Neither one writes. Both fill the ceiling field of the POST form, which
+// still takes ceiling_units and nothing else, so the ledger stays units and a
+// dollar value never reaches setTaskCeiling or preflight. The rate is never
+// stored: it rides the query string of this view and the hidden field that
+// carries it across a save, and nowhere else. AgentBill reads no bill and
+// keeps no price, so every dollar figure here is labelled as the reader's own
+// estimate at the reader's own rate.
+// ---------------------------------------------------------------------------
+
+/** How many of an agent's most recent jobs the suggested ceiling reads. */
+const HISTORY_JOBS = 20
+/** How many agents the suggestion lists, most recently active first. */
+const HISTORY_AGENTS = 5
+
+type Pick = 'p50' | 'p90' | 'max'
+const PICKS: readonly Pick[] = ['p50', 'p90', 'max']
+type AgentHistory = { agentId: string; jobs: number } & Record<Pick, number>
+
+/** What the tasks view read off its query string, validated. */
+type Calc = {
+  /** dollars_per_unit as typed, when it is a plain decimal above zero. */
+  rate: string | null
+  /** ceiling_dollars as typed, when it is a plain decimal. */
+  dollars: string | null
+  /** floor(dollars / rate), when that lands on a ceiling the API accepts. */
+  units: number | null
+  err: 'rate' | 'dollars' | 'needrate' | 'under' | 'over' | null
+  history: AgentHistory[]
+  /** A suggestion the reader chose, recomputed from the rows, never read off the URL. */
+  pick: { agentId: string; which: Pick; units: number } | null
+}
+
+// Plain decimals only. No thousands separator, because "5,50" is five and a
+// half in half the world and five hundred and fifty in the other half, and a
+// ceiling a hundred times too large is the one mistake this field must not
+// make. A leading "$" is forgiven.
+const RATE_RE = /^[0-9]{1,9}(\.[0-9]{1,12})?$/
+const DOLLARS_RE = /^[0-9]{1,12}(\.[0-9]{1,6})?$/
+const typedDecimal = (v: unknown): string => (typeof v === 'string' ? v.trim().replace(/^\$\s*/, '') : '')
+
+/** A usable dollars_per_unit, or '' when it is absent or malformed. */
+function ratePart(v: unknown): string {
+  const s = typedDecimal(v)
+  return RATE_RE.test(s) && /[1-9]/.test(s) ? s : ''
+}
+
+/**
+ * The account's recent jobs per agent: p50, p90 and max of used_units over
+ * each agent's last HISTORY_JOBS jobs.
+ *
+ * AgentBill has no "job finished" event, so a job counts here once it has
+ * spent units and holds nothing in flight (reserved_units = 0). That is the
+ * nearest honest reading of finished, and the page says what it counted.
+ * percentile_disc, so every number offered is one a real job used, never an
+ * interpolation. The console placeholder label is not an agent and is left
+ * out. used_units is what the developer's code reported; nothing here was
+ * measured by AgentBill.
+ */
+async function loadHistory(accountId: string): Promise<AgentHistory[]> {
+  const rows = await sql`
+    WITH finished AS (
+      SELECT agent_id, used_units, updated_at,
+             row_number() OVER (PARTITION BY agent_id ORDER BY updated_at DESC, id DESC) AS rn
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+        AND used_units > 0
+        AND reserved_units = 0
+        AND agent_id <> ${CONSOLE_AGENT}
+    )
+    SELECT agent_id,
+           count(*)                                                AS jobs,
+           percentile_disc(0.5) WITHIN GROUP (ORDER BY used_units) AS p50,
+           percentile_disc(0.9) WITHIN GROUP (ORDER BY used_units) AS p90,
+           max(used_units)                                         AS max,
+           max(updated_at)                                         AS last_at
+    FROM finished
+    WHERE rn <= ${HISTORY_JOBS}
+    GROUP BY agent_id
+    ORDER BY last_at DESC, agent_id
+    LIMIT ${HISTORY_AGENTS}
+  `
+  return rows.map((r) => ({
+    agentId: String(r.agentId), jobs: Number(r.jobs), p50: Number(r.p50), p90: Number(r.p90), max: Number(r.max),
+  }))
+}
+
+async function readCalc(accountId: string, q: Record<string, unknown>): Promise<Calc> {
+  const c: Calc = { rate: null, dollars: null, units: null, err: null, history: await loadHistory(accountId), pick: null }
+  const rawRate = typedDecimal(q?.dollars_per_unit)
+  if (rawRate) {
+    const rate = ratePart(rawRate)
+    if (rate) c.rate = rate
+    else c.err = 'rate'
+  }
+  const rawDollars = typedDecimal(q?.ceiling_dollars)
+  if (rawDollars && !c.err) {
+    if (!DOLLARS_RE.test(rawDollars)) c.err = 'dollars'
+    else {
+      c.dollars = rawDollars
+      if (!c.rate) c.err = 'needrate'
+      else {
+        // Both inputs are bounded by the patterns above, so the one thing that
+        // can throw here is a quotient past what a JavaScript number holds,
+        // which is past INT4_MAX as well. A crafted link is a message, not a 500.
+        const rate = c.rate
+        const units = (() => { try { return unitsFromDollars(rawDollars, rate) } catch { return Infinity } })()
+        if (units < 1) c.err = 'under'
+        else if (units > INT4_MAX) c.err = 'over'
+        else c.units = units
+      }
+    }
+  }
+  // The pick names an agent and a statistic; the number comes from the rows.
+  const which = PICKS.find((k) => k === q?.pick)
+  const row = isId(q?.history) ? c.history.find((h) => h.agentId === q.history) : undefined
+  if (row && which) c.pick = { agentId: row.agentId, which, units: row[which] }
+  return c
+}
+
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
@@ -851,6 +988,14 @@ function relFuture(mins: number): string {
 
 function num(n: number): string {
   return n.toLocaleString('en-US')
+}
+
+/** "$4.998", "$5.00", "$20,000.00". Takes the exact decimal dollarsFromUnits
+ *  returns, or one a reader typed, and groups it; it never rounds, because a
+ *  figure labelled "at your rate" should be exactly that. */
+function usd(exact: string): string {
+  const [whole, frac = ''] = exact.split('.')
+  return `$${BigInt(whole).toLocaleString('en-US')}.${frac.padEnd(2, '0')}`
 }
 
 /** "Aug 8" from an ISO day. The chart's x-axis used to print 2026-08-08. */
@@ -1328,9 +1473,31 @@ ${MARK_CSS}
   .bset label { display: inline; margin: 0; }
   .bset input { width: 9ch; margin: 0; min-height: 34px; padding: 4px var(--s2); font-size: var(--fs-micro); }
   .bset .btn-out { min-height: 34px; padding: 4px var(--s3); font-size: var(--fs-micro); cursor: pointer; }
+  /* The suggestion from the account's own jobs, and the dollars calculator.
+     Both fill the ceiling field above and neither saves anything, so neither
+     wears the green of a primary action: links in green, figures in ink. */
+  .hist { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--border); }
+  .hist .lbl { margin-bottom: var(--s2); }
+  .hrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s3); padding: 6px 0;
+          font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); overflow-wrap: anywhere; }
+  .hrow .ha { color: var(--text); font-weight: 600; }
+  .hrow a { color: var(--green); white-space: nowrap; }
+  .hrow b { font-weight: 600; }
+  .hrow .hf { color: var(--muted); }
+  .hrow .nw { white-space: nowrap; }
+  .conv { color: var(--muted); margin-top: var(--s3); overflow-wrap: anywhere; }
+  .conv b { color: var(--text); }
+  .atrate { color: var(--muted); }
+  .dolf { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--s3); align-items: end;
+          margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--border); }
+  .dolf input { margin-bottom: 0; }
+  .dolf label code { text-transform: none; letter-spacing: 0; font-family: var(--mono); color: var(--muted); margin-left: 4px; }
+  .dolf .btn-out { width: auto; min-height: 46px; padding: 0 var(--s4); }
   @media (max-width: ${BP.lg}px) {
     .setf { grid-template-columns: minmax(0, 1fr); }
     .setf .btn { width: 100%; }
+    .dolf { grid-template-columns: minmax(0, 1fr); }
+    .dolf .btn-out { width: 100%; }
   }
 
   /* The three-step start screen. One column at every width: these rows are
@@ -1599,12 +1766,12 @@ function handoffPage(tier: string, to: string): string {
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null; calc?: Calc | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; history: string; pick: Pick; rate: string }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
@@ -1614,6 +1781,11 @@ function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: stri
   if (extra.task) q.push(`task=${encodeURIComponent(extra.task)}`)
   if (extra.agent) q.push(`agent=${encodeURIComponent(extra.agent)}`)
   if (extra.only) q.push(`only=${encodeURIComponent(extra.only)}`)
+  // The tasks view's suggestion links. The rate is passed only by the links
+  // that stay on that view, so it never follows a reader into another one.
+  if (extra.history) q.push(`history=${encodeURIComponent(extra.history)}`)
+  if (extra.pick) q.push(`pick=${extra.pick}`)
+  if (extra.rate) q.push(`dollars_per_unit=${encodeURIComponent(extra.rate)}`)
   return q.length ? `/app?${q.join('&amp;')}` : '/app'
 }
 
@@ -1834,6 +2006,7 @@ function activityTable(series: Series[]): string {
 }
 
 function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
+  const rate = p.calc?.rate ?? null
   const ceiling = Number(t.ceilingUnits)
   const used = Number(t.usedUnits)
   const reserved = Number(t.reservedUnits)
@@ -1863,9 +2036,10 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
         <i class="res" style="width:${resPct.toFixed(1)}%"></i>
       </div>
       <div class="bfoot">
-        <span>${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}</span>
+        <span>${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}${rate ? ` · <span class="atrate">ceiling ${usd(dollarsFromUnits(ceiling, rate))} at your rate</span>` : ''}</span>
         ${editable ? `<form method="POST" action="/app/tasks" class="bset" autocomplete="off">
-          <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
+          <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />${rate ? `
+          <input type="hidden" name="dollars_per_unit" value="${esc(rate)}" />` : ''}
           <label for="ceil-${i}">ceiling</label>
           <input id="ceil-${i}" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />
           <button class="btn-out" type="submit">Save</button>
@@ -1919,16 +2093,98 @@ function ceilingForm(p: Page): string {
     : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const keep = f?.err && f.ref ? esc(f.ref) : ''
+  const c = p.calc ?? null
+  // What goes in the ceiling field: a dollar amount converted at the reader's
+  // rate wins over a suggestion picked from history, and neither is saved
+  // until the reader presses Set ceiling. Both stay editable.
+  const prefill = c?.units ?? c?.pick?.units ?? null
+  const agentValue = c?.pick ? esc(c.pick.agentId) : ''
+  const keepRate = c?.rate ? `\n      <input type="hidden" name="dollars_per_unit" value="${esc(c.rate)}" />` : ''
   return `<div class="frame setc">
     ${said}${pointer}
-    <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
+    <form method="POST" action="/app/tasks" class="setf" autocomplete="off">${keepRate}
       <div><label for="t-ref">Job <code>task_ref</code></label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
-      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
+      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${prefill != null ? `value="${prefill}"` : 'placeholder="500"'} required /></div>
+      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" value="${agentValue}" /></div>
       <button class="btn" type="submit">Set ceiling</button>
     </form>
+    ${calcLine(c)}
+    ${historyBlock(p)}
+    ${dollarsForm(p)}
     <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
+}
+
+/** "$0.01 per unit": the reader's rate, printed from the number it is. */
+const perUnit = (rate: string) => `${usd(dollarsFromUnits(1, rate))} per unit`
+
+/**
+ * The suggested ceilings. Hidden when no agent has a job that counts, because
+ * a suggestion from no history would be a number we made up. Each figure is a
+ * link that puts it in the ceiling field with that agent's label; the page
+ * then recomputes it from the rows rather than trusting the link.
+ */
+function historyBlock(p: Page): string {
+  const c = p.calc
+  if (!c || c.history.length === 0) return ''
+  const rate = c.rate
+  const rows = c.history.map((h) => {
+    const links = PICKS.map((k) =>
+      `<a href="${href(p, 'tasks', { history: h.agentId, pick: k, rate: rate ?? undefined })}">${k} <b>${num(h[k])}</b></a>`).join(' &middot; ')
+    const forecast = rate
+      ? `<span class="hf">per job at your rate: ${PICKS.map((k) => `<span class="nw">${k} ${usd(dollarsFromUnits(h[k], rate))}</span>`).join(' &middot; ')}, your estimate</span>`
+      : ''
+    return `<div class="hrow"><span class="ha">${esc(h.agentId)}</span><span>from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`}</span><span class="hp">${links} units</span>${forecast}</div>`
+  }).join('')
+  return `<div class="hist">
+      <p class="lbl">Suggested ceilings</p>
+      ${rows}
+      <p class="fine">Pick a figure and it goes in the ceiling field above with that agent's label, still editable. A job counts once it has spent units and holds none in flight, and the figures are the units your code reported. ${rate
+        ? `The dollar figures are those units at your rate of ${perUnit(rate)}: your estimate at your rate, not a bill, and your invoices may differ.`
+        : 'Add your rate below to see them in dollars, as your own estimate.'}</p>
+    </div>`
+}
+
+/** The line under the form: what is in the ceiling field and where it came from, or why the calculator could not fill it. */
+function calcLine(c: Calc | null): string {
+  if (!c) return ''
+  if (c.err === 'rate') return '<p class="err">The rate is dollars per unit as a plain decimal above zero, like 0.01, with no thousands separator.</p>'
+  if (c.err === 'dollars') return '<p class="err">The dollar amount is a plain decimal, like 5 or 12.50, with no thousands separator.</p>'
+  if (c.err === 'needrate') return '<p class="err">A dollar amount needs your rate beside it: how many dollars one unit is worth to you.</p>'
+  if (c.err === 'under' && c.dollars && c.rate) return `<p class="err">${usd(c.dollars)} at ${perUnit(c.rate)} is less than one unit. Raise the amount or lower the rate.</p>`
+  if (c.err === 'over' && c.dollars && c.rate) return `<p class="err">${usd(c.dollars)} at ${perUnit(c.rate)} is more units than a ceiling holds (${num(INT4_MAX)}).</p>`
+  if (c.units != null && c.dollars && c.rate) {
+    // Said only when rounding down changed the amount, which is the case a
+    // reader needs to see: $5 at 0.003 is 1,666 units, worth $4.998.
+    const worth = dollarsFromUnits(c.units, c.rate)
+    const moved = usd(worth) !== usd(c.dollars.includes('.') ? c.dollars.replace(/\.?0+$/, '') : c.dollars) ? `, worth ${usd(worth)} at that rate` : ''
+    return `<p class="conv">${usd(c.dollars)} at ${perUnit(c.rate)} is <b>${num(c.units)} ${c.units === 1 ? 'unit' : 'units'}</b>${moved}. Rounded down, so the unit ceiling is never worth more than ${usd(c.dollars)} at your rate. It is in the ceiling field, and nothing is saved until you press Set ceiling.</p>`
+  }
+  if (c.pick) {
+    const h = c.history.find((x) => x.agentId === c.pick!.agentId)
+    return `<p class="conv">In the ceiling field: <b>${num(c.pick.units)} ${c.pick.units === 1 ? 'unit' : 'units'}</b>, the ${c.pick.which} from your last ${h && h.jobs !== 1 ? `${num(h.jobs)} jobs` : 'job'} by ${esc(c.pick.agentId)}${c.rate ? `, ${usd(dollarsFromUnits(c.pick.units, c.rate))} at your rate` : ''}. Change it before you save if the next job is not like those.</p>`
+  }
+  return ''
+}
+
+/**
+ * The dollars calculator. A GET to this same view, so it saves nothing: it
+ * divides the amount by the rate, rounds down, and the page comes back with
+ * the result in the unit field above. A chosen suggestion rides along so its
+ * agent label stays filled in.
+ */
+function dollarsForm(p: Page): string {
+  const c = p.calc
+  if (!c) return ''
+  const keepPick = c.pick
+    ? `\n      <input type="hidden" name="history" value="${esc(c.pick.agentId)}" /><input type="hidden" name="pick" value="${c.pick.which}" />` : ''
+  return `<form method="GET" action="/app" class="dolf" autocomplete="off">
+      <input type="hidden" name="view" value="tasks" />${keepPick}
+      <div><label for="d-amt">Or a ceiling in dollars</label><input id="d-amt" name="ceiling_dollars" inputmode="decimal" maxlength="20" placeholder="5.00" value="${c.dollars ? esc(c.dollars) : ''}" /></div>
+      <div><label for="d-rate">At your rate, <code>dollars_per_unit</code></label><input id="d-rate" name="dollars_per_unit" inputmode="decimal" maxlength="24" placeholder="0.01" value="${c.rate ? esc(c.rate) : ''}" /></div>
+      <button class="btn-out" type="submit">Convert to units</button>
+    </form>
+    <p class="fine">You declare what one unit is worth to you. AgentBill stores and reserves units only: this divides your dollars by your rate, rounds down, and puts the result in the ceiling field. It saves nothing, the rate included, and reads no bill, so your invoices may differ from your rate times your units.</p>`
 }
 
 const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
@@ -2398,8 +2654,8 @@ function consolePage(p: Page): string {
         ${banner}
         ${body}
         <div class="foot">
-          Every number on this page is on the API too:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.
+          Every ${p.calc?.rate || p.calc?.history.length ? 'unit count' : 'number'} on this page is on the API too:
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.calc?.history.length ? ' A suggested ceiling is a percentile of the <code>used_units</code> that <code>GET /tasks?agent_id=</code> returns.' : ''}${p.calc?.rate ? ' A dollar figure is one of those counts times the rate you typed, worked out for this page and stored nowhere; the API carries no currency field.' : ''}
         </div>
       </div>
     </main>

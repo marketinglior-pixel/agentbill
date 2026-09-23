@@ -48,8 +48,9 @@ def preflight(
     task_ceiling_exceeded). Nothing is stopped by this server; the host decides.
 
     A unit is an integer you define and pass. AgentBill reserves the number you send
-    and never converts units to money, so the ceiling is only as tight as your
-    estimate. The common convention is 1 unit = 1 cent.
+    and stores units only, so the ceiling is only as tight as your estimate. This
+    tool takes and returns units, never dollars. The common convention is
+    1 unit = 1 cent.
 
     Args:
         agent_id: Identifier for this agent or task type (e.g. "research_agent").

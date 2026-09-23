@@ -147,6 +147,18 @@ trusts the reader, hates decoration.
     statement the endpoint runs (`src/lib/task-ceiling.ts`); a customer's
     ceiling and the per-request ceiling have no form here, because one is
     `PUT /budget` and the other is an argument to the call itself.
+  - **Dollars are a calculator, never a control (2026-09-23, T3).** The task
+    budgets view takes a dollar amount and the reader's own `dollars_per_unit`
+    on a GET, divides, rounds down, and puts the whole number in the unit field
+    of the same `ceiling_units` form. It saves nothing and stores no rate, so
+    the rule above holds: the one write is still the job's ceiling in units,
+    and the API still has no currency field. Beside it, a suggested ceiling per
+    agent (p50, p90 and max `used_units` of that agent's recent jobs that hold
+    nothing in flight), hidden when there is no such job, and at a typed rate
+    the same figures in dollars. Every dollar figure on the console is labelled
+    as the reader's estimate at the reader's rate, because AgentBill reads no
+    bill and keeps no price; the conversion lives once in
+    `src/lib/dollar-rate.ts`, byte-identical to the Node SDK's `rate.ts`.
   - The sample-data banner sits at the top of the main column, inside the
     frame a screenshot would carry; the account card under sample data shows
     the sample plan, because a real quota above invented tiles was the one

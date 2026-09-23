@@ -162,6 +162,33 @@ process.stdout.write('1');
 ")
 gate "console pre-save sample is byte-identical to taskSnippet()" 0 "$n"
 
+# Dollars at the developer's own rate (T3, 2026-09-23). The rule lives in two
+# TypeScript files on purpose: the console imports src/lib/dollar-rate.ts and
+# the Node SDK ships sdk/node/src/rate.ts, and neither package can import the
+# other. Byte for byte, so a fix to one that forgets the other is red here, and
+# sdk/rate-cases.json then holds both (verify.mjs) and the Python copy
+# (sdk/python/tests/test_rate.py) to one table.
+if cmp -s src/lib/dollar-rate.ts sdk/node/src/rate.ts; then n=0; else n=1; fi
+gate "dollar-rate.ts is byte-identical to the Node SDK's rate.ts" 0 "$n" "$(diff src/lib/dollar-rate.ts sdk/node/src/rate.ts | head -6)"
+
+# The ledger stays units. No file that decides, reserves, settles or sweeps a
+# ceiling may so much as name a dollar: the console converts on a GET and posts
+# ceiling_units, and that is the only way a dollar amount becomes a ceiling.
+# A comment counts too, on purpose: the day this file needs one is the day to
+# ask why the reservation path is thinking about money.
+RESERVE_PATH="src/routes/preflight.ts src/routes/events.ts src/routes/tasks.ts src/routes/budget.ts src/lib/task-ceiling.ts src/lib/reservations.ts src/lib/reservation-sweeper.ts src/lib/decisions.ts"
+n=$(grep -il 'dollar\|currency' $RESERVE_PATH 2>/dev/null | wc -l | tr -d ' ')
+gate "no dollar anywhere on the reservation path" 0 "$n" "$(grep -in 'dollar\|currency' $RESERVE_PATH 2>/dev/null | head -5)"
+
+# Two sentences the product must never say about itself: AgentBill does not
+# stop anything (preflight answers approved: false and the caller's code
+# decides) and it reads no bill (units are what the developer reported). Every
+# file a reader or an answer engine can see: the routes, the UI and the lib
+# that renders llms.txt, the READMEs, the MCP server, the OpenClaw plugin.
+COPY_SURFACES="src README.md sdk/python/README.md sdk/node/README.md mcp plugins/openclaw/README.md plugins/openclaw/src"
+n=$(grep -rniE 'we stop at|we read your (provider )?(bill|invoice)' $COPY_SURFACES 2>/dev/null | wc -l | tr -d ' ')
+gate "no \"we stop at\", no \"we read your bill\"" 0 "$n" "$(grep -rniE 'we stop at|we read your (provider )?(bill|invoice)' $COPY_SURFACES 2>/dev/null | head -5)"
+
 
 # Every inline script the site emits must PARSE.
 #

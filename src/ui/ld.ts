@@ -22,7 +22,7 @@ const DESCRIPTION =
   'A per-task spend ceiling for AI agents. Your code calls preflight before it calls a provider; ' +
   'preflight reserves the integer units you estimate against a ceiling bound to a task_ref you ' +
   'choose, answers approved:false or raises when the reservation would cross it, and your code ' +
-  'decides what happens next. Units are developer-defined and never converted to money.'
+  'decides what happens next. Units are developer-defined, and AgentBill stores and reserves units only.'
 
 /**
  * SoftwareApplication for / and /pricing. Both emit it under one @id so the two
@@ -78,7 +78,7 @@ export function softwareLd(): unknown {
       'One ceiling per task_ref: every call passing the same task_ref is checked against the same task budget, from any process, any machine and any provider.',
       'A job is opened with its ceiling by the first preflight that names a new task_ref, or from the console before any code runs. A task_ceiling sent on a later preflight is not applied, so a retry cannot raise the number it was meant to respect; the ceiling changes only through the console or PUT /tasks/:task_ref/ceiling, and an approved answer or a task_ceiling_exceeded refusal carries the ceiling in force.',
       'When used plus reserved plus this estimate would cross the task ceiling, preflight answers approved:false with reason task_ceiling_exceeded and the numbers it decided on; the SDK raises TaskCeilingExceededError and the calling code decides what happens next.',
-      'Units are integers the developer defines and passes. AgentBill compares units to a ceiling and never converts them to currency or reads a provider invoice.',
+      'Units are integers the developer defines and passes. AgentBill stores units, compares them to a ceiling and never reads a provider invoice; the console shows dollars only at a rate the developer types, rounding a dollar ceiling down to whole units.',
       'The check and the reservation are one conditional UPDATE, so two preflights arriving together cannot both be approved against the same remaining units.',
       'idempotency_key replays a stored decision, so a retried preflight holds one reservation instead of two.',
       'POST /events settles a reservation: success true records the units, success false releases them and records nothing.',

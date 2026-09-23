@@ -10,6 +10,7 @@ from .client import (
     PreflightResult,
     TaskStatus,
 )
+from .rate import units_from_dollars, dollars_from_units
 
 __all__ = [
     "meter",
@@ -25,4 +26,6 @@ __all__ = [
     "PreflightInProgressError",
     "PreflightResult",
     "TaskStatus",
+    "units_from_dollars",
+    "dollars_from_units",
 ]

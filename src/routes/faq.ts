@@ -21,10 +21,15 @@ type QA = { q: string; a: string }
 
 const FAQ: readonly QA[] = [
   {
-    // src/routes/preflight.ts: units are an integer the caller passes. Nothing
-    // in the codebase converts them to currency.
+    // src/routes/preflight.ts: units are an integer the caller passes, and
+    // every ceiling, reservation and count is stored in units. The console's
+    // tasks view shows dollars (src/routes/app.ts readCalc,
+    // src/lib/dollar-rate.ts) at a rate the reader types, by floor division,
+    // and only the units are saved. Rewritten 2026-09-23 (T3): this answer said
+    // AgentBill "never converts them to money", which the calculator made
+    // false.
     q: 'What is a unit?',
-    a: `An integer you define and pass. AgentBill counts units and compares them to a ceiling; it never converts them to money and never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours.`,
+    a: `An integer you define and pass. AgentBill stores units, reserves units and compares them to a ceiling, and it never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours. If you think in dollars, you declare the rate: the console's task budgets view takes a dollar amount and your dollars_per_unit, rounds down to whole units so the ceiling is never worth more than that amount at your rate, and saves only the units.`,
   },
   {
     // src/routes/preflight.ts for the five reason strings and their shapes;
@@ -42,8 +47,11 @@ const FAQ: readonly QA[] = [
   },
   {
     // llms.txt and preflight.ts both: no provider credentials, no bill access.
+    // The dollar figures the console shows are units times the rate the
+    // reader typed (src/routes/app.ts, historyBlock and calcLine), labelled as
+    // the reader's estimate; nothing reads or stores a price.
     q: 'Does AgentBill see my provider bill?',
-    a: `No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read, estimate or reconcile against your invoice. It knows what your code told it a call was worth. That is a deliberate limit and it is why a unit is whatever you say it is.`,
+    a: `No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read or reconcile against your invoice. It knows what your code told it a call was worth. That is a deliberate limit and it is why a unit is whatever you say it is. A dollar figure in the console is your units times the rate you typed there: your estimate at your rate, and your invoices may differ from it.`,
   },
   {
     // src/routes/preflight.ts:128-158. One conditional UPDATE, not read-then-write.

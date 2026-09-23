@@ -217,7 +217,8 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   instrument is invisible to it. Consulted <i>before</i> each call runs.</p>
 
   <h2>What a unit is</h2>
-  <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.
+  <p>A unit is an integer you define. AgentBill counts and stores units, never money; the console
+  converts a dollar amount only at a rate you declare, rounding down, and saves the units.
   The common convention is <b>1 unit = 1 cent</b>, so a $5 ceiling for the job is
   <span class="inline">task_ceiling=500</span> and a call you expect to cost 12 cents is
   <span class="inline">estimated_units=12</span>. Tokens, requests or tool calls work just as well,

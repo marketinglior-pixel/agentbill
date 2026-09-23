@@ -1,0 +1,38 @@
+{
+  "about": "One table for the three copies of the dollars-to-units rule: src/lib/dollar-rate.ts (console), sdk/node/src/rate.ts (Node SDK), sdk/python/agentbill/rate.py (Python SDK). Rounding is floor: the unit ceiling is never worth more than the dollar amount at the declared rate. scripts/preflight/verify.mjs runs the TypeScript copy against it, sdk/python/tests/test_rate.py runs the Python copy, and scripts/hygiene/run.sh holds the two TypeScript copies byte-identical.",
+  "units_from_dollars": [
+    { "dollars": "5", "rate": "0.01", "units": 500, "why": "the common convention, 1 unit = 1 cent" },
+    { "dollars": "5", "rate": "0.003", "units": 1666, "why": "floor: 1667 units would be $5.001" },
+    { "dollars": "0.29", "rate": "0.01", "units": 29, "why": "floating point gives 28.999999999999996 here" },
+    { "dollars": 0.29, "rate": 0.01, "units": 29, "why": "the same, passed as numbers" },
+    { "dollars": "0.07", "rate": "0.01", "units": 7, "why": "floating point gives 7.000000000000001 here" },
+    { "dollars": "4.99", "rate": "0.01", "units": 499, "why": "exact cents stay exact" },
+    { "dollars": "5", "rate": "0.000015", "units": 333333, "why": "a per-token rate" },
+    { "dollars": "12.50", "rate": "0.25", "units": 50, "why": "trailing zero on the amount" },
+    { "dollars": "5.00", "rate": "0.0100", "units": 500, "why": "trailing zeros on both" },
+    { "dollars": "1", "rate": "3", "units": 0, "why": "worth less than one unit" },
+    { "dollars": "0", "rate": "0.01", "units": 0, "why": "nothing buys nothing" },
+    { "dollars": "5", "rate": "1e-7", "units": 50000000, "why": "an exponent in the rate" },
+    { "dollars": "  5  ", "rate": " 0.01 ", "units": 500, "why": "surrounding whitespace is ignored" },
+    { "dollars": "21474836.47", "rate": "0.01", "units": 2147483647, "why": "the largest ceiling the API accepts" },
+    { "dollars": "5", "rate": "0", "error": true, "why": "a rate of zero is no rate" },
+    { "dollars": "5", "rate": "-0.01", "error": true, "why": "a negative rate" },
+    { "dollars": "-5", "rate": "0.01", "error": true, "why": "a negative amount" },
+    { "dollars": "5 dollars", "rate": "0.01", "error": true, "why": "not a decimal" },
+    { "dollars": "$5", "rate": "0.01", "error": true, "why": "the helper takes a number, not a price tag" },
+    { "dollars": "5,000", "rate": "0.01", "error": true, "why": "no thousands separators" },
+    { "dollars": "", "rate": "0.01", "error": true, "why": "empty" },
+    { "dollars": "5", "rate": "abc", "error": true, "why": "a rate that is not a number" },
+    { "dollars": "1e30", "rate": "1e-30", "error": true, "why": "past what a JavaScript number holds exactly" }
+  ],
+  "dollars_from_units": [
+    { "units": 500, "rate": "0.01", "dollars": "5" },
+    { "units": 1666, "rate": "0.003", "dollars": "4.998" },
+    { "units": 333333, "rate": "0.000015", "dollars": "4.999995" },
+    { "units": 0, "rate": "0.01", "dollars": "0" },
+    { "units": 3, "rate": "0.0100", "dollars": "0.03" },
+    { "units": 7, "rate": "2", "dollars": "14" },
+    { "units": 1, "rate": "0", "error": true },
+    { "units": -1, "rate": "0.01", "error": true }
+  ]
+}

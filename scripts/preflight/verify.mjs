@@ -18,6 +18,7 @@
 import postgres from 'postgres'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { ipOrigin } from '../../dist/lib/ip-origin.js'
+import { unitsFromDollars, dollarsFromUnits } from '../../dist/lib/dollar-rate.js'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
 const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
@@ -2145,6 +2146,203 @@ ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_
      && /if result\.reason == "task_ceiling_exceeded":\s*raise TaskCeilingExceededError/.test(py10)
      && node10.includes('free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw'),
    'an SDK branches on a quota refusal, so the /faq answer may no longer be true')
+
+// ---------------------------------------------------------------- dollars: a ceiling in dollars at your own rate, 2026-09-23 (T3)
+// Buyers think in "$5 per job"; the ledger stays units. The console's task
+// budgets view takes a dollar amount and the developer's own dollars_per_unit
+// on a GET, rounds down, and fills the unit field of the same ceiling_units
+// form. Nothing about a dollar is stored, the API has no dollar input, and
+// preflight reserves units exactly as before. Beside it, a suggested ceiling
+// from the agent's own recent jobs (the interview: "not to start
+// calculating"), and at a rate the same history in dollars, labelled as the
+// reader's estimate at the reader's rate ("know in advance, to show the
+// client"). Each gate below was made red once by a planted break and green
+// again after restoring from a copy; the breaks are listed in the PR.
+console.log('\n[dollars] a ceiling in dollars at the developer\'s rate, stored and reserved as units')
+await reset()
+// visible8 turns every tag into a space, so "units</b>, worth" would read
+// "units , worth"; a browser draws no space there, and neither does this.
+const shownD = (h) => visible8(h).replace(/\s+/g, ' ').replace(/ ([,.;:])/g, '$1').trim()
+const getD = (path) => nav8(path, { headers: { cookie: cookie8 } }).then((r) => r.text())
+const postD = (body) => nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body })
+
+// The rule, against the shared table first: the Python SDK's tests read the
+// same file, and hygiene holds this copy byte-identical to the Node SDK's.
+const rateCasesD = JSON.parse(readFileSync9(`${ROOT9}/sdk/rate-cases.json`, 'utf8'))
+const missD = []
+for (const c of rateCasesD.units_from_dollars) {
+  let got
+  try { got = unitsFromDollars(c.dollars, c.rate) } catch { got = 'error' }
+  const want = c.error ? 'error' : c.units
+  if (got !== want) missD.push(`${JSON.stringify(c.dollars)} at ${JSON.stringify(c.rate)} gave ${got}, want ${want}`)
+}
+for (const c of rateCasesD.dollars_from_units) {
+  let got
+  try { got = dollarsFromUnits(c.units, c.rate) } catch { got = 'error' }
+  const want = c.error ? 'error' : c.dollars
+  if (got !== want) missD.push(`${c.units} units at ${JSON.stringify(c.rate)} gave ${got}, want ${want}`)
+}
+ok('[dollars] the console\'s conversion matches every case in sdk/rate-cases.json, the table the Python SDK is held to',
+   missD.length === 0 && rateCasesD.units_from_dollars.length >= 20, missD.slice(0, 3).join('; '))
+// Then the rule itself, in integer arithmetic that shares nothing with the
+// implementation: u units at micro/1e6 dollars each are worth at most
+// cents/100, and u + 1 units would be worth more.
+let seedD = 20260923
+const randD = (n) => { seedD ^= seedD << 13; seedD ^= seedD >>> 17; seedD ^= seedD << 5; return (seedD >>> 0) % n }
+const floorMissD = []
+for (let i = 0; i < 3000; i++) {
+  const cents = BigInt(randD(10_000_000))
+  const micro = BigInt(1 + randD(999_999))
+  const dollars = `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
+  const rate = `0.${String(micro).padStart(6, '0')}`
+  const u = BigInt(unitsFromDollars(dollars, rate))
+  if (!(u * micro * 100n <= cents * 1_000_000n && cents * 1_000_000n < (u + 1n) * micro * 100n)) floorMissD.push(`${dollars} at ${rate} gave ${u}`)
+}
+ok('[dollars] rounding is floor: over 3,000 random amounts and rates the units are never worth more than the amount, and one more unit would be',
+   floorMissD.length === 0, floorMissD.slice(0, 3).join('; '))
+
+// Unit-only jobs, exactly as they were: the API shape, the form's redirect,
+// the start screen, and a tasks view with no rate.
+const TASK_KEYS_D = 'agent_id,ceiling_units,created_at,exceeded,remaining_units,reserved_units,task_ref,updated_at,used_units'
+const unitPutD = await putCeil('job-units', { ceiling_units: 500, agent_id: 'researcher' })
+const unitGetD = await fetch(`${API}/tasks/job-units`, { headers: { 'Authorization': `Bearer ${KEY8}` } }).then((r) => r.json())
+const unitListD = await fetch(`${API}/tasks?agent_id=researcher`, { headers: { 'Authorization': `Bearer ${KEY8}` } }).then((r) => r.json())
+const unitFormD = await postD('task_ref=job-units-form&ceiling_units=500')
+const startD = await getD('/app?view=start')
+ok('[dollars] a unit-only job is unchanged: nine fields on GET /tasks, the same redirect from the form, and no dollar field on the start screen',
+   unitPutD.body.ceiling_units === 500 && Object.keys(unitGetD).sort().join(',') === TASK_KEYS_D
+     && unitListD.tasks.length > 0 && unitListD.tasks.every((t) => Object.keys(t).sort().join(',') === TASK_KEYS_D)
+     && unitFormD.headers.get('location') === '/app?view=tasks&saved=job-units-form&created=1' && (await task8('job-units-form'))?.ceilingUnits === 500
+     && startD.includes('class="setf3"') && !/dollar/i.test(startD.replace(/<style[\s\S]*?<\/style>/g, '')),
+   `${Object.keys(unitGetD).sort().join(',')} | ${unitFormD.headers.get('location')}`)
+const plainD = await getD('/app?view=tasks')
+const plainRowsD = plainD.slice(plainD.indexOf('<div class="brow">'), plainD.indexOf('<div class="key">'))
+ok('[dollars] without a rate the tasks view carries no dollar figure',
+   plainD.includes('action="/app/tasks"') && plainRowsD.includes('job-units') && !plainRowsD.includes('$') && !plainD.includes('at your rate'),
+   plainRowsD.slice(0, 160))
+ok('[suggest] hidden while no agent has a settled job: jobs exist, none has spent units and settled',
+   plainD.includes('job-units') && !plainD.includes('Suggested ceilings') && !plainD.includes('from your last'))
+
+// No dollar reaches a write or a reservation. The console's POST reads
+// ceiling_units and nothing else; the API has no dollar input at all.
+const dolPostD = await postD('task_ref=job-dollars-post&ceiling_dollars=5&dollars_per_unit=0.01')
+const mixPostD = await postD('task_ref=job-mixed&ceiling_units=500&ceiling_dollars=99&dollars_per_unit=0.03')
+ok('[dollars] the console write takes ceiling_units and nothing else: a dollar amount alone writes nothing, and beside units it changes nothing',
+   dolPostD.headers.get('location') === '/app?view=tasks&err=ceiling&ref=job-dollars-post&dollars_per_unit=0.01' && !(await task8('job-dollars-post'))
+     && mixPostD.headers.get('location') === '/app?view=tasks&saved=job-mixed&created=1&dollars_per_unit=0.03' && (await task8('job-mixed'))?.ceilingUnits === 500,
+   `${dolPostD.headers.get('location')} | ${mixPostD.headers.get('location')}`)
+const putDolD = await putCeil('job-api-dollars', { ceiling_dollars: 5, dollars_per_unit: 0.01 })
+const preDolD = await pre8({ agent_id: 'researcher', task_ref: 'job-units', estimated_units: 5, ceiling_dollars: 1, dollars_per_unit: 0.01 })
+const heldDolD = await task8('job-units')
+ok('[dollars] the API has no dollar input: a PUT with dollars is a 422 that writes nothing, and a preflight carrying dollar fields reserves its units and answers none',
+   putDolD.status === 422 && !(await task8('job-api-dollars'))
+     && preDolD.body.approved === true && preDolD.body.task_ceiling === 500 && heldDolD.reservedUnits === 5
+     && !Object.keys(preDolD.body).some((k) => /dollar|currency/i.test(k)),
+   `${putDolD.status} ${JSON.stringify(preDolD.body)}`)
+
+// The calculator: $5 at 0.003 per unit is 1,666 units, never 1,667.
+const convD = await getD('/app?view=tasks&ceiling_dollars=5&dollars_per_unit=0.003')
+const convFieldD = (convD.match(/<input id="t-ceil"[^>]*>/) ?? [''])[0]
+const convLineD = shownD((convD.match(/<p class="conv">([\s\S]*?)<\/p>/) ?? [])[1] ?? '')
+ok('[dollars] $5 at 0.003 per unit fills the unit field with 1666, says it rounded down and what that is worth, and saves nothing',
+   /value="1666"/.test(convFieldD) && !/readonly|disabled/.test(convFieldD)
+     && convLineD.includes('$5.00 at $0.003 per unit is 1,666 units, worth $4.998 at that rate') && convLineD.includes('Rounded down')
+     && convLineD.includes('nothing is saved') && (await sql`SELECT 1 FROM task_budgets WHERE account_id = ${ACCT} AND ceiling_units = 1666`).length === 0,
+   convLineD || convFieldD)
+const overD = await nav8('/app?view=tasks&ceiling_dollars=999999999999&dollars_per_unit=0.000000000001', { headers: { cookie: cookie8 } })
+const overHtmlD = await overD.text()
+const commaD = await getD('/app?view=tasks&ceiling_dollars=5&dollars_per_unit=0%2C01')
+const markupD = await getD(`/app?view=tasks&dollars_per_unit=${encodeURIComponent('<b>x</b>')}`)
+ok('[dollars] a crafted link is a message, never a 500 or an echo: an overflow says the ceiling cannot hold it, and a comma or markup in the rate is refused unechoed',
+   overD.status === 200 && overHtmlD.includes('is more units than a ceiling holds (2,147,483,647)')
+     && commaD.includes('The rate is dollars per unit as a plain decimal') && !/<input id="d-rate"[^>]*value="0,01"/.test(commaD)
+     && markupD.includes('The rate is dollars per unit as a plain decimal') && !markupD.includes('<b>x</b>'),
+   `${overD.status}`)
+// The dogfood path, end to end: the converted number saved as the ceiling,
+// the job approved up to it, the next unit refused with the reason the SDK
+// raises TaskCeilingExceededError on, and the row showing it at your rate.
+const fiveD = (convFieldD.match(/value="([0-9]+)"/) ?? [])[1] ?? ''
+const savedD = await postD(`task_ref=job-five-dollars&ceiling_units=${fiveD}&agent_id=researcher&dollars_per_unit=0.003`)
+const savedPageD = await getD(savedD.headers.get('location') ?? '/app?view=tasks')
+const insideD = await pre8({ agent_id: 'researcher', task_ref: 'job-five-dollars', estimated_units: 1666 })
+const pastD = await pre8({ agent_id: 'researcher', task_ref: 'job-five-dollars', estimated_units: 1 })
+ok('[dollars] the converted ceiling is the job\'s ceiling in units: 1,666 approved, the next unit refused with task_ceiling_exceeded, the row at $4.998',
+   (await task8('job-five-dollars'))?.ceilingUnits === 1666 && insideD.body.approved === true
+     && pastD.body.approved === false && pastD.body.reason === 'task_ceiling_exceeded' && pastD.body.task_ceiling === 1666
+     && savedPageD.includes('ceiling $4.998 at your rate'),
+   `${savedD.headers.get('location')} ${JSON.stringify(pastD.body)}`)
+
+// The suggestion. Twenty-one settled jobs for summarizer, oldest first, the
+// oldest one far outside the rest; one of its jobs still in flight; one job
+// under the console's placeholder label; and three for crawler, one of them
+// settled through the real preflight and record path.
+for (let i = 0; i < 21; i++) {
+  await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+            VALUES (${ACCT}, 'summarizer', ${`hist-s-${i}`}, 100000, ${i === 0 ? 99999 : i * 10}, 0, now() - ${`${90 - i} minutes`}::interval)`
+}
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units)
+          VALUES (${ACCT}, 'summarizer', 'hist-s-live', 100000, 7777, 5), (${ACCT}, 'console', 'hist-console', 100000, 8888, 0),
+                 (${ACCT}, 'crawler', 'hist-c-1', 1000, 30, 0), (${ACCT}, 'crawler', 'hist-c-2', 1000, 50, 0)`
+await putCeil('hist-c-api', { ceiling_units: 100, agent_id: 'crawler' })
+await pre8({ agent_id: 'crawler', task_ref: 'hist-c-api', estimated_units: 40, idempotency_key: 'hist-c-api-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'hist-c-api-rec', units: 40, task_ref: 'hist-c-api' })
+const histBlockD = (h) => h.slice(h.indexOf('<div class="hist">'), h.indexOf('<form method="GET" action="/app" class="dolf"'))
+const agentRowD = (block, agent) => (block.match(new RegExp(`<div class="hrow"><span class="ha">${agent}</span>[\\s\\S]*?</div>`)) ?? [''])[0]
+const histD = await getD('/app?view=tasks')
+const hbD = histD.includes('<div class="hist">') ? histBlockD(histD) : ''
+const sumD = agentRowD(hbD, 'summarizer')
+const crawlD = agentRowD(hbD, 'crawler')
+ok('[suggest] p50, p90 and max of an agent\'s last 20 settled jobs, labelled from your last N jobs, leaving out jobs in flight, older ones and the console label',
+   sumD.includes('from your last 20 jobs') && sumD.includes('p50 <b>100</b>') && sumD.includes('p90 <b>180</b>') && sumD.includes('max <b>200</b>')
+     && !hbD.includes('99,999') && !hbD.includes('7,777') && !hbD.includes('8,888') && !hbD.includes('>console<')
+     && crawlD.includes('from your last 3 jobs') && crawlD.includes('p50 <b>40</b>') && crawlD.includes('p90 <b>50</b>') && crawlD.includes('max <b>50</b>'),
+   sumD || hbD.slice(0, 300) || 'no suggestion block')
+const pickedD = await getD('/app?view=tasks&history=summarizer&pick=p90')
+const pickFieldD = (pickedD.match(/<input id="t-ceil"[^>]*>/) ?? [''])[0]
+const pickAgentD = (pickedD.match(/<input id="t-agent"[^>]*>/) ?? [''])[0]
+const pickLineD = shownD((pickedD.match(/<p class="conv">([\s\S]*?)<\/p>/) ?? [])[1] ?? '')
+const noPrefillD = (h) => !/<input id="t-ceil"[^>]*value=/.test(h) && !h.includes('<p class="conv">')
+ok('[suggest] picking p90 fills 180 and the summarizer label, both still editable, and a pick the rows do not back fills nothing',
+   /value="180"/.test(pickFieldD) && !/readonly|disabled/.test(pickFieldD) && /value="summarizer"/.test(pickAgentD) && !/readonly|disabled/.test(pickAgentD)
+     && pickLineD.includes('the p90 from your last 20 jobs by summarizer')
+     && noPrefillD(await getD('/app?view=tasks&history=nobody&pick=p90')) && noPrefillD(await getD('/app?view=tasks&history=summarizer&pick=p99')),
+   pickLineD || pickFieldD)
+
+// The forecast: that history times the reader's rate, labelled as theirs.
+const fcD = await getD('/app?view=tasks&dollars_per_unit=0.01')
+const fcbD = fcD.includes('<div class="hist">') ? histBlockD(fcD) : ''
+const fcRowD = agentRowD(fcbD, 'summarizer')
+ok('[forecast] at a rate the history is shown per job in dollars, labelled your estimate at your rate; with no rate there is no dollar figure',
+   shownD(fcRowD).includes('per job at your rate: p50 $1.00 p90 $1.80 max $2.00, your estimate')
+     && shownD(fcbD).includes('your estimate at your rate') && shownD(fcbD).includes('your invoices may differ')
+     && hbD.length > 0 && !hbD.includes('$') && shownD(hbD).includes('Add your rate below to see them in dollars'),
+   fcRowD || fcbD.slice(0, 300))
+
+// The words on everything this change added. Scoped to the new blocks: the
+// tasks view's existing pointer line has its own history and its own gates.
+const dolfD = (fcD.match(/<form method="GET" action="\/app" class="dolf"[\s\S]*?<\/form>\s*<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0]
+const errsD = [overHtmlD, commaD].map((h) => (h.match(/<p class="err">[\s\S]*?<\/p>/) ?? [''])[0]).join(' ')
+const newCopyD = shownD([fcbD, hbD, dolfD, convLineD, pickLineD, errsD, (savedPageD.match(/<span class="atrate">[\s\S]*?<\/span>/) ?? [''])[0]].join(' '))
+const bannedD = newCopyD.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
+ok('[copy] the suggestion, the forecast and the calculator never say stop, block, kill, halt, cut off, first or only one',
+   newCopyD.length > 800 && dolfD.length > 0 && bannedD.length === 0, bannedD.join(', ') || `${newCopyD.length} chars`)
+// And two sentences no served surface may say, read as served: every sitemap
+// page with its structured data, both llms files, and the console views above.
+const sitemapD = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const pathsD = [...new Set([...sitemapD.matchAll(/<loc>https?:\/\/[^/<]+(\/[^<]*)<\/loc>/g)].map((m) => m[1]))]
+const saidD = []
+const NEVER_D = /we stop at|we read your (provider )?(bill|invoice)/i
+for (const path of [...pathsD, '/llms.txt', '/llms-full.txt']) {
+  const text = (await fetch(`${API}${path}`).then((r) => r.text())).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  const hit = text.match(NEVER_D)
+  if (hit) saidD.push(`${path}: "${hit[0]}"`)
+}
+for (const [name, h] of [['tasks+rate', fcD], ['tasks+dollars', convD], ['tasks+pick', pickedD]]) {
+  const hit = h.replace(/<[^>]+>/g, ' ').match(NEVER_D)
+  if (hit) saidD.push(`${name}: "${hit[0]}"`)
+}
+ok('[copy] no sitemap page, llms file or console view says "we stop at" or "we read your bill"',
+   pathsD.length >= 10 && saidD.length === 0, saidD.join('; ') || `${pathsD.length} sitemap paths`)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()

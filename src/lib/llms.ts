@@ -47,8 +47,9 @@ const SUMMARY =
   'when the reservation would cross that ceiling it refuses, answering approved: false or ' +
   'raising a typed error, after which your own code decides what happens next. Every process, ' +
   'machine, provider and agent that passes the same task_ref draws on the same ceiling. Units ' +
-  'are integers you define; AgentBill never converts them to money and never reads your ' +
-  'provider bill. Python and Node SDKs and an MCP server. Free tier: ' +
+  'are integers you define; AgentBill stores and reserves units only, never reads your ' +
+  'provider bill, and shows a dollar figure only at a rate you declare. Python and Node SDKs ' +
+  'and an MCP server. Free tier: ' +
   `${num(PLAN_LIMITS.free)} preflight calls a month.`
 
 const NOT_A = `## What AgentBill is not
@@ -56,9 +57,12 @@ const NOT_A = `## What AgentBill is not
 - **Not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider
   credentials held by us. Your model calls stay direct. AgentBill sees one HTTPS call, made by
   your code, to our API.
-- **Not a reader of your provider bill.** No invoice ingestion, no token counting, no currency
-  field anywhere in the API. Every quantity is an integer unit you defined and sent, so the
-  ceiling is exactly as tight as your estimate.
+- **Not a reader of your provider bill.** No invoice ingestion, no token counting, no price
+  table, no currency field anywhere in the API. Every quantity is an integer unit you defined and
+  sent, so the ceiling is exactly as tight as your estimate. The console's task budgets view can
+  show dollars at a rate you type there (dollars_per_unit): it divides a dollar amount by your rate,
+  rounds down, and fills in the unit ceiling. The rate is stored nowhere, and your provider
+  invoices may differ from your rate times your units.
 - **Not a per-agent budget.** agent_id is an attribution label. It is stored on tasks, steps and
   refusals and can be filtered on, and nothing is capped by it. Two agents sharing a task_ref
   share one ceiling.
@@ -176,9 +180,11 @@ burn-down.
 smaller estimate, drop to a cheaper model, escalate to a human, or stop. There is no kill switch on
 our side, because there is no proxy on our side.
 
-A unit is an integer you define and pass. The common convention is 1 unit = 1 cent, so "this job
-stops at $5" is task_ceiling=500, and nothing in the system knows that: AgentBill compares units to
-a ceiling and never converts them to currency.
+A unit is an integer you define and pass. The common convention is 1 unit = 1 cent, so a $5 job in
+your own accounting is a ceiling of 500. That mapping is yours, and AgentBill stores and reserves
+units only. You declare the dollar-to-unit map: the console converts a dollar amount at the rate
+you type (dollars_per_unit), rounding down so the unit ceiling is never worth more than the amount
+at that rate, and saves only the units. It reads no bill, so your invoices may differ.
 
 ## Install
 
@@ -282,6 +288,12 @@ settle its reservation; the sweeper reclaims it when it expires. Settle from the
   it was meant to respect. The last save through the endpoint or the console is the ceiling in force.
   An approved answer and a task_ceiling_exceeded refusal carry the ceiling that decided them as
   task_ceiling; the other refusals are decided before the job's row is consulted.
+- The console's task budgets view has two helpers, and neither writes. A suggested ceiling per
+  agent: p50, p90 and max of used_units over that agent's most recent jobs that have spent units
+  and hold none in flight, read from your own rows (GET /tasks?agent_id= returns them). And a
+  dollars calculator: a dollar amount at a rate you type (dollars_per_unit), divided and rounded
+  down to whole units. Both only fill in the unit field; the save is the same ceiling_units write,
+  and a dollar figure beside a suggestion is your estimate at your rate, not a bill.
 - The row is unique on (account_id, task_ref), which is why processes, machines, providers and
   agent_ids converge on one ceiling by sending one string.
 - The check and the reservation are one conditional UPDATE, so two calls arriving together cannot

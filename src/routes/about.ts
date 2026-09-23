@@ -75,7 +75,8 @@ export async function aboutRoute(app: FastifyInstance) {
   <h2>What it deliberately is not</h2>
   <p>It is not a proxy. Your traffic does not route through anything of ours and
      we never hold your provider keys. It does not read your provider bill, and
-     it does not convert the units you pass into money. It will not tell you
+     it stores the units you pass, never money: the console shows dollars only
+     at a rate you type into it, as your own estimate. It will not tell you
      what a call cost; it refuses the one that would cross the number you gave
      it, and what happens to the run after that is your code's decision.</p>
 

@@ -243,6 +243,33 @@ client.preflight(
 )
   </pre></div>
 
+  <h3 id="dollars">A ceiling in dollars, at your rate</h3>
+  <p>AgentBill stores and reserves units, and every ceiling on the API is
+  <span class="inline">ceiling_units</span>. If you think in dollars, <strong>you declare the
+  dollar-to-unit map</strong>: what one unit is worth to you, your
+  <span class="inline">dollars_per_unit</span>. AgentBill reads no bill and keeps no prices, so your
+  provider invoices may differ from your rate times your units. The conversion rounds down, so the
+  unit ceiling is never worth more than the dollar amount at your rate: $5 at 0.003 per unit is
+  1,666 units, not 1,667.</p>
+  <p>The console's <a href="/app?view=tasks">task budgets view</a> does that division for you. Type
+  the amount and your rate, and it puts the whole number of units in the ceiling field; the save is
+  the same <span class="inline">ceiling_units</span> write, and the rate is stored nowhere. The same
+  view suggests a ceiling from your own history, the p50, p90 and max units of an agent's recent
+  jobs, and at your rate shows what those jobs come to, as your estimate. In code it is the same
+  arithmetic, done exactly:</p>
+
+  <div class="code"><pre>
+from decimal import Decimal, ROUND_FLOOR
+
+<span class="comment"># Your config, not ours: what one unit is worth to you, and this job's budget.</span>
+DOLLARS_PER_UNIT = Decimal("0.01")
+JOB_BUDGET_DOLLARS = Decimal("5")
+
+<span class="comment"># Rounded down, so the unit ceiling is never worth more than $5 at your rate.</span>
+ceiling_units = int((JOB_BUDGET_DOLLARS / DOLLARS_PER_UNIT).to_integral_value(rounding=ROUND_FLOOR))
+print(ceiling_units)  <span class="comment"># 500: the number preflight and PUT /tasks/:task_ref/ceiling take</span>
+  </pre></div>
+
   <h2 id="reservation">The reservation</h2>
 
   <p>Preflight does not read your balance and then decide. It takes the budget in the same

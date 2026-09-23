@@ -381,6 +381,16 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
 }
 
 // ---------------------------------------------------------------------------
+// Public: dollars at your own rate
+// ---------------------------------------------------------------------------
+
+// Pure arithmetic, no network. You declare what one unit is worth to you
+// (dollarsPerUnit); these turn a dollar budget into the whole number of units
+// to send as a ceiling, rounded down, and a unit count back into dollars at
+// that rate. The API itself only ever sees units.
+export { unitsFromDollars, dollarsFromUnits, type Decimalish } from './rate.js'
+
+// ---------------------------------------------------------------------------
 // Public: meter()
 // ---------------------------------------------------------------------------
 
