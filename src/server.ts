@@ -19,6 +19,7 @@ import etag from '@fastify/etag'
 import { constants as zlibConstants } from 'node:zlib'
 import { webhooksRoute } from './routes/webhooks.js'
 import { guidesRoute } from './routes/guides.js'
+import { integrationsRoute } from './routes/integrations.js'
 import { blogRoute } from './routes/blog.js'
 import { checkpointRoute } from './routes/checkpoint.js'
 import { stepRoute } from './routes/step.js'
@@ -232,6 +233,7 @@ await app.register(compress, {
 app.register(homeRoute)
 app.register(docsRoute)
 app.register(guidesRoute)
+app.register(integrationsRoute)
 app.register(blogRoute)
 app.register(checkpointRoute)
 app.register(stepRoute)
