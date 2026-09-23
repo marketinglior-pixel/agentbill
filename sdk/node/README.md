@@ -71,21 +71,29 @@ The last two mean *our* quota ran out, not that your budget did. AgentBill runni
 | `taskRef` | string | none | Cross-call job budget: many calls, one hard ceiling |
 | `taskCeiling` | number | none | Opens a new `taskRef`; required then unless the job was opened first from the console or `PUT /tasks/:task_ref/ceiling`. Not applied once the job exists |
 | `idempotencyKey` | string | none | Same key, same decision, one reservation. Without it a retry reserves a second time |
+| `unit` | `'unit' \| 'token'` | none | What the job's numbers count, with a `taskRef`. Read when this call opens the job, checked on one that exists; a different unit is a 422 |
 
-Returns `{ approved, reason, estimatedUnits, remainingUnits, reservationExpiresAt?, taskRef?, taskRemainingUnits?, upgradeUrl? }`.
+Returns `{ approved, reason, estimatedUnits, remainingUnits, reservationExpiresAt?, reservationId?, taskRef?, taskRemainingUnits?, upgradeUrl? }`, plus a `record(options)` method bound to this call. The method is not an enumerable property, so `JSON.stringify` and spread see only the data.
 
 ### `record(options)`
 
-Record what actually happened. The idempotency key is generated per call.
+Record what actually happened.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `agentId` | string | required | Agent or task type identifier |
 | `customerId` | string | `"default"` | Your internal customer ID |
-| `units` | number | `1` | Units consumed |
+| `units` | number | `1` | Units consumed. `0` is allowed: a call that ran and cost nothing records 0 |
 | `success` | boolean | `true` | `false` releases the preflight reservation without billing |
 | `taskRef` | string | none | Attribute the spend to a task |
 | `metadata` | object | none | Key-value pairs stored with the event |
+| `reservationId` | string | none | The preflight's `reservationId`. Closes that reservation whole and releases what it held beyond `units`. Without it the oldest reservations of this customer and `taskRef` are settled by `units` only |
+| `idempotencyKey` | string | a fresh random key | Same key, one event: a retried record is ignored as a duplicate. Pass something stable, such as your provider's response id |
+| `usageMissing` | boolean | `false` | Your provider reported no usage. Not read as 0: the call is charged at least what its reservation held, and the job counts it |
+
+The result of `preflight()` has the same method, `result.record({ units, success?, idempotencyKey?, metadata?, usageMissing? })`, which carries `agentId`, `customerId`, `taskRef` and `reservationId` from the preflight that made it.
+
+> **Added after 0.4.2.** `reservationId`, `result.record()`, `unit`, and `record`'s `idempotencyKey`, `reservationId` and `usageMissing` are in this repository's SDK and not in 0.4.2 or earlier. They also need an AgentBill API that returns `reservation_id`; against one that does not, `reservationId` is absent and records settle as before.
 
 ### `meter(fn, options)`
 
@@ -165,5 +173,7 @@ await preflight({
 Same key, same decision, one reservation. A retry that lands while the original is still being decided throws with `preflight_in_progress`, which is not a refusal and reserves nothing: wait a moment and try again.
 
 **A run that never comes back.** If the process dies between `preflight` and `record`, the units stay reserved: nothing else can spend them, and the remaining budget looks smaller than it is. A sweeper reclaims them once the reservation passes its TTL, returned on every approved check as `reservationExpiresAt`.
+
+**A reservation bigger than the call.** A record that does not name its reservation settles by the units you pass and no more: reserve 70,000 and record 8,000, and the other 62,000 stay held until the reservation expires. Settle with `result.record({ units })`, or pass `reservationId` to `record`, and that reservation closes whole: the actual is what the job spent, and the rest is released at once. Settling the same reservation twice releases it once.
 
 Note the direction. An abandoned reservation makes the ceiling tighter, never looser. The gate does not open by accident.

@@ -234,6 +234,10 @@ Note the direction. An abandoned reservation makes the ceiling tighter, never lo
 
 Settle every run, including the ones that fail. `record(..., success=False)` releases the reservation without billing, and the `gate` decorator does it for you.
 
+**A reservation bigger than the call.** A record that does not name its reservation settles the oldest reservations of that customer and `task_ref` by the units you pass, and no more: reserve 70,000 and record 8,000, and the other 62,000 stay held until the reservation expires. Every approved check carries `check.reservation_id`. Settle with `check.record(units=actual)`, which carries the agent, customer, `task_ref` and reservation for you, or pass `reservation_id=check.reservation_id` to `client.record(...)`: that reservation closes whole, the actual is what the job spent, and the rest is released at once. `gate` does it for you. Settling the same reservation twice releases it once.
+
+> **Added after 0.6.5.** `reservation_id`, `PreflightResult.record()`, and `record()`'s `idempotency_key`, `reservation_id`, `metadata` and `usage_missing` arguments are in this repository's SDK and not in 0.6.5 or earlier. They also need an AgentBill API that returns `reservation_id` on preflight; against one that does not, `check.reservation_id` is `None` and records settle as before.
+
 ---
 
 ## Node.js
@@ -399,6 +403,24 @@ reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never
 | `customer_id` | `str` | `"default"` | Your internal customer identifier. Carries its own balance. |
 | `idempotency_key` | `str` | none | Stable across retries: same key, same decision, one reservation. |
 | `ceiling` | `int` | none | Set on `AgentBillClient(...)`, not per call. Refuses any single call whose `estimated_units` exceed it. |
+
+### `client.record(...)` and `check.record(...)`
+
+`check.record(...)` takes `units`, `success`, `idempotency_key`, `usage_missing` and `metadata`, and reads `agent_id`, `customer_id`, `task_ref` and `reservation_id` from the preflight that made `check`.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `agent_id` | `str` | required | The same attribution label you passed to preflight. |
+| `units` | `int` | `1` | What the call actually used. `0` is allowed: a call that ran and cost nothing records 0. |
+| `customer_id` | `str` | `"default"` | The customer the preflight named. |
+| `task_ref` | `str` | none | The job the preflight named. Without it the units settle against no job. |
+| `reservation_id` | `str` | none | `check.reservation_id`. Closes that reservation whole and releases what it held beyond `units`. Without it the oldest reservations are settled by `units` only. |
+| `success` | `bool` | `True` | `False` releases the reservation and bills nothing. |
+| `idempotency_key` | `str` | a fresh random key | Same key, one event: a retried record is ignored as a duplicate. Pass something stable, such as your provider's response id. |
+| `usage_missing` | `bool` | `False` | Your provider reported no usage for this call. Not read as 0: the call is charged at least what its reservation held, and the job counts it in `usage_missing_calls`. |
+| `metadata` | `dict` | none | Stored on the event, never counted. |
+
+`client.preflight(...)` also takes `unit`, `"unit"` (yours, the default) or `"token"`, with a `task_ref`: it is read when the call opens the job and checked on a job that exists, and a different unit is a 422. `client.get_task(...)` returns it as `status.unit`, beside `status.usage_missing_calls`.
 
 ### `@meter(event, options)`
 

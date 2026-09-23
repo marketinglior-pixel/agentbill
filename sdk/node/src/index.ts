@@ -139,8 +139,12 @@ function resolveCustomerId<TArgs extends Record<string, unknown>>(
 function resolveUnits<TResult>(units: UnitsResolver<TResult>, result: TResult): number {
   if (typeof units === 'function') {
     const resolved = units(result)
-    if (!Number.isInteger(resolved) || resolved < 1) {
-      throw new AgentBillError(`units function must return a positive integer, got ${resolved}`)
+    // 0 is allowed and means "record nothing" (meter skips it below), which is
+    // what the outcome-based example in meter's own doc comment does. Until
+    // 0.5.0 this threw on 0, so that example crashed the call it wrapped; the
+    // Python SDK has always accepted 0.
+    if (!Number.isInteger(resolved) || resolved < 0) {
+      throw new AgentBillError(`units function must return a non-negative integer, got ${resolved}`)
     }
     return resolved
   }
@@ -232,6 +236,12 @@ export interface PreflightOptions {
    * Same key, same decision, one reservation.
    */
   idempotencyKey?: string
+  /**
+   * What the job's numbers count: 'unit' (yours, the default) or 'token'.
+   * Needs taskRef. Read when this call opens the job and checked on a job
+   * that exists: a different unit is a 422, thrown as AgentBillError.
+   */
+  unit?: 'unit' | 'token'
 }
 
 export interface PreflightResult {
@@ -247,6 +257,37 @@ export interface PreflightResult {
    * stop being held. ISO 8601, absent when nothing was reserved.
    */
   reservationExpiresAt?: string
+  /**
+   * The handle of the reservation this preflight made. Pass it to record()
+   * as reservationId (or call result.record(), which does) and the record
+   * settles THIS reservation whole: units is what was spent, and the unused
+   * rest is released at once instead of being held until it expires. Absent
+   * when nothing was reserved, or against a server that predates it.
+   */
+  reservationId?: string
+}
+
+/** What result.record() takes: the call's own facts. The agent, customer,
+ *  task and reservation come from the preflight that made the result. */
+export interface SettleOptions {
+  /** What the call actually used. 0 is allowed. Default: 1 */
+  units?: number
+  /** false releases the reservation without billing. */
+  success?: boolean
+  idempotencyKey?: string
+  metadata?: Record<string, unknown>
+  /** The provider reported no usage. Charged at least the reservation, never 0. */
+  usageMissing?: boolean
+}
+
+/** What preflight() returns: the result, plus record() bound to this call. */
+export interface Preflight extends PreflightResult {
+  /**
+   * Record what this call used against this preflight's own reservation.
+   * Not an enumerable property: JSON.stringify, spread and deep equality see
+   * the same data they always did.
+   */
+  record(options?: SettleOptions): Promise<Record<string, unknown>>
 }
 
 /**
@@ -259,7 +300,7 @@ export interface PreflightResult {
  * refused it (`free_tier_exceeded`, `plan_limit_exceeded`), because our quota
  * must never crash your agent.
  */
-export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
+export async function preflight(options: PreflightOptions): Promise<Preflight> {
   const body: Record<string, unknown> = { agent_id: options.agentId }
   if (options.customerId) body.customer_id = options.customerId
   if (options.estimatedUnits != null) body.estimated_units = options.estimatedUnits
@@ -267,6 +308,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (options.taskRef) body.task_ref = options.taskRef
   if (options.taskCeiling != null) body.task_ceiling = options.taskCeiling
   if (options.idempotencyKey) body.idempotency_key = options.idempotencyKey
+  if (options.unit) body.unit = options.unit
 
   const res = await apiFetch('/preflight', { method: 'POST', body: JSON.stringify(body) })
   const data = await res.json() as Record<string, any>
@@ -310,7 +352,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     // degrade, alert, or send a human to upgrade, and keep running.
   }
 
-  return {
+  const result: PreflightResult = {
     approved: Boolean(data.approved),
     reason: data.reason ?? null,
     estimatedUnits: data.estimated_units ?? null,
@@ -319,30 +361,61 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     taskRemainingUnits: data.task_remaining_units,
     upgradeUrl: data.upgrade_url,
     reservationExpiresAt: data.reservation_expires_at,
+    reservationId: data.reservation_id,
   }
+  Object.defineProperty(result, 'record', {
+    enumerable: false,
+    value: (settle: SettleOptions = {}) => record({
+      ...settle,
+      agentId: options.agentId,
+      customerId: options.customerId,
+      taskRef: options.taskRef,
+      reservationId: result.reservationId,
+    }),
+  })
+  return result as Preflight
 }
 
 export interface RecordOptions {
   agentId: string
+  /** What the call used. 0 is allowed: a call that cost nothing records 0. Default: 1 */
   units?: number
   customerId?: string
   /** false releases the preflight reservation without billing. */
   success?: boolean
   taskRef?: string
   metadata?: Record<string, unknown>
+  /**
+   * Same key, one event: a retried record is ignored as a duplicate. When
+   * absent a fresh random key is sent, which is what every earlier version did.
+   */
+  idempotencyKey?: string
+  /**
+   * PreflightResult.reservationId. Settles that reservation whole; without it
+   * the record closes the oldest reservations of this customer and taskRef by
+   * `units` only, as before.
+   */
+  reservationId?: string
+  /**
+   * The provider reported no usage for this call. Not read as 0: the server
+   * charges at least what the reservation held and counts the call on the job.
+   */
+  usageMissing?: boolean
 }
 
-/** Record what actually happened. Idempotency key is generated per call. */
+/** Record what actually happened. */
 export async function record(options: RecordOptions): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {
     customer_id: options.customerId ?? 'default',
     event_type: options.agentId,
     units: options.units ?? 1,
     success: options.success ?? true,
-    idempotency_key: `${options.agentId}_${randomHex()}`,
+    idempotency_key: options.idempotencyKey ?? `${options.agentId}_${randomHex()}`,
   }
   if (options.taskRef) body.task_ref = options.taskRef
   if (options.metadata) body.metadata = options.metadata
+  if (options.reservationId) body.reservation_id = options.reservationId
+  if (options.usageMissing) body.usage_missing = true
 
   const res = await apiFetch('/events', { method: 'POST', body: JSON.stringify(body) })
   if (!res.ok) {
@@ -360,6 +433,10 @@ export interface TaskStatus {
   reservedUnits: number
   remainingUnits: number
   exceeded: boolean
+  /** What the numbers count: 'unit' (yours) or 'token'. getTask always sets it. */
+  unit?: 'unit' | 'token'
+  /** Calls recorded with usageMissing, charged at least their reservation. getTask always sets it. */
+  usageMissingCalls?: number
 }
 
 /** Live burn-down of one job's budget. */
@@ -377,6 +454,8 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
     reservedUnits: data.reserved_units,
     remainingUnits: data.remaining_units,
     exceeded: Boolean(data.exceeded),
+    unit: data.unit === 'token' ? 'token' : 'unit',
+    usageMissingCalls: typeof data.usage_missing_calls === 'number' ? data.usage_missing_calls : 0,
   }
 }
 

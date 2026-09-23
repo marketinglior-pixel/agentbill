@@ -122,6 +122,27 @@ jobs:
         working-directory: sdk/python
         run: python -m pytest tests -q
 
+  node-sdk:
+    # sdk/node had no tests until 2026-09-23, so nothing checked what it
+    # sends: the reservation_id it carries from preflight to record, the
+    # idempotency key it passes through, and that a record asking for nothing
+    # new still sends exactly the payload installed 0.4.x copies send. The
+    # snippets job typechecks the samples against it; this runs it.
+    name: Node SDK builds and its request tests pass
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      - run: npm test
+
   mcp:
     name: MCP server smoke test
     runs-on: ubuntu-latest

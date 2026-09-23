@@ -18,6 +18,48 @@ class PreflightResult:
     # Settle before this or the sweeper reclaims the reservation and the units
     # stop being held. ISO 8601, or None when nothing was reserved.
     reservation_expires_at: Optional[str] = None
+    # The handle of the reservation this preflight made. Hand it back to
+    # record() (result.record(...) does it for you) and the record settles
+    # THIS reservation whole: the actual moves the job's used units and the
+    # unused rest is released at once, instead of being held until the
+    # reservation expires. None when nothing was reserved, or when the server
+    # predates reservation_id; record() then settles the way it always has.
+    reservation_id: Optional[str] = None
+
+    def record(
+        self,
+        units: int = 1,
+        success: bool = True,
+        idempotency_key: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        usage_missing: bool = False,
+    ) -> dict:
+        """Record what this call actually used, against this preflight's own reservation.
+
+        Carries the agent_id, customer_id, task_ref and reservation_id this
+        preflight was made with, so the record settles exactly the reservation
+        it opened: `units` is what the job spent, and whatever the reservation
+        held beyond that is released now. See AgentBillClient.record for the
+        other arguments.
+        """
+        bound = getattr(self, "_agentbill_call", None)
+        if bound is None:
+            raise AgentBillError(
+                "This PreflightResult was not returned by AgentBillClient.preflight(), so it has no "
+                "call to record against. Use client.record(..., reservation_id=result.reservation_id)."
+            )
+        client, agent_id, customer_id, task_ref = bound
+        return client.record(
+            agent_id,
+            units=units,
+            customer_id=customer_id,
+            success=success,
+            task_ref=task_ref,
+            idempotency_key=idempotency_key,
+            reservation_id=self.reservation_id,
+            metadata=metadata,
+            usage_missing=usage_missing,
+        )
 
 
 @dataclass
@@ -29,6 +71,10 @@ class TaskStatus:
     reserved_units: int
     remaining_units: int
     exceeded: bool
+    # What the numbers count: "unit" (yours) or "token". Fixed when the job opens.
+    unit: str = "unit"
+    # Calls recorded with usage_missing=True, charged at least their reservation.
+    usage_missing_calls: int = 0
 
 @dataclass
 class StepResult:
@@ -157,6 +203,7 @@ class AgentBillClient:
         task_ref: Optional[str] = None,
         task_ceiling: Optional[int] = None,
         idempotency_key: Optional[str] = None,
+        unit: Optional[str] = None,
     ) -> PreflightResult:
         """Check every budget BEFORE the call runs.
 
@@ -171,6 +218,14 @@ class AgentBillClient:
         reserves a second time, so the mechanism meant to prevent waste is the
         one consuming the budget. Same key, same decision, one reservation.
         Raises PreflightInProgressError if the original is still being decided.
+
+        unit says what the job's numbers count, "unit" (yours, the default) or
+        "token". It needs task_ref. It is read when this call opens the job and
+        checked on a job that exists: a different unit is a 422, raised here as
+        an HTTPError, never a relabel.
+
+        The result carries reservation_id. Settle with result.record(units=...)
+        and the reservation this call made is closed whole.
         """
         payload = {"agent_id": agent_id}
         if estimated_units is not None:
@@ -185,6 +240,8 @@ class AgentBillClient:
             payload["task_ceiling"] = task_ceiling
         if idempotency_key is not None:
             payload["idempotency_key"] = idempotency_key
+        if unit is not None:
+            payload["unit"] = unit
 
         resp = requests.post(
             f"{self.base_url}/preflight",
@@ -210,7 +267,12 @@ class AgentBillClient:
             task_ref=data.get("task_ref"),
             task_remaining_units=data.get("task_remaining_units"),
             reservation_expires_at=data.get("reservation_expires_at"),
+            reservation_id=data.get("reservation_id"),
         )
+        # Not a dataclass field on purpose: asdict() and repr() of the result
+        # stay what they were, and the client (which holds the API key) never
+        # ends up in either.
+        result._agentbill_call = (self, agent_id, customer_id, task_ref)
 
         # One rule, and it is the same in both SDKs as of 0.6.0 / 0.4.0:
         # raise when YOUR spend rule refused the call, return a result when
@@ -248,16 +310,46 @@ class AgentBillClient:
         customer_id: Optional[str] = None,
         success: bool = True,
         task_ref: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        reservation_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        usage_missing: bool = False,
     ) -> dict:
+        """Record what a call actually used, or release its reservation.
+
+        units may be 0: a call that ran and cost nothing records 0.
+
+        idempotency_key makes a retried record safe: same key, one event. When
+        it is None a fresh random key is sent, which is what every version
+        before this one always did.
+
+        reservation_id (from PreflightResult.reservation_id) settles that
+        reservation whole: units is what was spent, and the unused rest of the
+        reservation is released now instead of being held until it expires.
+        Without it the record closes the oldest reservations of this customer
+        and task_ref by `units` only, as before.
+
+        usage_missing=True says the provider reported no usage for this call.
+        It is not read as 0: the server charges at least what the reservation
+        held and counts the call on the job as usage_missing_calls.
+
+        metadata is stored on the event and never counted.
+        """
         payload = {
             "customer_id": customer_id or "default",
             "event_type": agent_id,
-            "idempotency_key": f"{agent_id}-{__import__('uuid').uuid4()}",
+            "idempotency_key": idempotency_key if idempotency_key is not None else f"{agent_id}-{__import__('uuid').uuid4()}",
             "units": units,
             "success": success,
         }
         if task_ref is not None:
             payload["task_ref"] = task_ref
+        if reservation_id is not None:
+            payload["reservation_id"] = reservation_id
+        if metadata is not None:
+            payload["metadata"] = metadata
+        if usage_missing:
+            payload["usage_missing"] = True
         resp = requests.post(
             f"{self.base_url}/events",
             json=payload,
@@ -284,6 +376,8 @@ class AgentBillClient:
             reserved_units=data["reserved_units"],
             remaining_units=data["remaining_units"],
             exceeded=data["exceeded"],
+            unit=data.get("unit", "unit"),
+            usage_missing_calls=data.get("usage_missing_calls", 0),
         )
 
     def checkpoint(
@@ -371,18 +465,22 @@ class AgentBillClient:
                         customer_id=customer_id,
                         success=True,
                         task_ref=task_ref,
+                        reservation_id=check.reservation_id,
                     )
                     return result
                 except Exception:
                     # success=False releases the preflight reservation without
-                    # billing: units must equal what preflight reserved, or the
-                    # reservation leaks and eats the budget forever.
+                    # billing. With reservation_id the server releases that
+                    # reservation whole; against a server that predates it,
+                    # units must equal what preflight reserved, or the
+                    # remainder stays held until the reservation expires.
                     self.record(
                         agent_id=agent_id,
                         units=reserved,
                         customer_id=customer_id,
                         success=False,
                         task_ref=task_ref,
+                        reservation_id=check.reservation_id,
                     )
                     raise
             return wrapper
