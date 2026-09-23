@@ -2367,7 +2367,6 @@ console.log('\n[suggest] a suggested ceiling from the account\'s own finished jo
 await reset()
 const { HISTORY_JOBS: JOBS_S, HISTORY_AGENTS: AGENTS_S, percentileDisc: pdS } = await import('../../dist/lib/ceiling-suggest.js')
 const { RESERVATION_TTL_MINUTES: TTL_S } = await import('../../dist/lib/reservations.js')
-const { SWEEP_INTERVAL_MS: SWEEP_S } = await import('../../dist/lib/reservation-sweeper.js')
 const getS = (path, cookie = cookie8) => nav8(path, { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, html: await r.text() }))
 // visible8 turns every tag into a space, so "used_units</code>, as" reads
 // "used_units , as"; a browser draws no space there, and neither does this.
@@ -2606,7 +2605,6 @@ ok('[suggest] ?demo=1 shows the suggestion from the labelled sample rows, a clic
 // constants the server runs on, /docs says it in one paragraph, and no served
 // surface keeps the old review's sentence, which named GET /tasks?agent_id=
 // (created_at order, every job) as what the percentile was taken over.
-const heldS = TTL_S + Math.ceil(SWEEP_S / 60_000)
 const footS = shownS((pageS.html.match(/<div class="foot">[\s\S]*?<\/div>/) ?? [''])[0])
 const fineS = shownS((blockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0])
 const docsS = shownS(await fetch(`${API}/docs`).then((r) => r.text()))
@@ -2626,7 +2624,7 @@ ok('[suggest] the footer, the fine print and /docs say what the code computes: o
    footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
      && fineS.includes(`Each row is the p50, p90 and max used_units of one agent's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
      && fineS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
-     && fineS.includes(`a call still in flight keeps its job out until it records, or for up to ${heldS} minutes if it never does, until its reservation expires and is released.`)
+     && fineS.includes(`a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${TTL_S} minutes and a sweep releases it.`)
      && fineS.includes('Jobs with the placeholder label console are left out.')
      && fineS.includes(`At most ${AGENTS_S} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion.`)
      && docsS.includes(`For at most ${AGENTS_S} agents, those whose latest finished jobs are the most recent, it shows the p50, p90 and max used_units of each one's last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
