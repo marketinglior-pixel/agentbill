@@ -6,7 +6,8 @@ import { limiterKey } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
 import { publicRoute } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
-import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
+import { KEY_CTA, KEY_CTA_SHORT, CHROME_CSS, siteNav, siteFooter } from '../ui/chrome.js'
+import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
@@ -784,12 +785,16 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
   all.splice(1, 0, mk(0, 60, 'enricher', 'batch-2211', 'task_overrun_recorded', false, 25, 1000, 1025,
     { recorded: true, task_ref: 'batch-2211', task_used_units: 1025, task_remaining_units: 0, task_exceeded: true, note: 'recorded past the ceiling: preflight was skipped for this call' }))
   const decisions = all.filter((d) => (!f.task || d.taskRef === f.task) && (!f.agent || d.agentId === f.agent) && (f.only !== 'leaks' || !d.blocked))
+  // Heaviest first, the order a real account gets from ORDER BY used_units
+  // DESC in loadConsole(): the list says "heaviest first", and the overview takes
+  // the first five of it as the top customers. Sorted here as well as written
+  // in order, so an edit to a number cannot put the heaviest last again.
   const customers: CustomerRow[] = [
+    { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
     { customerRef: 'cust_acme',     limitUnits: 5000, usedUnits: 4820, reservedUnits: 0 },
     { customerRef: 'cust_globex',   limitUnits: 5000, usedUnits: 2140, reservedUnits: 30 },
     { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
-    { customerRef: 'cust_umbrella', limitUnits: null, usedUnits: 9310, reservedUnits: 0 },
-  ]
+  ].sort((x, y) => y.usedUnits - x.usedUnits)
   const tasks: TaskRow[] = [
       { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
       { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
@@ -913,186 +918,183 @@ export function decisionLine(r: DecisionRow): string {
 // ---------------------------------------------------------------------------
 
 // The console keeps its own chrome: it is an authenticated surface with a rail,
-// not a marketing page, so it takes neither siteNav nor siteFooter. It does
-// take the shared tokens, which is what the fragmentation finding was about.
-const CSS = `
+// not a marketing page, so it takes neither siteNav nor siteFooter. It takes the
+// shared tokens and, since 2026-09-23, the shared component kit (src/ui/kit.ts):
+// the buttons, tags, chips, the panel-in-panel frame, the meter, the table, the
+// code plate, the callout, the fields, the segmented control and the rail link
+// are the homepage's, and this stylesheet only lays them out. The signed-out
+// login and the checkout hand-off are public pages and carry the site nav and
+// footer instead (LOGIN_CSS, below).
+// The kit, without its comments. They are the kit's documentation, not the
+// page's, and one of them names task_ref: the [onboarding] gate compares where
+// "One job is one budget" and the first task_ref fall in the RAW response,
+// stylesheet included, and a CSS comment above the steps read as the page
+// teaching the wire name first. No reader sees a comment; the bytes go too.
+const KIT = KIT_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+
+const CSS = `${KIT}
   /* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell: side rail + server-rendered views)
-     · nav: N3 side rail, folds to a top bar and a view strip under 960px · footer: none (in-page API note)
-     · design-system: design.md · designed-as-app · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+     · nav: N3 side rail, folds to a top bar and a view menu under 960px · footer: none (in-page API note)
+     · design-system: design.md, the canvas system · designed-as-app */
 
-  /* Colour semantics for this page, and why they had to be written down.
-     Red used to mark a blocked call in the chart, a task that hit its ceiling
-     and a customer at their limit, all three of which are the product doing
-     exactly its job, and also a plan bar at 100%, which is a real problem.
-     A colour that means two things means nothing, so each gets one job and
-     nothing else is allowed to borrow it:
+  /* Colour semantics on canvas, 2026-09-23. The console used to spend its
+     accent on --held ("AgentBill stopped something") in green. On canvas the
+     one accent is the refusal, so the same meanings re-cast:
 
-       --flow  ordinary traffic. Metered units, a running task, a live key.
-       --held  AgentBill stopped something. This is what the product is for,
-               so it carries the accent instead of an alarm.
-       --near  approaching a limit. Worth a glance; nothing is wrong yet.
-       --fail  needs a human. Spend that got past a ceiling, or an account
-               about to stop working. Nothing else on this page is red. */
+       ordinary traffic   ink and the warm greys: metered units, a running
+                          task, a live key. Neutral on purpose.
+       the refusal        --signal: a task at its ceiling, a customer at their
+                          limit, the refused day on the chart, the refusal chip,
+                          the approved: false line on the plate. What --held was.
+       a leak             --signal filled (.chip-fail) or its tint: spend that got
+                          past a ceiling, or an account about to stop working.
+                          Its bar is the signal hatched, the homepage's mark for
+                          units past the ceiling, so it never reads as the held bar.
+       approaching        the .chip-near chip, and only the chip: the bar stays ink.
+                          A bar is ink, the signal, or the signal hatched; a third
+                          warm hue beside the signal read as the same colour.
+
+     --held: var(--green) is gone from this block: --green is the ink on canvas,
+     so held rendered black and meant nothing. */
   :root {
-    --shell: 1080px;
-    --rail: 240px;
-    --held: var(--green); --near: var(--amber); --fail: var(--red);
+    /* The nav's width, which CHROME_CSS defines and this page does not load.
+       The main column starts on the same measure as every other page. */
+    --chrome-w: 1072px; --shell: var(--chrome-w);
   }
 
   body { font-size: var(--fs-small); line-height: 1.5; }
   a { text-decoration: none; }
   a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a.btn:hover, a.btn-alt:hover, a.btn-ghost:hover, a.cv-navlink:hover, a.logo:hover { text-decoration: none; }
+  code { font-family: var(--mono); font-size: .92em; }
 
-  /* The shell: a rail and a main column. The rail is sticky for the height of
-     the viewport, so the views and the account are in reach from any scroll
-     position. Under --lg the same markup becomes a top bar and a strip. */
-  .shell { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); min-height: 100vh; }
+  /* ---- The shell: a rail and a main column. The rail is the warm-grey
+     column the kit calls --rail-bg, sticky for the viewport's height, so the
+     views and the account are in reach from any scroll position. Under --lg
+     the same markup becomes a top bar and a view menu. */
+  /* The rail's ground is painted on the shell as well, so the grey column
+     runs the page's full height: the rail itself is one viewport tall. */
+  .shell { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh;
+           background: linear-gradient(90deg, var(--rail-bg) 0 calc(var(--rail-w) - 1px), var(--border) 0 var(--rail-w), transparent 0); }
   .rail { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
-          gap: var(--s4); padding: var(--s4) var(--s3); border-right: 1px solid var(--border); background: var(--bg); }
-  .logo { display: flex; align-items: center; gap: 9px; padding: var(--s1) var(--s2); font-family: var(--mono);
+          gap: var(--s5); padding: var(--s4) var(--s3); background: var(--rail-bg); border-right: 1px solid var(--border); }
+  .logo { display: flex; align-items: center; gap: 9px; min-height: var(--h-md); padding: 0 var(--s3); font-family: var(--mono);
           font-weight: 700; font-size: var(--fs-body); color: var(--text); white-space: nowrap; }
-  .logo:hover { text-decoration: none; }
 ${MARK_CSS}
 
-  /* The account card. The one bar on this page that is about the account
-     rather than the product: running out of plan means calls stop being
-     metered, which needs a human, so this is where --fail legitimately lives. */
-  .acct { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-          border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s3) var(--s3) var(--s3); }
-  .acct-who { font-size: var(--fs-small); color: var(--text); font-weight: 600; overflow: hidden;
+  /* The account card: the white card on the rail's grey, panel in panel. The
+     one bar here that is about the account rather than the product; the plan
+     quota's end is a ceiling like any other, so it carries the tick. It is
+     ink below 90% and the signal from 90%, where calls start being refused;
+     the link to raise the ceiling still appears from 75%. */
+  .acct { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
+          padding: 14px var(--s4) var(--s4); display: grid; gap: var(--s2); min-width: 0; }
+  .acct-who { font-size: var(--fs-small); font-weight: 500; color: var(--text); overflow: hidden;
               text-overflow: ellipsis; white-space: nowrap; }
   .acct-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
-              margin-top: 6px; font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); white-space: nowrap; }
-  .acct-q { margin-top: var(--s2); font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
-            font-variant-numeric: tabular-nums; line-height: 1.5; }
-  .acct-q b { color: var(--muted); font-weight: 500; }
-  .meter { height: 4px; background: var(--surface3); border-radius: var(--r-pill); margin-top: var(--s2); overflow: hidden; }
-  .meter i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--flow); }
-  .meter i.near { background: var(--near); } .meter i.fail { background: var(--fail); }
-  .acct a { color: var(--green); }
+              font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); white-space: nowrap; }
+  .acct-m { padding-top: var(--s2); }
+  .acct-m .cv-meter { height: 6px; }
+  .acct-m .cv-meter > u { top: -5px; height: 16px; }
+  .acct-m.is-fail .cv-meter > i { background: var(--signal); }
+  .acct-q { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; line-height: 1.55; }
+  .acct-q b { color: var(--text); font-weight: 500; }
+  .acct-q a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 
-  /* The views. The current one is a fact the server decided, so it may wear
-     a current state; the old jump rail could not, because every section
-     rendered regardless of which link was pressed. */
+  /* The views. The current one is a fact the server decided (aria-current),
+     drawn as the kit's white pill on the rail's grey. */
   .views { display: flex; flex-direction: column; gap: 2px; }
-  .views a { display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
-             min-height: 40px; padding: 0 var(--s2) 0 var(--s3); border-radius: var(--r-control);
-             color: var(--muted); font-weight: 500; white-space: nowrap; position: relative; }
-  .views a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
-  .views a[aria-current="page"] { color: var(--text); background: var(--surface2); }
-  .views a[aria-current="page"]::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px;
-                                          width: 2px; border-radius: 1px; background: var(--green); }
-  .views a b { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500; color: var(--dim);
-               font-variant-numeric: tabular-nums; }
-  .views a[aria-current="page"] b { color: var(--muted); }
-  .views .mode { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border);
-                 border-radius: 0; }
-  .views .mode span::before { content: '\\2194  '; color: var(--dim); }
+  .views .mode { position: relative; margin-top: 13px; }
+  .views .mode::before { content: ''; position: absolute; left: var(--s3); right: var(--s3); top: -8px;
+                         border-top: 1px solid var(--border2); }
+  .mode span::before { content: '\\2194  '; color: var(--dim); }
   .vmenu { display: none; }
   .rail-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--s2); }
-  .rail-foot .docs { display: flex; align-items: center; min-height: 40px; padding: 0 var(--s3);
-                     border-radius: var(--r-control); color: var(--muted); font-weight: 500; }
-  .rail-foot .docs:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
   .rail-foot form { display: contents; }
-  .btn-out { background: none; border: 1px solid var(--border-strong); color: var(--muted); border-radius: var(--r-control);
-             padding: 0 var(--s3); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
-             min-height: 44px; display: inline-flex; align-items: center; justify-content: center; width: 100%; }
-  .btn-out:hover { color: var(--text); border-color: var(--dim); }
-  /* The signed-out sample console's only CTA. Filled, not ghosted: this is the
-     one action a prospect on this page is meant to take. */
-  .btn-key { display: inline-flex; align-items: center; justify-content: center; background: var(--green);
-             color: var(--green-ink); border-radius: var(--r-control); padding: 0 var(--s4); font-weight: 700;
-             white-space: nowrap; min-height: 44px; width: 100%; }
-  .btn-key:hover { color: var(--green-ink); filter: brightness(1.06); text-decoration: none; }
-  .btn-key .short { display: none; }
+  .rail-foot .btn, .rail-foot .btn-ghost { width: 100%; }
+  .rail .btn-ghost { background: var(--surface); }
+  .btn .short { display: none; }
 
-  /* The main column. Centred inside what the rail leaves, on the shell width. */
+  /* ---- The main column, on the nav's measure, centred in what the rail leaves. */
   .main { min-width: 0; }
-  .wrap { max-width: var(--shell); margin: 0 auto; padding: var(--s6) var(--s6) var(--s8); }
+  .wrap { max-width: var(--shell); margin: 0 auto; padding: var(--s7) var(--s6) var(--s8); }
   .vh { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s4); flex-wrap: wrap;
         margin-bottom: var(--s5); }
-  h1 { font-family: var(--display); font-size: var(--fs-h1-app); font-weight: 700; letter-spacing: -.022em;
-       line-height: 1.1; }
-  .sub { color: var(--muted); font-size: var(--fs-body); margin-top: 6px; max-width: 64ch; }
-  .sub code, .lede code, .note code, td code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+  h1 { font-size: var(--fs-h1-app); letter-spacing: -0.02em; line-height: 1.15; }
+  .sub { color: var(--muted); font-size: var(--fs-body); margin-top: var(--s2); max-width: 64ch; line-height: 1.55; }
 
-  /* The period control. Segmented, 44px, and it scopes every figure on the
-     view that carries a window. It lives in the view header, not under the
-     chart, because it is not the chart's control. */
-  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r-control);
-         overflow: hidden; background: var(--surface); }
-  .seg a { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); display: inline-flex;
-           align-items: center; min-height: 44px; padding: 0 var(--s4); border-right: 1px solid var(--border);
-           white-space: nowrap; }
-  .seg a:last-child { border-right: none; }
-  .seg a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
-  .seg a.on { color: var(--green-ink); background: var(--green); font-weight: 700; }
+  /* Sample data says so in a callout under the header, and again inside every
+     frame's own bar, so a screenshot of any one frame carries the label. */
+  .banner { margin-bottom: var(--s5); }
+  .banner p { max-width: 90ch; }
+  .banner a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 
-  /* Neutral, not amber. This was the largest amber object on the page and it
-     meant "this data is invented", while every other amber here means
-     "approaching a limit", so the page's loudest colour signal was the one that
-     is not a signal. The frame and the label stay, so design.md's rule that
-     sample data says so inside its own frame still holds. */
-  .banner { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
-            background: var(--surface2); border: 1px solid var(--border-strong); border-radius: var(--r-frame);
-            padding: var(--s3) var(--s4); margin-bottom: var(--s5); }
-  .banner b { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .1em;
-              text-transform: uppercase; color: var(--dim); }
-  .banner p { color: var(--muted); margin: 0; }
-  .banner a { color: var(--green); }
-
-  /* One frame recipe for everything that holds content. */
-  .frame { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-           border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); min-width: 0; }
-  .lbl { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .1em; text-transform: uppercase;
-         color: var(--dim); font-weight: 500; }
-  h2 { font-family: var(--display); font-size: var(--fs-h3); font-weight: 600; letter-spacing: -.01em;
-       display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
-       margin: var(--s7) 0 var(--s3); }
-  h2 a { font-family: var(--sans); font-size: var(--fs-small); font-weight: 500; color: var(--green); white-space: nowrap; }
+  /* Section heads on a view with more than one frame: Geist at the h3 rung,
+     sentence case, with the view link at the right. */
+  h2 { font-size: var(--fs-h3); letter-spacing: -0.01em; line-height: 1.3; display: flex; align-items: baseline;
+       justify-content: space-between; gap: var(--s3); margin: var(--s7) 0 var(--s3); }
+  h2 a { font-family: var(--sans); font-size: var(--fs-small); font-weight: 500; color: var(--text); white-space: nowrap; }
   h2 span { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 400; color: var(--dim); }
-  .lede { color: var(--dim); margin: -4px 0 var(--s3); max-width: 78ch; }
+  .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); }
+  /* A link inside a sentence is the ink, so it carries the underline: without
+     a colour it is the only mark that says it is a link. */
+  .wrap p a:not(.btn), .lim .param a { text-decoration: underline; text-underline-offset: 2px; }
+  .note { margin-top: var(--s3); color: var(--dim); max-width: 78ch; }
+  .note code, .fine code, .nothing code { color: var(--muted); }
 
-  /* Tiles. Four peers, each saying its own window in its own label. */
-  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
-  .tile { padding: var(--s4) var(--s4) var(--s3); display: flex; flex-direction: column; gap: 6px; }
-  .tv { font-family: var(--mono); font-size: var(--fs-figure); font-weight: 700; line-height: 1.1;
-        letter-spacing: -.02em; color: var(--text); overflow-wrap: anywhere; }
-  .tv.held { color: var(--held); }
+  /* ---- The frame's bar, as this page fills it: the tag that names what the
+     frame holds, and SAMPLE at the right under sample data. */
+  .cv-bar-t .tag { flex: none; }
+  .cv-panel + .key { margin-top: var(--s3); }
+
+  /* ---- The overview's figures. One card, four cells on hairlines, and the
+     leak strip under them. The four each say their own window in their label. */
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tile { padding: 20px; display: flex; flex-direction: column; gap: var(--s2); min-width: 0;
+          border-left: 1px solid var(--card-line); }
+  .tile:first-child { border-left: 0; }
+  .tile .cv-stat { line-height: 1.05; overflow-wrap: anywhere; }
   /* margin-top: auto, so the four footers share one baseline whether or not
-     the tile above them carries a sparkline. */
+     the cell above them carries a sparkline. */
   .tf { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; margin-top: auto; }
   .tf.now { color: var(--muted); }
-  .spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 4px; }
-  .spark i { flex: 1 1 0; min-width: 0; background: var(--flow); border-radius: 1px 1px 0 0; }
-  .spark i.held { background: var(--held); }
-  .spark i.zero { background: var(--surface2); height: 1px; }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 28px; margin-top: var(--s1); }
+  .spark i { flex: 1 1 0; min-width: 0; background: var(--meter-fill); border-radius: 2px 2px 0 0; }
+  .spark i.held { background: var(--signal); }
+  .spark i.zero { background: var(--border); height: 1px; }
 
-  /* Leaked spend is not a peer of the four tiles above it. It is the only
-     number here whose good value is zero, so it has its own row with its
-     explanation attached, and it is the only red on the page. */
-  .leak { display: flex; align-items: center; gap: var(--s4); margin-top: var(--s3); padding: var(--s3) var(--s4); }
-  .leak-n { font-family: var(--mono); font-size: var(--fs-figure); font-weight: 700; line-height: 1.1;
-            letter-spacing: -.02em; color: var(--flow-ink); min-width: 2ch; text-align: right; }
-  .leak-t { flex: 1 1 auto; min-width: 0; }
-  .leak-t b { display: block; font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .1em;
-              text-transform: uppercase; color: var(--dim); font-weight: 500; }
-  .leak-t p { color: var(--dim); margin: 3px 0 0; max-width: 78ch; }
-  .leak a { color: var(--green); white-space: nowrap; }
-  .leak.bad { border-color: var(--fail-line); }
-  .leak.bad .leak-n, .leak.bad .leak-t b { color: var(--fail); }
+  /* Leaked spend is not a peer of the four cells. It is the only number here
+     whose good value is zero, so it has its own strip with its explanation
+     attached, tinted in the signal only when it is not zero: the refused row's
+     treatment, because it is the refusal that did not happen. */
+  .leak { display: flex; align-items: center; gap: var(--s4); margin: 0 var(--s4) var(--s4); padding: 14px var(--s4);
+          border-radius: var(--r-row); background: var(--surface2); }
+  .leak-n { font-family: var(--display); font-size: var(--fs-figure); font-weight: 500; line-height: 1;
+            letter-spacing: -0.02em; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+  .leak-t { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+  .leak-t p { color: var(--muted); max-width: 78ch; }
+  .leak a { color: var(--text); white-space: nowrap; font-weight: 500; }
+  .leak.bad { background: var(--fail-bg); }
+  .leak.bad .leak-n, .leak.bad .cv-label { color: var(--signal); }
 
-  /* The chart. Two rows, one series each, one scale each, one x-axis. Blocks
-     are rarer than units by orders of magnitude, so they cannot share a scale;
-     they used to be stacked into the same column on two different scales and
-     reading any bar against the axis gave a number roughly half the truth. */
-  .chart { padding: var(--s4) var(--s4) var(--s3); }
+  /* ---- The overview's task frame: the log on the left, this job on the
+     right, as the homepage frame draws them. */
+  .side-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
+  .cv-side .cv-no { overflow-wrap: anywhere; }
+  /* A persisted body, on the plate. A div, not the code tag: scripts/snippets
+     harvests every code block under src/routes and executes it, and this one
+     is interpolated. */
+  .plate { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* ---- The chart. Two rows, one series each, one scale each, one x-axis.
+     Units are the ink, the meter's fill; refusals are the signal. */
+  .chart { padding: 20px 20px var(--s4); }
   .crow { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--s4); align-items: stretch; }
-  .crow + .crow { margin-top: var(--s3); }
+  .crow + .crow { margin-top: var(--s4); }
   .clab { display: flex; flex-direction: column; justify-content: flex-start; gap: 2px; padding-top: 2px; }
-  .clab b { font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
-  .clab b::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--flow); flex: none; }
-  .clab.held b::before { background: var(--held); }
+  .clab b { font-weight: 500; color: var(--text); display: flex; align-items: center; gap: var(--s2); }
+  .clab b::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--meter-fill); flex: none; }
+  .clab.held b::before { background: var(--signal); }
   .clab span { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
   /* A 44px gutter on the left of the plot carries the y ticks, so a tick never
      sits on a bar. The x-axis row pads by the same amount to stay in step. */
@@ -1101,7 +1103,7 @@ ${MARK_CSS}
            pointer-events: none; }
   .cgrid span { border-top: 1px solid var(--border-soft); height: 0; position: relative; }
   .cgrid span::after { content: attr(data-y); position: absolute; right: calc(100% + 8px); top: -8px;
-                       font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
+                       font-family: var(--mono); font-size: var(--fs-tick); color: var(--dim);
                        font-variant-numeric: tabular-nums; white-space: nowrap; }
   .cbars { display: flex; align-items: flex-end; gap: 3px; height: 180px; position: relative; }
   /* Ninety columns at a 3px gap spent 267px on gaps, which is more than a
@@ -1110,329 +1112,277 @@ ${MARK_CSS}
   .cbars.strip { height: 40px; }
   .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center;
          position: relative; }
-  .col i { display: block; width: 100%; max-width: 28px; border-radius: 3px 3px 0 0; background: var(--flow); }
-  .col i.held { background: var(--held); }
+  .col i { display: block; width: 100%; max-width: 28px; border-radius: 4px 4px 1px 1px; background: var(--meter-fill); }
+  .col i.held { background: var(--signal); }
   .col i.zero { display: none; }
-  /* The one direct label: the peak. Everything else is on the axis, the hover
-     or the day-by-day table on the activity view. */
+  /* The one direct label: the peak. */
   .strip .col.peak::before { display: none; }
   .col.peak::before { content: attr(data-v); position: absolute; left: 50%; transform: translateX(-50%);
                       top: -18px; font-family: var(--mono); font-size: var(--fs-chip); color: var(--muted);
                       font-variant-numeric: tabular-nums; white-space: nowrap; }
-  /* The hover layer, in CSS: one readout per day with every series at that x.
-     The column is the hit target, not the bar, so a two-pixel day is as easy
-     to hit as the peak. Values are also in the table on the activity view. */
+  /* The hover layer, in CSS: one readout per day with every series at that x,
+     on a white card with a hairline, like every card on this page. */
   .col::after { content: attr(data-t); display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
-                transform: translateX(-50%); z-index: 2; background: var(--surface3); color: var(--text);
-                border: 1px solid var(--border2); border-radius: var(--r-chip); padding: 5px 9px;
-                font-family: var(--mono); font-size: var(--fs-chip); white-space: nowrap; box-shadow: var(--lift); }
+                transform: translateX(-50%); z-index: 2; background: var(--surface); color: var(--text);
+                border: 1px solid var(--border2); border-radius: var(--r-field); padding: 6px 10px;
+                font-family: var(--mono); font-size: var(--fs-chip); white-space: nowrap; }
   .col:hover::after { display: block; }
-  /* On the tallest bars the readout above the column pokes past the frame's
-     top edge; those anchor it just inside the plot instead. */
   .col.tall::after { bottom: auto; top: 6px; }
-  .col:hover i { filter: brightness(1.25); }
+  .col:hover i { opacity: .72; }
   .col.l::after { left: 0; transform: none; } .col.r::after { left: auto; right: 0; transform: none; }
-  .cx { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--s4); margin-top: 6px; }
+  .cx { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--s4); margin-top: var(--s2); }
   .cx div { display: flex; gap: 3px; padding-left: 44px; }
-  /* Each label is centred on its column, and may overflow its slot on both
-     sides equally, which is what a flex container with justify-content:
-     center does with a child wider than itself. The last label of a dense
-     axis ends flush with its column instead, so it never leaves the frame. */
-  .cx span { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
+  .cx span { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: var(--fs-tick); color: var(--dim);
              white-space: nowrap; overflow: visible; display: flex; justify-content: center; }
   .cx div:not(.x1) span:last-child { justify-content: flex-end; }
 
-  /* Burn-down rows. */
-  .brow { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
-  .brow:last-child { border-bottom: none; }
-  .bhead { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
-           margin-bottom: 8px; }
-  .btask { font-family: var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-  .btask a { color: var(--text); }
-  .bagent { color: var(--dim); font-family: var(--sans); }
-  .bnum { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums;
-          white-space: nowrap; display: flex; align-items: center; gap: var(--s2); }
-  .bnum b { color: var(--text); font-weight: 700; }
-  .track { height: 8px; background: var(--surface3); border-radius: var(--r-pill); overflow: hidden; display: flex; }
-  .track i { display: block; height: 100%; }
-  .track i.used { background: var(--flow); }
-  .track i.used.near { background: var(--near); }
-  .track i.used.held { background: var(--held); }
-  .track i.used.fail { background: var(--fail); }
-  .track i.res { background: var(--res); }
-  .bfoot { margin-top: 6px; font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
-           display: flex; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
-  .key { display: flex; gap: var(--s4); flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-chip);
-         color: var(--dim); margin: var(--s3) 0 0; }
-  .key span { display: flex; align-items: center; gap: 6px; }
-  .key i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--flow); }
-  .key i.res { background: var(--res); } .key i.near { background: var(--near); } .key i.held { background: var(--held); }
-  .key i.fail { background: var(--fail); }
+  /* ---- Tables. The kit's table, as the homepage frame's log reads: mono
+     uppercase column labels, mono names, right-aligned mono numbers. A row
+     at its ceiling or past it is the refused row, tinted in the signal. */
+  .cv-scroll { -webkit-overflow-scrolling: touch; }
+  .cv-body.flush { padding: 6px 10px 10px; }
+  .cv-table td.num, .cv-table th.num { font-family: var(--mono); white-space: nowrap; text-align: right; }
+  .cv-table td.num b { color: var(--text); font-weight: 500; }
+  .cv-table tr.is-no td.num b { color: inherit; }
+  .cv-table td.when { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); white-space: nowrap; }
+  .cv-table td.id { font-family: var(--mono); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .cv-table td.id a, .cv-table td.lead a { color: var(--text); }
+  .cv-table tr.is-no td.id a, .cv-table tr.is-no td.lead a { color: inherit; }
+  .cv-table td.msg { color: var(--muted); min-width: 26ch; }
+  .cv-table td.msg.bad { color: var(--signal); }
+  .cv-table td.lead { font-family: var(--mono); }
+  .cv-table tr.zero td { color: var(--dim); }
+  /* Hover is for a pointer. On a phone the rows are cards and a sticky
+     hover tint on the last-tapped card would read as a state. */
+  @media (hover: hover) and (min-width: ${BP.sm + 1}px) {
+    .cv-table tbody tr:not(.is-no):hover td { background: var(--row-hover); }
+    .cv-table tbody tr:not(.is-no):hover td:first-child { border-radius: var(--r-row) 0 0 var(--r-row); }
+    .cv-table tbody tr:not(.is-no):hover td:last-child { border-radius: 0 var(--r-row) var(--r-row) 0; }
+    .cv-table.is-ruled tbody tr:hover td { border-radius: 0; }
+  }
+  .cv-table td.state { white-space: nowrap; }
+  /* A state that is not a decision is a tag; a dead key is the same tag, quieter. */
+  .tag.dead { color: var(--dim); border-style: dashed; }
 
-  /* Tables. */
-  .tw { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; padding: 10px var(--s4); color: var(--dim); font-weight: 500; font-size: var(--fs-chip);
-       text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border);
-       white-space: nowrap; font-family: var(--mono); }
-  td { padding: 11px var(--s4); border-bottom: 1px solid var(--border); vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
-  td.id { font-family: var(--mono); font-size: var(--fs-micro); white-space: nowrap; max-width: 220px;
-          overflow: hidden; text-overflow: ellipsis; }
-  td.id a { color: var(--text); }
-  td.msg { color: var(--muted); min-width: 26ch; }
-  td.when { color: var(--dim); font-family: var(--mono); font-size: var(--fs-micro); white-space: nowrap; }
-  tr.zero td { color: var(--dim); }
-  .chip { display: inline-block; font-family: var(--mono); font-size: var(--fs-chip); font-weight: 700;
-          letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: var(--r-chip); white-space: nowrap; }
-  .chip.held { background: var(--held-bg); color: var(--green); border: 1px solid var(--held-line); }
-  .chip.near { background: var(--near-bg); color: var(--amber); border: 1px solid var(--near-line); }
-  .chip.fail { background: var(--fail-bg); color: var(--fail-ink); border: 1px solid var(--fail-line); }
-  .chip.flow { background: var(--surface3); color: var(--flow-ink); border: 1px solid var(--border2); }
-  .chip.dead { background: var(--surface3); color: var(--dim); border: 1px solid var(--border2); }
+  /* The task rows. The name and its agent on one line and the counts under
+     them, the units as the frame's figure (used / ceiling), and the burn-down
+     as the kit's meter at row size: spent, reserved by a call in flight, and
+     the ceiling as the signal tick at the end.
+     The job's name is the row's identity and is never cut: "job-88..." cannot
+     be told from job-8871 or job-8864. It wraps inside its cell if it must, and
+     the agent label is what gives way: it drops to its own line when the two
+     do not fit, and takes the ellipsis. */
+  .tk { display: grid; gap: 2px; min-width: 0; }
+  .tk-n { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--s2); min-width: 0; }
+  .tk-n a { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .tk-a { font-family: var(--sans); color: var(--dim); min-width: 0; max-width: 100%;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-f { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
+  tr.is-no .tk-a, tr.is-no .tk-f { color: var(--row-no-ink); }
+  td.burn { width: 22%; min-width: 96px; }
+  .cv-meter.is-row { height: 6px; }
+  .cv-meter.is-row > u { top: -5px; height: 16px; }
+  .cv-meter > s { position: absolute; top: 0; bottom: 0; background: var(--res); text-decoration: none; }
+  /* Ink plus one signal, as on the homepage. A task within a fifth of its
+     ceiling keeps the ink bar and says so with its chip. The ceiling held is
+     the signal; a leak is the signal hatched, the homepage playground's mark
+     for units past the ceiling (.pg-ghost), so held and leaked differ by more
+     than a shade of the same hue. */
+  .cv-meter.held > i { background: var(--signal); }
+  .cv-meter.fail > i, .key i.fail { background: repeating-linear-gradient(45deg, var(--signal) 0 3px, transparent 3px 6px); }
+  /* The legend under the tasks: the bar's parts and states as bar swatches,
+     and "within a fifth" as the chip those rows carry, since its bar is ink. */
+  .key { display: flex; gap: var(--s2) var(--s4); flex-wrap: wrap; align-items: center; font-family: var(--mono);
+         font-size: var(--fs-chip); color: var(--dim); margin: var(--s3) 0 0; }
+  .key > span { display: flex; align-items: center; gap: 6px; }
+  .key i { width: 18px; height: 8px; border-radius: var(--r-pill); display: inline-block; flex: none;
+           background: var(--meter-fill); }
+  .key i.res { background: var(--res); } .key i.held { background: var(--signal); }
+  .key i.fail { background-color: var(--meter-track); }
+  /* The row's own chip, at the legend's size so it does not out-weigh the line. */
+  .key .chip-near { font-size: inherit; padding-block: 1px; }
+
   /* Share of spend: one hue for one series, the bar scaled to the heaviest
      customer, the percentage of every customer's lifetime spend beside it. */
   .share { display: flex; align-items: center; gap: var(--s2); }
-  .share .sbar { display: block; width: 110px; height: 8px; background: var(--surface3); border-radius: var(--r-pill);
-                 overflow: hidden; flex: none; }
-  .share i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--flow); }
-  .share i.held { background: var(--held); } .share i.near { background: var(--near); }
+  .share .cv-meter { width: 110px; flex: none; }
   .share > span:last-child { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted);
-                             font-variant-numeric: tabular-nums; }
-  .muted { color: var(--muted); } .dim { color: var(--dim); } .none { color: var(--dim); font-style: italic; }
-  details summary { cursor: pointer; color: var(--green); font-family: var(--mono); font-size: var(--fs-micro);
-                    list-style: none; padding: 2px 0; }
-  td details summary { white-space: nowrap; }
+                             font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* The body a refused call received, behind a disclosure. The summary is a
+     small outlined pill; the body opens on the plate. */
+  details summary { cursor: pointer; list-style: none; }
   details summary::-webkit-details-marker { display: none; }
-  details summary::before { content: '\\25B8  '; } details[open] summary::before { content: '\\25BE  '; }
-  pre { background: var(--bg-deep); border: 1px solid var(--border); border-radius: var(--r-control); padding: var(--s3) var(--s4);
-        font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.55; overflow-x: auto;
-        color: var(--code-ink); margin-top: var(--s2); }
-
-  /* Compact refusal rows on the overview: the time in a gutter, then two
-     lines that may each be cut with an ellipsis but never grow the row. A
-     first draft put the chip in a 1fr track, which stretched it to the frame,
-     and let a nowrap sentence size an auto track past the frame's edge. */
-  .rrow { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s3); align-items: baseline;
-          padding: 11px var(--s4); border-bottom: 1px solid var(--border); }
-  .rrow:last-child { border-bottom: none; }
-  .rrow .when { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); white-space: nowrap; }
-  .rmain { min-width: 0; }
-  .rtop { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-  .rrow .who { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text); white-space: nowrap;
-               overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .rrow .who a { color: var(--text); }
-  .rrow .who .dim { color: var(--dim); }
-  .rrow .chip { flex: none; }
-  /* Two lines, then an ellipsis. One line cut the leaked row's own number. */
-  .rrow .what { color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-                margin-top: 3px; }
-  /* .bad, not .leak: the exception row above owns .leak, and a modifier that
-     shares its name inherited display: flex and 12px of padding, which is a
-     box text-overflow cannot ellipsise. Same reach as the .kick span bug. */
-  .rrow .what.bad { color: var(--fail-ink); }
-
-  /* Two frames side by side on the overview; the row closes itself. */
-  .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: start; }
-  .duo h2 { margin-top: 0; }
-  .duo > div { min-width: 0; }
+  td details summary, .ns3 details summary { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
+          font-size: var(--fs-micro); color: var(--text); white-space: nowrap; }
+  td details summary { min-height: 28px; padding: 0 12px; border: 1px solid var(--border2); border-radius: var(--r-pill);
+                       background: var(--surface); }
+  td details summary:hover { border-color: var(--dim); }
+  details summary::before { content: '\\25B8'; color: var(--dim); } details[open] summary::before { content: '\\25BE'; }
+  td .cv-code { margin-top: var(--s2); white-space: pre; }
 
   /* The filter row on the refusals view. A filter is a fact about the list,
      so it says what it is and how to clear it. */
-  .filters { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin: -8px 0 var(--s3);
+  .filters { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin: 0 0 var(--s3);
              font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
-  .filters .chip-f { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong);
-                     border-radius: var(--r-control); padding: 0 10px; min-height: 32px; color: var(--muted);
-                     max-width: 100%; min-width: 0; }
+  .filters .chip-f { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border2);
+                     border-radius: var(--r-pill); padding: 0 12px; min-height: var(--h-sm); color: var(--muted);
+                     background: var(--surface); max-width: 100%; min-width: 0; }
   .filters .chip-f b { color: var(--text); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                        white-space: nowrap; }
-  .filters a { color: var(--green); }
+  .filters a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 
-  /* The limits ladder. Four rules in evaluation order. Named .lim, not .rule:
-     the refusals table has a td.rule and a shared name gave that cell a grid. */
-  .lim { display: grid; grid-template-columns: 34px minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4) var(--s6); padding: var(--s4);
-         border-bottom: 1px solid var(--border); }
-  .lim:last-child { border-bottom: none; }
+  /* The limits ladder. Four rules in evaluation order, each with its live
+     counts on the grey plate at its right. Named .lim, not .rule: the
+     refusals table has a td.rule and a shared name gave that cell a grid. */
+  .lim { display: grid; grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--s4) var(--s5);
+         padding: 20px; border-top: 1px solid var(--card-line); }
+  .cv-bar + .lim { border-top: 0; }
   .lim .n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); padding-top: 3px; }
-  .lim h3 { font-family: var(--display); font-size: var(--fs-body); font-weight: 600; letter-spacing: -.01em; color: var(--text);
-            margin-bottom: 2px; }
-  .lim .param { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); margin-bottom: 6px; }
-  .lim p { color: var(--dim); max-width: 60ch; }
-  .lim .live { display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: var(--fs-micro);
+  .lim h3 { font-size: var(--fs-body); letter-spacing: -0.01em; color: var(--text); margin-bottom: 2px; }
+  .lim .param { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); margin-bottom: var(--s2); }
+  .lim p { color: var(--muted); max-width: 60ch; }
+  .lim .live { display: flex; flex-direction: column; gap: 6px; align-self: start; background: var(--side-bg);
+               border-radius: var(--r-field); padding: 14px var(--s4); font-family: var(--mono); font-size: var(--fs-micro);
                color: var(--muted); font-variant-numeric: tabular-nums; }
-  .lim .live b { color: var(--text); font-weight: 700; }
-  .lim .live .held { color: var(--held); } .lim .live .fail { color: var(--fail); }
-  .lim .live a { color: var(--green); }
-  .note { margin-top: var(--s3); color: var(--dim); max-width: 78ch; }
+  .lim .live b { color: var(--text); font-weight: 500; }
+  .lim .live .fail { color: var(--signal); }
+  .lim .live a { color: var(--text); font-family: var(--sans); font-size: var(--fs-small); font-weight: 500; margin-top: 2px; }
 
-  /* Commands, as display, not as a code sample: a div, never a pre, because
-     scripts/snippets harvests every pre on every route and executes it. */
-  .cmds { padding: var(--s2) 0; }
-  .cmd { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: var(--s4); padding: 9px var(--s4);
-         border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: var(--fs-micro); }
-  .cmd:last-child { border-bottom: none; }
-  .cmd b { color: var(--code-ink); font-weight: 500; white-space: nowrap; }
-  .cmd span { color: var(--dim); font-family: var(--sans); font-size: var(--fs-small); }
+  /* Commands, as display, not as a code sample: a div, never the code tag,
+     because scripts/snippets harvests every code block on every route and
+     executes it. */
+  .cmd { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: var(--s4); padding: 12px 20px;
+         border-top: 1px solid var(--card-line); align-items: baseline; }
+  .cmd:first-child { border-top: 0; }
+  .cmd b { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text); font-weight: 400; white-space: nowrap; }
+  .cmd span { color: var(--muted); }
 
-  /* Empty state and the in-page note. */
-  .empty { padding: var(--s5); border-style: dashed; border-color: var(--border2); box-shadow: none; }
-  .empty h2 { margin: 0 0 var(--s2); }
-  .empty p { color: var(--muted); margin-bottom: var(--s3); max-width: 70ch; }
-  /* The flash lines are direct children of .empty on the first-run screen, and
-     .empty p (0,1,1) outranks .err (0,1,0) while .setc .ok never matches
-     there, so a save confirmation and a validation error both rendered in
-     --muted: the two lines on the screen whose whole job is to be noticed.
-     Scoped rather than bumped, so the .setc copies keep deciding their own. */
-  .empty > .ok { color: var(--green); overflow-wrap: anywhere; }
-  .empty > .err { color: var(--red); overflow-wrap: anywhere; }
-  .empty ol { margin: 0 0 var(--s3) 1.2em; color: var(--muted); }
-  .empty ol li { margin-bottom: 6px; }
-  .empty pre { margin: var(--s2) 0 var(--s3); white-space: pre-wrap; word-break: break-all; }
-  .empty details { margin-top: var(--s2); }
-  .empty .out { font-family: var(--mono); font-size: var(--fs-micro); color: var(--code); overflow-wrap: anywhere; }
-  .nothing { padding: var(--s5) var(--s4); color: var(--dim); }
+  /* Empty states: the kit's dashed frame, saying what would be here and the
+     one step that fills it. */
+  .cv-empty p { max-width: 64ch; }
+  .cv-empty a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+  .nothing { color: var(--muted); }
   .foot { margin-top: var(--s7); padding-top: var(--s4); border-top: 1px solid var(--border); color: var(--dim);
           line-height: 1.7; }
-  .foot code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+  .foot code { font-size: var(--fs-micro); color: var(--muted); }
 
-  /* Login. */
-  .login { max-width: 460px; margin: var(--s9) auto; padding: var(--s6); }
-  .login h1 { font-size: var(--fs-h3); }
-  .login p { color: var(--muted); font-size: var(--fs-body); margin-bottom: var(--s4); }
-  label { display: block; font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .1em;
-          text-transform: uppercase; color: var(--dim); margin-bottom: var(--s2); }
-  input { width: 100%; background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--r-control);
-          padding: var(--s3); color: var(--text); font-family: var(--mono); font-size: var(--fs-small);
-          margin-bottom: var(--s3); outline: 2px solid transparent; outline-offset: 2px; min-height: 46px; }
-  .btn { width: 100%; background: var(--green); color: var(--green-ink); border: none; border-radius: var(--r-control);
-         padding: var(--s3); font: inherit; font-size: var(--fs-body); font-weight: 700; cursor: pointer; min-height: 46px; }
-  .btn:hover { filter: brightness(1.06); }
-  .err { color: var(--red); margin-bottom: var(--s3); }
-  .fine { color: var(--dim); margin-top: var(--s4); }
-  /* Outranks .login p, which is what kept the card bottom-heavy. */
-  .login .fine { margin-bottom: 0; }
-  /* The tasks view's form (POST /app/tasks) and the inline save on a row. */
-  .setc { padding: var(--s4); }
+  /* ---- Forms: the kit's fields. A save confirmation is one line on a white
+     strip; an error is one line of --red, never a filled block. */
+  .ok { color: var(--text); background: var(--surface); border: 1px solid var(--card-line); border-radius: var(--r-field);
+        padding: 12px var(--s4); overflow-wrap: anywhere; }
+  .err { color: var(--red); overflow-wrap: anywhere; }
+  .fine { color: var(--dim); }
+  .fine a, .ns3 a:not(.btn) { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+  /* The tasks view's form (POST /app/tasks), on the panel's grey. */
+  .setc { background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); display: grid; gap: var(--s4);
+          margin-bottom: var(--s5); }
   .setf { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr) minmax(0, 1fr) auto; gap: var(--s3); align-items: end; }
-  .setf input { margin-bottom: 0; }
-  .setf .btn { width: auto; padding: var(--s3) var(--s5); white-space: nowrap; }
-  .setc .fine { margin-top: var(--s3); max-width: 78ch; }
-  .setc .ok { color: var(--green); margin-bottom: var(--s3); }
-  .setc .err { margin-bottom: var(--s3); }
-  .setc .ok, .setc .err, .nothing { overflow-wrap: anywhere; }
-  .setc p code, .nothing code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
-  .setf label code { text-transform: none; letter-spacing: 0; font-family: var(--mono); color: var(--muted); margin-left: 4px; }
-  .bfoot { flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
-  .bset { display: flex; align-items: center; gap: var(--s2); }
-  .bset label { display: inline; margin: 0; }
-  .bset input { width: 9ch; margin: 0; min-height: 34px; padding: 4px var(--s2); font-size: var(--fs-micro); }
-  .bset .btn-out { min-height: 34px; padding: 4px var(--s3); font-size: var(--fs-micro); cursor: pointer; }
-  @media (max-width: ${BP.lg}px) {
-    .setf { grid-template-columns: minmax(0, 1fr); }
-    .setf .btn { width: 100%; }
-  }
+  .setf code { font-size: .9em; color: var(--dim); font-weight: 400; margin-left: 2px; }
+  .setc .fine { max-width: 86ch; }
+  /* The inline save on a row: a field and a button at the in-control height. */
+  .bset { display: flex; align-items: center; gap: var(--s2); justify-content: flex-end; }
+  /* The column head says CEILING; the label stays for a screen reader and
+     comes back on a phone, where the rows are cards with no column heads. */
+  .bset label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .bset .cv-field { width: 10ch; min-height: var(--h-sm); padding: 4px 10px; font-size: var(--fs-micro); border-radius: var(--r-row); }
+  .bset .btn-ghost { min-height: var(--h-sm); padding: 5px 14px; line-height: 20px; font-size: var(--fs-micro); }
 
-  /* The three-step start screen. One column at every width: these rows are
-     read in order, and a step that sits beside its neighbour is not a step.
-     Restyled 2026-09-12 after the fold: more air between steps, the ordinal
-     in a ring so the eye finds 1, 2, 3 before it reads anything, and a solid
-     frame rather than the dashed empty-state one, because this is not an
-     empty state; it is the screen a new account is meant to be on. */
-  .ns3 { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--s4); align-items: start;
-         padding: var(--s5) 0; border-top: 1px solid var(--border-soft); }
+  /* ---- The three-step start screen. One column at every width: these rows
+     are read in order, and a step beside its neighbour is not a step. The
+     panel's grey holds three white step cards; the ordinal is a ring, and
+     the frame is solid, because this is not an empty state: it is the screen
+     a new account is meant to be on. */
+  .start { display: grid; gap: var(--s3); }
+  .start > .intro { color: var(--text); font-size: var(--fs-lede); line-height: 1.5; max-width: 46ch; margin: var(--s2) var(--s2) var(--s3); }
+  .start > .fine, .start > .seedemo { margin: 0 var(--s2); max-width: 86ch; }
+  .start > .fine { margin-top: var(--s3); }
+  .start > .seedemo a { color: var(--text); font-weight: 500; }
   .setf3 { display: block; }
-  .setf3 .ns3:first-child { border-top: 1px solid var(--border-soft); }
-  .ns3-n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--green); width: 26px; height: 26px;
-           border: 1px solid var(--held-line); background: var(--held-bg); border-radius: 50%;
-           display: grid; place-items: center; margin-top: -2px; }
-  .start { border-style: solid; border-color: var(--border); border-top-color: var(--border2); box-shadow: var(--edge), var(--lift);
-           padding: var(--s6) var(--s6) var(--s5); }
-  .start > .intro { color: var(--text); font-size: var(--fs-lede); max-width: 46ch; margin-bottom: var(--s4); }
-  .start .ns3 > div > p.units { margin-top: var(--s5); }
-  .start .got { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin-top: var(--s3); }
-  .start .got .chip { margin-left: 0; }
-  .start .got .dim { font-family: var(--mono); font-size: var(--fs-micro); }
-  .start .btn-in { display: inline-flex; align-items: center; min-height: 40px; padding: 0 var(--s4); background: var(--green);
-                   color: var(--green-ink); border-radius: var(--r-control); font-weight: 700; text-decoration: none; }
-  @media (max-width: ${BP.md}px) {
-    .start { padding: var(--s4); }
-  }
+  .ns3 { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--s4); align-items: start;
+         background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner); padding: var(--s5); }
+  .ns3-n { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text); width: 28px; height: 28px;
+           border: 1px solid var(--border2); background: var(--surface2); border-radius: 50%;
+           display: grid; place-items: center; }
+  .ns3 > div { display: grid; gap: var(--s3); min-width: 0; justify-items: start; }
+  .ns3 > div > * { max-width: 100%; }
   .ns3 > div > p { color: var(--muted); max-width: 74ch; }
-  .ns3 label { display: block; margin-top: var(--s3); margin-bottom: 0; }
-  .ns3 .hint { display: block; font-family: var(--mono); font-size: var(--fs-label); color: var(--dim); margin: 2px 0 6px; }
-  .ns3 .hint code { font-family: var(--mono); color: var(--dim); }
-  .ns3 input { max-width: 32ch; }
-  .ns3 details { margin-top: var(--s3); }
-  .ns3 details input { margin-top: var(--s2); }
-  .ns3 .btn { margin-top: var(--s4); width: auto; padding: var(--s3) var(--s5); }
-  .ns3 .fine { margin-top: var(--s3); max-width: 78ch; }
-  /* Step 3 carries two paragraphs with the install line between them. */
-  .ns3 .snip + p { margin-top: var(--s4); }
-  .ns3 p code, .ns3 .fine code { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
-  /* One class, two tags, on purpose. scripts/snippets/extract.mjs harvests
-     every pre element under src/routes and executes it, and records an
-     interpolated one as "dynamic" with empty code, which drops it from the
+  .ns3 > div > p.units { margin-top: var(--s3); }
+  .ns3 > div > .fld { display: grid; width: 100%; max-width: 36ch; }
+  .fld .cv-flabel { color: var(--text); }
+  .ns3 details { width: 100%; }
+  .ns3 details .cv-field { margin-top: var(--s2); max-width: 36ch; }
+  .ns3 details .fine { margin-top: var(--s2); }
+  .ns3 .btn { margin-top: var(--s2); }
+  .ns3 .out { font-family: var(--mono); font-size: .92em; color: var(--text); }
+  .ns3 .got { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+  .ns3 .got .dim { font-family: var(--mono); font-size: var(--fs-micro); }
+  /* Named with its parent, or .ns3 > div > p (muted) outranks the kit's
+     signal and the one refusal line on the screen reads as body text. */
+  .ns3 > div > p.cv-no { color: var(--signal); font-size: var(--fs-body); }
+  .start .cv-code { width: 100%; }
+  /* Your code on a light card with a hairline, the kit's .cv-snip recipe,
+     under one class for two tags, on purpose. scripts/snippets/extract.mjs
+     harvests every code block under src/routes and executes it, and records
+     an interpolated one as "dynamic" with empty code, which drops it from the
      gate in silence. So the personalised sample (the reader's job name inside
      it) and the install line are divs, and the pre-save sample, a literal, is
-     the one pre element: it is the copy CI actually runs, and the hygiene gate
-     holds it byte-identical to taskSnippet(). Same convention as .cmds here.
+     the one code block: it is the copy CI actually runs, and the hygiene gate
+     holds it byte-identical to taskSnippet(). Same convention as .cmd here.
 
      The tag name is spelled without angle brackets in this comment and the one
      beside the sample, on purpose. The harvester's regex reads a bare tag in a
      comment as an opening tag and swallows the file to the next closing one,
      which took this very sample out of CI for one commit on 2026-09-11 and
      showed up only as python 38 -> 37 in the inventory. */
-  .snip { margin-top: var(--s3); background: var(--bg-deep); border: 1px solid var(--border);
-          border-radius: var(--r-control); padding: var(--s3); font-family: var(--mono);
-          font-size: var(--fs-micro); color: var(--code-ink); line-height: 1.6;
+  .snip { width: 100%; background: var(--snip-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
+          padding: 14px 18px; font-family: var(--mono); font-size: var(--fs-code); color: var(--text); line-height: 1.7;
           white-space: pre-wrap; overflow-wrap: anywhere; }
-  .seedemo { margin-top: var(--s4); }
-  nav.top { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 var(--s5); }
+
   a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
     outline: 2px solid var(--green); outline-offset: 2px; }
 
   @media (max-width: ${BP.lg}px) {
-    /* The rail becomes a bar and a strip. Same markup, three areas: the
-       identity row, the views scrolling in one line, nothing else. */
-    .shell { display: block; }
-    .rail { position: sticky; height: auto; overflow: visible; z-index: 10; display: grid;
+    /* The rail becomes a bar and a menu. Same markup: the identity row on the
+       site nav's height and ground, then the views behind one disclosure
+       whose summary names the current view. */
+    .shell { display: block; background: none; }
+    .rail { position: sticky; top: 0; height: auto; overflow: visible; z-index: 10; display: grid;
             grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "logo acct foot" "views views views";
-            align-items: center; gap: var(--s2) var(--s3); padding: var(--s2) var(--s3) 0;
-            border-right: none; border-bottom: 1px solid var(--border); }
-    .logo { grid-area: logo; padding: 0; }
-    .acct { grid-area: acct; background: none; border: none; box-shadow: none; padding: 0; min-width: 0;
+            align-items: center; gap: 0 var(--s3); padding: 0 var(--gutter) var(--s3);
+            background: var(--nav-bg); backdrop-filter: blur(14px); border-right: none; border-bottom: 1px solid var(--border); }
+    .logo { grid-area: logo; padding: 0; min-height: 60px; }
+    .acct { grid-area: acct; background: none; border: none; padding: 0; min-width: 0;
             display: flex; align-items: center; justify-content: flex-end; gap: var(--s3); overflow: hidden; }
-    .acct-who, .acct-q, .meter { display: none; }
-    .acct-row { margin: 0; }
+    .acct-who, .acct-q, .acct-m { display: none; }
     .rail-foot { grid-area: foot; margin: 0; flex-direction: row; }
-    .rail-foot .docs { display: none; }
-    .btn-out, .btn-key { width: auto; }
+    .rail-foot > .cv-navlink { display: none; }
+    .rail-foot .btn, .rail-foot .btn-ghost { width: auto; }
     .views { display: none; }
-    .vmenu { display: block; grid-area: views; position: relative; margin: 0 calc(-1 * var(--s3)); }
-    .vmenu summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: var(--s2);
-                     min-height: 44px; padding: 0 var(--s4); color: var(--text); font-weight: 600; }
-    .vmenu summary::-webkit-details-marker { display: none; }
+    .vmenu { display: block; grid-area: views; position: relative; }
+    .vmenu summary { display: flex; align-items: center; gap: var(--s3); min-height: var(--h-lg); padding: 0 var(--s4);
+                     background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-field);
+                     color: var(--text); font-weight: 500; }
     .vmenu summary::before, .vmenu[open] summary::before { content: none; }
-    .vmenu summary .lbl { font-size: var(--fs-chip); }
+    .vmenu summary b { font-weight: 500; }
     .vmenu summary i { margin-left: auto; width: 8px; height: 8px; border-right: 1.5px solid var(--dim);
                        border-bottom: 1.5px solid var(--dim); transform: translateY(-2px) rotate(45deg); }
+    .vmenu[open] summary { border-color: var(--border-strong); }
     .vmenu[open] summary i { transform: translateY(2px) rotate(-135deg); }
-    .vlist { position: absolute; left: var(--s3); right: var(--s3); top: 100%; z-index: 11; display: flex; flex-direction: column;
-             gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r-frame);
-             box-shadow: var(--edge), var(--lift); }
-    .vlist a { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 44px;
-               padding: 0 var(--s3); border-radius: var(--r-control); color: var(--muted); font-weight: 500; white-space: nowrap; }
-    .vlist a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
-    .vlist a[aria-current="page"] { color: var(--text); background: var(--surface2); }
-    .vlist a b { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500; color: var(--dim); }
-    .vlist .mode { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 4px; }
-    .vlist .mode span::before { content: '\\2194  '; color: var(--dim); }
-    .vlist .more { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 4px; }
-    .vlist .mode + .more { margin-top: 0; border-top: none; padding-top: 0; }
-    .wrap { padding: var(--s5) var(--s4) var(--s7); }
+    .vlist { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 11; display: flex; flex-direction: column;
+             gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r-field); }
+    .vlist .cv-navlink { min-height: var(--h-lg); }
+    .vlist .cv-navlink[aria-current="page"] { background: var(--surface2); box-shadow: none; }
+    .vlist .mode, .vlist .more { position: relative; margin-top: 9px; }
+    .vlist .mode::before, .vlist .more::before { content: ''; position: absolute; left: var(--s3); right: var(--s3); top: -6px;
+                                                 border-top: 1px solid var(--border); }
+    .vlist .mode + .more { margin-top: 0; }
+    .vlist .mode + .more::before { content: none; }
+    .wrap { padding: var(--s5) var(--gutter) var(--s7); }
     .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .duo { grid-template-columns: minmax(0, 1fr); }
+    .tile:nth-child(3) { border-left: 0; }
+    .tile:nth-child(n+3) { border-top: 1px solid var(--card-line); }
     .crow, .cx { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
     .clab { flex-direction: row; align-items: baseline; gap: var(--s3); }
     /* The row title sits above the plot here, where the peak's direct label
@@ -1442,90 +1392,122 @@ ${MARK_CSS}
     .cbars { height: 140px; }
     .lim { grid-template-columns: 28px minmax(0, 1fr); }
     .lim .live { grid-column: 2; }
+    .setf { grid-template-columns: minmax(0, 1fr); }
+    .setf .btn { width: 100%; }
+  }
+  @media (max-width: ${BP.md}px) {
+    .cv-body.flush { padding: var(--s1) var(--s1) var(--s2); }
+    .setc { padding: var(--s4); border-radius: var(--r-card-sm); }
+    .ns3 { padding: var(--s4); gap: var(--s3); }
+    .start > .intro { font-size: var(--fs-body); margin-inline: var(--s1); }
+    .tile { padding: var(--s4); }
+    .leak { margin: 0 var(--s2) var(--s2); padding: var(--s3); }
+    .chart { padding: var(--s4) var(--s3) var(--s3); }
+    .lim { padding: var(--s4); gap: var(--s3); }
+    .cmd { padding: 12px var(--s4); }
   }
   @media (max-width: ${BP.sm}px) {
-    /* The leak row: the link takes its own line instead of squeezing the
+    /* The leak strip: the link takes its own line instead of squeezing the
        sentence into an 84px column beside it. */
-    .leak { flex-wrap: wrap; }
+    .leak { flex-wrap: wrap; align-items: flex-start; }
     .leak-t { flex: 1 1 160px; }
     .leak a { flex-basis: 100%; }
     /* The hover readout is wider than a phone's plot and there is no hover on
        a phone; the day-by-day table on the activity view carries the values. */
     .col:hover::after { display: none; }
-    /* Seven daily labels, or six ninety-day ones, overlap at 320px; every
-       other one steps back. */
     .cx div.x1 .alt, .cx div.dense .alt { visibility: hidden; }
-    /* The refusals table on a phone: the same rows, laid out as cards. Six
-       columns in a sideways scroller hid the sentence that explains the row
-       behind two swipes. One DOM, no second copy for the small screen. */
-    .refusals thead { display: none; }
-    .refusals tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px var(--s3);
-                   padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
-    .refusals tr:last-child { border-bottom: none; }
-    .refusals td { display: block; padding: 0; border: none; }
-    .refusals td.rule { text-align: right; }
-    .refusals td.id { max-width: none; }
-    .refusals td.id::before { content: attr(data-l) ' '; color: var(--dim); }
-    .refusals td.msg, .refusals td.body { grid-column: 1 / -1; }
-    .refusals td.msg { margin-top: 2px; }
-    /* Customers and keys as cards too: the identifier and its state on the
-       first line, the wide cell (share bar, label) on the second, then the
-       numbers as label-value pairs. No column is hidden off the edge. */
-    .cards thead { display: none; }
-    .cards tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--s3);
-                padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); align-items: center; }
-    .cards tr:last-child { border-bottom: none; }
-    .cards td { display: block; padding: 0; border: none; }
+    /* The tables on a phone: the same rows, laid out as cards on hairlines.
+       Six columns in a sideways scroller hid the sentence that explains the
+       row behind two swipes. One DOM, no second copy for the small screen. */
+    .cards thead, .refusals thead { display: none; }
+    .cards tr, .refusals tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--s3);
+             padding: var(--s3) 10px; align-items: center; border-top: 1px solid var(--row-line); }
+    .cards tbody tr:first-child, .refusals tbody tr:first-child { border-top: 0; }
+    .cards tr.is-no, .refusals tr.is-no { border-radius: var(--r-row); background: var(--row-no-bg); border-top-color: transparent; }
+    .cards tr.is-no + tr { border-top-color: transparent; }
+    /* Named with the table's class, so they outrank the kit's ruled and
+       tinted cell rules (two classes each) without an !important. */
+    .cv-table.cards td, .cv-table.refusals td { display: block; padding: 0; border: none; }
+    .cv-table.cards tr.is-no td, .cv-table.refusals tr.is-no td { background: none; }
     .cards td.lead { max-width: none; }
     .cards td.state { grid-column: 2; grid-row: 1; justify-self: end; }
-    .cards td.wide { grid-column: 1 / -1; }
+    .cards td.wide, .cards td.burn { grid-column: 1 / -1; width: auto; }
     .cards td.num, .cards td.when { grid-column: 1 / -1; text-align: left; font-size: var(--fs-micro); white-space: normal; }
-    .cards td[data-l]::before { content: attr(data-l) '  '; color: var(--dim); font-family: var(--mono); font-size: var(--fs-chip);
-                                text-transform: uppercase; letter-spacing: .06em; }
-    .cards .share .sbar { flex: 1 1 60px; width: auto; }
-    .cards .share > span:last-child { flex: none; white-space: nowrap; }
-    th, td { padding-inline: 10px; }
-    /* The day-by-day table at 375px: the weekday steps back, the heads may
-       wrap, and the cells tighten, so four columns fit a 341px card. */
-    .days th { white-space: normal; }
-    .days th, .days td { padding-inline: 8px; }
+    .cards td[data-l]::before, .refusals td[data-l]::before { content: attr(data-l) '  '; color: var(--dim); font-family: var(--mono);
+                                font-size: var(--fs-chip); text-transform: uppercase; letter-spacing: var(--track-chip); }
+    .cards .share .cv-meter { flex: 1 1 60px; width: auto; }
+    .cards .bset { justify-content: flex-start; }
+    .cards .bset label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+    .cards .bset .cv-field, .cards .bset .btn-ghost { min-height: var(--h-md); }
+    .refusals td.rule { grid-column: 2; grid-row: 1; justify-self: end; }
+    .refusals td.when { grid-column: 1; grid-row: 1; }
+    /* Two equal tracks under the time and the rule, the ids at the mono's
+       small step: the kit's 14px on a 1fr/auto grid cut an agent name by
+       38px at 320 (the shots gate, 2026-09-23). */
+    .cv-table.refusals tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .refusals td.id { max-width: none; font-size: var(--fs-micro); }
+    .refusals td.msg, .refusals td.body { grid-column: 1 / -1; }
+    .refusals td.msg { margin-top: 2px; min-width: 0; }
+    /* Named with the table's class, or th.num's nowrap (two classes) keeps
+       REFUSED UNITS on one line and the table scrolls at 320. */
+    .cv-table.days th { white-space: normal; }
+    .cv-table.days th, .cv-table.days td { padding-inline: 6px; }
     .days td.when .dim { display: none; }
-    /* The JSON body wraps instead of scrolling inside a 322px card. */
-    td pre { white-space: pre-wrap; word-break: break-word; }
-    /* The login card keeps a gutter like every other card on a phone. */
-    .login { margin: var(--s6) var(--s4); }
+    td .cv-code { white-space: pre-wrap; word-break: break-word; }
     /* The key tail and the wordmark wanted the same 80px at 375px; the tail is
        the one that can go, the banner and the rail say which mode this is. */
     .acct-row span:last-child { display: none; }
-    .kpis { gap: var(--s2); }
-    .tile { padding: var(--s3); }
-    .tile .lbl { font-size: var(--fs-chip); letter-spacing: .06em; }
-    .rrow { grid-template-columns: 56px minmax(0, 1fr); }
-    /* The chip wraps under the ids instead of squeezing them to fragments,
-       and the sentence gets two lines instead of one. */
-    .rtop { flex-wrap: wrap; gap: 4px 10px; }
-    .rrow .who { flex: 1 1 100%; }
-    .bhead { flex-direction: column; align-items: flex-start; gap: 4px; }
     .cmd { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
   @media (max-width: ${BP.xs}px) {
-    /* A seven-digit figure needs 140px of the 116px a half-width tile has at
-       320px; one column keeps the number inside its frame. */
+    /* A seven-digit figure needs more than a half-width cell has at 320px;
+       one column keeps the number inside its frame. */
     .kpis { grid-template-columns: minmax(0, 1fr); }
-    .btn-key { padding: 0 var(--s3); }
+    .tile { border-left: 0; }
+    /* At 320 a half track is 120px; an id and its label need their own line. */
+    .refusals td.id { grid-column: 1 / -1; }
+    /* The same for a task: the agent goes under the job's name on every row,
+       not only on the rows whose names happen to be long. */
+    .tk-n { flex-direction: column; align-items: flex-start; }
+    .tile + .tile { border-top: 1px solid var(--card-line); }
     .btn-key .long { display: none; }
     .btn-key .short { display: inline; }
   }
 `
 
-const HEAD = (title: string) => head({
+// The signed-out login and the checkout hand-off are public pages: a visitor
+// reaches them from the site nav's Console link, so they carry the same nav
+// and footer as every other page, and the card is the panel-in-panel frame.
+// No sticky bar: the one action on this page is the card's own button.
+const LOGIN_CSS = `${CHROME_CSS}
+  :root { --shell: var(--chrome-w); }
+  .login-wrap { max-width: var(--shell); margin: 0 auto; padding: var(--s8) var(--gutter) 0; }
+  .login { max-width: 520px; margin: 0 auto; }
+  .login .cv-card { padding: var(--s6); display: grid; gap: var(--s4); }
+  .login h1 { font-size: var(--fs-h1-app); letter-spacing: -0.02em; line-height: 1.15; }
+  .login p { color: var(--muted); }
+  .login p a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+  .login form { display: grid; gap: var(--s2); margin-top: var(--s1); }
+  .login form .btn { width: 100%; margin-top: var(--s3); }
+  .login .fine { font-size: var(--fs-small); color: var(--dim); }
+  .login .fine + .fine { margin-top: calc(-1 * var(--s2)); }
+  .login .err { margin: 0; }
+  .site-foot { margin-top: var(--s9); }
+  @media (max-width: ${BP.md}px) {
+    .login-wrap { padding-top: var(--s6); }
+    .login .cv-card { padding: var(--s5) var(--s4); }
+  }
+`
+
+const HEAD = (title: string, css = CSS) => head({
   title: `${esc(title)} · AgentBill`,
   description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
   // robots.txt reads, so the two cannot disagree about this page.
   path: '/app',
-  css: CSS,
+  css,
 })
+const LOGIN_HEAD = (title: string) => HEAD(title, LOGIN_CSS)
 
 const ERRORS: Record<string, string> = {
   key: 'That key was not found. It starts with agb_ and comes from /register.',
@@ -1544,26 +1526,29 @@ const ERRORS: Record<string, string> = {
 function loginPage(err: string, next = ''): string {
   const tier = next ? next.slice(next.lastIndexOf('/') + 1) : ''
   const tierName = tier ? tier[0].toUpperCase() + tier.slice(1) : ''
-  return `${HEAD(tier ? `Sign in to buy ${tierName}` : 'Console')}
+  return `${LOGIN_HEAD(tier ? `Sign in to buy ${tierName}` : 'Console')}
 <body>
-  <nav class="top" aria-label="Account"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
-  <div class="login frame">
+${siteNav('/app', { sticky: false })}
+  <main class="login-wrap">
+    <div class="login cv-panel"><div class="cv-card">
     ${tier
       ? `<h1>Sign in to buy ${esc(tierName)}.</h1>
     <p>Paste the API key of the account that should carry the plan. After that you go straight to checkout.
        No key yet? <a href="/register">Get a free one</a> in 30 seconds, then come back to this page.</p>`
       : `<h1>Your console</h1>
     <p>Live task budgets, every call refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>`}
-    ${Object.hasOwn(ERRORS, err) ? `<p class="err">${esc(ERRORS[err])}</p>` : ''}
+    ${Object.hasOwn(ERRORS, err) ? `<p class="err cv-err">${esc(ERRORS[err])}</p>` : ''}
     <form method="POST" action="/app/session" autocomplete="off">
       ${next ? `<input type="hidden" name="next" value="${esc(next)}" />` : ''}
-      <label for="api_key">API key</label>
-      <input id="api_key" name="api_key" type="password" placeholder="agb_..." autofocus required />
-      <button class="btn" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
+      <label class="cv-flabel" for="api_key">API key</label>
+      <input id="api_key" class="cv-field m" name="api_key" type="password" placeholder="agb_..." autofocus required />
+      <button class="btn btn-lg" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
     </form>
     <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and ends when the key is revoked. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
     <p class="fine">No longer have the key? <a href="/recover">Get back in</a> with the email you registered with.</p>
-  </div>
+    </div></div>
+  </main>
+${siteFooter()}
 </body>
 </html>`
 }
@@ -1581,16 +1566,19 @@ function handoffPage(tier: string, to: string): string {
     title: `Opening checkout for ${esc(name)} · AgentBill`,
     description: 'Handing this account to Polar for checkout.',
     path: '/app',
-    css: CSS,
+    css: LOGIN_CSS,
     extraHead: `<meta http-equiv="refresh" content="0;url=${esc(to)}">`,
   })}
 <body>
-  <nav class="top" aria-label="Account"><a class="logo" href="/">${mark(18)}AgentBill</a></nav>
-  <div class="login frame">
+${siteNav('/app', { sticky: false })}
+  <main class="login-wrap">
+    <div class="login cv-panel"><div class="cv-card">
     <h1>Opening checkout for ${esc(name)}.</h1>
     <p>Polar takes the payment, and the plan lands on the account you are signed in as.
        If nothing happens in a second, <a href="${esc(to)}">continue to checkout</a>.</p>
-  </div>
+    </div></div>
+  </main>
+${siteFooter()}
 </body>
 </html>`
 }
@@ -1653,10 +1641,13 @@ function accountCard(p: Page): string {
     ? `<b>${num(plan.monthlyCalls)}</b> calls this month · metered, no cap`
     : `<b>${num(plan.monthlyCalls)}</b> / ${num(limit)} calls · this billing month${pct >= 75
         ? ` · <a href="/pricing?account_id=${encodeURIComponent(p.v.accountId)}">raise the ceiling</a>` : ''}`
+  // The plan's end is a ceiling, so it is the kit's meter with the tick. The
+  // share is the meter's own arithmetic from the two numbers; the state class
+  // is planOf's, so the colour and the percentage cannot disagree.
   return `<div class="acct">
         <div class="acct-who" title="${esc(who)}">${esc(who)}</div>
-        <div class="acct-row"><span class="chip flow">${esc(plan.plan)}</span><span title="${p.v.keyLabel ? esc(p.v.keyLabel) : 'key'}">${esc(keyTail)}</span></div>
-        ${limit === null ? '' : `<div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>`}
+        <div class="acct-row">${tag(esc(plan.plan))}<span title="${p.v.keyLabel ? esc(p.v.keyLabel) : 'key'}">${esc(keyTail)}</span></div>
+        ${limit === null ? '' : `<div class="acct-m${cls ? ` is-${cls}` : ''}">${meter(plan.monthlyCalls, limit)}</div>`}
         <div class="acct-q">${quota}</div>
       </div>`
 }
@@ -1671,29 +1662,27 @@ function rail(p: Page): string {
     keys: activeKeys ? num(activeKeys) : '',
   }
   const items = (Object.keys(VIEWS) as ViewKey[]).filter((k) => !('hidden' in VIEWS[k])).map((k) =>
-    `<a href="${href(p, k)}"${k === p.view ? ' aria-current="page"' : ''}><span>${VIEWS[k].title}</span>${counts[k] ? `<b>${counts[k]}</b>` : ''}</a>`).join('\n        ')
+    `<a class="cv-navlink" href="${href(p, k)}"${k === p.view ? ' aria-current="page"' : ''}><span>${VIEWS[k].title}</span>${counts[k] ? `<span class="n">${counts[k]}</span>` : ''}</a>`).join('\n        ')
+  const mode = p.anon
+    ? ''
+    : p.demo
+      ? `<a class="cv-navlink mode" href="${href(p, p.view, { demo: false })}"><span>Your data</span></a>`
+      : `<a class="cv-navlink mode" href="${href(p, p.view, { demo: true })}"><span>Sample data</span></a>`
   // The phone's copy of the same list, inside a native disclosure whose
   // summary names the current view. A horizontal strip put the current item
   // off screen on the last three views, with no highlight and no hint that
   // it scrolled; a summary that reads "Limits" cannot hide which page this is.
   const menu = `<details class="vmenu">
-        <summary><span class="lbl">View</span><b>${VIEWS[p.view].title}</b><i aria-hidden="true"></i></summary>
+        <summary>${label('View')}<b>${VIEWS[p.view].title}</b><i aria-hidden="true"></i></summary>
         <div class="vlist">
         ${items}
-        ${p.anon ? '' : p.demo
-          ? `<a class="mode" href="${href(p, p.view, { demo: false })}"><span>Your data</span></a>`
-          : `<a class="mode" href="${href(p, p.view, { demo: true })}"><span>Sample data</span></a>`}
-        <a class="more" href="/docs"><span>Docs</span></a>
+        ${mode}
+        <a class="cv-navlink more" href="/docs"><span>Docs</span></a>
         </div>
       </details>`
-  const mode = p.anon
-    ? ''
-    : p.demo
-      ? `<a class="mode" href="${href(p, p.view, { demo: false })}"><span>Your data</span></a>`
-      : `<a class="mode" href="${href(p, p.view, { demo: true })}"><span>Sample data</span></a>`
   const action = p.anon
-    ? `<a class="btn-key" href="/register"><span class="long">${KEY_CTA}</span><span class="short">${KEY_CTA_SHORT}</span></a>`
-    : `<form method="POST" action="/app/logout"><button class="btn-out" type="submit">Sign out</button></form>`
+    ? `<a class="btn btn-key" href="/register"><span class="long">${KEY_CTA}</span><span class="short">${KEY_CTA_SHORT}</span></a>`
+    : `<form method="POST" action="/app/logout"><button class="btn-ghost" type="submit">Sign out</button></form>`
   return `<aside class="rail">
       <a class="logo" href="/">${mark(18)}AgentBill</a>
       ${accountCard(p)}
@@ -1703,15 +1692,15 @@ function rail(p: Page): string {
       </nav>
       ${menu}
       <div class="rail-foot">
-        <a class="docs" href="/docs">Docs</a>
+        <a class="cv-navlink" href="/docs">Docs</a>
         ${action}
       </div>
     </aside>`
 }
 
 function periodControl(p: Page): string {
-  return `<span class="seg" aria-label="Period">${Object.entries(RANGES).map(([k, r]) =>
-    `<a class="${k === p.range ? 'on' : ''}" href="${href(p, p.view, { range: k })}"${k === p.range ? ' aria-current="true"' : ''}>${esc(r.label)}</a>`).join('')}</span>`
+  return `<span class="cv-seg" aria-label="Period">${Object.entries(RANGES).map(([k, r]) =>
+    `<a href="${href(p, p.view, { range: k })}"${k === p.range ? ' aria-current="true"' : ''}>${esc(r.label)}</a>`).join('')}</span>`
 }
 
 function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused', cls: string): string {
@@ -1721,6 +1710,27 @@ function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused', cls: s
     return v > 0 ? `<i class="${cls}" style="height:${Math.max(6, Math.round((v / max) * 100))}%"></i>` : '<i class="zero"></i>'
   }).join('')}</div>`
 }
+
+/**
+ * The frame, for anything that shows product data: the warm-grey panel, the
+ * white card, and the bar that opens it. `bar` is the left of the bar (the tag
+ * that names what the frame holds); SAMPLE sits at its right under sample data,
+ * so a screenshot of any one frame still says the numbers are invented.
+ */
+function frame(p: Page, bar: string, body: string, cls = ''): string {
+  return `<div class="cv-panel${cls ? ` ${cls}` : ''}"><div class="cv-card">
+      <div class="cv-bar"><span class="cv-bar-t">${bar}</span>${p.demo ? SAMPLE_TAG : ''}</div>
+      ${body}
+    </div></div>`
+}
+/** A bar's left half: the tag that names what the frame holds. The bar carries
+ *  no fact of its own: every count or order it could state is already in the
+ *  heading, the lede or the note on the same screen, and a second copy is copy
+ *  the restyle added (review, 2026-09-23). */
+const barOf = (name: string, id = false) => tag(name, id)
+
+/** The key a frame belongs to, masked the way every key on this page is. */
+const tailOf = (key: string) => key.slice(0, 8) + '…' + key.slice(-4)
 
 function kpis(p: Page, rangeLabel: string): string {
   const d = p.d
@@ -1734,27 +1744,27 @@ function kpis(p: Page, rangeLabel: string): string {
   // the tiles stopped lining up. The period control in the header says the rest.
   const win = rangeLabel.replace(' days', 'd')
   return `<div class="kpis">
-      <div class="tile frame">
-        <div class="lbl">Refused · ${esc(win)}</div>
-        <div class="tv held">${num(blocked)}</div>
+      <div class="tile">
+        ${label(`Refused · ${esc(win)}`)}
+        <div class="cv-stat"><b>${num(blocked)}</b></div>
         ${sparkline(d.series, 'blocks', 'held')}
         ${delta(blocked, d.prevBlocked, rangeLabel)}
       </div>
-      <div class="tile frame">
-        <div class="lbl">Units refused · ${esc(win)}</div>
-        <div class="tv">${num(refused)}</div>
+      <div class="tile">
+        ${label(`Units refused · ${esc(win)}`)}
+        <div class="cv-stat"><b>${num(refused)}</b></div>
         ${sparkline(d.series, 'refused', '')}
         <div class="tf">${blocked ? `${num(avgAsk)} units per refused call` : 'units asked for and not run'}</div>
       </div>
-      <div class="tile frame">
-        <div class="lbl">Units metered · ${esc(win)}</div>
-        <div class="tv">${num(metered)}</div>
+      <div class="tile">
+        ${label(`Units metered · ${esc(win)}`)}
+        <div class="cv-stat"><b>${num(metered)}</b></div>
         ${sparkline(d.series, 'units', '')}
         <div class="tf">${d.lastBlock ? `last refusal ${rel(d.lastBlock)}` : 'no refusal yet'}</div>
       </div>
-      <div class="tile frame">
-        <div class="lbl">Live tasks · now</div>
-        <div class="tv">${num(live)}</div>
+      <div class="tile">
+        ${label('Live tasks · now')}
+        <div class="cv-stat"><b>${num(live)}</b></div>
         <div class="tf now">${live === 0 ? 'none under a ceiling' : near ? `${num(near)} within a fifth of the ceiling` : 'all comfortably under their ceilings'}</div>
       </div>
     </div>`
@@ -1762,10 +1772,10 @@ function kpis(p: Page, rangeLabel: string): string {
 
 function leakRow(p: Page): string {
   const n = p.d.overruns
-  return `<div class="leak frame${n > 0 ? ' bad' : ''}">
+  return `<div class="leak${n > 0 ? ' bad' : ''}">
       <div class="leak-n">${num(n)}</div>
       <div class="leak-t">
-        <b>Leaked past a ceiling · all time</b>
+        ${label('Leaked past a ceiling · all time')}
         <p>${n > 0
           ? 'Calls that ran after their task was already at its limit, because preflight was skipped or the estimate came in low. The one number here that should be zero.'
           : 'Nothing has run past a ceiling. The one number here that should stay at zero, and it has.'}</p>
@@ -1774,9 +1784,16 @@ function leakRow(p: Page): string {
     </div>`
 }
 
+/** The overview's figures: one card whose bar names the account they belong to. */
+function figures(p: Page, rangeLabel: string): string {
+  const key = p.demo ? DEMO_KEY : p.v.apiKey
+  return frame(p, barOf(esc(tailOf(key)), true), `${kpis(p, rangeLabel)}
+      ${leakRow(p)}`, 'figs')
+}
+
 // Two rows, one series each, one scale each, one x-axis. The label column is
 // the legend: each row is single-series and named, so no swatch box is needed.
-function chartBlock(series: Series[]): string {
+function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
   const n = series.length
   const unitMax = Math.max(...series.map((s) => s.units), 0)
   const blockMax = Math.max(...series.map((s) => s.blocks), 0)
@@ -1804,7 +1821,7 @@ function chartBlock(series: Series[]): string {
     const alt = on && nth++ % 2 === 1 ? ' class="alt"' : ''
     return `<span${alt}>${on ? esc(fmtDay(s.day)) : ''}</span>`
   }).join('')
-  return `<div class="chart frame">
+  return frame(p, barOf(esc(rangeLabel)), `<div class="chart">
       <div class="crow">
         <div class="clab"><b>Units metered</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
         <div class="cplot">
@@ -1817,20 +1834,20 @@ function chartBlock(series: Series[]): string {
         <div class="cplot"><div class="cbars strip${dense}">${bcols}</div></div>
       </div>
       <div class="cx"><span></span><div class="${dense.trim()}${stride === 1 ? ' x1' : ''}">${xs}</div></div>
-    </div>`
+    </div>`)
 }
 
-function activityTable(series: Series[]): string {
+function activityTable(p: Page, series: Series[], rangeLabel: string): string {
   const rows = [...series].reverse().map((s) => `<tr${s.units === 0 && s.blocks === 0 ? ' class="zero"' : ''}>
       <td class="when">${esc(fmtDay(s.day))} <span class="dim">${esc(new Date(`${s.day}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }))}</span></td>
       <td class="num">${num(s.units)}</td>
       <td class="num">${num(s.blocks)}</td>
       <td class="num">${num(s.refused)}</td>
     </tr>`).join('')
-  return `<div class="frame tw days"><table>
+  return frame(p, barOf(esc(rangeLabel)), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled days">
     <thead><tr><th>Day</th><th class="num">Metered</th><th class="num">Refused</th><th class="num">Refused units</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>`
+  </table></div>`)
 }
 
 function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
@@ -1845,37 +1862,35 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   const ratio = (used + reserved) / ceiling
   // Above the ceiling is not the ceiling holding. tasks.ts derives exceeded
   // as used > ceiling, and a record can land past the ceiling when preflight
-  // was skipped; that is the leak the overview counts, so it is red here too.
+  // was skipped; that is the leak the overview counts, so it is the filled
+  // signal here too. At the ceiling the next call was refused, which is the
+  // refused row: the frame's tint and the outlined refusal chip.
   const leaked = used > ceiling
   const cls = leaked ? 'fail' : ratio >= 1 ? 'held' : ratio >= 0.8 ? 'near' : ''
   const state = leaked
-    ? '<span class="chip fail">leaked</span>'
+    ? '<span class="chip-fail">leaked</span>'
     : used >= ceiling
-      ? '<span class="chip held">ceiling hit</span>'
-      : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
-  return `<div class="brow">
-      <div class="bhead">
-        <div class="btask"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a> <span class="bagent">· ${esc(t.agentId)}</span></div>
-        <div class="bnum"><span><b>${num(used)}</b> / ${num(ceiling)}</span>${state}</div>
-      </div>
-      <div class="track" aria-hidden="true">
-        <i class="used ${cls}" style="width:${usedPct.toFixed(1)}%"></i>
-        <i class="res" style="width:${resPct.toFixed(1)}%"></i>
-      </div>
-      <div class="bfoot">
-        <span>${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}</span>
-        ${editable ? `<form method="POST" action="/app/tasks" class="bset" autocomplete="off">
+      ? '<span class="chip-no">ceiling hit</span>'
+      : ratio >= 0.8 ? '<span class="chip-near">close</span>' : tag('running')
+  const refusedRow = leaked || used >= ceiling
+  return `<tr${refusedRow ? ' class="is-no"' : ''}>
+      <td class="lead"><div class="tk">
+        <div class="tk-n"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a><span class="tk-a">${esc(t.agentId)}</span></div>
+        <div class="tk-f">${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
+      </div></td>
+      <td class="num" data-l="units"><b>${num(used)}</b> / ${num(ceiling)}</td>
+      <td class="burn"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${usedPct.toFixed(1)}%"></i><s style="left:${usedPct.toFixed(1)}%;width:${resPct.toFixed(1)}%"></s><u></u></div></td>
+      <td class="state">${state}</td>${editable ? `
+      <td class="wide"><form method="POST" action="/app/tasks" class="bset" autocomplete="off">
           <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
-          <label for="ceil-${i}">ceiling</label>
-          <input id="ceil-${i}" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />
-          <button class="btn-out" type="submit">Save</button>
-        </form>` : ''}
-        <span>${rel(t.updatedAt)}</span>
-      </div>
-    </div>`
+          <label class="cv-label" for="ceil-${i}">ceiling</label>
+          <input id="ceil-${i}" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />
+          <button class="btn-ghost" type="submit">Save</button>
+        </form></td>` : ''}
+    </tr>`
 }
 
-function tasksBlock(p: Page, tasks: TaskRow[]): string {
+function tasksBlock(p: Page, tasks: TaskRow[], side = ''): string {
   const editable = p.view === 'tasks' && !p.demo
   if (tasks.length === 0) {
     // One job is one budget, and the budget can be set here before any code
@@ -1885,9 +1900,52 @@ function tasksBlock(p: Page, tasks: TaskRow[]): string {
     const where = editable
       ? 'Name a job above and give it a ceiling in units'
       : `<a href="${href(p, 'tasks')}">Name a job and give it a ceiling in units</a>`
-    return `<div class="frame"><p class="nothing">No jobs yet. One job is one budget. ${where}, then have your code preflight with that <code>task_ref</code>; it appears here and burns down live. A job opened from code, with <code>task_ref</code> and <code>task_ceiling</code> on its first preflight, appears the same way.</p></div>`
+    return `<div class="cv-empty"><p class="nothing">No jobs yet. One job is one budget. ${where}, then have your code preflight with that <code>task_ref</code>; it appears here and burns down live. A job opened from code, with <code>task_ref</code> and <code>task_ceiling</code> on its first preflight, appears the same way.</p></div>`
   }
-  return `<div class="frame">${tasks.map((t, i) => taskRow(p, t, i, editable)).join('')}</div>`
+  const table = `<div class="cv-body flush cv-scroll"><table class="cv-table cards tasks">
+    <thead><tr><th>Task</th><th class="num">Units</th><th>Burn-down</th><th>State</th>${editable ? '<th class="num">Ceiling</th>' : ''}</tr></thead>
+    <tbody>${tasks.map((t, i) => taskRow(p, t, i, editable)).join('')}</tbody>
+  </table></div>`
+  return frame(p, barOf('task_ref', true),
+    side ? `<div class="cv-split">${table}${side}</div>` : table)
+}
+
+/**
+ * The right column of the overview's task frame: the job the newest refusal
+ * landed on, as the homepage frame draws "this job". Its used over its ceiling
+ * as the figure, the kit's meter (which computes its own share, so the bar
+ * cannot disagree with the number), the refusal's own sentence in the signal,
+ * and the persisted body on the plate. Every value comes from the rows this
+ * page already loaded; nothing here is new data. Without a refusal on a job
+ * it is the most recently touched job, figure and meter only.
+ */
+function jobSide(p: Page): string {
+  const d = p.d
+  const refusal = d.decisions.find((r) => r.blocked && r.taskRef && d.tasks.some((t) => t.taskRef === r.taskRef)) ?? null
+  const job = refusal ? d.tasks.find((t) => t.taskRef === refusal.taskRef) ?? null : d.tasks[0] ?? null
+  if (!job) return ''
+  const used = Number(job.usedUnits)
+  const ceiling = Number(job.ceilingUnits)
+  return `<div class="cv-side">
+        <div class="side-h">${label('this job')}${tag(esc(job.taskRef), true)}</div>
+        <div class="cv-stat"><b>${num(used)}</b> <span>/ ${num(ceiling)} units</span></div>
+        ${meter(used, ceiling)}
+        ${refusal ? `<p class="cv-no">${esc(decisionLine(refusal))}</p>
+        <div class="cv-code is-sm plate">${plateBody(refusal.snapshot)}</div>` : ''}
+      </div>`
+}
+
+/**
+ * A persisted body for the plate: pretty-printed when it parses and verbatim
+ * when it does not, the rule every body on this page follows, with the
+ * approved: false line in the plate's signal, as the homepage plate marks it.
+ * Escaped first, so the wrap is the only markup in it.
+ */
+function plateBody(snapshot: string): string {
+  let pretty = snapshot
+  try { pretty = JSON.stringify(JSON.parse(snapshot), null, 2) } catch { /* leave verbatim */ }
+  return esc(pretty).split('\n')
+    .map((l) => (/^\s*&quot;approved&quot;: false,?$/.test(l) ? `<span class="no">${l}</span>` : l)).join('\n')
 }
 
 const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
@@ -1916,68 +1974,70 @@ function ceilingForm(p: Page): string {
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
-    : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
+    : f.err ? `<p class="err cv-err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const keep = f?.err && f.ref ? esc(f.ref) : ''
-  return `<div class="frame setc">
+  return `<div class="setc">
     ${said}${pointer}
     <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
-      <div><label for="t-ref">Job <code>task_ref</code></label><input id="t-ref" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label for="t-ceil">Ceiling, in units</label><input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
-      <div><label for="t-agent">Agent label, optional</label><input id="t-agent" name="agent_id" placeholder="researcher" maxlength="128" /></div>
-      <button class="btn" type="submit">Set ceiling</button>
+      <div><label class="cv-flabel" for="t-ref">Job <code>task_ref</code></label><input id="t-ref" class="cv-field m" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
+      <div><label class="cv-flabel" for="t-ceil">Ceiling, in units</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
+      <div><label class="cv-flabel" for="t-agent">Agent label, optional</label><input id="t-agent" class="cv-field m" name="agent_id" placeholder="researcher" maxlength="128" /></div>
+      <button class="btn btn-lg" type="submit">Set ceiling</button>
     </form>
     <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
 }
 
-const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><i class="near"></i> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
+// The legend: the bar's two parts as swatches, then the three states, named
+// with the same words as before. A bar within a fifth of its ceiling stays
+// ink, so that state's mark is the chip its row carries, not a swatch.
+const TASK_KEY = `<div class="key"><span><i></i> spent</span><span><i class="res"></i> reserved by a call in flight</span><span><span class="chip-near">close</span> within a fifth of the ceiling</span><span><i class="held"></i> ceiling held: the next call was refused</span><span><i class="fail"></i> leaked past the ceiling</span></div>`
 
+/** The decision a row carries: the refusal chip, outlined in the signal, or
+ *  the leak, the signal filled. The rule's name is the chip's text. */
+const ruleChip = (r: DecisionRow) =>
+  `<span class="${r.blocked === false ? 'chip-fail' : 'chip-no'}" title="${esc(r.reason)}">${esc(REASON_LABEL[r.reason] ?? r.reason)}</span>`
+
+/** One refusal as a log row. `body` adds the column with what the agent got. */
+function refusalRow(p: Page, r: DecisionRow, body: boolean): string {
+  const leak = r.blocked === false
+  const when = new Date(r.createdAt)
+  return `<tr>
+      <td class="when" title="${esc(when.toISOString())}">${rel(when)}</td>
+      <td class="rule">${ruleChip(r)}</td>
+      <td class="id" data-l="agent" title="${esc(r.agentId ?? '')}">${r.agentId ? `<a href="${href(p, 'refusals', { agent: r.agentId })}">${esc(r.agentId)}</a>` : '<span class="none">none</span>'}</td>
+      <td class="id" data-l="task" title="${esc(r.taskRef ?? '')}">${r.taskRef ? `<a href="${href(p, 'refusals', { task: r.taskRef })}">${esc(r.taskRef)}</a>` : '<span class="none">none</span>'}</td>
+      <td class="msg${leak ? ' bad' : ''}">${esc(decisionLine(r))}</td>${body ? `
+      <td class="body"><details><summary>body</summary><pre class="cv-code is-sm">${plateBody(r.snapshot)}</pre></details></td>` : ''}
+    </tr>`
+}
+
+/** The overview's latest refusals: the same rows as the refusals view, without the body. */
 function refusalRows(p: Page, rows: DecisionRow[]): string {
-  return rows.map((r) => {
-    const leak = r.blocked === false
-    const who = `${r.agentId ? `<a href="${href(p, 'refusals', { agent: r.agentId })}">${esc(r.agentId)}</a>` : '<span class="dim">no agent</span>'}${r.taskRef ? ` <span class="dim">&rarr;</span> <a href="${href(p, 'refusals', { task: r.taskRef })}">${esc(r.taskRef)}</a>` : ''}`
-    return `<div class="rrow">
-      <span class="when" title="${esc(new Date(r.createdAt).toISOString())}">${rel(r.createdAt)}</span>
-      <div class="rmain">
-        <div class="rtop"><span class="who">${who}</span><span class="chip ${leak ? 'fail' : 'held'}" title="${esc(r.reason)}">${esc(REASON_LABEL[r.reason] ?? r.reason)}</span></div>
-        <div class="what${leak ? ' bad' : ''}" title="${esc(decisionLine(r))}">${esc(decisionLine(r))}</div>
-      </div>
-    </div>`
-  }).join('')
+  return `<div class="cv-body flush cv-scroll"><table class="cv-table refusals">
+    <thead><tr><th>When</th><th>Rule</th><th>Agent</th><th>Task</th><th>What happened</th></tr></thead>
+    <tbody>${rows.map((r) => refusalRow(p, r, false)).join('')}</tbody>
+  </table></div>`
 }
 
 function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): string {
+  const filtered = p.filter.task || p.filter.agent || p.filter.only
   if (rows.length === 0) {
-    const filtered = p.filter.task || p.filter.agent || p.filter.only
-    return `<div class="frame"><p class="nothing">${filtered
+    return `<div class="cv-empty"><p class="nothing">${filtered
       ? 'Nothing on this account matches this filter.'
       : 'Nothing refused yet. Every call AgentBill refuses lands here with the literal JSON your agent received.'}</p></div>`
   }
-  const body = rows.map((r) => {
-    const leak = r.blocked === false
-    let pretty = r.snapshot
-    try { pretty = JSON.stringify(JSON.parse(r.snapshot), null, 2) } catch { /* leave verbatim */ }
-    const when = new Date(r.createdAt)
-    return `<tr>
-      <td class="when" title="${esc(when.toISOString())}">${rel(when)}</td>
-      <td class="rule"><span class="chip ${leak ? 'fail' : 'held'}" title="${esc(r.reason)}">${esc(REASON_LABEL[r.reason] ?? r.reason)}</span></td>
-      <td class="id" data-l="agent" title="${esc(r.agentId ?? '')}">${r.agentId ? `<a href="${href(p, 'refusals', { agent: r.agentId })}">${esc(r.agentId)}</a>` : '<span class="none">none</span>'}</td>
-      <td class="id" data-l="task" title="${esc(r.taskRef ?? '')}">${r.taskRef ? `<a href="${href(p, 'refusals', { task: r.taskRef })}">${esc(r.taskRef)}</a>` : '<span class="none">none</span>'}</td>
-      <td class="msg">${esc(decisionLine(r))}</td>
-      <td class="body"><details><summary>body</summary><pre>${esc(pretty)}</pre></details></td>
-    </tr>`
-  }).join('')
-  return `<div class="frame tw refusals"><table>
+  return `${frame(p, barOf('refusals'), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled refusals">
     <thead><tr><th>When</th><th>Rule</th><th>Agent</th><th>Task</th><th>What happened</th><th>What the agent got</th></tr></thead>
-    <tbody>${body}</tbody>
-  </table></div>
-  ${truncated ? `<p class="note">The latest 100 of ${num(p.d.decisionMatched)}${p.filter.task || p.filter.agent || p.filter.only ? ' that match' : ''}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
+    <tbody>${rows.map((r) => refusalRow(p, r, true)).join('')}</tbody>
+  </table></div>`)}
+  ${truncated ? `<p class="note">The latest 100 of ${num(p.d.decisionMatched)}${filtered ? ' that match' : ''}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
 }
 
 function customersTable(p: Page, rows: CustomerRow[], total: number, compact = false): string {
   if (rows.length === 0) {
-    return `<div class="frame"><p class="nothing">No customers yet. Pass <code>customer_id</code> on a preflight or record call and each of your end users gets an independent balance here.</p></div>`
+    return `<div class="cv-empty"><p class="nothing">No customers yet. Pass <code>customer_id</code> on a preflight or record call and each of your end users gets an independent balance here.</p></div>`
   }
   const maxUsed = Math.max(1, ...rows.map((c) => Number(c.usedUnits)))
   const body = rows.map((c) => {
@@ -1987,53 +2047,53 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
     const fill = Math.round((used / maxUsed) * 100)
     const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
     const cls = limit && used >= limit ? 'held' : pct >= 80 ? 'near' : ''
-    // A customer at their limit is a limit that held, not an incident.
-    const status = limit && used >= limit
-      ? '<span class="chip held">at limit</span>'
-      : '<span class="chip flow">ok</span>'
-    return `<tr>
+    // A customer at their limit is a limit that held, not an incident: the
+    // refused row, because that customer's next call is refused.
+    const atLimit = !!limit && used >= limit
+    const status = atLimit ? '<span class="chip-no">at limit</span>' : tag('ok')
+    return `<tr${atLimit ? ' class="is-no"' : ''}>
       <td class="id lead" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
-      <td class="wide"><div class="share"><span class="sbar"><i class="${cls}" style="width:${Math.max(2, fill)}%"></i></span><span>${share}% of spend</span></div></td>
+      <td class="wide"><div class="share"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${Math.max(2, fill)}%"></i></div><span>${share}% of spend</span></div></td>
       <td class="num" data-l="used">${num(used)}</td>
       <td class="num" data-l="limit">${limit == null ? '<span class="dim">no limit</span>' : num(limit)}</td>
       <td class="num" data-l="left">${limit == null ? '<span class="dim">no limit</span>' : num(Math.max(0, limit - used))}</td>
       <td class="state">${status}</td>
     </tr>`
   }).join('')
-  return `<div class="frame tw cards"><table>
+  return frame(p, barOf('customer_id', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
     <thead><tr><th>Customer</th><th>Share of spend${compact ? '' : ' · all customers'}</th><th class="num">Used</th><th class="num">Limit</th><th class="num">Left</th><th>State</th></tr></thead>
     <tbody>${body}</tbody>
-  </table></div>`
+  </table></div>`)
 }
 
-function keysTable(rows: KeyRow[], viewerKey: string): string {
-  if (rows.length === 0) return `<div class="frame"><p class="nothing">No keys on this account.</p></div>`
+function keysTable(p: Page, rows: KeyRow[], viewerKey: string): string {
+  if (rows.length === 0) return `<div class="cv-empty"><p class="nothing">No keys on this account.</p></div>`
   const now = Date.now()
   const body = rows.map((k) => {
     const mine = k.apiKey === viewerKey
-    const mask = k.apiKey.slice(0, 8) + '…' + k.apiKey.slice(-4)
+    const mask = tailOf(k.apiKey)
     const revoked = k.revokedAt ? new Date(k.revokedAt).getTime() : null
     const expires = k.expiresAt ? new Date(k.expiresAt).getTime() : null
-    // A working key is not an achievement, so it stays neutral. Green here
-    // would be a third meaning for the accent.
-    let chip = '<span class="chip flow">active</span>'
-    if (revoked !== null && revoked <= now) chip = '<span class="chip dead">revoked</span>'
-    else if (revoked !== null) chip = '<span class="chip near">rotating</span>'
-    else if (expires !== null && expires <= now) chip = '<span class="chip dead">expired</span>'
-    else if (expires !== null && expires - now < 86_400_000) chip = '<span class="chip near">expiring</span>'
+    // A working key is not an achievement, so it is a plain tag. A colour
+    // here would be a second meaning for the accent.
+    let state = tag('active')
+    if (revoked !== null && revoked <= now) state = '<span class="tag dead">revoked</span>'
+    else if (revoked !== null) state = '<span class="chip-near">rotating</span>'
+    else if (expires !== null && expires <= now) state = '<span class="tag dead">expired</span>'
+    else if (expires !== null && expires - now < 86_400_000) state = '<span class="chip-near">expiring</span>'
     return `<tr>
       <td class="id lead">${esc(mask)}</td>
-      <td class="wide">${k.label ? esc(k.label) : '<span class="none">no label</span>'}${mine ? ' <span class="chip flow" title="The key that opened this console">this session</span>' : ''}</td>
-      <td class="state">${chip}</td>
+      <td class="wide">${k.label ? esc(k.label) : '<span class="none">no label</span>'}${mine ? ' <span class="tag" title="The key that opened this console">this session</span>' : ''}</td>
+      <td class="state">${state}</td>
       <td class="when" data-l="created">${rel(k.createdAt)}</td>
       <td class="when" data-l="expires">${k.expiresAt ? rel(k.expiresAt) : '<span class="none">never</span>'}</td>
       <td class="when" data-l="last seen from">${k.lastSeenIp ? esc(k.lastSeenIp) : '<span class="none">unused</span>'}</td>
     </tr>`
   }).join('')
-  return `<div class="frame tw cards"><table>
+  return frame(p, barOf('keys'), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
     <thead><tr><th>Key</th><th>Label</th><th>State</th><th>Created</th><th>Expires</th><th>Last seen from</th></tr></thead>
     <tbody>${body}</tbody>
-  </table></div>`
+  </table></div>`)
 }
 
 // The four rules, in the order src/routes/preflight.ts evaluates them. Every
@@ -2053,7 +2113,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
   const born = v.defaultBudgetUnits == null
     ? 'with no limit'
     : `with <b>${num(v.defaultBudgetUnits)} units</b>, the account default`
-  return `<div class="frame">
+  return `${frame(p, barOf('preflight'), `
       <div class="lim">
         <div class="n">01</div>
         <div>
@@ -2104,8 +2164,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
           <span><b class="${d.overruns ? 'fail' : ''}">${num(d.overruns)}</b> leaked · all time</span>
           ${d.taskCount ? `<a href="${href(p, 'tasks')}">Burn-down &rarr;</a>` : ''}
         </div>
-      </div>
-    </div>
+      </div>`)}
     <p class="note">The per-request ceiling is an argument to the call itself and has no endpoint. A customer's ceiling is set from the API: <code>GET /budget?customer_id=</code> returns the balance and creates the customer if it is new, <code>PUT /budget</code> sets it. A job's ceiling is the one number this console edits, on the <a href="${href(p, 'tasks')}">task budgets</a> view or with <code>PUT /tasks/:task_ref/ceiling</code>.</p>`
 }
 
@@ -2143,7 +2202,7 @@ function startScreen(p: Page): string {
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
-    : f.err ? `<p class="err">${FLASH_TEXT[f.err](f)}</p>`
+    : f.err ? `<p class="err cv-err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const job = p.d.tasks[0] ?? null
   // A failed save NEVER proposes a name. It gives back the one the reader
@@ -2218,40 +2277,41 @@ except TaskCeilingExceededError as refused:
     print(refused)</pre>`
 
   // Step 3. The body is the persisted snapshot, pretty-printed when it parses
-  // and verbatim when it does not, the same rule decisionsTable applies. A div
-  // and not a pre, for the reason above: it is interpolated.
+  // and verbatim when it does not (plateBody, the rule every body on this page
+  // follows), on the plate, because it is the machine's answer and not code to
+  // copy. A div and not the code tag, for the reason above: it is interpolated.
   let third: string
   if (refusal) {
-    let pretty = refusal.snapshot
-    try { pretty = JSON.stringify(JSON.parse(refusal.snapshot), null, 2) } catch { /* leave verbatim */ }
-    third = `<p class="ok">Refused. ${esc(decisionLine(refusal))}</p>
-       <div class="got"><span class="chip held" title="${esc(refusal.reason)}">${esc(REASON_LABEL[refusal.reason] ?? refusal.reason)}</span><span class="dim">${esc(rel(refusal.createdAt))}${refusal.agentId ? ` &middot; ${esc(refusal.agentId)}` : ''}${refusal.taskRef ? ` &rarr; ${esc(refusal.taskRef)}` : ''}</span></div>
-       <div class="snip">${esc(pretty)}</div>
+    third = `<p class="cv-no">Refused. ${esc(decisionLine(refusal))}</p>
+       <div class="got">${ruleChip(refusal)}<span class="dim">${esc(rel(refusal.createdAt))}${refusal.agentId ? ` &middot; ${esc(refusal.agentId)}` : ''}${refusal.taskRef ? ` &rarr; ${esc(refusal.taskRef)}` : ''}</span></div>
+       <div class="cv-code plate">${plateBody(refusal.snapshot)}</div>
        <p class="fine">That is the body your code received, kept as a row. Every refusal on this account lands on the <a href="${href(p, 'refusals')}">refusals view</a> the same way, and the overview is now your console.</p>
-       <p><a class="btn-in" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
+       <p><a class="btn" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
   } else if (job && spent > 0) {
     third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} units and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
   } else {
     third = `<p>Nothing here yet. Run the lines above, then <a href="${href(p, 'start')}">reload this page</a>: the refusal appears here with the body your code received.</p>`
   }
 
-  return `<div class="empty frame start">
+  return `<div class="start cv-panel">
       ${said}
       <p class="intro">${SEQUENCE_INTRO}</p>
       <form method="POST" action="/app/tasks" class="setf3" autocomplete="off">
         <input type="hidden" name="back" value="start" />
         <div class="ns3"><span class="ns3-n">1</span><div>
           <p>${STEP_NAME}</p>
-          <label for="t-ref">${LABEL_REF}</label><span class="hint">${HINT_REF}</span>
-          <input id="t-ref" name="task_ref" maxlength="128" value="${refValue}" required />
+          <div class="fld"><label class="cv-flabel" for="t-ref">${LABEL_REF}</label>
+          <input id="t-ref" class="cv-field m" name="task_ref" maxlength="128" value="${refValue}" required />
+          <span class="cv-hint">${HINT_REF}</span></div>
           <p class="units">${STEP_UNITS}</p>
-          <label for="t-ceil">${LABEL_CEIL}</label><span class="hint">${HINT_CEIL}</span>
-          <input id="t-ceil" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" value="${ceilValue}" required />
+          <div class="fld"><label class="cv-flabel" for="t-ceil">${LABEL_CEIL}</label>
+          <input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" value="${ceilValue}" required />
+          <span class="cv-hint">${HINT_CEIL}</span></div>
           <details><summary>Add an agent label, optional</summary>
-            <input id="t-agent" name="agent_id" maxlength="128" placeholder="researcher" />
+            <input id="t-agent" class="cv-field m" name="agent_id" maxlength="128" placeholder="researcher" />
             <p class="fine">Read only when a save opens the job. Leave it blank and the job is listed as <code>console</code> until an approved call names one.</p>
           </details>
-          <button class="btn" type="submit">${job ? 'Save the ceiling' : 'Set the ceiling'}</button>
+          <button class="btn btn-lg" type="submit">${job ? 'Save the ceiling' : 'Set the ceiling'}</button>
           ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${ceiling === 1 ? 'unit' : 'units'}. Change either and save again; the last save wins.</p>` : ''}
         </div></div>
       </form>
@@ -2293,31 +2353,27 @@ function overviewView(p: Page, rangeLabel: string): string {
   if (p.view === 'start' ? !p.demo : onboardingDue(p)) return startScreen(p)
   const latest = d.decisions.slice(0, 5)
   const topCustomers = d.customers.slice(0, 5)
-  return `${kpis(p, rangeLabel)}
-    ${leakRow(p)}
+  return `${figures(p, rangeLabel)}
 
     <h2>Activity <a href="${href(p, 'activity')}">Day by day &rarr;</a></h2>
-    ${chartBlock(d.series)}
+    ${chartBlock(p, d.series, rangeLabel)}
 
-    <div class="duo" style="margin-top:var(--s7)">
-      <div>
-        <h2>Recent tasks <a href="${href(p, 'tasks')}">All ${d.taskCount ? num(d.taskCount) + ' ' : ''}&rarr;</a></h2>
-        ${tasksBlock(p, d.tasks.slice(0, 4))}
-      </div>
-      <div>
-        <h2>Latest refusals <a href="${href(p, 'refusals')}">All ${d.decisionTotal ? num(d.decisionTotal) + ' ' : ''}&rarr;</a></h2>
-        <div class="frame">${latest.length ? refusalRows(p, latest) : '<p class="nothing">Nothing refused yet.</p>'}</div>
-      </div>
-    </div>
+    <h2>Recent tasks <a href="${href(p, 'tasks')}">All ${d.taskCount ? num(d.taskCount) + ' ' : ''}&rarr;</a></h2>
+    ${tasksBlock(p, d.tasks.slice(0, 4), jobSide(p))}
+
+    <h2>Latest refusals <a href="${href(p, 'refusals')}">All ${d.decisionTotal ? num(d.decisionTotal) + ' ' : ''}&rarr;</a></h2>
+    ${latest.length
+      ? frame(p, barOf('refusals'), refusalRows(p, latest))
+      : '<div class="cv-empty"><p class="nothing">Nothing refused yet.</p></div>'}
 
     <h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customerCount ? num(d.customerCount) + ' ' : ''}&rarr;</a></h2>
     ${customersTable(p, topCustomers, d.customerTotal, true)}`
 }
 
 function activityView(p: Page, rangeLabel: string): string {
-  return `${chartBlock(p.d.series)}
+  return `${chartBlock(p, p.d.series, rangeLabel)}
     <h2>Day by day <span>the last ${esc(rangeLabel)}, newest first</span></h2>
-    ${activityTable(p.d.series)}`
+    ${activityTable(p, p.d.series, rangeLabel)}`
 }
 
 function tasksView(p: Page): string {
@@ -2346,9 +2402,9 @@ function customersView(p: Page): string {
 }
 
 function keysView(p: Page): string {
-  return `${keysTable(p.d.keys, p.v.apiKey)}
+  return `${keysTable(p, p.d.keys, p.v.apiKey)}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
-    <div class="frame cmds">
+    <div class="cv-card cmds">
       ${KEY_COMMANDS.map(([ep, what]) =>
         `<div class="cmd"><b>${ep}</b><span>${what}${ep.endsWith('/revoke') ? ' A revoked key ends this session on its next request.' : ''}</span></div>`).join('\n      ')}
     </div>
@@ -2369,8 +2425,8 @@ function consolePage(p: Page): string {
   const meta = asStart ? VIEWS.start : p.view === 'start' ? VIEWS.overview : VIEWS[p.view]
 
   const banner = p.demo
-    ? `<div class="banner">
-        <b>Sample data</b>
+    ? `<div class="banner cv-callout">
+        ${label('Sample data')}
         <p>${p.anon
             ? 'Every number on this page is invented. This is what the console looks like once your agents are calling preflight. <a href="/register">Get an API key</a> and it fills with your own runs.'
             : `Nothing on this page is from your account. It shows what the console looks like once your agents are calling preflight. <a href="${href(p, p.view, { demo: false })}">Back to your real console</a>.`}</p>

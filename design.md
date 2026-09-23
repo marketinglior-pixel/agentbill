@@ -96,7 +96,10 @@ card), and the docs shell (`docs.ts`).
 **Panel in panel is the frame for anything that shows product data.** A
 warm-grey outer panel holds a white card with a hairline. The card opens with a
 bar: an id tag, a muted label, and `SAMPLE` at its right when the numbers are
-not the reader's own. A split card gives its right column the warm-grey ground;
+not the reader's own. On the console the bar carries the tag and `SAMPLE`
+only: every count or order a muted label there could state ("5 jobs", "newest
+first") is already in the heading, lede or note on the same screen, and a
+second copy is copy a restyle added. A split card gives its right column the warm-grey ground;
 that is where the one figure, its meter and the machine's answer sit. Nothing
 that shows data floats on the page without the frame.
 
@@ -110,6 +113,16 @@ approved call is not a colour. The refusal is `.chip-no`, outlined in the
 signal. A leak (spend past a ceiling, needs a human) is `.chip-fail`, the signal
 filled. Approaching a limit is `.chip-near`, the one non-signal state colour. A
 state that is neither (running, ok) is a `.tag`.
+
+**A bar is ink, the signal, or the signal hatched.** A meter's fill is
+`--meter-fill` (ink) for ordinary spend, including a task or a plan within a
+fifth of its ceiling: that state is the `.chip-near` beside it, never a bar
+colour. The ceiling held (a task at its ceiling, a customer at their limit, a
+plan at 90%) is `--signal`. A leak is the signal hatched, the playground's mark
+for units past the ceiling (`.pg-ghost`), so held and leaked never differ by a
+shade of one hue. The console once drew near, held and leaked in `--amber`,
+`--signal` and `--fail-ink`, three browns a reader could not tell apart (review,
+2026-09-23); `--amber` and `--fail-ink` are not bar or text colours on canvas.
 
 **One accent, and it is the refusal.** `--signal` marks the approved-false
 moment and what belongs to it: the refused row's tint (`tr.is-no`), the
@@ -125,6 +138,17 @@ dark" under Genre; the three faces under Type (they are the dark theme's);
 `--green` as a chromatic accent and the 12/8 radius rule under Colour and
 "What pages must share"; the primary as a green 8px button under CTA voice; the
 console's green `--held` under the App family.
+
+**Held for Lior's approval** (review, 2026-09-23). The restyle kept copy as it
+was, with these additions still open for his yes or no: the site nav and
+footer on the signed-out login and the checkout hand-off (the brief asks for
+the homepage's nav and footer on every page); the frame's mono labels, which
+are the approved frame's own parts (the column heads Task / Units / Burn-down /
+State, THIS JOB over the figure); a tag and `SAMPLE` on every console frame;
+and the overview's latest refusals as the refusals view's table, so
+"researcher → job-8871" became an Agent and a Task column. The frame bars'
+facts ("5 jobs", "latest 5 of 6, newest first", "4 customers, heaviest first",
+the date range and the rest) were removed rather than held.
 
 ## Genre
 
