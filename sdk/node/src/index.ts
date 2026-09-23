@@ -276,7 +276,8 @@ export interface SettleOptions {
   success?: boolean
   idempotencyKey?: string
   metadata?: Record<string, unknown>
-  /** The provider reported no usage. Charged at least the reservation, never 0. */
+  /** The provider reported no usage. Charged at least this preflight's
+   *  reservation, never read as 0. */
   usageMissing?: boolean
 }
 
@@ -398,7 +399,9 @@ export interface RecordOptions {
   reservationId?: string
   /**
    * The provider reported no usage for this call. Not read as 0: the server
-   * charges at least what the reservation held and counts the call on the job.
+   * charges at least the reservation the record settles (the one
+   * reservationId names or, without it, the oldest open one of this customer
+   * and taskRef; with none open, units as sent) and counts the call on the job.
    */
   usageMissing?: boolean
 }
@@ -435,7 +438,8 @@ export interface TaskStatus {
   exceeded: boolean
   /** What the numbers count: 'unit' (yours) or 'token'. getTask always sets it. */
   unit?: 'unit' | 'token'
-  /** Calls recorded with usageMissing, charged at least their reservation. getTask always sets it. */
+  /** Calls recorded with usageMissing, charged at least the reservation they
+   *  settled (units as sent when none was open). getTask always sets it. */
   usageMissingCalls?: number
 }
 

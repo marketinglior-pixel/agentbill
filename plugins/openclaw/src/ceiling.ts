@@ -122,6 +122,14 @@ export class Ceiling {
    * was held until the server's sweeper reclaimed it an hour later.
    */
   private readonly held = new Map<string, string>()
+  /**
+   * True once any preflight in this process came back with a reservation_id.
+   * A server that returns one also accepts units 0 on a record (migration
+   * 015); one that does not refuses 0 with a 422. So this is what decides
+   * whether a model call with no usage and no reservation of its own can be
+   * recorded as usage_missing at 0, rather than skipped as 0.1.0 did.
+   */
+  private serverSettles = false
   private counter = 0
 
   constructor(
@@ -199,6 +207,7 @@ export class Ceiling {
 
     if (d.approved) {
       if (d.reservationId) {
+        this.serverSettles = true
         if (this.held.size >= HELD_CAP) {
           const oldest = this.held.keys().next().value
           if (oldest !== undefined) this.held.delete(oldest)
@@ -228,7 +237,8 @@ export class Ceiling {
 
   /** The reservation the preflight under this key made, once: a second
    *  settle for the same key (a second llm_output in one run) gets none and
-   *  records the 0.1.0 way. */
+   *  records the 0.1.0 way, or as usage_missing when it has no usage (see
+   *  recordQuietly). */
   private takeHeld(key: string): string | undefined {
     const id = this.held.get(key)
     if (id !== undefined) this.held.delete(key)
@@ -261,7 +271,8 @@ export class Ceiling {
     await this.recordQuietly(t, units, `${runId ?? 'run'}:llm:${++this.counter}`, customerId, metadata, {
       reservationId: this.takeHeld(`${runId ?? 'run'}:agent_run`),
       // No usage from the host is not a call that cost 0. The server charges
-      // it at least the reservation and counts it on the job.
+      // it at least the reservation it settles (this turn's, or without one
+      // the task_ref's oldest open reservation) and counts it on the job.
       usageMissing: tokens && read.missing,
     })
   }
@@ -282,14 +293,20 @@ export class Ceiling {
     metadata: Record<string, unknown>,
     settle: { reservationId?: string; usageMissing?: boolean } = {},
   ): Promise<void> {
-    // Nothing to spend and nothing named to release: the 0.1.0 behaviour,
-    // and the only safe one against a server that refuses units 0.
-    if (units < 1 && !settle.reservationId) return
+    // A model call with no usage and no reservation of its own left (a
+    // second llm_output in one run) is still a call that ran, so it is
+    // recorded as usage_missing at 0 and the server charges it at least the
+    // task_ref's oldest open reservation. Only against a server that has
+    // returned a reservation_id, since that is the server that accepts 0.
+    const missingOnly = settle.usageMissing === true && !settle.reservationId && this.serverSettles
+    // Otherwise nothing to spend and nothing named to release: the 0.1.0
+    // behaviour, and the only safe one against a server that refuses units 0.
+    if (units < 1 && !settle.reservationId && !missingOnly) return
     try {
       await this.client.record({
         agentId: this.cfg.agentId, taskRef: t.taskRef, units, idempotencyKey: `${t.taskRef}:${key}`, customerId, metadata,
         reservationId: settle.reservationId,
-        usageMissing: settle.reservationId ? settle.usageMissing : undefined,
+        usageMissing: settle.reservationId || missingOnly ? settle.usageMissing : undefined,
       })
     } catch (err) {
       // A failed record leaves the reservation open until the server sweeps it.

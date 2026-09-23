@@ -334,12 +334,43 @@ test('llm_output reporting 0 tokens is a real 0: settled, and not flagged as mis
   })
 })
 
-test('llm_output with no usage and no reservation records nothing, as 0.1.0 did', async () => {
+test('against a server that has returned no reservation_id, llm_output with no usage records nothing, as 0.1.0 did', async () => {
+  // Such a server refuses units 0 with a 422, so a 0 sent here would be a
+  // failed record and a warning, not a recorded call.
   const srv = fakeServer((b) => ('units' in b ? recorded : approved))
   await withFetch(srv.fetchImpl, async () => {
     const { api, fire } = fakeApi({ apiKey: 'agb_x' })
     registerCeiling(api as any)
     await fire('llm_output', { runId: 'r', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] }, { sessionKey: 'k' })
-    assert.equal(srv.calls.filter((c) => c.path === '/events').length, 0)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r2', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r2', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [], usage: { total: 50 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r2', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] }, { sessionKey: 'k' })
+    const rec = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(rec.length, 1, 'only the call that reported usage is recorded')
+    assert.equal(rec[0]!.units, 50)
+    assert.equal('usage_missing' in rec[0]!, false)
+  })
+})
+
+test('once the server has returned a reservation_id, a model call with no usage and none of its own left is recorded as usage_missing at 0, not dropped', async () => {
+  // The README says an llm_output with no usage is recorded as usage_missing.
+  // Until 2026-09-23 the second one in a run was not: its turn's reservation
+  // had gone to the first, so it had nothing named and was skipped whole, and
+  // the job read as if that call never ran.
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r10', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r10', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [], usage: { total: 700 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r10', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] }, { sessionKey: 'k' })
+    const [first, second] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(first!.reservation_id, RID_RUN)
+    assert.equal(first!.units, 700)
+    assert.ok(second, 'the second model call is recorded')
+    assert.equal(second!.units, 0)
+    assert.equal(second!.usage_missing, true)
+    assert.equal('reservation_id' in second!, false, 'it names no reservation: the server floors it at the task_ref\'s oldest open one')
+    assert.equal(second!.task_ref, 'openclaw:k')
   })
 })

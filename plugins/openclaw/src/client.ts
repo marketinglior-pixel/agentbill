@@ -44,7 +44,9 @@ export type RecordRequest = {
   metadata?: Record<string, unknown>
   /** Settles that reservation whole, unused part released now. */
   reservationId?: string
-  /** The host reported no usage for the call: charged at least the reservation. */
+  /** The host reported no usage for the call: charged at least the
+   *  reservation the record settles, the named one or else the task_ref's
+   *  oldest open one; with none open, the 0 sent is recorded and flagged. */
   usageMissing?: boolean
 }
 
@@ -121,11 +123,12 @@ export class AgentBillClient {
    * dedupes on idempotency_key, so a retried record is one event, not two.
    */
   async record(req: RecordRequest): Promise<void> {
-    // 0 units is only sent with a reservationId. A server that returned one
-    // accepts 0 (migration 015) and the record closes that reservation; a
-    // server that did not is one that refuses 0 with a 422, and with nothing
-    // named there is nothing a 0 could settle anyway.
-    if (req.units < 1 && !req.reservationId) return
+    // 0 units is only sent with a reservationId, or as usage_missing, which
+    // Ceiling passes only once the server has returned a reservation_id. A
+    // server that returned one accepts 0 (migration 015); a server that did
+    // not is one that refuses 0 with a 422, and with nothing named and
+    // nothing missing there is nothing a 0 could settle or say anyway.
+    if (req.units < 1 && !req.reservationId && !req.usageMissing) return
     const body: Record<string, unknown> = {
       customer_id: req.customerId ?? 'default',
       event_type: req.agentId,

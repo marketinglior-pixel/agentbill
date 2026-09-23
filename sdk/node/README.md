@@ -89,7 +89,7 @@ Record what actually happened.
 | `metadata` | object | none | Key-value pairs stored with the event |
 | `reservationId` | string | none | The preflight's `reservationId`. Closes that reservation whole and releases what it held beyond `units`. Without it the oldest reservations of this customer and `taskRef` are settled by `units` only |
 | `idempotencyKey` | string | a fresh random key | Same key, one event: a retried record is ignored as a duplicate. Pass something stable, such as your provider's response id |
-| `usageMissing` | boolean | `false` | Your provider reported no usage. Not read as 0: the call is charged at least what its reservation held, and the job counts it |
+| `usageMissing` | boolean | `false` | Your provider reported no usage. Not read as 0: the call is charged at least the reservation the record settles, the one `reservationId` names or, without it, the oldest open reservation of this customer and `taskRef`. With no reservation open, `units` is recorded as sent. Either way the job counts it |
 
 The result of `preflight()` has the same method, `result.record({ units, success?, idempotencyKey?, metadata?, usageMissing? })`, which carries `agentId`, `customerId`, `taskRef` and `reservationId` from the preflight that made it.
 

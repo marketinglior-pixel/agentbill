@@ -74,9 +74,13 @@ API returns one (`reservation_id`): a model turn's reservation closes on the
 `llm_output` that settles the turn, and a tool call's on its `after_tool_call`,
 at 0 tokens in tokens mode. What the estimate held beyond what was used is released then,
 instead of staying held until the server's 60 minute expiry. An `llm_output`
-with no usage in it is recorded as `usage_missing`, which the server charges at
-the reservation rather than at 0. Against a server that returns no
-`reservation_id` the plugin records exactly as 0.1.0 did.
+with no usage in it is recorded as `usage_missing`, not as 0: the server
+charges it at least the reservation the record settles, the turn's own or,
+when the turn's is already settled, the oldest open one for the session's
+`task_ref`. With no reservation open it is recorded at 0 and counted on the
+job as a call with no usage reported. Against a server that returns no
+`reservation_id` the plugin records exactly as 0.1.0 did, and a call with no
+usage records nothing.
 
 ## What a refusal looks like
 
@@ -117,7 +121,7 @@ ceiling can be raised from the console at any time.
 | `subagent_spawned` | observe | links the child session to the parent's task_ref |
 | `before_agent_run` | gate | `POST /preflight`; refused returns `{ outcome: "block", message }` |
 | `before_tool_call` | gate | `POST /preflight`; refused returns `{ block: true, blockReason }` |
-| `llm_output` | observe | `POST /events` with the usage total, the provider and model, and the turn's `reservation_id` when there is one |
+| `llm_output` | observe | `POST /events` with the usage total (or `usage_missing` when the host sent none), the provider and model, and the turn's `reservation_id` when there is one |
 | `after_tool_call` | observe | `POST /events` with `toolCallUnits` when above zero, and at 0 when the call's preflight returned a `reservation_id`, to settle it |
 | `session_end` | observe | forgets the session |
 
