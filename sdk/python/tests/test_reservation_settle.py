@@ -10,8 +10,11 @@ unchanged when nothing new is asked for, and the new arguments go out as sent.
 
 Every test stubs `requests` at the module the client calls, so no socket opens.
 """
+import copy
 import dataclasses
+import gc
 import json
+import pickle
 import re
 import uuid
 
@@ -165,6 +168,45 @@ def test_the_result_does_not_carry_the_client_into_asdict_or_repr(monkeypatch):
     assert sorted(as_dict) == sorted(f.name for f in dataclasses.fields(PreflightResult))
     # And a result still compares equal to the same data, as before.
     assert result == PreflightResult(**as_dict)
+
+
+def test_the_result_carries_no_key_into_pickle_vars_or_deepcopy_and_still_records(monkeypatch):
+    # The binding used to live in result.__dict__: pickle.dumps(result)
+    # carried the api_key, deepcopy kept the client, and
+    # json.dumps(vars(result)) raised on it.
+    sent = _server(monkeypatch)
+    result = AgentBillClient(api_key=FAKE_KEY).preflight("researcher", estimated_units=5, task_ref="job-142")
+    assert FAKE_KEY.encode() not in pickle.dumps(result)
+    assert pickle.loads(pickle.dumps(result)) == result
+    logged = json.dumps(vars(result))
+    assert FAKE_KEY not in logged and json.loads(logged)["reservation_id"] == RID
+    clone = copy.deepcopy(result)
+    assert clone == result and FAKE_KEY.encode() not in pickle.dumps(clone)
+    # The original still records against its own reservation.
+    result.record(units=3)
+    (event,) = _events(sent)
+    assert event["reservation_id"] == RID and event["task_ref"] == "job-142" and event["units"] == 3
+
+
+def test_a_copy_or_an_unpickled_result_cannot_record_and_says_what_to_do(monkeypatch):
+    _server(monkeypatch)
+    result = AgentBillClient(api_key=FAKE_KEY).preflight("researcher", estimated_units=5, task_ref="job-142")
+    for other in (copy.copy(result), copy.deepcopy(result), pickle.loads(pickle.dumps(result))):
+        with pytest.raises(AgentBillError) as exc_info:
+            other.record(units=1)
+        assert "reservation_id=result.reservation_id" in str(exc_info.value)
+
+
+def test_the_binding_goes_away_with_the_result(monkeypatch):
+    _server(monkeypatch)
+    client = AgentBillClient(api_key=FAKE_KEY)
+    gc.collect()  # results of earlier tests, so they are not counted as ours
+    before = len(client_module._BINDINGS)
+    results = [client.preflight("researcher", estimated_units=5) for _ in range(5)]
+    assert len(client_module._BINDINGS) == before + 5
+    del results
+    gc.collect()
+    assert len(client_module._BINDINGS) == before
 
 
 def test_gate_settles_the_reservation_it_opened(monkeypatch):

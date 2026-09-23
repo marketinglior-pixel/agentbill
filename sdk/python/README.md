@@ -417,7 +417,7 @@ reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never
 | `reservation_id` | `str` | none | `check.reservation_id`. Closes that reservation whole and releases what it held beyond `units`. Without it the oldest reservations are settled by `units` only. |
 | `success` | `bool` | `True` | `False` releases the reservation and bills nothing. |
 | `idempotency_key` | `str` | a fresh random key | Same key, one event: a retried record is ignored as a duplicate. Pass something stable, such as your provider's response id. |
-| `usage_missing` | `bool` | `False` | Your provider reported no usage for this call. Not read as 0: the call is charged at least what its reservation held, and the job counts it in `usage_missing_calls`. |
+| `usage_missing` | `bool` | `False` | Your provider reported no usage for this call. Not read as 0: the call is charged at least the reservation the record settles, the one `reservation_id` names or, without it, the oldest open reservation of this customer and `task_ref`. With no reservation open, `units` is recorded as sent. Either way the job counts it in `usage_missing_calls`. |
 | `metadata` | `dict` | none | Stored on the event, never counted. |
 
 `client.preflight(...)` also takes `unit`, `"unit"` (yours, the default) or `"token"`, with a `task_ref`: it is read when the call opens the job and checked on a job that exists, and a different unit is a 422. `client.get_task(...)` returns it as `status.unit`, beside `status.usage_missing_calls`.
