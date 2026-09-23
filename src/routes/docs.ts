@@ -386,9 +386,9 @@ try {
   <h3 id="wrap-what">What is measured, and what is not</h3>
   <table>
     <tr><th>Provider</th><th>Measured methods</th><th>Usage read from the response</th></tr>
-    <tr><td>OpenAI</td><td>chat.completions.create, responses.create</td><td>input (cached reads apart), output, reasoning. A streamed Chat Completions call gets <span class="inline">stream_options.include_usage</span> turned on, and the usage-only chunk that adds is kept out of your loop. One you set yourself is left as you set it.</td></tr>
+    <tr><td>OpenAI</td><td>chat.completions.create, responses.create</td><td>input (cache reads and cache writes apart), output, reasoning. A streamed Chat Completions call gets <span class="inline">stream_options.include_usage</span> turned on, and the usage-only chunk that adds is kept out of your loop. One you set yourself is left as you set it.</td></tr>
     <tr><td>Anthropic</td><td>messages.create</td><td>input, cache reads, cache writes (five-minute and one-hour apart), output.</td></tr>
-    <tr><td>Gemini (google-genai)</td><td>models.generate_content, models.generate_content_stream; in Python also aio.models</td><td>prompt (cached apart), candidates plus thoughts as output: Gemini reports thinking outside candidates.</td></tr>
+    <tr><td>Gemini (google-genai)</td><td>models.generate_content, models.generate_content_stream; in Python also aio.models</td><td>prompt (cached apart), candidates plus thoughts as output: Gemini reports thinking outside candidates. With automatic function calling (a Python function or a CallableTool in <span class="inline">tools</span>) one call sends a model request per round and returns only the last round's usage, so each round is measured as its own call, with its own preflight and record.</td></tr>
   </table>
 
   <ul>
@@ -402,7 +402,8 @@ try {
     the call's own <span class="inline">max_tokens</span> when it sets one. The prompt is not
     counted before the call, and no request is added. The record then charges what the provider reported, so one call can pass the
     ceiling when the estimate was low: at most that one call for each caller running at the same
-    moment, and the next preflight is refused.</li>
+    moment, and the next preflight is refused. That bound holds while preflight checks the ceiling;
+    see the quota below for the one state where it does not.</li>
     <li><strong>Missing usage is recorded as missing, never as 0.</strong> The call is charged at
     least what it reserved, and counted in <span class="inline">usage_missing_calls</span>.</li>
     <li><strong>The job is counted in tokens.</strong> Open it with
@@ -412,12 +413,20 @@ try {
     <span class="inline">422 task_unit_mismatch</span>, and the call is not sent. A customer limit
     set with <a href="#put-budget">PUT /budget</a> counts whatever that customer's calls send, so
     under <span class="inline">wrap()</span> it counts tokens.</li>
-    <li><strong>A refusal is raised, and your code decides.</strong> AgentBill's own quota
-    running out never holds a call back: it is sent, and a warning carries the upgrade link. A
-    provider error releases the call's reservation. A record that fails after the provider
-    answered never loses the answer.</li>
+    <li><strong>A refusal is raised, and your code decides.</strong> A provider error releases the
+    call's reservation. A record that fails after the provider answered never loses the answer.</li>
+    <li><strong>Each measured call is one preflight</strong>, so it uses one preflight of your
+    account's monthly quota. Once that quota is spent, preflight answers before it looks at the job
+    and no ceiling can be checked. So by default the wrapped call raises
+    <span class="inline">FreeTierExceededError</span> or
+    <span class="inline">PlanLimitExceededError</span> with the upgrade link, and is not sent. With
+    <span class="inline">on_quota="send"</span> (Node: <span class="inline">onQuota: 'send'</span>)
+    it is sent unchecked and recorded, with a warning once per job, and nothing bounds the job
+    until the quota resets or you upgrade.</li>
     <li>A client pointed at another host (Azure, a proxy, an OpenAI-compatible server) is
-    recorded as <span class="inline">openai-compatible</span> and gets no list price. In Node the
+    recorded as <span class="inline">openai-compatible</span> and gets no list price. Its records
+    are keyed by a random key, not the response id, because such a server's ids need not be
+    unique. In Node the
     wrapped create returns a plain Promise, without the SDK's <span class="inline">withResponse()</span>.</li>
   </ul>
 
@@ -513,7 +522,10 @@ try {
   <span class="inline">budget_exhausted</span>) and <strong>return the result when the refusal is
   AgentBill's own quota</strong> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
-  <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.</p>
+  <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.
+  <a href="#wrap">wrap()</a> is the exception, because once the quota is spent no ceiling can be
+  checked: a wrapped call raises by default, and <span class="inline">on_quota="send"</span>
+  sends it unchecked instead.</p>
 
   <h3>record()</h3>
   <table>

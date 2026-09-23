@@ -104,6 +104,10 @@ is an error status.
 | free_tier_exceeded (plan is free) | returned, with .upgrade_url | returned, with .upgradeUrl |
 | plan_limit_exceeded (any paid plan) | returned, with .upgrade_url | returned, with .upgradeUrl |
 
+Under wrap() the quota is the exception: once it is spent no ceiling can be checked, so by default a
+wrapped call raises FreeTierExceededError or PlanLimitExceededError (both SDKs) and is not sent;
+on_quota="send" (Node: onQuota: 'send') sends it unchecked instead.
+
 Two shapes that are errors rather than refusals: a task_ref preflight has never seen, arriving
 without a task_ceiling, is 422 task_ceiling_required (Python raises TaskCeilingRequiredError, Node
 throws AgentBillError); a retried preflight whose idempotency_key is still being decided is 409
@@ -299,6 +303,7 @@ const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', tas
 - After the call: idempotency_key is the provider's response id, the reservation is settled whole,
   and metadata carries provider, model, the tokens by type, duration_ms and step. Missing usage is
   recorded as missing, never as 0.
+- Each measured call is one preflight, so it uses one preflight of the account's monthly quota.
 - A refusal raises TaskCeilingExceededError before the provider call is sent. Your code decides.
 - GET /tasks/:task_ref then breaks the job down by model and by step, with tokens and an estimate
   at public list price. List price, your invoice may differ.
@@ -699,8 +704,8 @@ review = agentbill.wrap(llm, step="review")      # another step, the same job an
 \`\`\`
 
 Python: wrap(client, *, task_ref, agent_id, step=None, customer_id=None, task_ceiling=None,
-default_estimate=None, agentbill_client=None, provider=None). Node: wrap(client, { taskRef, agentId,
-step, customerId, taskCeiling, defaultEstimate, provider }). The key comes from AGENTBILL_API_KEY in
+default_estimate=None, agentbill_client=None, provider=None, on_quota="raise"). Node: wrap(client,
+{ taskRef, agentId, step, customerId, taskCeiling, defaultEstimate, provider, onQuota }). The key comes from AGENTBILL_API_KEY in
 both unless Python is given agentbill_client. The wrapped client is the original with the measured
 methods replaced: every other attribute is the original's, and the original object is untouched and
 unmeasured.
@@ -711,9 +716,13 @@ prompt plus the call's own max_tokens, max_completion_tokens, max_output_tokens 
 max_output_tokens. It is an estimate, not a bound: a call with a far bigger prompt than usual uses
 more than it reserved, the record charges what the provider reported, and the job can end past its
 ceiling by that one call for each caller running at the same moment. The next preflight is refused.
+That bound holds while preflight checks the ceiling, which it does not once the account's own
+monthly quota is spent (below).
 
-After it, record with units = the provider's total, idempotency_key = the provider's response id,
-reservation_id = the one preflight returned, and metadata:
+After it, record with units = the provider's total, idempotency_key = the provider's response id (a
+random key on a "<provider>-compatible" endpoint, whose ids need not be unique, or when there is no
+id; a record the server answers duplicate_ignored is recorded again under a random key, since wrap()
+never retries a record), reservation_id = the one preflight returned, and metadata:
 
 \`\`\`json
 {"provider": "openai", "model": "gpt-4o-mini-2024-07-18", "requested_model": "gpt-4o-mini",
@@ -721,14 +730,23 @@ reservation_id = the one preflight returned, and metadata:
  "duration_ms": 740, "step": "plan", "service_tier": "default"}
 \`\`\`
 
-input excludes cache reads and writes; output includes reasoning. Anthropic's one-hour cache writes
-are cache_write_1h. Gemini reports thinking outside candidates, so output there is candidates plus
-thoughts. A streamed Chat Completions call gets stream_options.include_usage when the caller did not
-set it, and the usage-only chunk that adds is kept out of the caller's loop; a stream is recorded when
-it ends, is closed, or its loop stops. Usage the provider did not report is recorded with
-usage_missing, never as 0. A provider error releases the reservation. A failed record never loses the
-answer. AgentBill's own quota never holds a call back: it is sent, with a warning. A client pointed at
-another host is recorded as "<provider>-compatible" and is not priced.
+input excludes cache reads and writes (OpenAI's cache_write_tokens and Anthropic's
+cache_creation_input_tokens are cache_write); output includes reasoning. Anthropic's one-hour cache
+writes are cache_write_1h. Gemini reports thinking outside candidates, so output there is candidates
+plus thoughts. With Gemini's automatic function calling one generate_content sends a model request per
+round and returns only the last round's usage, so each round is measured as its own call, with its own
+preflight and record. A streamed Chat Completions call gets stream_options.include_usage when the
+caller did not set it, and the usage-only chunk that adds is kept out of the caller's loop; a stream is
+recorded when it ends, is closed, or a loop over it stops. Usage the provider did not report is
+recorded with usage_missing, never as 0. A provider error releases the reservation. A failed record
+never loses the answer. A client pointed at another host is recorded as "<provider>-compatible" and is
+not priced.
+
+Each measured call is one preflight, so it uses one preflight of the account's monthly quota. Once
+that quota is spent, preflight answers before it looks at the job and no ceiling can be checked. By
+default (on_quota="raise") the wrapped call raises FreeTierExceededError or PlanLimitExceededError with
+upgrade_url and is not sent. With on_quota="send" it is sent unchecked and recorded, with a warning
+once per job, and nothing bounds the job until the quota resets or the plan is upgraded.
 
 ## Two things that are not the task ceiling
 
@@ -757,7 +775,9 @@ ${NOT_A}
   if your code records it.
 - One call can pass the ceiling when its estimate was low: preflight reserves an estimate and record
   charges what the call used, so the overshoot is at most that one call for each caller running at
-  the same moment, and the next preflight is refused.
+  the same moment, and the next preflight is refused. That bound needs preflight to check the
+  ceiling: under wrap() with on_quota="send" and the account's monthly quota spent, nothing is
+  checked and nothing bounds the job until the quota resets or the plan is upgraded.
 - Calls are refused, not reversed. Refusing the next call does not undo the calls that already ran,
   and there is no billing reversal for a result later found to be wrong.
 - Multi-step workflows with state machines, long-running runs measured in hours or days, and

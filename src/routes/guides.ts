@@ -188,7 +188,10 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   refused it</b> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
   <span class="inline">upgrade_url</span> set. Our billing running out must never crash your agent,
-  so those two come back as a value you can act on rather than an exception you did not plan for.</p>
+  so those two come back as a value you can act on rather than an exception you did not plan for.
+  A client made with <a href="/docs#wrap">wrap()</a> is the exception: once the quota is spent no
+  ceiling can be checked, so a wrapped call raises by default, and
+  <span class="inline">on_quota="send"</span> sends it unchecked instead.</p>
 
   <h2>Getting back to the three-step screen</h2>
   <p>The link to it disappears from the console once you have had a first refusal, because it is a

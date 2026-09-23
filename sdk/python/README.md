@@ -264,9 +264,11 @@ except TaskCeilingExceededError as refused:
     print(refused)  # the call that would have passed the ceiling was not sent
 ```
 
-- **The estimate needs no number from you.** Before the job's first measured call in this process it is `default_estimate` (2,000); after, the job's running average per call, never more than the average prompt plus the call's own `max_tokens` (or `max_completion_tokens`, `max_output_tokens`). The prompt is not counted before the call, and no request is added. A call that uses more than it reserved is still recorded at what it used, so one call can take the job past its ceiling, by at most that call for each caller running at the same moment; the next preflight is refused.
-- **After the call** the record carries `idempotency_key` = the provider's response id, the preflight's `reservation_id`, and metadata: provider, model, tokens by type (`input`, `cache_read`, `cache_write`, `output`, `reasoning`), `duration_ms`, and the `step` you named. No prompt, no answer. For another step of the same job, `wrap(llm, step="review")`.
-- **Missing usage is recorded as missing, never as 0.** A provider error releases the reservation. A record that fails after the provider answered warns and still returns the answer. AgentBill's own quota running out never holds the call back; it warns with the upgrade link.
+- **The estimate needs no number from you.** Before the job's first measured call in this process it is `default_estimate` (2,000); after, the job's running average per call, never more than the average prompt plus the call's own `max_tokens` (or `max_completion_tokens`, `max_output_tokens`). The prompt is not counted before the call, and no request is added. A call that uses more than it reserved is still recorded at what it used, so one call can take the job past its ceiling, by at most that call for each caller running at the same moment; the next preflight is refused. That bound holds while preflight checks the ceiling; see the quota below.
+- **After the call** the record carries `idempotency_key` = the provider's response id (a random key on a `-compatible` endpoint, whose ids need not be unique), the preflight's `reservation_id`, and metadata: provider, model, tokens by type (`input`, `cache_read`, `cache_write`, `output`, `reasoning`), `duration_ms`, and the `step` you named. No prompt, no answer. For another step of the same job, `wrap(llm, step="review")`.
+- **Tokens by type:** OpenAI's `cached_tokens` and `cache_write_tokens` are `cache_read` and `cache_write`; with Gemini's automatic function calling (a Python function in `tools`), each round the SDK sends is its own measured call, because the response it returns carries only the last round's usage.
+- **Missing usage is recorded as missing, never as 0.** A provider error releases the reservation. A record that fails after the provider answered warns and still returns the answer. A stream is recorded when it ends, is closed, or a `for` loop over it stops.
+- **Each measured call is one preflight**, so it uses one preflight of your account's monthly quota. Once that quota is spent no ceiling can be checked, so by default the wrapped call raises `FreeTierExceededError` or `PlanLimitExceededError` (with `.upgrade_url`) and is not sent. `wrap(..., on_quota="send")` sends it unchecked and records it, with a warning once per job, and nothing bounds the job until the quota resets or you upgrade.
 - **Only wrapped calls are measured.** Another method, an unwrapped client, a tool call or a GPU run counts only if your code records it with the same `task_ref`. A client pointed at another host is recorded as `openai-compatible` (or `anthropic-compatible`) and gets no list price.
 - **The job is counted in tokens.** One opened in units answers 422 `task_unit_mismatch`, and the call is not sent.
 - **What it cost:** `client.get_task("tokens-1").breakdown` has the job by model and by step, with tokens and `list_price_usd_estimate`, an estimate at public list price from a dated price table. List price, your invoice may differ; a model with no list price is counted in `unpriced_calls`, never as $0.
@@ -486,9 +488,10 @@ worth after the fact, with `units` as a function of the result.
 | `PreflightInProgressError` | A preflight with the same `idempotency_key` is still being decided |
 | `AgentBillError` | Network error or unexpected server response |
 
-`FreeTierExceededError` and `PlanLimitExceededError` are still exported but nothing raises them:
-AgentBill's own quota running out returns `approved=False` with `.upgrade_url` instead. Our billing
-must never crash your agent.
+`preflight()` never raises `FreeTierExceededError` or `PlanLimitExceededError`: AgentBill's own
+quota running out returns `approved=False` with `.upgrade_url` instead. Our billing must never crash
+your agent. A client made with `wrap()` is the exception: once the quota is spent no ceiling can be
+checked, so a wrapped call raises one of the two by default, and `on_quota="send"` sends it unchecked.
 
 ---
 

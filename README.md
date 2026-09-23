@@ -125,7 +125,7 @@ Two things `gate` does not do: it takes no `idempotency_key`, and it raises a ba
 
 ### What raises, what comes back
 
-The rule: **your** spend rule refusing raises. **AgentBill's own quota** refusing returns a result, because our billing state must not be able to crash your agent. All five are HTTP 200 with `approved: false`; none is an error status.
+The rule: **your** spend rule refusing raises. **AgentBill's own quota** refusing returns a result, because our billing state must not be able to crash your agent. All five are HTTP 200 with `approved: false`; none is an error status. `wrap()` is the exception: once the quota is spent no ceiling can be checked, so a wrapped call raises `FreeTierExceededError` or `PlanLimitExceededError` by default, and `on_quota="send"` (Node: `onQuota: 'send'`) sends it unchecked instead.
 
 | Refusal | Python | Node |
 |---|---|---|
@@ -194,7 +194,7 @@ Read this section before the pitch, not after.
 - **It is not a proxy or a gateway.** No base URL to change, no traffic routed through us, no provider credentials held by us.
 - **Automatic metering covers wrapped model calls only.** `wrap()` records the tokens an OpenAI, Anthropic or Gemini client reports through its create methods. Tool calls, GPU time and any unwrapped call are invisible to AgentBill: they move units only when your code calls `/preflight`, `/events` or `/step`, and they count against a job only when the call carries the same `task_ref`.
 - **It never reads a provider invoice.** Units you define are never turned into dollars. The one dollar figure in the API is `list_price_usd_estimate` on a job read, for calls recorded through `wrap()`: an estimate at public list price from a dated price table. List price, your invoice may differ, and a model with no list price shows none, never $0.
-- **The ceiling is only as tight as the estimate.** Preflight reserves the number you send, or under `wrap()` the job's running average. A call that uses more than that is still recorded at what it used, so one call can take a job past its ceiling: at most that one call for each caller running at the same moment, and the next preflight is refused. Record 1 by hand when you spent 100, and 99 of it was never seen.
+- **The ceiling is only as tight as the estimate.** Preflight reserves the number you send, or under `wrap()` the job's running average. A call that uses more than that is still recorded at what it used, so one call can take a job past its ceiling: at most that one call for each caller running at the same moment, and the next preflight is refused. That bound needs preflight to check the ceiling, and once your account's monthly preflight quota is spent it checks none; under `wrap()` with `on_quota="send"`, nothing bounds the job until the quota resets or you upgrade. Each call `wrap()` measures uses one preflight of that quota. Record 1 by hand when you spent 100, and 99 of it was never seen.
 - **No per-agent budget.** `agent_id` is an attribution label. Nothing is capped by it; ceilings live on a `task_ref`, a customer, or a single call.
 - **It is not a payment processor.** It does not move money, hold cards or charge your end customers. Polar bills you for AgentBill; nothing bills anyone on your behalf. Stripe Connect is not shipped.
 - **Not observability.** No traces, no spans, no prompt capture. `GET /tasks/:task_ref` breaks a job down by model and by step with a list-price estimate; it is not a trace of what a call did.
