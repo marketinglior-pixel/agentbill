@@ -127,6 +127,7 @@ export type PageMeta = {
 const HOME = ['Home', '/'] as const
 const DOCS = ['Docs', '/docs'] as const
 const BLOG = ['Blog', '/blog'] as const
+const INTEGRATIONS = ['Integrations', '/integrations'] as const
 
 export const PAGES: readonly PageMeta[] = [
   { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-23', priority: 1.0, changefreq: 'weekly' },
@@ -148,16 +149,28 @@ export const PAGES: readonly PageMeta[] = [
   // gives it a canonical and a sitemap row instead of a bare 200.
   { path: '/he/cost-per-client', section: 'marketing', crumbs: [HOME], crumb: 'כמה כל לקוח עולה לך', og: 'default', index: true, updated: '2026-09-06', priority: 0.6, changefreq: 'monthly' },
 
-  { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-14', priority: 0.9, changefreq: 'weekly' },
-  { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-08', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
-  { path: '/docs/first-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'First run', og: 'docs', index: true, updated: '2026-09-14', published: '2026-09-14', priority: 0.8, changefreq: 'monthly' },
-  { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/langchain-billing', section: 'docs', crumbs: [HOME, DOCS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
-  { path: '/docs/openai-agent-spend-ceiling', section: 'docs', crumbs: [HOME, DOCS], crumb: 'OpenAI', og: 'docs', index: true, updated: '2026-09-08', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  { path: '/docs', section: 'docs', crumbs: [HOME], crumb: 'Docs', og: 'docs', index: true, updated: '2026-09-23', priority: 0.9, changefreq: 'weekly' },
+  { path: '/docs/task-budgets', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Task budgets', og: 'docs', index: true, updated: '2026-09-23', published: '2026-08-27', priority: 0.8, changefreq: 'monthly' },
+  { path: '/docs/first-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Setup failures', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-14', priority: 0.8, changefreq: 'monthly' },
+  { path: '/docs/limit-cost-per-agent-run', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Cost per run', og: 'docs', index: true, updated: '2026-09-23', published: '2026-05-06', priority: 0.7, changefreq: 'monthly' },
+  // /docs/langchain-billing and /docs/openai-agent-spend-ceiling are 301s to the
+  // LangChain and OpenAI Agents SDK pages below since 2026-09-23, so they have no
+  // row: a redirect is not a page, and a sitemap that lists one is a sitemap
+  // whose entries do not answer 200.
+
+  // What we publish and the frameworks the plain SDK slots into. The hub sits
+  // under Docs in the trail because /docs is where a reader arrives from; the
+  // path is top-level so each page's URL names its integration and nothing else.
+  { path: '/integrations', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Integrations', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
+  { path: '/integrations/openclaw', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenClaw', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
+  { path: '/integrations/langchain', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
+  { path: '/integrations/openai-agents-sdk', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenAI Agents SDK', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
+  { path: '/integrations/crewai', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'CrewAI', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
+  { path: '/integrations/mcp', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'MCP server', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.6, changefreq: 'monthly' },
 
   { path: '/blog', section: 'blog', crumbs: [HOME], crumb: 'Blog', og: 'blog', index: true, updated: '2026-09-05', priority: 0.6, changefreq: 'monthly' },
   { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
-  { path: '/blog/monthly-caps-wont-save-you', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Monthly caps', og: 'blog', index: true, updated: '2026-09-18', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
+  { path: '/blog/monthly-caps-wont-save-you', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Monthly caps', og: 'blog', index: true, updated: '2026-09-23', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
 
   // Indexable on purpose. noindex on a policy page buys nothing (nobody is
   // competing for "AgentBill terms of service"), ad review prefers them

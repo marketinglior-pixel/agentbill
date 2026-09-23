@@ -480,8 +480,8 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></di
   <div class="also">
     <p>Related guides</p>
     <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
-    <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
-    <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
+    <a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a>
+    <a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a>
   </div>
 
 `,

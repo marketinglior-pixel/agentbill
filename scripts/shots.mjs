@@ -26,6 +26,15 @@ const PAGES = [
   ['home', '/'],
   ['pricing', '/pricing'],
   ['docs', '/docs'],
+  // The integration pages, 2026-09-23: the hub's five-column table and the
+  // hook table on /integrations/openclaw are the two widest things on any docs
+  // page, and a table is what sideways scroll comes from at 320.
+  ['integrations', '/integrations'],
+  ['int-openclaw', '/integrations/openclaw'],
+  ['int-langchain', '/integrations/langchain'],
+  ['int-openai-agents', '/integrations/openai-agents-sdk'],
+  ['int-crewai', '/integrations/crewai'],
+  ['int-mcp', '/integrations/mcp'],
   ['register', '/register'],
   // The same route twice, on purpose. /register ships the signup form and the
   // post-key screen as two siblings in one response, and the second is hidden

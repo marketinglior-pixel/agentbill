@@ -180,7 +180,7 @@ except TaskCeilingExceededError as refused:
   console groups by; the ceiling is on the task, not on the agent. Run it a second time and the first
   call is refused, because the job spent 3 of 3 and a job ceiling has no clock to reset it: raise the
   ceiling or use a new name. New to it, or something did not run?
-  <a href="/docs/first-run">Every first-run failure, and its fix</a>. The free tier is 1,000 preflight
+  <a href="/docs/first-run">Every setup failure, and its fix</a>. The free tier is 1,000 preflight
   calls per month, per account.</p>
 
   <p>A call that passes no <span class="inline">customer_id</span> draws on a customer named
@@ -454,8 +454,17 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></di
   <div class="ct-links">
     <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
     <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
-    <a href="/docs/langchain-billing">How to add billing to a LangChain agent</a>
-    <a href="/docs/openai-agent-spend-ceiling">How to add a spend ceiling to an OpenAI agent</a>
+    <a href="/docs/first-run">Every setup failure, and its fix</a>
+  </div>
+
+  <h2>Integrations</h2>
+  <div class="ct-links">
+    <a href="/integrations">Everything AgentBill publishes, and where to install it</a>
+    <a href="/integrations/openclaw">OpenClaw, one ceiling per session, as a ClawHub plugin</a>
+    <a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a>
+    <a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a>
+    <a href="/integrations/crewai">CrewAI, one ceiling per crew run in model-call hooks</a>
+    <a href="/integrations/mcp">MCP server, a ceiling the agent can consult</a>
   </div>
 
   <div class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></div>
