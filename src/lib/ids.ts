@@ -67,12 +67,21 @@ export const zId = (max: number = ID_MAX) => plain(z.string().min(1).max(max))
 export const zIdOrBlank = (max: number = ID_MAX) => z.union([z.literal(''), zId(max)])
 
 /**
- * The largest value an INTEGER column holds.
+ * The largest value an INTEGER column holds, and the bound every per-request
+ * unit and ceiling field is still validated against.
  *
  * The string rules above exist because a value the schema accepts must be a
  * value the column accepts. Numbers had the same gap in the other direction:
- * every units and ceiling column is INTEGER, every schema said
+ * every units and ceiling column was INTEGER, every schema said
  * `z.number().int()` with no ceiling, and 3_000_000_000 was Postgres 22003 and
  * a 500 on /events and /preflight.
+ *
+ * Migration 016 moves the unit columns to BIGINT so the running totals
+ * (a customer's lifetime used_units, a long job counted in tokens) have room.
+ * The per-request bounds stay here on purpose until that migration is applied
+ * and verified in production: raised first, a value past INT4 would reach a
+ * column that is still INTEGER and turn this 422 back into a 500. Raising them
+ * is its own deploy, after 016, and never past Number.MAX_SAFE_INTEGER, which
+ * is where src/db/int8.ts stops returning numbers.
  */
 export const INT4_MAX = 2_147_483_647

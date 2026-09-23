@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
+import { unitsOf, unitsOrNull } from '../db/int8.js'
 
 const CheckpointBody = z.object({
   agent_id:     zId(),
@@ -48,22 +49,23 @@ export async function checkpointRoute(app: FastifyInstance) {
       })
     }
 
-    const customer = rows[0]
+    // Exact integers, never raw row values: `used + units_so_far` on a
+    // string is concatenation, and the columns are BIGINT from migration 016.
+    const limit = unitsOrNull(rows[0].limitUnits)
+    const used = unitsOf(rows[0].usedUnits)
+    const reserved = unitsOf(rows[0].reservedUnits)
 
-    if (
-      customer.limitUnits !== null &&
-      customer.usedUnits + units_so_far > customer.limitUnits
-    ) {
+    if (limit !== null && used + units_so_far > limit) {
       return reply.send({
         approved: false,
         reason: 'budget_exhausted',
         units_so_far,
-        remaining_units: customer.limitUnits - customer.usedUnits - customer.reservedUnits,
+        remaining_units: limit - used - reserved,
       })
     }
 
-    const remaining = customer.limitUnits !== null
-      ? customer.limitUnits - customer.usedUnits - customer.reservedUnits
+    const remaining = limit !== null
+      ? limit - used - reserved
       : null
 
     return reply.send({

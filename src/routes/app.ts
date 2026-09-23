@@ -9,7 +9,7 @@ import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT } from '../ui/chrome.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
-import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { setTaskCeiling, CONSOLE_AGENT, unitWord } from '../lib/task-ceiling.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -162,7 +162,9 @@ export async function appRoute(app: FastifyInstance) {
     if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return fail('ceiling')
 
     const result = await setTaskCeiling(viewer.accountId, ref, Number(raw), agent || null)
-    if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.minimum}`)
+    // The form sends no unit, so a save here never meets a unit mismatch; the
+    // narrowing is for the type, and the job keeps the unit it opened with.
+    if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.reason === 'below_committed' ? result.minimum : 0}`)
     // An agent label typed for a job that already existed was not applied
     // (the label is read only when a save opens the job); say so.
     const kept = agent && !result.row.taskCreated ? '&agent=kept' : ''
@@ -521,7 +523,8 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
   return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
 }
 
-type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
+// unit and usageMissingCalls are absent on the demo rows, which read as 'unit' and 0.
+type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; unit?: string; usageMissingCalls?: number; updatedAt: Date }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date }
@@ -601,7 +604,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     GROUP BY reason
   `
   const tasks = await sql`
-    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
+    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, updated_at
     FROM task_budgets
     WHERE account_id = ${accountId}
     ORDER BY updated_at DESC
@@ -1853,17 +1856,24 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
     : used >= ceiling
       ? '<span class="chip held">ceiling hit</span>'
       : ratio >= 0.8 ? '<span class="chip near">close</span>' : '<span class="chip flow">running</span>'
+  // A job counted in tokens says so beside its numbers (migration 014). A job
+  // in the developer's own unit reads as it always has.
+  const tokens = t.unit === 'token'
+  const per = tokens ? ' tokens' : ''
+  // Calls recorded without a usage count were charged their reservation, not
+  // 0, so the total is partly an estimate; the row says how many.
+  const missing = Number(t.usageMissingCalls ?? 0)
   return `<div class="brow">
       <div class="bhead">
         <div class="btask"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a> <span class="bagent">· ${esc(t.agentId)}</span></div>
-        <div class="bnum"><span><b>${num(used)}</b> / ${num(ceiling)}</span>${state}</div>
+        <div class="bnum"><span><b>${num(used)}</b> / ${num(ceiling)}${per}</span>${state}</div>
       </div>
       <div class="track" aria-hidden="true">
         <i class="used ${cls}" style="width:${usedPct.toFixed(1)}%"></i>
         <i class="res" style="width:${resPct.toFixed(1)}%"></i>
       </div>
       <div class="bfoot">
-        <span>${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}</span>
+        <span>${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}${missing > 0 ? ` · ${num(missing)} ${missing === 1 ? 'call' : 'calls'} with no usage reported, charged at ${missing === 1 ? 'its' : 'their'} reservation` : ''}</span>
         ${editable ? `<form method="POST" action="/app/tasks" class="bset" autocomplete="off">
           <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
           <label for="ceil-${i}">ceiling</label>
@@ -2230,7 +2240,7 @@ except TaskCeilingExceededError as refused:
        <p class="fine">That is the body your code received, kept as a row. Every refusal on this account lands on the <a href="${href(p, 'refusals')}">refusals view</a> the same way, and the overview is now your console.</p>
        <p><a class="btn-in" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
   } else if (job && spent > 0) {
-    third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} units and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
+    third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} ${unitWord(job.unit)} and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
   } else {
     third = `<p>Nothing here yet. Run the lines above, then <a href="${href(p, 'start')}">reload this page</a>: the refusal appears here with the body your code received.</p>`
   }
@@ -2252,7 +2262,7 @@ except TaskCeilingExceededError as refused:
             <p class="fine">Read only when a save opens the job. Leave it blank and the job is listed as <code>console</code> until an approved call names one.</p>
           </details>
           <button class="btn" type="submit">${job ? 'Save the ceiling' : 'Set the ceiling'}</button>
-          ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${ceiling === 1 ? 'unit' : 'units'}. Change either and save again; the last save wins.</p>` : ''}
+          ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${unitWord(job.unit, ceiling)}. Change either and save again; the last save wins.</p>` : ''}
         </div></div>
       </form>
       <div class="ns3"><span class="ns3-n">2</span><div>

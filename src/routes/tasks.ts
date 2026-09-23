@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
-import { setTaskCeiling } from '../lib/task-ceiling.js'
+import { setTaskCeiling, TASK_UNITS, asTaskUnit, unitWord, unitMismatchMessage } from '../lib/task-ceiling.js'
+import { unitsOf } from '../db/int8.js'
 
 const TaskParams = z.object({ task_ref: zId() })
 
@@ -12,6 +13,9 @@ const CeilingBody = z.object({
   // Only read when this call opens the job. An existing job keeps the agent
   // that opened it: the label attributes spend, and a save is not spend.
   agent_id: zId().optional(),
+  // Same rule as unit on preflight: read when this call opens the job,
+  // checked against a job that exists, never a relabel.
+  unit: z.enum(TASK_UNITS).optional(),
 })
 
 const ListQuery = z.object({
@@ -22,20 +26,32 @@ const ListQuery = z.object({
 function serialize(t: {
   taskRef: string
   agentId: string
-  ceilingUnits: number
-  usedUnits: number
-  reservedUnits: number
+  ceilingUnits: unknown
+  usedUnits: unknown
+  reservedUnits: unknown
+  unit?: unknown
+  usageMissingCalls?: unknown
   createdAt: Date
   updatedAt: Date
 }) {
+  const ceiling = unitsOf(t.ceilingUnits)
+  const used = unitsOf(t.usedUnits)
+  const reserved = unitsOf(t.reservedUnits)
   return {
     task_ref: t.taskRef,
     agent_id: t.agentId,
-    ceiling_units: t.ceilingUnits,
-    used_units: t.usedUnits,
-    reserved_units: t.reservedUnits,
-    remaining_units: Math.max(0, t.ceilingUnits - t.usedUnits - t.reservedUnits),
-    exceeded: t.usedUnits > t.ceilingUnits,
+    ceiling_units: ceiling,
+    used_units: used,
+    reserved_units: reserved,
+    remaining_units: Math.max(0, ceiling - used - reserved),
+    exceeded: used > ceiling,
+    // What the numbers above count: 'unit' (yours) or 'token'. Declared when
+    // the job opened; see migration 014.
+    unit: asTaskUnit(t.unit),
+    // Calls recorded with usage_missing: charged at least their reservation,
+    // not at 0, and counted here so the total above is known to be partly an
+    // estimate. See migration 015.
+    usage_missing_calls: t.usageMissingCalls == null ? 0 : unitsOf(t.usageMissingCalls),
     created_at: t.createdAt,
     updated_at: t.updatedAt,
   }
@@ -53,14 +69,14 @@ export async function tasksRoute(app: FastifyInstance) {
 
     const rows = agent_id
       ? await sql`
-          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, created_at, updated_at
+          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
           FROM task_budgets
           WHERE account_id = ${accountId} AND agent_id = ${agent_id}
           ORDER BY created_at DESC
           LIMIT ${limit}
         `
       : await sql`
-          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, created_at, updated_at
+          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
           FROM task_budgets
           WHERE account_id = ${accountId}
           ORDER BY created_at DESC
@@ -83,7 +99,7 @@ export async function tasksRoute(app: FastifyInstance) {
     const accountId = (request as any).accountId
 
     const [row] = await sql`
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, created_at, updated_at
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
       FROM task_budgets
       WHERE account_id = ${accountId} AND task_ref = ${taskRef}
     `
@@ -128,7 +144,7 @@ export async function tasksRoute(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(422).send({
         error: 'validation_error',
-        message: 'Body needs ceiling_units (a positive integer): the same number preflight calls task_ceiling, named ceiling_units here and on GET /tasks. agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job.',
+        message: 'Body needs ceiling_units (a positive integer): the same number preflight calls task_ceiling, named ceiling_units here and on GET /tasks. agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job. unit is optional, "unit" or "token", read when this call opens the job and checked against one that exists.',
         details: parsed.error.issues,
       })
     }
@@ -136,11 +152,20 @@ export async function tasksRoute(app: FastifyInstance) {
     const accountId = (request as any).accountId
 
     try {
-      const result = await setTaskCeiling(accountId, taskRef, parsed.data.ceiling_units, parsed.data.agent_id)
+      const result = await setTaskCeiling(accountId, taskRef, parsed.data.ceiling_units, parsed.data.agent_id, parsed.data.unit)
+      if (!result.ok && result.reason === 'unit_mismatch') {
+        return reply.code(422).send({
+          error: 'task_unit_mismatch',
+          message: unitMismatchMessage(taskRef, result.unit, parsed.data.unit!),
+          task_ref: taskRef,
+          unit: result.unit,
+          declared_unit: parsed.data.unit,
+        })
+      }
       if (!result.ok) {
         return reply.code(409).send({
           error: 'ceiling_below_committed',
-          message: `Task "${taskRef}" has ${result.usedUnits} units spent and ${result.reservedUnits} reserved by calls in flight. The ceiling cannot go under ${result.minimum}: pass ${result.minimum} or more, or wait for the reservations to settle or expire.`,
+          message: `Task "${taskRef}" has ${result.usedUnits} ${unitWord(result.unit)} spent and ${result.reservedUnits} reserved by calls in flight. The ceiling cannot go under ${result.minimum}: pass ${result.minimum} or more, or wait for the reservations to settle or expire.`,
           task_ref: taskRef,
           ceiling_units: result.ceilingUnits,
           used_units: result.usedUnits,

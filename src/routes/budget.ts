@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
+import { unitsOf, unitsOrNull } from '../db/int8.js'
 
 const BudgetQuery = z.object({
   customer_id: zId(),
@@ -54,17 +55,19 @@ export async function budgetRoute(app: FastifyInstance) {
             WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
           `)[0]
 
-      const remaining = customer.limitUnits !== null
-        ? customer.limitUnits - customer.usedUnits
+      const limit = unitsOrNull(customer.limitUnits)
+      const used = unitsOf(customer.usedUnits)
+      const remaining = limit !== null
+        ? limit - used
         : null
 
-      const isBlocked = customer.limitUnits !== null && remaining! <= 0
+      const isBlocked = limit !== null && remaining! <= 0
 
       return reply.code(200).send({
         customer_id: customerRef,
         customer_created: customerCreated,
-        limit: customer.limitUnits,
-        used: customer.usedUnits,
+        limit,
+        used,
         remaining,
         is_blocked: isBlocked,
       })
@@ -125,19 +128,21 @@ export async function budgetRoute(app: FastifyInstance) {
       // customer is refused with budget_exhausted until reservations settle or
       // expire. remaining is floored at 0 so the caller never reads a negative
       // headroom as a credit.
-      const remaining = customer.limitUnits !== null
-        ? Math.max(0, customer.limitUnits - customer.usedUnits - customer.reservedUnits)
+      const limit = unitsOrNull(customer.limitUnits)
+      const used = unitsOf(customer.usedUnits)
+      const reserved = unitsOf(customer.reservedUnits)
+      const remaining = limit !== null
+        ? Math.max(0, limit - used - reserved)
         : null
 
-      const isBlocked = customer.limitUnits !== null &&
-        customer.usedUnits + customer.reservedUnits >= customer.limitUnits
+      const isBlocked = limit !== null && used + reserved >= limit
 
       return reply.code(200).send({
         customer_id: customer.customerRef,
         customer_created: customer.customerCreated,
-        limit: customer.limitUnits,
-        used: customer.usedUnits,
-        reserved: customer.reservedUnits,
+        limit,
+        used,
+        reserved,
         remaining,
         is_blocked: isBlocked,
       })

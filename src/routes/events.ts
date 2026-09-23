@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
+import { unitsOf, unitsOrNull } from '../db/int8.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
 import { mailOwner, ownerMailReady } from '../lib/mail.js'
 import { recordDecision } from '../lib/decisions.js'
-import { consumeReservations } from '../lib/reservations.js'
+import { consumeReservations, findNamedReservation, settleNamedReservation, type NamedReservation } from '../lib/reservations.js'
 
 const ALERT_THRESHOLD = 800
 
@@ -25,13 +26,31 @@ const EventBody = z.object({
   customer_id:      zId(),
   event_type:       zId(),
   idempotency_key:  zId(),
-  // The table says CHECK (units >= 1), so min(0) accepted a value the column
-  // refused: units 0 was a 500 rather than a 422.
-  units:            z.number().int().min(1).max(INT4_MAX).default(1),
+  // 0 is a real answer: a provider can report 0 tokens, and a tool call in a
+  // tokens job costs 0 of them on its own. Until migration 015 the table said
+  // CHECK (units >= 1) and this said min(1), so "it ran and cost nothing" was
+  // a 422 and the only way around it was to skip record and leave the call's
+  // reservation held until the sweeper took it.
+  units:            z.number().int().min(0).max(INT4_MAX).default(1),
   metadata:         z.record(z.unknown()).optional(),
   success:          z.boolean().default(true),
   task_ref:         zId().optional(),
+  // The reservation_id preflight returned. Settles THAT reservation whole:
+  // units moves used_units and the unused rest is released now, instead of
+  // closing the oldest rows FIFO by `units` and leaving the rest held until
+  // the sweeper. Optional: a record without it behaves exactly as before.
+  // null is read as absent, so a client serialising an empty field is fine.
+  reservation_id:   z.string().uuid().nullish(),
+  // The provider reported no usage for this call. It is NOT read as 0: the
+  // call is charged at least what its reservation held, and counted on the
+  // job as usage_missing_calls. See migration 015.
+  usage_missing:    z.boolean().optional(),
 })
+
+type ReservationStatus = 'settled' | 'already_closed' | 'not_found'
+
+const statusOf = (r: NamedReservation | null): ReservationStatus | null =>
+  r == null ? null : r.state === 'open' ? 'settled' : r.state
 
 export async function eventsRoute(app: FastifyInstance) {
   app.post('/events', async (request, reply) => {
@@ -43,10 +62,14 @@ export async function eventsRoute(app: FastifyInstance) {
       })
     }
 
-    const { customer_id: customerRef, event_type, idempotency_key, units, metadata, success, task_ref } = parsed.data
-    const metadataJson = metadata !== undefined ? JSON.stringify(metadata) : null
+    const {
+      customer_id: customerRef, event_type, idempotency_key, units: reportedUnits,
+      metadata, success, task_ref, reservation_id, usage_missing,
+    } = parsed.data
+    const usageMissing = usage_missing === true
     const accountId = request.accountId
     const defaultBudget: number | null = null
+    const taskRef = task_ref ?? null
 
     try {
       const result = await sql.begin(async (tx) => {
@@ -80,6 +103,29 @@ export async function eventsRoute(app: FastifyInstance) {
           WHERE id = ${customer.id}
           FOR UPDATE
         `
+        const lockedLimit = unitsOrNull(locked.limitUnits)
+        const lockedUsed = unitsOf(locked.usedUnits)
+        const lockedReserved = unitsOf(locked.reservedUnits)
+
+        // ----------------------------------------------------------------
+        // 2b. The reservation this record names, if it names one. Found and
+        //     locked, not yet closed: the budget check below may still refuse
+        //     the record, and a refused record must leave its reservation as
+        //     it found it, exactly as the unnamed path always has.
+        // ----------------------------------------------------------------
+        const named = reservation_id
+          ? await findNamedReservation(tx, accountId, locked.id, taskRef, reservation_id)
+          : null
+
+        // What the call is charged. Normally what the caller reported. With
+        // usage_missing it is never less than what the call's own
+        // reservation held: the caller's worst-case estimate, made before the
+        // call, is the best number anyone has, and 0 would let a job look
+        // cheaper than it was. A named reservation already closed (settled or
+        // swept) still says how big it was, so it still sets the floor.
+        const units = usageMissing && named && named.state !== 'not_found'
+          ? Math.max(reportedUnits, named.units)
+          : reportedUnits
 
         // ----------------------------------------------------------------
         // 3a. If success=false: release the preflight reservation only.
@@ -89,8 +135,12 @@ export async function eventsRoute(app: FastifyInstance) {
           // Close the reservation rows this run holds and release exactly what
           // they were holding, never the raw `units`. If the sweeper already
           // reclaimed them, consumed is 0 and the counters are left alone
-          // instead of being decremented a second time.
-          const consumed = await consumeReservations(tx, locked.id, task_ref ?? null, units)
+          // instead of being decremented a second time. A named reservation
+          // is released whole; an unnamed release goes FIFO by `units`, as
+          // before, and so does a name that matched nothing.
+          const consumed = named && named.state !== 'not_found'
+            ? await settleNamedReservation(tx, named)
+            : await consumeReservations(tx, locked.id, taskRef, reportedUnits)
           await tx`
             UPDATE customers
             SET reserved_units = GREATEST(0, reserved_units - ${consumed}),
@@ -106,37 +156,50 @@ export async function eventsRoute(app: FastifyInstance) {
               WHERE account_id = ${accountId} AND task_ref = ${task_ref}
             `
           }
-          return { type: 'released' as const, customerCreated }
+          return { type: 'released' as const, customerCreated, reservation: statusOf(named), consumed }
         }
 
         // ----------------------------------------------------------------
-        // 3b. Budget check, happens under the row lock.
+        // 3b. Budget check, happens under the row lock. Integers, never the
+        //     raw row values: once these columns are BIGINT a driver that
+        //     hands back strings turns this + into concatenation.
         // ----------------------------------------------------------------
-        if (
-          locked.limitUnits !== null &&
-          locked.usedUnits + units > locked.limitUnits
-        ) {
+        if (lockedLimit !== null && lockedUsed + units > lockedLimit) {
           return { type: 'budget_exhausted' as const, customerRef }
         }
 
         // ----------------------------------------------------------------
         // 4. Insert event. ON CONFLICT DO NOTHING handles duplicates at
         //    DB level without an error, idempotency is enforced here.
+        //    usage_missing is stamped into the row's metadata, so the event
+        //    itself says its units are a floor and not a measurement.
         // ----------------------------------------------------------------
+        //
+        //    ::text::jsonb, not a bare parameter. Bound straight to the jsonb
+        //    column, postgres.js runs its own JSON.stringify on the string
+        //    already serialized here, and until 2026-09-23 every metadata
+        //    this route wrote was a JSON string holding JSON text:
+        //    jsonb_typeof 'string', and metadata->>'anything' NULL. Nothing
+        //    read the column, which is how it lasted. Rows written before the
+        //    fix are still strings; read them with (metadata #>> '{}')::jsonb.
+        //    Same trap, same cast, as recordDecision in lib/decisions.ts.
+        const rowMetadata = usageMissing ? { ...(metadata ?? {}), usage_missing: true } : metadata
+        const metadataJson = rowMetadata !== undefined ? JSON.stringify(rowMetadata) : null
         const [event] = await tx`
           INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata)
-          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataJson})
+          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataJson}::text::jsonb)
           ON CONFLICT (account_id, idempotency_key) DO NOTHING
           RETURNING id
         `
 
         if (!event) {
-          // Duplicate, row already exists, budget untouched
+          // Duplicate, row already exists, budget untouched. The first
+          // request with this key already settled whatever it named.
           return {
             type: 'duplicate' as const,
             customerCreated,
-            remainingUnits: locked.limitUnits !== null
-              ? locked.limitUnits - locked.usedUnits - locked.reservedUnits
+            remainingUnits: lockedLimit !== null
+              ? lockedLimit - lockedUsed - lockedReserved
               : null,
           }
         }
@@ -145,14 +208,25 @@ export async function eventsRoute(app: FastifyInstance) {
         // 5. Reconcile: increment used_units and close the reservation rows
         //    preflight opened. used_units always moves by `units` because the
         //    spend really happened; reserved_units moves by `consumed`, the
-        //    units the closed rows were actually holding. The two differ in
-        //    exactly two cases, and the difference is the point:
-        //      - record() with no prior preflight: consumed is 0, nothing to release.
-        //      - a reservation the sweeper already reclaimed: consumed is 0,
-        //        so this late settle cannot subtract it a second time and push
-        //        the counter below the units still in flight.
+        //    units the closed rows were actually holding.
+        //
+        //    Named and open: that one row closes whole, and consumed is all
+        //    it held, so the part the call did not use is released now.
+        //    Named and already closed: consumed is 0. It was this call's
+        //    reservation and it is gone; taking the actual out of some other
+        //    call's reservation instead would release budget that call still
+        //    needs.
+        //    Unnamed, or a name that matched nothing: FIFO by `units`, the
+        //    path every record took before reservation_id existed, with its
+        //    two known cases where consumed is 0:
+        //      - record() with no prior preflight: nothing to release.
+        //      - a reservation the sweeper already reclaimed: this late settle
+        //        cannot subtract it a second time and push the counter below
+        //        the units still in flight.
         // ----------------------------------------------------------------
-        const consumed = await consumeReservations(tx, customer.id, task_ref ?? null, units)
+        const consumed = named && named.state !== 'not_found'
+          ? await settleNamedReservation(tx, named)
+          : await consumeReservations(tx, customer.id, taskRef, units)
 
         const [updated] = await tx`
           UPDATE customers
@@ -162,9 +236,11 @@ export async function eventsRoute(app: FastifyInstance) {
           WHERE id = ${customer.id}
           RETURNING used_units, limit_units, reserved_units
         `
+        const updatedUsed = unitsOf(updated.usedUnits)
+        const updatedLimit = unitsOrNull(updated.limitUnits)
 
-        const remainingUnits = updated.limitUnits !== null
-          ? updated.limitUnits - updated.usedUnits - updated.reservedUnits
+        const remainingUnits = updatedLimit !== null
+          ? updatedLimit - updatedUsed - unitsOf(updated.reservedUnits)
           : null
 
         // ----------------------------------------------------------------
@@ -172,17 +248,20 @@ export async function eventsRoute(app: FastifyInstance) {
         //    records report reality (the spend already happened); only
         //    preflight prevents. Overage surfaces as task_exceeded.
         // ----------------------------------------------------------------
-        let taskRow = null
+        let taskRow: { agentId: string | null; ceilingUnits: number; usedUnits: number; reservedUnits: number } | null = null
         if (task_ref) {
           const [t] = await tx`
             UPDATE task_budgets
-            SET used_units     = used_units + ${units},
-                reserved_units = GREATEST(0, reserved_units - ${consumed}),
-                updated_at     = now()
+            SET used_units          = used_units + ${units},
+                reserved_units      = GREATEST(0, reserved_units - ${consumed}),
+                usage_missing_calls = usage_missing_calls + ${usageMissing ? 1 : 0},
+                updated_at          = now()
             WHERE account_id = ${accountId} AND task_ref = ${task_ref}
             RETURNING agent_id, ceiling_units, used_units, reserved_units
           `
-          taskRow = t ?? null
+          taskRow = t
+            ? { agentId: t.agentId ?? null, ceilingUnits: unitsOf(t.ceilingUnits), usedUnits: unitsOf(t.usedUnits), reservedUnits: unitsOf(t.reservedUnits) }
+            : null
         }
 
         return {
@@ -190,10 +269,13 @@ export async function eventsRoute(app: FastifyInstance) {
           eventId: event.id as string,
           customerCreated,
           remainingUnits,
-          prevUsedUnits: updated.usedUnits - units,
-          usedUnits: updated.usedUnits,
+          prevUsedUnits: updatedUsed - units,
+          usedUnits: updatedUsed,
           customerRef,
           taskRow,
+          units,
+          reservation: statusOf(named),
+          consumed,
         }
       })
 
@@ -201,6 +283,9 @@ export async function eventsRoute(app: FastifyInstance) {
         return reply.code(200).send({
           status: 'released',
           customer_created: result.customerCreated,
+          ...(result.reservation
+            ? { reservation_status: result.reservation, reservation_released_units: result.consumed }
+            : {}),
         })
       }
 
@@ -211,8 +296,8 @@ export async function eventsRoute(app: FastifyInstance) {
           customer_id: result.customerRef,
         }
         recordDecision(request.log, {
-          accountId, source: 'events', customerRef: result.customerRef, taskRef: task_ref ?? null,
-          reason: body.error, estimatedUnits: units, snapshot: body,
+          accountId, source: 'events', customerRef: result.customerRef, taskRef,
+          reason: body.error, estimatedUnits: reportedUnits, snapshot: body,
         })
         return reply.code(402).send(body)
       }
@@ -241,6 +326,18 @@ export async function eventsRoute(app: FastifyInstance) {
               task_exceeded: t.usedUnits > t.ceilingUnits,
             }
           : {}),
+        // Present only when the request named a reservation. settled: that
+        // row closed whole and reservation_released_units is what it held.
+        // already_closed: an earlier record or the sweeper had closed it, and
+        // nothing more was released. not_found: the id matched no reservation
+        // of this customer and task_ref, so the record settled FIFO instead,
+        // the way a record without an id does.
+        ...(result.reservation
+          ? { reservation_status: result.reservation, reservation_released_units: result.consumed }
+          : {}),
+        // Present only for usage_missing: the units the call was charged,
+        // which is at least its reservation and may be more than was sent.
+        ...(usageMissing ? { usage_missing: true, units_recorded: result.units } : {}),
       }
       // Spend that landed past the ceiling: preflight was skipped, or the
       // actual exceeded the estimate it approved. Nothing stopped it. Recorded
@@ -248,8 +345,8 @@ export async function eventsRoute(app: FastifyInstance) {
       if (t && t.usedUnits > t.ceilingUnits) {
         recordDecision(request.log, {
           accountId, source: 'events', blocked: false, agentId: t.agentId ?? null,
-          customerRef: result.customerRef, taskRef: task_ref ?? null,
-          reason: 'task_overrun_recorded', estimatedUnits: units,
+          customerRef: result.customerRef, taskRef,
+          reason: 'task_overrun_recorded', estimatedUnits: result.units,
           ceilingUnits: t.ceilingUnits, usedUnits: t.usedUnits, snapshot: body,
         })
       }
