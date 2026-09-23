@@ -2095,6 +2095,57 @@ for (const path of ['/privacy', '/terms']) {
      `shown "${shown}", dateModified ${iso || 'absent'} -> "${fromIso}"`)
 }
 
+// ---------------------------------------------------------------- faq: what a quota refusal is, 2026-09-23
+// The /faq answer to "What happens when I reach the free tier's N calls?" said
+// the quota refusal "is the same shape of refusal as a task ceiling, so your
+// code catches it the same way". It is not: both SDKs raise only when the
+// developer's own spend rule refused the call, and RETURN approved false with
+// upgrade_url on free_tier_exceeded and plan_limit_exceeded, on purpose. Code
+// written to that sentence caught nothing and went on calling the provider,
+// and the answer two questions above it on the same page said the opposite.
+// No gate read /faq at all, which is how it survived. This reads the served
+// answer (visible, and in the FAQPage JSON-LD, which the same array drives)
+// AND the two SDK sources it describes, so the page and the SDKs cannot drift
+// apart again without one of these going red. Breaks that proved them, each on
+// a fresh database and restored: the old answer put back (the first three red,
+// the SDK gate green); the Python SDK made to raise on free_tier_exceeded (the
+// SDK gate alone red).
+const faq10 = await fetch(`${API}/faq`).then((r) => r.text())
+// Anchored on the question's own <h2> and the paragraph under it, not on the
+// question text: the docs shell lists every question again in its contents,
+// and the first version of this gate sliced that list and read no answer.
+const freeHtml10 = (faq10.match(/<h2[^>]*>What happens when I reach the free tier[^<]*<\/h2>\s*<p>([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const freeA10 = visible8(freeHtml10).replace(/\s+/g, ' ').trim()
+ok('[faq] the free-tier answer says the SDK returns approved: false with an upgrade_url instead of raising, and your code decides',
+   freeA10.includes('approved: false') && freeA10.includes('free_tier_exceeded') && freeA10.includes('upgrade_url')
+     && freeA10.includes('returns that answer instead of raising') && freeA10.includes('check result.approved')
+     && freeA10.includes('your code decides') && !faq10.includes('catches it the same way'),
+   freeA10.slice(0, 220) || 'the free-tier answer is not on /faq')
+ok('[faq] the free-tier answer never says stop, kill, block, dies or first',
+   freeA10.length > 0 && !/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\bfirst\b/i.test(freeA10),
+   (freeA10.match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\bfirst\b/gi) ?? []).join(', '))
+const faqLd10 = (() => {
+  for (const m of faq10.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    try { const j = JSON.parse(m[1]); if (j['@type'] === 'FAQPage') return j } catch {}
+  }
+  return null
+})()
+const ldFree10 = faqLd10?.mainEntity?.find((x) => /free tier/.test(x.name))?.acceptedAnswer?.text ?? ''
+ok('[faq] the FAQPage JSON-LD carries the same corrected answer',
+   ldFree10.includes('returns that answer instead of raising') && !ldFree10.includes('catches it the same way'),
+   ldFree10.slice(0, 160) || 'no FAQPage answer for the free tier')
+// The claim is about the SDKs, so the SDKs are read too. If either ever starts
+// raising on a quota refusal, the page above becomes false again, and this is
+// the line that says so before a reader does.
+const py10 = readFileSync9(`${ROOT9}/sdk/python/agentbill/client.py`, 'utf8')
+const node10 = readFileSync9(`${ROOT9}/sdk/node/src/index.ts`, 'utf8')
+ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_limit_exceeded',
+   !/reason\s*==\s*["'](free_tier_exceeded|plan_limit_exceeded)["']/.test(py10)
+     && !/reason\s*===\s*'(free_tier_exceeded|plan_limit_exceeded)'/.test(node10)
+     && /if result\.reason == "task_ceiling_exceeded":\s*raise TaskCeilingExceededError/.test(py10)
+     && node10.includes('free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw'),
+   'an SDK branches on a quota refusal, so the /faq answer may no longer be true')
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)
