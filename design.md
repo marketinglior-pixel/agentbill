@@ -12,10 +12,119 @@ is edited, so this file names the tokens and says how to use them, and
 genuinely page-local), then reference it. No hex below the `:root` line of any
 page.
 
+## The canvas system (2026-09-23)
+
+**Every page and the console render on canvas.** The homepage's design, approved
+by Lior in Figma (`uMcr4L26RQYChYmpykVGRQ`), became the system for every screen
+on 2026-09-23, on his instruction that day: "I love the design you made, but it
+does not look like the system in production. Design ALL the screens, including
+the console, in the same design and the same design language." This **reverses
+the earlier lock "do not restyle the /app console"** and the rule that the
+console keeps the dark theme because its `--held` green is semantics. The
+semantics survive, re-cast below; the green does not. It is a design pass on
+the branch `design/canvas-everywhere`, captured into Figma for review, **not
+merged and not deployed**. Where anything later in this file disagrees with
+this section, this section wins.
+
+**Tokens.** `head()` renders `TOKENS_CANVAS` unless a page passes a theme;
+`dark` (`TOKENS`) and `paper` stay defined as the revert path and nothing
+passes them. `ROLES` (also `theme.ts`) is rendered after the theme on every
+page and names each component role, aliasing the theme's own tokens, so it
+holds no colour of its own:
+
+- ground and ink: `--bg` / `--surface` white, `--surface2` and `--surface3`
+  the warm greys one and two steps down; `--text`, `--muted`, `--dim`;
+  hairlines `--border` / `--border2`, and `--border-strong` for anything that
+  marks a control (3:1).
+- the one accent: `--signal` (and `--plate-signal` on the plate, `--fail-bg`
+  its tint). `--green` keeps its name and is the ink: it is the primary
+  action's fill, the link colour, the focus ring.
+- radii by role: `--r-card` 24 (outer panel; `--r-card-sm` 20 on a phone),
+  `--r-inner` 16 (the card inside it, a code frame), `--r-field` 12 (an input,
+  a plate in a side column), `--r-row` 10 (a tinted row, a rail link),
+  `--r-inline` 6 (code in a sentence), `--r-pill` for actions, chips and tags.
+- heights: `--h-lg` 44 and `--h-md` 40, the Figma Button component's L and M;
+  `--h-sm` 32 only for a button inside another control.
+- type: Geist and Geist Mono, one family in two cuts. Every heading is Geist
+  at 500 (`--fw-h1..3`, read by BASE). `--fs-stat` the figure in a frame,
+  `--fs-code` code in a frame, and the existing scale for everything else.
+- roles (`ROLES`): `--panel-bg --card-bg --card-line --side-bg` (the frame),
+  `--th-ink --row-line --row-hover --row-no-bg --row-no-ink` (tables),
+  `--chip-bg --chip-ink --chip-line --chip-no-*` (chips),
+  `--callout-bg --callout-line`, `--field-bg --field-line --field-focus
+  --field-ph`, `--rail-w --rail-bg --rail-ink --rail-hover-bg --rail-on-bg
+  --rail-on-ink`, `--empty-line --empty-bg`, `--snip-bg` (your code's frame),
+  `--meter-track --meter-fill --meter-tick`, `--track-label --track-chip`.
+- the phone gutter is 16px on every page under `--md` (`ROLES`); every screen
+  holds 390 and 320 with no sideways scroll.
+
+**Components live in `src/ui/kit.ts`** (`KIT_CSS`, carried by `CHROME_CSS`, so
+every page with the nav has it; the console and `/admin` include it
+themselves). The homepage's own names were kept where it had them, and every
+new name is `cv-` because the short ones are taken by page-local rules:
+
+- actions: `.btn` (ink fill, M 40), `.btn-lg` (L 44), `.btn-alt` (light fill,
+  L 44, the secondary beside a primary, never a second ink fill), `.btn-ghost`
+  (outlined, M 40). All pills. One filled primary per fold.
+- labels: `.eyebrow` (section kicker), `.cv-label` (the in-frame label),
+  `.mono-in` (a code word in a sentence).
+- `.pill` / `.pill-tag` (the announcement over a hero); `.tag` / `.tag-id`
+  (names a thing: SAMPLE, `job-142`); chips `.chip-ok` `.chip-no` `.chip-near`
+  `.chip-fail`; `.cv-picks` / `.cv-pick` (what your code can do next, not
+  buttons).
+- the frame: `.cv-panel` > `.cv-card` > `.cv-bar` (+ `.cv-bar-t`) and
+  `.cv-body`, `.cv-split` with `.cv-side`; `.cv-stat`, `.cv-meter`, `.cv-no`.
+- `.cv-table` (+ `.is-ruled`, `.num`, `.m`, `.mut`, `tr.is-no`), in
+  `.cv-scroll` when it can outgrow a phone.
+- code: `.cv-code` (+ `.is-sm`) on the plate for the machine's answer;
+  `.cv-snip` / `.cv-snip-h` for your code.
+- `.cv-callout` (+ `.is-no`), `.cv-flabel` / `.cv-field` (+ `.m`) /
+  `.cv-hint` / `.cv-err`, `.cv-seg`, `.cv-navlink` (+ `.n`), `.cv-empty`.
+- helpers: `chip()`, `tag()`, `SAMPLE_TAG`, `label()`, `meter()`.
+
+The shared partials follow the same values: the nav and footer (`chrome.ts`,
+one width, `--chrome-w` 1072, on every page), the copy pill (`copy.ts`), the
+tier cards (`tiers.ts`), the panel frame (`panels.ts`, `.panel` is the canvas
+card), and the docs shell (`docs.ts`).
+
+**Panel in panel is the frame for anything that shows product data.** A
+warm-grey outer panel holds a white card with a hairline. The card opens with a
+bar: an id tag, a muted label, and `SAMPLE` at its right when the numbers are
+not the reader's own. A split card gives its right column the warm-grey ground;
+that is where the one figure, its meter and the machine's answer sit. Nothing
+that shows data floats on the page without the frame.
+
+**The mono label voice** is small, tracked, uppercase, in `--dim`: the column
+heads of a table (CALL, UNITS, TOTAL, ANSWER), the label over a figure (THIS
+JOB), a section kicker. It is never a heading and never a sentence; headings are
+Geist at 500, sentence case.
+
+**Chips carry decisions.** An approved call is `.chip-ok`, neutral, because an
+approved call is not a colour. The refusal is `.chip-no`, outlined in the
+signal. A leak (spend past a ceiling, needs a human) is `.chip-fail`, the signal
+filled. Approaching a limit is `.chip-near`, the one non-signal state colour. A
+state that is neither (running, ok) is a `.tag`.
+
+**One accent, and it is the refusal.** `--signal` marks the approved-false
+moment and what belongs to it: the refused row's tint (`tr.is-no`), the
+refusal chip, the meter's ceiling tick, the one-line note under it, the
+`"approved": false` line on the plate. Apart from `.chip-near`'s amber, nothing
+else on a screen is chromatic: not links, not the brand, not an active tab, not
+inline code. `--red` is the
+same hue on canvas by design, so a form error reads as the form refusing; it is
+one line of text, never a filled block.
+
+**Superseded by this section**, and kept below as the record: "modern-minimal,
+dark" under Genre; the three faces under Type (they are the dark theme's);
+`--green` as a chromatic accent and the 12/8 radius rule under Colour and
+"What pages must share"; the primary as a green 8px button under CTA voice; the
+console's green `--held` under the App family.
+
 ## Genre
 
-modern-minimal, dark. A brilliant systems engineer's page: terse, precise,
-trusts the reader, hates decoration. `/` alone is light since 2026-09-16 (paper)
+modern-minimal. A brilliant systems engineer's page: terse, precise,
+trusts the reader, hates decoration. On canvas since 2026-09-23 (the section
+above); the history of the themes follows. `/` alone is light since 2026-09-16 (paper)
 and, from 2026-09-23, the canvas theme; the console, docs, pricing and register
 stay dark.
 
@@ -181,7 +290,9 @@ stay dark.
 
 ## Type
 
-Three faces, three jobs, no overlap (see the comment block in `theme.ts`):
+On canvas: Geist and Geist Mono, headings at 500 (the canvas system, above).
+The dark theme, the revert path, has three faces, three jobs, no overlap (see
+the comment block in `theme.ts`):
 
 - `--display` Archivo, every heading. The human voice.
 - `--sans` Inter, body. Preserved deliberately; the anti-slop canon dislikes

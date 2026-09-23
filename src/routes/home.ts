@@ -200,10 +200,9 @@ export async function homeRoute(app: FastifyInstance) {
       title: `AgentBill · ${HOME_H1}`,
       description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next. Free tier, no card.`,
       path: '/',
-      // The one page on the canvas theme. /app, /docs, /register and the rest
-      // keep their own: the console's --held green is semantics, not
-      // decoration, and a marketing decision must not reach it. See
-      // TOKENS_CANVAS in theme.ts.
+      // Canvas is head()'s default for every page since 2026-09-23 (Lior's
+      // instruction to carry this page's design to every screen, the console
+      // included). Named here anyway: this page is the system's reference.
       theme: 'canvas',
       og: {
         description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next.`,
@@ -231,52 +230,28 @@ export async function homeRoute(app: FastifyInstance) {
 
     .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
     h1, h2, h3 { overflow-wrap: anywhere; min-width: 0; }
-    /* Geist at 500 for every heading, the reference's register. BASE ships
-       800/700/600 to every route; this page overrides, it does not edit BASE. */
-    h1 { color: var(--white); font-weight: 500; letter-spacing: -0.03em; line-height: 1.02; }
-    h2 { color: var(--white); font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
-    h3 { font-weight: 500; }
+    /* Geist at 500 is every heading's weight now, from BASE (--fw-h1..3 in
+       TOKENS_CANVAS); the tighter set of this page's two display rungs stays here. */
+    h1 { color: var(--white); letter-spacing: -0.03em; line-height: 1.02; }
+    h2 { color: var(--white); letter-spacing: -0.02em; line-height: 1.1; }
 
-    .eyebrow { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .08em;
-               text-transform: uppercase; color: var(--dim); margin-bottom: var(--s3); }
+    /* .eyebrow, .mono-in, the chips, the tags, the pill and every button live
+       in src/ui/kit.ts since 2026-09-23 (through CHROME_CSS), lifted from here
+       with their values, so the rest of the site renders the same objects. */
     .lead { color: var(--muted); font-size: var(--fs-lede); line-height: 1.55; max-width: 62ch; margin-top: var(--s3); }
-    .mono-in { font-family: var(--mono); font-size: .9em; color: var(--text); font-weight: 400; }
     .sec { padding-block: 128px 0; }
     .sec-head { text-align: center; }
     .sec-head .lead, .sec-head .pg-lede { margin-inline: auto; }
 
-    /* Chips inside product mocks. */
-    .tag { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .06em; text-transform: uppercase;
-           color: var(--muted); border: 1px solid var(--border2); border-radius: var(--r-pill);
-           padding: 3px 10px; white-space: nowrap; background: var(--surface); }
-    .tag-id { text-transform: none; letter-spacing: 0; }
-    .chip-ok, .chip-no { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
-           font-size: var(--fs-micro); border-radius: var(--r-pill); padding: 3px 10px; white-space: nowrap; }
-    .chip-ok { background: var(--surface3); color: var(--text); }
-    .chip-no { background: var(--fail-bg); color: var(--signal); border: 1px solid var(--signal); }
-    .chip-ok::before, .chip-no::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-
-    /* Pill actions on this page only. chrome.ts keeps its 8px buttons for every
-       other route; these overrides are scoped to what / renders. */
-    .site-nav .btn, .btn, .btn-ghost, .nav-menu summary { border-radius: var(--r-pill); }
-    .btn { font-weight: 500; }
-    /* Heights from the Figma Button component: L 44, M 40. */
-    .btn-lg { padding: 10px 24px; font-size: var(--fs-body); line-height: 24px; min-height: 44px; display: inline-flex; align-items: center; }
-    .site-nav .btn, .pricing .tier-card .btn, .pricing .tier-card .btn-ghost { padding: 10px 20px; line-height: 20px; }
-    .btn-alt { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 24px; line-height: 24px; border-radius: var(--r-pill);
-               background: var(--surface3); color: var(--text); text-decoration: none; font-weight: 500;
-               font-size: var(--fs-body); white-space: nowrap; transition: background .15s; }
-    .btn-alt:hover { background: var(--border); }
-    .btn-alt:active { transform: translateY(1px); }
-    .btn-ghost { border-color: var(--border2); color: var(--text); font-weight: 500; }
+    /* The plan buttons on this page are 42 tall, 10px of padding over a 1px
+       border, as they shipped with the redesign; the kit's .btn-ghost is 40,
+       the Figma M. Held here so this page renders as approved; the system
+       value is the kit's. */
+    .pricing .tier-card .btn-ghost { padding: 10px 20px; }
 
     /* Hero: centred, the reference's order. The block padding is the page's
        largest on purpose; the frame under the actions is the one picture. */
     .hero { padding-block: 56px 0; text-align: center; display: flex; flex-direction: column; align-items: center; }
-    .pill { display: inline-flex; align-items: center; gap: 10px; padding: 5px 14px 5px 5px; border-radius: var(--r-pill);
-            background: var(--surface2); border: 1px solid var(--border); font-size: var(--fs-small); color: var(--text); }
-    .pill-tag { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em; text-transform: uppercase;
-                background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 2px 10px; }
     .hero h1 { margin-top: 24px; max-width: 880px; }
     .sub { font-size: var(--fs-lede); color: var(--muted); margin-top: var(--s5); max-width: 42rem; line-height: 1.55;
            text-wrap: pretty; }
@@ -383,11 +358,8 @@ export async function homeRoute(app: FastifyInstance) {
     /* Pricing: the four cards /pricing renders, from ui/tiers.ts, on this
        page's ground. Free keeps the one dark button; Team is marked by its
        border and chip and never by a second fill (decision 7). */
-    .pricing .tier-card { background: var(--surface2); border-color: transparent; }
-    .pricing .tier-card.rec { background: var(--surface); border: 1.5px solid var(--text); }
-    .pricing .tier-price { font-weight: 500; }
-    .pricing .tier-tag { color: var(--text); border-color: var(--border2); background: var(--surface3); }
-    /* Plan buttons hug their label, as the frames draw them; /pricing keeps
+    /* The cards' canvas look is TIERS_CSS's own since 2026-09-23.
+       Plan buttons hug their label, as the frames draw them; /pricing keeps
        its own full-width ones because this rule is scoped to this page. */
     .pricing .tier-card .btn, .pricing .tier-card .btn-ghost { display: inline-flex; width: auto; align-self: flex-start; }
     .price-links { margin-top: var(--s5); display: flex; justify-content: center; }
@@ -419,10 +391,6 @@ export async function homeRoute(app: FastifyInstance) {
                   display: grid; justify-items: center; gap: 14px; }
     .final-band p { color: var(--muted); font-size: var(--fs-lede); }
     .final-row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
-    .cp { border-radius: var(--r-pill); }
-    .cp .cp-btn { border: 0; border-radius: var(--r-pill); background: var(--surface3); color: var(--text); font-weight: 500;
-                  height: 32px; padding: 0 var(--s3); transition: background .15s; }
-    .cp .cp-btn:hover { background: var(--border); }
     /* Body copy at the text styles' own line heights (16/24, 14/20). */
     .st-copy p, .step p, .faq-list details p, .nots li { line-height: 1.5; }
     .trust, .icp-note, .evid-a { line-height: 20px; }
@@ -450,8 +418,8 @@ export async function homeRoute(app: FastifyInstance) {
       .faq-grid { grid-template-columns: minmax(0, 1fr); }
     }
     @media (max-width: ${BP.md}px) {
-      :root { --gutter: 16px; }
-      /* The phone frames (Figma 5:2): heads and chips set left, the hero alone centred. */
+      /* The 16px phone gutter is every page's now (ROLES in theme.ts).
+         The phone frames (Figma 5:2): heads and chips set left, the hero alone centred. */
       .sec-head, .how h2, .icp { text-align: left; }
       .sec-head .lead, .pg-lede { margin-inline: 0; }
       .chips { justify-content: flex-start; gap: 8px; }

@@ -71,7 +71,11 @@ export const CANVAS = {
   signal: '#B93A0A',
 } as const
 
-/** Colour, type and spacing tokens. Every route gets exactly these. */
+/**
+ * The dark theme's colour, type and spacing tokens. Every route rendered these
+ * until 2026-09-23; since then canvas is the default and this block is the
+ * revert path (theme: 'dark'), kept whole so the revert is one argument.
+ */
 export const TOKENS = `
   :root {
     /* Both the meta and the property. The meta tells the UA before CSS parses;
@@ -212,10 +216,15 @@ export const TOKENS = `
        never behind text. Colour on this site is subtraction: 0.84% chromatic
        pixels against 0.00 to 0.06% on the references, measured 2026-09-06. */
     --grad-vignette: radial-gradient(120% 80% at 50% 0%, #0b0f0d 0%, var(--bg) 60%);
+    /* The canvas role names (see TOKENS_CANVAS), at this theme's own values,
+       so a page opted back into dark never meets an undefined property. */
+    --r-card: 12px; --r-card-sm: 12px; --r-inner: 12px; --r-field: 8px; --r-row: 8px; --r-inline: 4px;
+    --fs-stat: 34px; --fs-code: 13px; --btn-hover: ${BRAND.green};
   }`
 
 /**
- * The paper theme, for marketing surfaces only.
+ * The paper theme, for marketing surfaces only. `/` rendered it from
+ * 2026-09-16 to 2026-09-23; nothing routes to it now.
  *
  * It redefines the SAME token names as TOKENS above rather than adding a second
  * vocabulary, which is what lets `/` change identity without touching
@@ -282,21 +291,32 @@ export const TOKENS_PAPER = `
        that names them does not emit an empty box-shadow. */
     --edge: none; --lift: none;
     --grad-vignette: none;
+    /* The canvas role names, square here, for the same reason as on dark. */
+    --r-card: 0px; --r-card-sm: 0px; --r-inner: 0px; --r-field: 0px; --r-row: 0px; --r-inline: 0px;
+    --fs-stat: 34px; --fs-code: 13px; --btn-hover: ${PAPER.ink};
   }`
 
 /**
- * The canvas theme, for `/` only. Added 2026-09-23.
+ * The canvas theme. Added 2026-09-23 for `/`, and the same evening made the
+ * DEFAULT for every page, the console included, on Lior's instruction ("design
+ * all the screens, including the console, in the same design and the same
+ * design language"). head() renders this block unless a page passes a theme.
  *
  * Craft reference: x.ai/bot, read for the white canvas, near-black type, pale
  * warm-gray panels, large soft-cornered frames and pill actions; nothing of its
- * product, palette or claims. Opt-in per route exactly like paper: only home.ts
- * passes theme 'canvas', so /app, /docs, /pricing and /register keep the bytes
- * they had, and the console's --held green never follows a marketing decision.
- * Paper is left untouched on purpose, so reverting home.ts alone restores the
- * page that was live before this one.
+ * product, palette or claims. Dark (TOKENS) and paper stay defined, and nothing
+ * routes to them: a page can still pass theme 'dark' or 'paper', which is the
+ * revert path, and both carry the role names below at their own values.
+ *
+ * This reverses the earlier rule that the console keeps the dark theme because
+ * its --held green is semantics. The semantics survive, re-cast: on this ground
+ * the one accent is the refusal (--signal), and an approved call is not a
+ * colour. design.md, "The canvas system", has the rules.
  *
  * Same token NAMES as TOKENS and TOKENS_PAPER, so the shared partials follow
- * without an edit; four extra names at the end are used by `/` alone.
+ * without an edit. The role names at the end (radii by role, --fs-stat,
+ * --fs-code, heading weights, the primary's hover) are read by src/ui/kit.ts,
+ * chrome.ts and docs.ts; ROLES below aliases the component roles onto these.
  *
  * Contrast, WCAG 2.x, measured on the three grounds this page uses (white /
  * --surface2 / --surface3): --text 19.8 / 18.3 / 17.1, --muted 6.21 / 5.75 /
@@ -351,10 +371,63 @@ export const TOKENS_CANVAS = `
     /* Flat. Objects separate by ground and hairline, not by a light source. */
     --edge: none; --lift: none;
     --grad-vignette: none;
-    /* Used by / alone. */
-    --r-card: 24px; --r-inner: 16px; --r-field: 12px;
+    /* Radii by role. --r-card the outer panel (--r-card-sm on a phone),
+       --r-inner the white card inside it and a code frame, --r-field an
+       input or a plate inside a card, --r-row a tinted row or a rail link,
+       --r-inline code set inside a sentence. */
+    --r-card: 24px; --r-card-sm: 20px; --r-inner: 16px; --r-field: 12px; --r-row: 10px; --r-inline: 6px;
+    /* The figure in a frame (492 / 500 units), and code in a frame. */
     --fs-stat: clamp(34px, 4vw, 44px);
+    --fs-code: 13px;
+    /* Geist at 500 for every heading, the register the homepage set. BASE
+       reads these; the other themes fall back to BASE's own weights. */
+    --fw-h1: 500; --fw-h2: 500; --fw-h3: 500;
+    /* The primary's hover: the ink lifted one step. */
+    --btn-hover: #2A2A28;
   }`
+
+/**
+ * Component roles, on top of whichever theme rendered. Added 2026-09-23 with
+ * src/ui/kit.ts, so a table, a chip, a callout, a field, the rail, an empty
+ * state and a code frame each have one name per role instead of a surface
+ * token picked per page. They alias the theme's own tokens, so this block
+ * carries no colour of its own and renders correctly under every theme.
+ * Change a role here and every screen that uses the kit follows.
+ */
+export const ROLES = `
+  :root {
+    /* Heights: the Figma Button component, L 44 and M 40. S 32 is a button
+       that sits inside another control (the copy pill) and nothing else. */
+    --h-lg: 44px; --h-md: 40px; --h-sm: 32px;
+    /* The mono label voice. */
+    --track-label: .08em; --track-chip: .06em;
+    /* Panel in panel: outer panel, inner card, the card's hairline, and the
+       grey right column inside a split card. */
+    --panel-bg: var(--surface2); --card-bg: var(--surface); --card-line: var(--border); --side-bg: var(--surface2);
+    /* Tables: column-label ink, row hairline, hover, and the refused row. */
+    --th-ink: var(--dim); --row-line: var(--border); --row-hover: var(--surface2);
+    --row-no-bg: var(--fail-bg); --row-no-ink: var(--signal);
+    /* Chips: neutral decision, the tag's outline, and the refusal. */
+    --chip-bg: var(--surface3); --chip-ink: var(--text); --chip-line: var(--border2);
+    --chip-no-bg: var(--fail-bg); --chip-no-ink: var(--signal); --chip-no-line: var(--signal);
+    /* Callouts. */
+    --callout-bg: var(--surface2); --callout-line: var(--border);
+    /* Fields: ground, a 3:1 border, focus ink, placeholder. */
+    --field-bg: var(--surface); --field-line: var(--border-strong); --field-focus: var(--text); --field-ph: var(--dim);
+    /* The rail: the console's sidebar and the docs' "On this page". */
+    --rail-w: 240px; --rail-bg: var(--surface2); --rail-ink: var(--muted); --rail-hover-bg: var(--surface3);
+    --rail-on-bg: var(--surface); --rail-on-ink: var(--text);
+    /* Empty state: the dashed frame. */
+    --empty-line: var(--border2); --empty-bg: var(--surface);
+    /* Code: the machine's answer is on --plate (--plate-ink / -dim / -signal);
+       your code is on --snip-bg, grey on the page and white inside a panel. */
+    --snip-bg: var(--surface2);
+    /* The meter: track, fill, and the ceiling's tick. */
+    --meter-track: var(--surface3); --meter-fill: var(--text); --meter-tick: var(--signal);
+  }
+  /* The phone gutter, for every page: 16px a side under --md. It was the
+     homepage's own rule; every other page kept 24 on a 390px screen. */
+  @media (max-width: ${BP.md}px) { :root { --gutter: 16px; } }`
 
 /** Reset plus the element defaults every page shares. */
 export const BASE = `
@@ -364,9 +437,9 @@ export const BASE = `
   body { background: var(--bg); color: var(--text); font-family: var(--sans);
          font-size: var(--fs-body); line-height: 1.65; -webkit-font-smoothing: antialiased; }
   h1, h2, h3, h4 { font-family: var(--display); text-wrap: balance; }
-  h1 { font-size: var(--fs-display); font-weight: 800; letter-spacing: -0.03em; line-height: 1.04; }
-  h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -0.022em; line-height: 1.12; }
-  h3 { font-size: var(--fs-h3); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+  h1 { font-size: var(--fs-display); font-weight: var(--fw-h1, 800); letter-spacing: -0.03em; line-height: 1.04; }
+  h2 { font-size: var(--fs-h2); font-weight: var(--fw-h2, 700); letter-spacing: -0.022em; line-height: 1.12; }
+  h3 { font-size: var(--fs-h3); font-weight: var(--fw-h3, 600); letter-spacing: -0.01em; line-height: 1.3; }
   a { color: var(--green); }
   .mono { font-family: var(--mono); }
   :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -426,10 +499,9 @@ type HeadOpts = {
   /** Full <title>, including the " · AgentBill" suffix. */
   title: string
   /**
-   * The token block. Defaults to 'dark', which is every page that existed
-   * before the homepage redesign. 'paper' is opt-in per route on purpose: the
-   * console's colour semantics are load-bearing and must not follow a
-   * marketing decision.
+   * The token block. Defaults to 'canvas' since 2026-09-23, for every page and
+   * the console (Lior's instruction that day). 'dark' and 'paper' stay
+   * selectable as the revert path and nothing passes them.
    */
   theme?: ThemeName
   description?: string
@@ -576,7 +648,7 @@ const icons = (theme: ThemeName) => `  <meta name="color-scheme" content="${THEM
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'dark' }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'canvas' }: HeadOpts): string {
   const { tokens, fonts } = THEMES[theme]
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
@@ -628,7 +700,7 @@ ${csp}${icons(theme)}
   <meta name="twitter:description" content="${ogDesc}" />` : ''}
   <meta name="twitter:image" content="${card}" />
 ${fonts}
-  <style>${tokens}${BASE}${css}
+  <style>${tokens}${ROLES}${BASE}${css}
   </style>${blocks.map((b) => `\n  <script type="application/ld+json">${ld(b)}</script>`).join('')}${extraHead ? `\n${extraHead}` : ''}
 </head>`
 }
