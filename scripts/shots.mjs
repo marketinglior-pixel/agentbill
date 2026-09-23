@@ -448,8 +448,8 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
 }
 // ---------------------------------------------------------------- the ?src= rewrite, in a browser
 //
-// The only check that can prove this one. The homepage's six links to
-// /register are tagged by script at load, so the served HTML says /register
+// The only check that can prove this one. The homepage's seven links to
+// /register (six until 2026-09-23; the redesign's estimator card added one) are tagged by script at load, so the served HTML says /register
 // and the DOM the visitor clicks says /register?src=x. Every grep, every
 // string-presence gate in verify.mjs and every curl reads the FIRST of those
 // and would stay green with the rewrite deleted.
@@ -478,8 +478,8 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
 
   const hrefs = await page.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
   const tagged = hrefs.filter((h) => h === '/register?src=shotsgate').length
-  if (hrefs.length !== 6 || tagged !== 6) {
-    failures.push(`src-rewrite: ${tagged}/${hrefs.length} /register links tagged after load (expected 6/6) -> ${JSON.stringify(hrefs)}`)
+  if (hrefs.length !== 7 || tagged !== 7) {
+    failures.push(`src-rewrite: ${tagged}/${hrefs.length} /register links tagged after load (expected 7/7) -> ${JSON.stringify(hrefs)}`)
   }
 
   // And the click itself: the listener still fires on the rewritten href, and
@@ -510,7 +510,7 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   if (plainPv.length !== 1 || 'source' in plainPv[0]) {
     failures.push(`page-view: ${plainPv.length} page_view beacon(s) on an untagged load, first ${JSON.stringify(plainPv[0] ?? null)}; expected exactly one with no source`)
   }
-  rows.push(`browser  src-rewrite   ${tagged}/6 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
+  rows.push(`browser  src-rewrite   ${tagged}/7 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
   rows.push(`browser  page-view     tagged load ${pv.length} beacon(s) src ${pv[0]?.source ?? 'none'}, plain load ${plainPv.length} beacon(s) src ${plainPv[0]?.source ?? 'none'}`)
   await ctx.close()
 }

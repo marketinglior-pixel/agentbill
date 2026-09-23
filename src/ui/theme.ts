@@ -59,6 +59,18 @@ export const PAPER = {
   signal: '#C2410C',
 } as const
 
+/**
+ * The canvas theme's fixed values, for the surfaces that cannot read a CSS
+ * variable (the theme-color meta). White ground, near-black ink, and one
+ * refusal hue at 5.72 on the ground. Same rule as PAPER: the signal is the
+ * refused call and nothing else.
+ */
+export const CANVAS = {
+  bg: '#FFFFFF',
+  ink: '#0A0A0A',
+  signal: '#B93A0A',
+} as const
+
 /** Colour, type and spacing tokens. Every route gets exactly these. */
 export const TOKENS = `
   :root {
@@ -272,6 +284,78 @@ export const TOKENS_PAPER = `
     --grad-vignette: none;
   }`
 
+/**
+ * The canvas theme, for `/` only. Added 2026-09-23.
+ *
+ * Craft reference: x.ai/bot, read for the white canvas, near-black type, pale
+ * warm-gray panels, large soft-cornered frames and pill actions; nothing of its
+ * product, palette or claims. Opt-in per route exactly like paper: only home.ts
+ * passes theme 'canvas', so /app, /docs, /pricing and /register keep the bytes
+ * they had, and the console's --held green never follows a marketing decision.
+ * Paper is left untouched on purpose, so reverting home.ts alone restores the
+ * page that was live before this one.
+ *
+ * Same token NAMES as TOKENS and TOKENS_PAPER, so the shared partials follow
+ * without an edit; four extra names at the end are used by `/` alone.
+ *
+ * Contrast, WCAG 2.x, measured on the three grounds this page uses (white /
+ * --surface2 / --surface3): --text 19.8 / 18.3 / 17.1, --muted 6.21 / 5.75 /
+ * 5.35, --dim 5.11 / 4.73 (never on --surface3, where it is 4.40), --signal
+ * 5.72 / 5.29 / 4.93 and 5.22 on its own tint (--fail-bg), --border-strong
+ * 3.33 / 3.08 for every border that marks a control. On the plate: --plate-ink
+ * 15.1, --plate-dim 5.63, --plate-signal 6.74. The reference's own body gray,
+ * #7D8187, measures 3.92 on white and is not used.
+ */
+export const TOKENS_CANVAS = `
+  :root {
+    color-scheme: light;
+    /* ground: white page, warm-gray panels one and two steps down */
+    --bg: ${CANVAS.bg}; --surface: ${CANVAS.bg}; --surface2: #F7F6F3; --surface3: #EFEEEA;
+    --bg-deep: #F7F6F3;
+    /* borders: hairlines are quiet; anything that marks a control clears 3:1 */
+    --border: #E6E4DF; --border-soft: #EFEEEA; --border2: #D4D1CA; --border-strong: #8A8D93;
+    /* ink */
+    --text: ${CANVAS.ink}; --muted: #5E6167; --dim: #6B6E74; --white: ${CANVAS.ink};
+    /* The primary action is ink on white. --green keeps its NAME for the same
+       reason it does on paper: it is the role every shared component binds to. */
+    --green: ${CANVAS.ink}; --green-ink: ${CANVAS.bg};
+    /* The refusal, and nothing else. */
+    --signal: ${CANVAS.signal}; --signal-deep: #9A3412; --signal-ink: ${CANVAS.bg};
+    --plate: #111110; --plate-ink: #E8E6E1; --plate-dim: #8F8C85; --plate-signal: #F97316;
+    --nav-bg: rgba(255,255,255,0.9);
+    /* Code on this page sits on white (the install pills, the samples); the dark
+       plates read --plate-* directly. */
+    --code: #9A3412; --code-ink: ${CANVAS.ink};
+    --red: ${CANVAS.signal}; --amber: #92400E;
+    /* Console semantics, kept legible for any shared partial. Held and flow are
+       neutral here: an approved call is not a colour on this page. */
+    --flow: #8A8D93; --flow-ink: #5E6167; --res: #D4D1CA;
+    --held-bg: #EFEEEA; --held-line: #D4D1CA;
+    --near-bg: #F6EBD6; --near-line: #92400E; --near-ink: #6B4A0B;
+    --fail-bg: #FBF3EE; --fail-line: ${CANVAS.signal}; --fail-ink: #9A3412;
+    /* One family in two cuts. */
+    --display: 'Geist', 'Helvetica Neue', Arial, sans-serif;
+    --sans: 'Geist', system-ui, -apple-system, sans-serif;
+    --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --fs-display: clamp(36px, 4.6vw, 64px);
+    --fs-h2: clamp(30px, 3.2vw, 40px);
+    --fs-h3: clamp(19px, 2vw, 22px);
+    --fs-lede: 18px; --fs-body: 16px; --fs-small: 14px; --fs-micro: 12px;
+    --fs-label: 12px; --fs-chip: 11px; --fs-tick: 10px;
+    --fs-h1-sub: clamp(32px, 5vw, 50px); --fs-h1-app: 28px; --fs-figure: 34px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+    --s6: 32px; --s7: 48px; --s8: 64px; --s9: 88px;
+    --gutter: 24px; --gap: 56px;
+    /* Soft corners: frames at 24, controls and chips as pills. */
+    --r-frame: 24px; --r-control: 999px; --r-chip: 999px; --r-pill: 999px;
+    /* Flat. Objects separate by ground and hairline, not by a light source. */
+    --edge: none; --lift: none;
+    --grad-vignette: none;
+    /* Used by / alone. */
+    --r-card: 24px; --r-inner: 16px; --r-field: 12px;
+    --fs-stat: clamp(34px, 4vw, 44px);
+  }`
+
 /** Reset plus the element defaults every page shares. */
 export const BASE = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -315,8 +399,28 @@ const FONTS_PAPER = `  <link rel="preconnect" href="https://fonts.googleapis.com
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />`
 
+// The canvas theme's families. Both are variable fonts on Google Fonts, so one
+// range per family covers every weight the shared CSS asks for (BASE headings
+// at 600 to 800, .btn at 700, the mono wordmark at 700) without synthesis. The
+// CSP already allows fonts.googleapis.com and fonts.gstatic.com; a self-hosted
+// copy would be blocked by font-src and fall back silently.
+const FONTS_CANVAS = `  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@400..700&display=swap" rel="stylesheet" />`
+
 /** Which token block the page renders against. */
-export type ThemeName = 'dark' | 'paper'
+export type ThemeName = 'dark' | 'paper' | 'canvas'
+
+/**
+ * One row per theme. Record<ThemeName, ...> makes tsc refuse a theme that has
+ * no fonts or no meta colour, which is how a third theme would otherwise fall
+ * back to the dark settings through a ternary without anyone noticing.
+ */
+const THEMES: Record<ThemeName, { tokens: string; fonts: string; scheme: 'dark' | 'light'; color: string }> = {
+  dark: { tokens: TOKENS, fonts: FONTS_DARK, scheme: 'dark', color: BRAND.bg },
+  paper: { tokens: TOKENS_PAPER, fonts: FONTS_PAPER, scheme: 'light', color: PAPER.bg },
+  canvas: { tokens: TOKENS_CANVAS, fonts: FONTS_CANVAS, scheme: 'light', color: CANVAS.bg },
+}
 
 type HeadOpts = {
   /** Full <title>, including the " · AgentBill" suffix. */
@@ -465,16 +569,15 @@ function webPageLd(
  * /admin, which does not go through the token block, and because without it a
  * dark page still gets light native scrollbars, form controls and autofill.
  */
-const icons = (theme: ThemeName) => `  <meta name="color-scheme" content="${theme === 'paper' ? 'light' : 'dark'}" />
-  <meta name="theme-color" content="${theme === 'paper' ? PAPER.bg : BRAND.bg}" />
+const icons = (theme: ThemeName) => `  <meta name="color-scheme" content="${THEMES[theme].scheme}" />
+  <meta name="theme-color" content="${THEMES[theme].color}" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
 export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'dark' }: HeadOpts): string {
-  const tokens = theme === 'paper' ? TOKENS_PAPER : TOKENS
-  const fonts = theme === 'paper' ? FONTS_PAPER : FONTS_DARK
+  const { tokens, fonts } = THEMES[theme]
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
   // A canonical on a noindex page is two contradictory signals about one URL.

@@ -59,8 +59,9 @@ const PLAN: ReadonlyArray<readonly [string, number]> = [
  *  would refuse. Nothing is reserved after a refusal, so the walk ends there. */
 function firstRefusal(ceiling: number) {
   let used = 0
-  for (const [, units] of PLAN) {
-    if (used + units > ceiling) return { used, ceiling, remaining: ceiling - used, asked: units }
+  for (let at = 0; at < PLAN.length; at++) {
+    const units = PLAN[at][1]
+    if (used + units > ceiling) return { used, ceiling, remaining: ceiling - used, asked: units, at }
     used += units
   }
   return null
@@ -88,6 +89,29 @@ export const REFUSAL = {
   ceiling: REFUSED.ceiling,
   remaining: REFUSED.remaining,
 } as const
+
+/**
+ * The run the homepage draws above the playground, 2026-09-23: the fold's
+ * agent's-log frame and the Statement's meter. Walked from PLAN under the
+ * default ceiling by the same firstRefusal() the band uses, so the fold, the
+ * Statement and a press of Run cannot show three versions of one job. The
+ * refused call here is the one the playground refuses (the seventh step, asking
+ * for its own units), not HERO_BODY's call below, which asks for the first
+ * step's 12.
+ */
+export const RUN = (() => {
+  let cum = 0
+  const approved = PLAN.slice(0, REFUSED.at).map(([name, units]) => ({ name, units, cum: (cum += units) }))
+  return {
+    taskRef: TASK_REF,
+    ceiling: REFUSED.ceiling,
+    used: REFUSED.used,
+    remaining: REFUSED.remaining,
+    approved,
+    refused: { name: PLAN[REFUSED.at][0], asked: REFUSED.asked },
+    notAsked: PLAN.length - REFUSED.at - 1,
+  } as const
+})()
 
 /**
  * The body POST /preflight answers when the hero's own call is refused.
@@ -171,216 +195,193 @@ function restingRequest(): string {
 
 /** Playground CSS. Include once, after theme BASE and the page's .wrap rule. */
 export const PLAYGROUND_CSS = `
-  /* The one grid break on the page. Every other section is a 1080px column on
-     the page ground; this one is full bleed on its own ground, because it is
-     where the product runs. --band-hi / --band-lo are page-local, declared in
-     the homepage's :root. */
-  .pg-sec { padding-block: var(--s8) var(--s8);
-            background: linear-gradient(180deg, var(--band-hi), var(--band-lo) 72%);
-            border-block: 1px solid var(--border2); box-shadow: var(--edge); }
-  .pg-sec h2 { color: var(--white); max-width: 22ch; }
-  .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 60ch; margin-top: var(--s3); }
+  /* The demo on /, restyled 2026-09-23 to the canvas theme (x.ai/bot craft,
+     layout only). One panel on the warm-gray ground holds two cards: the run on
+     white on the left, the wire and your code on the right. Every id and every
+     class the script writes is the one it wrote before; reset() and step()
+     replace className wholesale, so a row or status can carry no extra class. */
+  .pg-sec h2 { color: var(--white); }
+  .pg-lede { color: var(--muted); font-size: var(--fs-lede); max-width: 60ch; margin: var(--s3) auto 0; }
 
-  .pg { margin-top: 30px; border: 1px solid var(--border); background: var(--surface);
-        border-radius: var(--r-frame); overflow: hidden; }
+  .pg { margin-top: var(--s6); background: var(--surface2); border-radius: var(--r-card); padding: var(--s5);
+        display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: var(--s5); align-items: start; }
+  .pg-left { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-inner);
+             padding: 20px; min-width: 0; }
+  .pg-right { display: grid; gap: var(--s4); min-width: 0; }
 
-  .pg-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 24px;
-            padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-  .pg-field { display: flex; align-items: center; gap: 10px; }
-  .pg-key { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.16em;
+  .pg-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-bottom: 18px; }
+  .pg-actions { display: flex; gap: 8px; }
+  .pg-btn { font-family: var(--sans); font-size: var(--fs-small); font-weight: 500; padding: 10px 20px; min-height: 40px;
+            border-radius: var(--r-control); cursor: pointer; border: 1px solid transparent;
+            background: var(--surface3); color: var(--text); transition: background .15s; }
+  .pg-btn:hover:not(:disabled) { background: var(--border); }
+  .pg-btn.pri { background: var(--surface3); }
+  .pg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .pg-field { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .pg-key { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.08em;
             text-transform: uppercase; color: var(--dim); }
-  .pg-val { font-family: var(--mono); font-size: var(--fs-body); color: var(--text); }
-  .pg-sl { -webkit-appearance: none; appearance: none; width: 150px; height: 2px;
+  .pg-val { font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
+  .pg-sl { -webkit-appearance: none; appearance: none; width: 120px; height: 2px;
            background: var(--border2); outline: none; cursor: pointer; }
-  .pg-sl::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
-           border-radius: 50%; background: var(--green); cursor: pointer;
-           border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--green); }
-  .pg-sl::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%;
-           background: var(--green); cursor: pointer; border: 3px solid var(--bg);
-           box-shadow: 0 0 0 1px var(--green); }
+  .pg-sl::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px;
+           border-radius: 50%; background: var(--text); cursor: pointer; border: 3px solid var(--surface); }
+  .pg-sl::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%;
+           background: var(--text); cursor: pointer; border: 3px solid var(--surface); }
+  .pg-sl:focus-visible { outline: 2px solid var(--text); outline-offset: 4px; }
   .pg-sl:disabled { opacity: 0.4; cursor: not-allowed; }
-  .pg-actions { margin-left: auto; display: flex; gap: 10px; }
-  .pg-btn { font-family: var(--sans); font-size: var(--fs-small); font-weight: 600; padding: 9px 20px;
-            border-radius: var(--r-control); cursor: pointer; border: 1px solid var(--border-strong);
-            background: transparent; color: var(--text); transition: border-color 0.15s; }
-  .pg-btn:hover:not(:disabled) { border-color: var(--text); }
-  .pg-btn.pri { background: var(--green); color: var(--green-ink); border-color: var(--green); }
-  .pg-btn.pri:hover:not(:disabled) { filter: brightness(1.09); }
-  .pg-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  /* minmax(0, 1fr), not 1fr. A bare 1fr track has min-width:auto, so it refuses
-     to shrink below its content and the TRACK grows wider than the grid. That is
-     why .pg-left measured wider than .pg itself at 320 and got cut by the
-     frame's overflow:hidden, which reads as a text bug and is a grid bug. */
-  .pg-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .pg-left { border-right: 1px solid var(--border); padding: 20px; }
-  .pg-right { padding: 20px; background: var(--bg-deep); display: flex; flex-direction: column; }
-  .pg-h { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.18em;
-          text-transform: uppercase; color: var(--dim); display: flex;
-          justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
-
-  .pg-budget { margin-bottom: 20px; }
-  .pg-nums { display: flex; justify-content: space-between; align-items: baseline;
-             font-family: var(--mono); margin-bottom: 9px; }
-  .pg-used { font-size: var(--fs-figure); color: var(--text); transition: color 0.2s; }
-  .pg-used.over { color: var(--red); }
-  .pg-ceil { font-size: var(--fs-small); color: var(--dim); }
-  .pg-track { height: 6px; background: var(--border2); position: relative; overflow: hidden; }
-  .pg-fill { height: 100%; width: 0; background: var(--green);
+  .pg-h { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: 0.08em;
+          text-transform: uppercase; color: var(--dim); display: flex; flex-wrap: wrap; gap: 4px 12px;
+          justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .pg-budget { margin-bottom: 18px; }
+  .pg-nums { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+  .pg-used { font-family: var(--display); font-size: var(--fs-figure); font-weight: 500; letter-spacing: -0.02em;
+             color: var(--text); font-variant-numeric: tabular-nums; transition: color 0.2s; }
+  .pg-used.over { color: var(--signal); }
+  .pg-ceil { font-size: var(--fs-small); color: var(--muted); }
+  .pg-ceil b { font-weight: 500; color: var(--text); }
+  .pg-track { height: 8px; background: var(--surface3); border-radius: var(--r-pill); position: relative; overflow: hidden; }
+  .pg-fill { height: 100%; width: 0; background: var(--text); border-radius: var(--r-pill);
              transition: width 0.45s cubic-bezier(0.22,1,0.36,1), background 0.2s; }
-  .pg-fill.refused { background: var(--red); }
+  .pg-fill.refused { background: var(--text); }
   .pg-ghost { position: absolute; top: 0; height: 100%; opacity: 0; transition: opacity 0.25s;
-              background: repeating-linear-gradient(45deg, var(--red) 0 3px, transparent 3px 7px); }
+              background: repeating-linear-gradient(45deg, var(--signal) 0 3px, transparent 3px 7px); }
   .pg-ghost.on { opacity: 0.85; }
 
-  /* No min-height. It used to reserve 292px whether or not there were rows, so
-     the tallest element on the homepage held the height of a run it had not
-     done and none of its content: two ~300px voids side by side until someone
-     clicked. The rows are server-rendered at rest now, so the content sets the
-     height, the height never changes when the run starts, and the section says
-     something with JavaScript off. */
-  .pg-log { display: flex; flex-direction: column; gap: 1px; }
-  .pg-cols { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 68px; gap: 12px;
-             font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .12em;
-             text-transform: uppercase; color: var(--dim); padding-bottom: 6px;
-             border-bottom: 1px solid var(--border); }
+  .pg-log { display: flex; flex-direction: column; gap: 2px; }
+  .pg-cols { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 64px; gap: 12px;
+             font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em;
+             text-transform: uppercase; color: var(--dim); padding: 0 10px 6px; }
   .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
-  .pg-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 68px; gap: 12px; align-items: baseline;
-            font-family: var(--mono); font-size: var(--fs-small); padding: 7px 0;
-            border-bottom: 1px solid var(--border-soft); }
-  /* Only a row that CHANGES state animates. At rest every row is already there,
-     so entry animation would be ten rows sliding in for no reason. */
+  .pg-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 64px; gap: 12px; align-items: baseline;
+            font-family: var(--mono); font-size: var(--fs-small); padding: 7px 10px; border-radius: 10px; }
   .pg-row.ran, .pg-row.refused { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
-  @keyframes pg-slip { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
-  .pg-row .ar { color: var(--green); }
-  .pg-row .nm { color: var(--muted); }
-  .pg-row .un { color: var(--dim); }
-  .pg-row .cum { color: var(--dim); text-align: right; }
-  /* At rest the whole row is quiet: this is a plan, not a result. */
-  .pg-row.planned { opacity: .55; }
-  .pg-row.planned .ar { color: var(--dim); }
-  .pg-row.refused { border-bottom-color: var(--red); opacity: 1; }
-  .pg-row.refused .ar, .pg-row.refused .nm, .pg-row.refused .un, .pg-row.refused .cum { color: var(--red); }
-  .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; }
+  @keyframes pg-slip { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+  .pg-row .ar { color: var(--dim); }
+  .pg-row .nm { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+  .pg-row .un { color: var(--muted); text-align: right; }
+  .pg-row .cum { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+  .pg-row.planned .nm, .pg-row.planned .un, .pg-row.planned .cum { color: var(--dim); }
+  .pg-row.refused { background: var(--fail-bg); }
+  .pg-row.refused .ar, .pg-row.refused .nm, .pg-row.refused .un, .pg-row.refused .cum { color: var(--signal); }
+  .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; padding-inline: 10px; }
   .pg-ask b { color: var(--muted); font-weight: 500; }
-  .pg-note { font-family: var(--mono); font-size: var(--fs-small); color: var(--red); padding-top: 11px;
+  .pg-note { font-family: var(--mono); font-size: var(--fs-small); color: var(--signal); padding: 10px 10px 0;
              animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   .pg-note.calm { color: var(--dim); }
-  .pg-empty { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); padding-top: 8px; }
 
-  .pg-json { font-family: var(--mono); font-size: var(--fs-small); line-height: 1.75; white-space: pre;
-             overflow-x: auto; flex: 1; color: var(--dim); }
-  .pg-json .k { color: var(--muted); }
-  .pg-json .s, .pg-json .n { color: var(--code); }
-  .pg-json .t { color: var(--green); }
-  .pg-json .f { color: var(--red); font-weight: 700; }
-  .pg-json .nl { color: var(--dim); }
-  .pg-status { font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: 0.14em;
-               text-transform: uppercase; padding: 5px 11px; border-radius: var(--r-chip); border: 1px solid; }
-  .pg-status.ok { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
-  .pg-status.no { color: var(--red); border-color: var(--fail-line); background: var(--fail-bg); }
-  .pg-status.idle { color: var(--dim); border-color: var(--border2); }
-  .pg-throw { margin-top: 16px; border: 1px solid var(--red); background: var(--fail-bg);
-              padding: 12px 14px; font-family: var(--mono); font-size: var(--fs-small); color: var(--red);
-              animation: pg-pop 0.3s cubic-bezier(0.22,1,0.36,1) both; }
-  @keyframes pg-pop { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
-  .pg-throw b { display: block; font-weight: 700; margin-bottom: 3px; }
-  .pg-throw span { color: var(--muted); font-size: var(--fs-small); }
-
-  .pg-foot { border-top: 1px solid var(--border); padding: 15px 20px; display: flex;
-             flex-wrap: wrap; gap: 12px 24px; align-items: center; background: var(--surface2); }
-  .pg-rule { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); }
+  /* The decision under the run: what your code does with approved: false. */
+  .pg-decide { margin-top: 20px; padding: 16px 10px 0; border-top: 1px solid var(--border); display: grid; gap: 10px; }
+  .pg-decide .pg-key { display: block; }
+  .pg-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pg-picks span { font-size: var(--fs-small); color: var(--text); padding: 7px 14px; border-radius: var(--r-pill);
+                   border: 1px solid var(--border2); background: var(--surface); }
+  .pg-decide p { font-size: var(--fs-small); color: var(--dim); line-height: 1.5; }
+  .pg-foot { margin-top: 16px; padding: 14px 10px 0; border-top: 1px solid var(--border); display: grid; gap: 4px; }
+  .pg-rule { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
   .pg-rule b { color: var(--muted); font-weight: 400; }
-  .pg-disc { margin-left: auto; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim);
-             text-align: right; line-height: 1.5; }
+  .pg-disc { font-size: var(--fs-small); color: var(--dim); line-height: 1.5; }
+  .pg-disc a { color: var(--muted); }
 
-  @media (max-width: 820px) {
-    .pg-split { grid-template-columns: minmax(0, 1fr); }
-    .pg-left { border-right: none; border-bottom: 1px solid var(--border); }
-    .pg-actions { margin-left: 0; }
-    .pg-disc { margin-left: 0; text-align: left; }
+  /* The wire: the machine's answer on the dark plate. */
+  .pg-wire { background: var(--plate); border-radius: var(--r-inner); padding: 18px 20px; min-width: 0; }
+  .pg-wire .pg-h { color: var(--plate-dim); }
+  .pg-json { font-family: var(--mono); font-size: var(--fs-small); line-height: 1.7; white-space: pre;
+             overflow-x: auto; color: var(--plate-ink); }
+  .pg-json .k { color: var(--plate-ink); }
+  .pg-json .s, .pg-json .n, .pg-json .t { color: var(--plate-ink); }
+  .pg-json .f { color: var(--plate-signal); font-weight: 500; }
+  .pg-json .nl { color: var(--plate-dim); }
+  .pg-status { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: 0.08em; text-transform: uppercase;
+               padding: 4px 10px; border-radius: var(--r-pill); border: 1px solid; }
+  .pg-status.ok { color: var(--plate-ink); border-color: var(--plate-dim); }
+  .pg-status.no { color: var(--plate-signal); border-color: var(--plate-signal); }
+  .pg-status.idle { color: var(--plate-dim); border-color: var(--plate-dim); }
+  .pg-throw { margin-top: 14px; border: 1px solid var(--plate-signal); border-radius: 12px;
+              padding: 12px 14px; font-family: var(--mono); font-size: var(--fs-small); color: var(--plate-signal);
+              animation: pg-pop 0.3s cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes pg-pop { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
+  .pg-throw b { display: block; font-weight: 500; margin-bottom: 3px; }
+  .pg-throw span { color: var(--plate-ink); font-size: var(--fs-small); }
+
+  @media (max-width: 900px) {
+    .pg { grid-template-columns: minmax(0, 1fr); padding: var(--s3); }
+    .pg-field { margin-left: 0; }
   }
-  /* At 320px the ceiling row (label, slider, value, unit) wants more than the
-     space between the bar's gutters, and .pg is overflow:hidden, so what does
-     not fit is not merely pushed out, it is CUT. The slider gives up the width;
-     the value is the point.
-     This block used to set a flat width:100px here, and 100px was still too
-     wide: production shipped "500 UNIT" and "0 CAL" at 320 for weeks after that
-     supposed fix, because the sweep that found the first one was hand-run and
-     nothing re-ran it. A second hard-coded number would have the same shelf
-     life, so the slider is elastic now and gives up whatever is needed at any
-     width. min-width:0 on the field is what lets a flex item shrink below its
-     content size at all; without it the rest of this does nothing.
-     The two header rows wrap instead of cutting, for the same reason: losing a
-     line break is recoverable, losing the letter S is not. */
+  /* At 320px the row is 20 + 64 + 64 of fixed columns plus three gaps before the
+     call name gets anything, and the frame clips what does not fit. The
+     gutters tighten first and the fixed columns narrow second, so the running
+     total stays inside the card; losing a line break is recoverable, losing a
+     digit is not. */
   @media (max-width: 480px) {
-    .pg-field { min-width: 0; flex: 1 1 auto; }
+    .pg-left { padding: 14px; }
+    .pg-wire { padding: 14px; }
+    .pg-cols, .pg-row { gap: 8px; grid-template-columns: 14px minmax(0, 1fr) 48px 48px; padding-inline: 6px; }
     .pg-sl { width: auto; flex: 1 1 48px; min-width: 48px; }
-    .pg-left, .pg-right { padding: 16px; }
-    .pg-h, .pg-nums { flex-wrap: wrap; gap: 2px 10px; }
-    .pg-h { letter-spacing: 0.12em; }
-    /* The log row is 24 + 68 of fixed columns plus three 12px gaps before the
-       two elastic ones get anything. Tightening the gutters is what puts the
-       running total back inside the frame; the alternative was dropping a
-       column, and every column here is part of the demonstration. */
-    .pg-cols, .pg-row { gap: 8px; grid-template-columns: 16px minmax(0, 1fr) auto 56px; }
+    .pg-field { min-width: 0; flex: 1 1 auto; }
   }`
 
-/** The section markup. Drop it straight after the hero. */
-export function playgroundSection(): string {
-  return `  <section class="pg-sec" id="playground">
-    <div class="wrap">
-    <p class="eyebrow">Try it &middot; runs in your browser</p>
-    <h2>Run an agent into its ceiling.</h2>
-    <p class="pg-lede">Set a ceiling for the whole job and run the agent. The call that would cross
-    it gets <span class="mono-in">approved: false</span>, with the same body your SDK gets.</p>
+/**
+ * The section markup. `code` is the frame of your own code under the wire; the
+ * homepage passes it in because its two samples live in routes/home.ts, the
+ * only place the snippet harness reads and executes them.
+ */
+export function playgroundSection(code = ''): string {
+  return `  <section class="wrap sec pg-sec" id="playground">
+    <div class="sec-head">
+      <p class="eyebrow">Demo &middot; runs in your browser</p>
+      <h2>Watch one job reach its ceiling</h2>
+      <p class="pg-lede">A ten-call plan shares ${TASK_REF} and a ceiling of ${DEFAULT_CEILING} units. A unit is
+      whatever you decide it is worth.</p>
+    </div>
 
     <div class="pg">
-      <div class="pg-bar">
-        <div class="pg-field"><span class="pg-key">task</span><span class="pg-val">${TASK_REF}</span></div>
-        <div class="pg-field">
-          <label class="pg-key" for="pg-ceil">ceiling</label>
-          <input id="pg-ceil" class="pg-sl" type="range" min="100" max="1500" step="50" value="${DEFAULT_CEILING}"
-                 aria-label="Task ceiling in units" />
-          <span class="pg-val" id="pg-ceilv">${DEFAULT_CEILING}</span><span class="pg-key">units</span>
+      <div class="pg-left">
+        <div class="pg-bar">
+          <div class="pg-actions">
+            <button id="pg-run" class="pg-btn pri" type="button">Run the job</button>
+            <button id="pg-reset" class="pg-btn" type="button">Reset</button>
+          </div>
+          <div class="pg-field">
+            <label class="pg-key" for="pg-ceil">ceiling</label>
+            <input id="pg-ceil" class="pg-sl" type="range" min="100" max="1500" step="50" value="${DEFAULT_CEILING}"
+                   aria-label="Task ceiling in units" />
+            <span class="pg-val" id="pg-ceilv">${DEFAULT_CEILING}</span><span class="pg-key">units</span>
+          </div>
         </div>
-        <div class="pg-actions">
-          <button id="pg-run" class="pg-btn pri" type="button">Run agent</button>
-          <button id="pg-reset" class="pg-btn" type="button">Reset</button>
+        <div class="pg-budget">
+          <div class="pg-nums">
+            <span class="pg-used" id="pg-used">0</span>
+            <span class="pg-ceil">used of <b id="pg-ceil2">${DEFAULT_CEILING}</b> units &middot; ${TASK_REF}</span>
+          </div>
+          <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
+        </div>
+        <div class="pg-h"><span>Agent calls</span><span id="pg-count">0 calls</span></div>
+        <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span></div>
+        <div class="pg-log" id="pg-log" aria-live="polite">
+${plannedRows()}
+        </div>
+        <div class="pg-ask" id="pg-ask">this plan asks for <b>${PLAN_TOTAL.toLocaleString('en-US')}</b> units.</div>
+        <div class="pg-decide">
+          <span class="pg-key">When the answer is approved: false, your code decides</span>
+          <div class="pg-picks"><span>Return what you have</span><span>Skip this step</span><span>Replan with a cheaper model</span></div>
+          <p>The SDK raises in your process, and the branch you wrote picks one.</p>
+        </div>
+        <div class="pg-foot">
+          <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
+          <p class="pg-disc">Runs in your browser, against no account. Same rule and same response body as
+          <a href="/docs#api-reference">POST /preflight</a>.</p>
         </div>
       </div>
 
-      <div class="pg-split">
-        <div class="pg-left">
-          <div class="pg-h"><span>Agent calls</span><span id="pg-count">0 calls</span></div>
-          <div class="pg-budget">
-            <div class="pg-nums">
-              <span class="pg-used" id="pg-used">0</span>
-              <span class="pg-ceil">used of <b id="pg-ceil2">${DEFAULT_CEILING}</b> units</span>
-            </div>
-            <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
-          </div>
-          <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span></div>
-          <div class="pg-log" id="pg-log" aria-live="polite">
-${plannedRows()}
-          </div>
-          <div class="pg-ask" id="pg-ask">this plan asks for <b>${PLAN_TOTAL.toLocaleString('en-US')}</b> units.</div>
-        </div>
-
-        <div class="pg-right">
+      <div class="pg-right">
+        <div class="pg-wire">
           <div class="pg-h"><span id="pg-verb">POST /preflight</span><span class="pg-status idle" id="pg-status">request</span></div>
           <div class="pg-json" id="pg-json">${restingRequest()}</div>
           <div id="pg-throw"></div>
         </div>
+${code}
       </div>
-
-      <div class="pg-foot">
-        <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
-        <div class="pg-disc">The plan above is what the agent will send. Pressing Run
-        executes it in your browser, against no account.<br />
-        Same rule and same response body as <a href="/docs#api-reference">POST /preflight</a>.</div>
-      </div>
-    </div>
     </div>
   </section>`
 }
@@ -412,15 +413,29 @@ const PLAYGROUND_SRC = `
   for (var ci = 0; ci < CTA_LINKS.length; ci++) {
     CTA_LINKS[ci].addEventListener('click', function(){ pulse('cta_click'); });
   }
-  // The hero's text link to the demo, 2026-09-18. It scrolls, it does not
-  // navigate, so the beacon has all the time it needs; sendBeacon is still the
-  // one call that costs the click nothing. Read beside cta_click: a page where
-  // try_click runs well ahead of cta_click is a page whose demo has earned a
-  // higher place, and one where neither moves is a fold problem, not a depth
-  // problem.
-  var TRY_LINKS = document.querySelectorAll('a[href="#playground"]');
-  for (var ti = 0; ti < TRY_LINKS.length; ti++) {
-    TRY_LINKS[ti].addEventListener('click', function(){ pulse('try_click'); });
+  // The hero's second action, 2026-09-23: a pill to the estimator. It replaced
+  // the 2026-09-18 text link to the demo (try_click), which Lior retired with
+  // the redesign; try_click stays on the server's list for its history, and
+  // nothing on the page sends it any more. It scrolls, it does not navigate, so
+  // the beacon has all the time it needs. Read beside cta_click the same way:
+  // a page where estimate_click runs well ahead of cta_click is a page whose
+  // visitors want the arithmetic before the key.
+  var EST_LINKS = document.querySelectorAll('a[href="#estimate"]');
+  for (var ei = 0; ei < EST_LINKS.length; ei++) {
+    EST_LINKS[ei].addEventListener('click', function(){ pulse('estimate_click'); });
+  }
+  // The estimator was used: once per page load, on the first keystroke into
+  // any of its inputs, never on load. Only that it happened is sent. What the
+  // visitor typed never leaves the page; the estimator's own script makes no
+  // network call at all.
+  var EST_INPUTS = document.querySelectorAll('#est input');
+  var estUsed = false;
+  for (var ej = 0; ej < EST_INPUTS.length; ej++) {
+    EST_INPUTS[ej].addEventListener('input', function(){
+      if (estUsed) return;
+      estUsed = true;
+      pulse('estimate_use');
+    });
   }
   // This page loaded, in our own rows, 2026-09-22. Meta's pixel is a
   // third-party script and desktop browsers block it: between 20.09 and 22.09
@@ -508,7 +523,7 @@ const PLAYGROUND_SRC = `
     el('fill').style.width = '0'; el('fill').classList.remove('refused');
     el('ghost').classList.remove('on'); el('ghost').style.width = '0';
     el('used').textContent = '0'; el('used').classList.remove('over');
-    el('ceil').disabled = false; el('run').disabled = false; el('run').textContent = 'Run agent';
+    el('ceil').disabled = false; el('run').disabled = false; el('run').textContent = 'Run the job';
   }
 
   function step(){
