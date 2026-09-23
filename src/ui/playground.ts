@@ -1,5 +1,6 @@
 import { inlineScript } from '../lib/csp.js'
 import { PULSE_CLIENT_SRC } from './pulse-client.js'
+import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 // The homepage playground: a preflight you can run yourself.
 //
 // The refusal band above states the outcome, and it now renders from the run
@@ -156,11 +157,12 @@ function plannedRows(): string {
   let cum = 0
   return PLAN.map(([name, units], i) => {
     cum += units
-    return `        <div class="pg-row planned" data-i="${i}">` +
+    return `        <div class="pg-row planned" data-i="${i}" data-u="${units}" data-c="${cum.toLocaleString('en-US')}">` +
       `<span class="ar">&middot;</span>` +
       `<span class="nm">${name}</span>` +
       `<span class="un">${units}</span>` +
-      `<span class="cum">${cum.toLocaleString('en-US')}</span></div>`
+      `<span class="cum">${cum.toLocaleString('en-US')}</span>` +
+      `<span class="an"></span></div>`
   }).join('\n')
 }
 
@@ -249,21 +251,25 @@ export const PLAYGROUND_CSS = `
   .pg-ghost.on { opacity: 0.85; }
 
   .pg-log { display: flex; flex-direction: column; gap: 2px; }
-  .pg-cols { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 64px; gap: 12px;
+  .pg-cols { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 72px 128px; gap: 12px;
              font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em;
              text-transform: uppercase; color: var(--dim); padding: 0 10px 6px; }
   .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
-  .pg-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 64px; gap: 12px; align-items: baseline;
+  .pg-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 72px 128px; gap: 12px; align-items: center;
             font-family: var(--mono); font-size: var(--fs-small); padding: 7px 10px; border-radius: 10px; }
   .pg-row.ran, .pg-row.refused { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-slip { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
   .pg-row .ar { color: var(--dim); }
-  .pg-row .nm { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+  .pg-row .nm { color: var(--text); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pg-row .un { color: var(--muted); text-align: right; }
   .pg-row .cum { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
   .pg-row.planned .nm, .pg-row.planned .un, .pg-row.planned .cum { color: var(--dim); }
   .pg-row.refused { background: var(--fail-bg); }
   .pg-row.refused .ar, .pg-row.refused .nm, .pg-row.refused .un, .pg-row.refused .cum { color: var(--signal); }
+  /* The calls the run never reached, after a refusal: named, never asked. */
+  .pg-row.na .nm, .pg-row.na .un, .pg-row.na .an { color: var(--dim); }
+  .pg-row .an { font-size: var(--fs-micro); }
+  .pg-more { display: none; font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); padding: 8px 10px 0; }
   .pg-ask { font-family: var(--mono); font-size: var(--fs-small); color: var(--dim); margin-top: 10px; padding-inline: 10px; }
   .pg-ask b { color: var(--muted); font-weight: 500; }
   .pg-note { font-family: var(--mono); font-size: var(--fs-small); color: var(--signal); padding: 10px 10px 0;
@@ -297,16 +303,21 @@ export const PLAYGROUND_CSS = `
   .pg-status.ok { color: var(--plate-ink); border-color: var(--plate-dim); }
   .pg-status.no { color: var(--plate-signal); border-color: var(--plate-signal); }
   .pg-status.idle { color: var(--plate-dim); border-color: var(--plate-dim); }
-  .pg-throw { margin-top: 14px; border: 1px solid var(--plate-signal); border-radius: 12px;
-              padding: 12px 14px; font-family: var(--mono); font-size: var(--fs-small); color: var(--plate-signal);
-              animation: pg-pop 0.3s cubic-bezier(0.22,1,0.36,1) both; }
-  @keyframes pg-pop { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
-  .pg-throw b { display: block; font-weight: 500; margin-bottom: 3px; }
-  .pg-throw span { color: var(--plate-ink); font-size: var(--fs-small); }
 
   @media (max-width: 900px) {
     .pg { grid-template-columns: minmax(0, 1fr); padding: var(--s3); }
     .pg-field { margin-left: 0; }
+  }
+  /* The phone frame (Figma 6:120): the rows that ran carry their total, the
+     refused one carries its answer on a second line, and the calls never asked
+     fold into one line. */
+  @media (max-width: 720px) {
+    .pg-cols { display: none; }
+    .pg-row { grid-template-columns: 14px minmax(0, 1fr) 48px 56px; gap: 8px; padding-inline: 6px; }
+    .pg-row .an { display: none; }
+    .pg-row.refused .an { display: block; grid-column: 2 / -1; }
+    .pg-row.na { display: none; }
+    .pg-more.on { display: block; }
   }
   /* At 320px the row is 20 + 64 + 64 of fixed columns plus three gaps before the
      call name gets anything, and the frame clips what does not fit. The
@@ -316,7 +327,6 @@ export const PLAYGROUND_CSS = `
   @media (max-width: 480px) {
     .pg-left { padding: 14px; }
     .pg-wire { padding: 14px; }
-    .pg-cols, .pg-row { gap: 8px; grid-template-columns: 14px minmax(0, 1fr) 48px 48px; padding-inline: 6px; }
     .pg-sl { width: auto; flex: 1 1 48px; min-width: 48px; }
     .pg-field { min-width: 0; flex: 1 1 auto; }
   }`
@@ -357,15 +367,16 @@ export function playgroundSection(code = ''): string {
           <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
         </div>
         <div class="pg-h"><span>Agent calls</span><span id="pg-count">0 calls</span></div>
-        <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span></div>
+        <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span><span>answer</span></div>
         <div class="pg-log" id="pg-log" aria-live="polite">
 ${plannedRows()}
         </div>
+        <div class="pg-more" id="pg-more"></div>
         <div class="pg-ask" id="pg-ask">this plan asks for <b>${PLAN_TOTAL.toLocaleString('en-US')}</b> units.</div>
         <div class="pg-decide">
-          <span class="pg-key">When the answer is approved: false, your code decides</span>
+          <span class="pg-key">Your code decides</span>
           <div class="pg-picks"><span>Return what you have</span><span>Skip this step</span><span>Replan with a cheaper model</span></div>
-          <p>The SDK raises in your process, and the branch you wrote picks one.</p>
+          <p>On a ceiling refusal the SDK raises in your process, and the branch you wrote picks one.</p>
         </div>
         <div class="pg-foot">
           <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
@@ -393,6 +404,11 @@ const PLAYGROUND_SRC = `
   // same array, so the page cannot show two versions of this run.
   var PLAN = ${JSON.stringify(PLAN.map(([n, u]) => [n, u]))};
   var TASK_REF = ${JSON.stringify(TASK_REF)};
+  // The reservation lifetime the server itself uses (lib/reservations.ts), so
+  // the approved body's reservation_expires_at is the same distance away as a
+  // real one. It was a fixed two minutes until 2026-09-23, beside a page that
+  // says sixty.
+  var TTL_MS = ${JSON.stringify(RESERVATION_TTL_MINUTES * 60000)};
   var el = function(id){ return document.getElementById('pg-' + id) };
   ${PULSE_CLIENT_SRC}
   // Every link to /register on this page, wherever it sits: the nav, the hero,
@@ -461,7 +477,7 @@ const PLAYGROUND_SRC = `
       task.reserved += reserve;
       return { approved:true, reason:null, estimated_units:o.estimatedUnits,
         remaining_units:null,
-        reservation_expires_at:new Date(Date.now()+120000).toISOString(),
+        reservation_expires_at:new Date(Date.now()+TTL_MS).toISOString(),
         task_ref:o.taskRef,
         task_ceiling: task.ceiling,
         task_remaining_units: task.ceiling - task.used - task.reserved };
@@ -512,9 +528,13 @@ const PLAYGROUND_SRC = `
     for (var i = 0; i < rows.length; i++) {
       rows[i].className = 'pg-row planned';
       rows[i].querySelector('.ar').innerHTML = '&middot;';
+      rows[i].querySelector('.un').textContent = rows[i].getAttribute('data-u');
+      rows[i].querySelector('.cum').textContent = rows[i].getAttribute('data-c');
+      rows[i].querySelector('.an').innerHTML = '';
     }
     var note = el('log').querySelector('.pg-note');
     if (note) note.parentNode.removeChild(note);
+    el('more').className = 'pg-more'; el('more').textContent = '';
     el('json').innerHTML = REQUEST_HTML;
     el('ask').style.visibility = '';
     el('throw').innerHTML = '';
@@ -546,6 +566,7 @@ const PLAYGROUND_SRC = `
     el('count').textContent = (idx+1) + (idx ? ' calls' : ' call');
 
     if (res.approved) {
+      if (row) row.querySelector('.an').innerHTML = '<span class="chip-ok">approved</span>';
       record(units); bars(null);
       el('status').className = 'pg-status ok'; el('status').textContent = '200 approved';
       idx++; timer = setTimeout(step, 620);
@@ -554,16 +575,29 @@ const PLAYGROUND_SRC = `
 
     bars(units);
     el('status').className = 'pg-status no'; el('status').textContent = '200 refused';
-    var note = document.createElement('div');
-    note.className = 'pg-note';
-    note.textContent = res.task_remaining_units + ' units left, this call asked for '
-      + units + '. it never ran.';
-    el('log').appendChild(note);
-    // Rows the run never reached stay planned rather than going blank, so the
-    // reader can see what the ceiling stopped as well as what it allowed.
+    // The row says what happened, the way Figma's refused state (C2) draws
+    // it: what the call asked, what was left, and the answer. 2026-09-23: the
+    // note and the "the SDK throws here, so the expensive call never starts"
+    // panel that used to be inserted here came out, because whether the call
+    // runs is decided by the branch the developer wrote, which the caption in
+    // the same card says.
+    if (row) {
+      row.querySelector('.un').textContent = 'asks ' + units;
+      row.querySelector('.cum').textContent = res.task_remaining_units + ' left';
+      row.querySelector('.an').innerHTML = '<span class="chip-no">approved: false</span>';
+    }
+    // The calls the run never reached: named, not asked, no running total.
+    var rest = 0;
+    for (var j = idx + 1; j < PLAN.length; j++) {
+      var later = el('log').querySelector('.pg-row[data-i="' + j + '"]');
+      if (!later) continue;
+      later.className = 'pg-row na';
+      later.querySelector('.cum').textContent = '';
+      later.querySelector('.an').textContent = 'not asked';
+      rest++;
+    }
+    if (rest) { el('more').textContent = rest + (rest === 1 ? ' more call' : ' more calls') + ' in the plan, not asked'; el('more').className = 'pg-more on'; }
     el('ask').style.visibility = 'hidden';
-    el('throw').innerHTML = '<div class="pg-throw"><b>throw TaskCeilingExceededError</b>'
-      + '<span>the SDK throws here, so the expensive call never starts</span></div>';
     // The event NAME keeps its old spelling on purpose: it is the key /pulse
     // has stored since the playground shipped, and renaming it would split one
     // series into two. Nothing a reader sees carries the word; the row and

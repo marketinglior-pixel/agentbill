@@ -27,6 +27,10 @@ import { inlineScript } from '../lib/csp.js'
 export const EST_DEFAULTS = { calls: 2000, costPerCall: 0.05, ceiling: 500 } as const
 
 const usd = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/** A per-call or per-unit rate: a single LLM call often costs under a cent, and rounding it to $0.00 would make the card's own arithmetic fail to add up. */
+const rate = (n: number) => '$' + (n > 0 && n < 0.01
+  ? n.toLocaleString('en-US', { maximumSignificantDigits: 3 })
+  : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }))
 const int = (n: number) => n.toLocaleString('en-US')
 
 /** The arithmetic, once. The server renders the example with it and the script re-runs the same rule. */
@@ -63,12 +67,23 @@ export const ESTIMATOR_CSS = `
   .est-cap { font-size: var(--fs-small); color: var(--dim); line-height: 1.5; }
   .est-line { height: 1px; background: var(--border); margin-block: 6px; }
   .est-ceil { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--text); }
+  .est-res, .est-cres { display: grid; gap: 10px; }
   .est-out .btn { justify-self: start; margin-top: var(--s2); }
   .est-js { font-size: var(--fs-small); color: var(--dim); }
   .est.live .est-js { display: none; }
+  /* The phone order (Figma 5:81) tells the story in sequence: calls and cost,
+     what one run costs with no ceiling, then the ceiling, where it answers, and
+     the one action. The two wrappers dissolve so their children sit in one
+     column, and order places them. */
   @media (max-width: 820px) {
-    .est { grid-template-columns: minmax(0, 1fr); padding: var(--s4); }
-    .est-in { padding: 0; }
+    .est { display: flex; flex-direction: column; gap: var(--s4); padding: var(--s4); }
+    .est-in, .est-out { display: contents; }
+    .est-f-calls { order: 1; } .est-f-cost { order: 2; }
+    .est-res { order: 3; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-inner); padding: 18px; }
+    .est-rule, .est-line { display: none; }
+    .est-f-ceil { order: 4; } .est-note { order: 5; } .est-js { order: 6; }
+    .est-cres { order: 7; }
+    .est-out > .btn { order: 8; justify-self: stretch; justify-content: center; }
   }`
 
 /** The section. The numbers are rendered from EST_DEFAULTS through estimate(). */
@@ -83,23 +98,27 @@ export function estimatorSection(cta: string): string {
     </div>
     <div class="est" id="est">
       <div class="est-in">
-        <div class="est-f"><label for="est-calls">Calls in one run</label>
+        <div class="est-f est-f-calls"><label for="est-calls">Calls in one run</label>
           <input id="est-calls" type="text" inputmode="numeric" autocomplete="off" value="${int(d.calls)}" /></div>
-        <div class="est-f"><label for="est-cost">Your cost per call (USD)</label>
-          <input id="est-cost" type="text" inputmode="decimal" autocomplete="off" value="${usd(d.costPerCall)}" /></div>
+        <div class="est-f est-f-cost"><label for="est-cost">Your cost per call (USD)</label>
+          <input id="est-cost" type="text" inputmode="decimal" autocomplete="off" value="${rate(d.costPerCall)}" /></div>
         <div class="est-rule"></div>
-        <div class="est-f"><label for="est-ceil">Try a job ceiling (units)</label>
+        <div class="est-f est-f-ceil"><label for="est-ceil">Try a job ceiling (units)</label>
           <input id="est-ceil" type="text" inputmode="numeric" autocomplete="off" value="${int(d.ceiling)}" /></div>
-        <p class="est-note" id="est-rate">Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is ${usd(d.costPerCall)} a unit. AgentBill counts units, not dollars.</p>
+        <p class="est-note" id="est-rate">Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is ${rate(d.costPerCall)} a unit. AgentBill counts units, not dollars.</p>
         <p class="est-js">The inputs need JavaScript. The math is calls in one run &times; your cost per call.</p>
       </div>
-      <div class="est-out" aria-live="polite">
-        <div class="est-head"><span class="est-k">One run, no job ceiling</span><span class="tag" id="est-ex">example</span></div>
-        <div class="est-total" id="est-total">${usd(r.total)}</div>
-        <p class="est-cap" id="est-cap">${int(d.calls)} calls &times; ${usd(d.costPerCall)}: example inputs until you change them. An estimate, not a measurement.</p>
+      <div class="est-out">
+        <div class="est-res" aria-live="polite">
+          <div class="est-head"><span class="est-k">One run, no job ceiling</span><span class="tag" id="est-ex">example</span></div>
+          <div class="est-total" id="est-total">${usd(r.total)}</div>
+          <p class="est-cap" id="est-cap">${int(d.calls)} calls &times; ${rate(d.costPerCall)}: example inputs until you change them. An estimate, not a measurement.</p>
+        </div>
         <div class="est-line"></div>
-        <div class="est-ceil" id="est-ceil-line">Call ${int(r.firstRefused ?? 0)} gets <span class="chip-no">approved: false</span></div>
-        <p class="est-cap" id="est-after">The ${int(r.approvedCalls)} approved calls: about ${usd(r.approvedCost)} at your rate. What runs after that is your code&rsquo;s decision.</p>
+        <div class="est-cres" aria-live="polite">
+          <div class="est-ceil" id="est-ceil-line">Call ${int(r.firstRefused ?? 0)} gets <span class="chip-no">approved: false</span></div>
+          <p class="est-cap" id="est-after">The ${int(r.approvedCalls)} approved calls: about ${usd(r.approvedCost)} at your rate. What runs after that is your code&rsquo;s decision.</p>
+        </div>
         <a class="btn btn-lg" href="/register">${cta}</a>
       </div>
     </div>
@@ -118,25 +137,33 @@ const ESTIMATOR_SRC = `
     return isFinite(v) && v >= 0 ? Math.min(v, MAX) : null;
   }
   function usd(n){ return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+  function rate(n){ return '$' + (n > 0 && n < 0.01 ? n.toLocaleString('en-US', { maximumSignificantDigits: 3 })
+    : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })) }
   function int(n){ return Math.floor(n).toLocaleString('en-US') }
   var edited = false;
   function run(){
     var calls = num($('calls').value), cost = num($('cost').value), ceil = num($('ceil').value);
     if (calls === null || cost === null || ceil === null) {
+      // Nothing on the card may keep a dollar figure that no longer comes from
+      // the inputs, so every derived line is cleared, not only the total.
       $('total').textContent = 'enter a number';
       $('cap').textContent = 'Calls, cost per call and the ceiling each need a number of 0 or more.';
+      $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. AgentBill counts units, not dollars.';
+      $('ceil-line').textContent = '';
+      $('after').textContent = '';
       return;
     }
     calls = Math.floor(calls); ceil = Math.floor(ceil);
     var total = calls * cost, fits = calls <= ceil, ok = fits ? calls : ceil;
     $('total').textContent = usd(total);
-    $('cap').textContent = int(calls) + ' calls \\u00d7 ' + usd(cost)
+    $('cap').textContent = int(calls) + ' calls \\u00d7 ' + rate(cost)
       + (edited ? '.' : ': example inputs until you change them.') + ' An estimate, not a measurement.';
     $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is '
-      + usd(cost) + ' a unit. AgentBill counts units, not dollars.';
+      + rate(cost) + ' a unit. AgentBill counts units, not dollars.';
     if (fits) {
       $('ceil-line').textContent = 'Every call fits under a ceiling of ' + int(ceil) + '.';
-      $('after').textContent = 'The job never reaches its ceiling, so preflight approves all ' + int(calls) + ' calls.';
+      $('after').textContent = 'The job never reaches its ceiling, so the ceiling approves all ' + int(calls)
+        + ' calls. Your plan\\u2019s monthly preflight calls still apply.';
     } else {
       $('ceil-line').innerHTML = 'Call ' + int(ceil + 1) + ' gets <span class="chip-no">approved: false</span>';
       $('after').textContent = 'The ' + int(ok) + ' approved calls: about ' + usd(ok * cost)
