@@ -29,7 +29,9 @@ import { SDK_VERSIONS } from '../lib/llms.js'
 //     install the frameworks, so the framework half is only as good as that
 //     run. Change a sample and run it again.
 //   - The mechanism is worded the same way everywhere: preflight answers, the
-//     SDK raises on a ceiling refusal, and the caller's code decides. Nothing
+//     SDK raises on a ceiling refusal, and the caller's code decides. The two
+//     rows without an SDK say what they do instead: the OpenClaw plugin hands
+//     the refusal to OpenClaw, and the MCP server returns it as a value. Nothing
 //     here says AgentBill ends a run, because nothing here can.
 //
 // n8n and Claude Code have no page: nothing we ship installs into either, so a
@@ -169,8 +171,10 @@ ${HUB_ROWS.map(hubRow).join('\n')}
 
   <h2>Which one fits</h2>
   <p><b>Your agent runs inside OpenClaw.</b> Install the plugin. It asks one ceiling before every
-  model turn and every tool call in a session, and OpenClaw does not send a turn or run a tool the
-  ceiling refused.</p>
+  tool call in a session, and before every model turn on OpenClaw's embedded and CLI runners.
+  OpenClaw does not run a tool or send a turn the ceiling refused. On the Codex and Copilot
+  harnesses only tool calls are asked; the <a href="/integrations/openclaw">OpenClaw page</a> says
+  why.</p>
   <p><b>Your agent is code you own.</b> Put preflight and record where your code, or your
   framework, calls the model. The guides show where that is in LangChain, the OpenAI Agents SDK and
   CrewAI, with samples that were run against the framework versions in the table.</p>
@@ -183,11 +187,16 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <h2>What every row has in common</h2>
   <p>The ceiling is bound to a <span class="inline">task_ref</span>, the name you give a job, and
   every call that passes it draws on the same number, whichever process, agent or provider made it.
-  Units are integers you define; AgentBill never converts them to money and never reads your
-  provider bill. Before a call, preflight answers. When the call would pass the ceiling it answers
-  <span class="inline">approved: false</span>, the SDK raises
-  <span class="inline">TaskCeilingExceededError</span>, and your code decides what the job does
-  next. <a href="/docs/task-budgets">Task budgets</a> explains the mechanism.</p>
+  Before a call, preflight answers, and when the call would pass the ceiling it answers
+  <span class="inline">approved: false</span>. <a href="/docs/task-budgets">Task budgets</a>
+  explains the mechanism.</p>
+  <p>What reaches you then depends on the row. With the Python and Node SDKs, and the guides built
+  on them, the SDK raises <span class="inline">TaskCeilingExceededError</span> and your code
+  decides what the job does next. The OpenClaw plugin hands the refusal to OpenClaw, and the MCP
+  server returns it to the model as a value. Over the HTTP API, the answer is the JSON body.</p>
+  <p>Units are integers you assign to each call, except in the OpenClaw plugin's tokens mode, which
+  counts the token totals OpenClaw reports. AgentBill never converts units to money and never reads
+  your provider bill.</p>
 
   ${cta('integrations')}
 `,
@@ -200,18 +209,28 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   // says the run "stops": the host is what declines to send the turn, and the
   // plugin is what hands it the refusal. { outcome: 'block' } is OpenClaw's
   // field name and stays in OpenClaw's code, not in this page's sentences.
+  //
+  // Two limits of the host, from openclaw 2026.9.4, that every sentence here
+  // keeps. before_agent_run runs once per turn, before the agent loop, and only
+  // on the embedded and CLI runners (docs/plugins/hooks.md: not a Codex or
+  // Copilot input gate). llm_output reports once per run attempt with the
+  // attempt's usage summed, so the model calls inside a turn are recorded
+  // together after they run and are never asked one by one.
   app.get('/integrations/openclaw', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       '/integrations/openclaw',
       'OpenClaw spend limit: one ceiling per session, as a ClawHub plugin',
-      'Install @agentbill/openclaw from ClawHub and every model turn and tool call in an OpenClaw session asks one ceiling before it runs. A refusal goes to OpenClaw\'s gate hook, and OpenClaw does not send that turn or run that tool.',
+      'Install @agentbill/openclaw from ClawHub and every tool call in an OpenClaw session asks one ceiling before it runs, and so does every model turn on the embedded and CLI runners. OpenClaw does not run a refused tool call or send a refused turn.',
       `
   <h1>OpenClaw spend limit, one ceiling per session</h1>
   <span class="badge">OpenClaw plugin</span><span class="badge">ClawHub ${SDK_VERSIONS.openclaw}</span>
-  <p class="lede">One ceiling per OpenClaw session. Before every model turn and every tool call, the
-  plugin asks AgentBill whether the session's running total plus the next call would pass it. When
-  it would, preflight answers <span class="inline">approved: false</span>, the plugin hands that
-  refusal to OpenClaw's gate hook, and OpenClaw does not send the turn or run the tool.</p>
+  <p class="lede">One ceiling per OpenClaw session. Before every tool call, and before every model
+  turn on OpenClaw's embedded and CLI runners, the plugin asks AgentBill whether the session's
+  running total plus an estimate of what comes next would pass it. When it would, preflight answers
+  <span class="inline">approved: false</span>, the plugin hands that refusal to OpenClaw's gate
+  hook, and OpenClaw does not run the tool or send the turn. On the Codex and Copilot harnesses
+  OpenClaw does not run <span class="inline">before_agent_run</span>, so only tool calls are
+  asked.</p>
 
   <h2>Install</h2>
   <div class="code"><pre>openclaw plugins install clawhub:@agentbill/openclaw</pre></div>
@@ -255,16 +274,24 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   means it is on. Uninstalling the plugin removes its whole
   <span class="inline">plugins.entries.agentbill</span> entry, the flag with it, so set it again
   after a reinstall.</p>
+  <p>With the flag set, model turns are asked only where OpenClaw runs
+  <span class="inline">before_agent_run</span>, which is its embedded and CLI runners. On the Codex
+  and Copilot harnesses OpenClaw does not run that hook, so only tool calls are asked and each
+  model turn goes to the model unasked.</p>
 
   <h2>What one unit is</h2>
-  <p><span class="inline">units: "tokens"</span> is the default. After each model call the plugin
-  records the usage total OpenClaw reports in its <span class="inline">llm_output</span> hook, so
-  what counts against the ceiling is the host's own number, not an estimate you write. Before a call
-  it reserves an estimate: <span class="inline">estimateUnits</span> for a session's opening call,
-  then the session's running average of what its model calls cost. Tool calls record nothing in
-  tokens mode; the model call around them is what costs.</p>
-  <p><span class="inline">units: "calls"</span> counts every model call and every tool call as one
-  unit, so a ceiling of 40 is forty calls.</p>
+  <p><span class="inline">units: "tokens"</span> is the default. After a model turn runs, the plugin
+  records the usage total OpenClaw reports for it in its <span class="inline">llm_output</span>
+  hook, which covers every model call in the turn, so what counts against the ceiling is the host's
+  own number, not an estimate you write. Before a call it reserves an estimate:
+  <span class="inline">estimateUnits</span> for a session's opening call, then the session's running
+  average of what those reports came to. Tool calls record nothing in tokens mode; the model calls
+  around them are what cost.</p>
+  <p><span class="inline">units: "calls"</span> counts one unit for each
+  <span class="inline">llm_output</span> report and one for each tool call. OpenClaw's embedded
+  runner makes that report once per model turn (once per attempt, if it retries one), however many
+  model calls the turn made, so a ceiling of 40 is forty turns and tool calls together, not forty
+  provider requests.</p>
   <p>The plugin measures no provider and no tool. It records what OpenClaw already counts, and
   nothing converts that number to dollars.</p>
 
@@ -283,10 +310,13 @@ ${HUB_ROWS.map(hubRow).join('\n')}
 
   <h2>Loops, subagents and fan-out</h2>
   <p>A tool loop inside one session is one task_ref already. Every tool call asks before it runs,
-  and so does every model turn between them, so the step that would pass the ceiling is refused
-  before it runs, however many steps came before it. The ceiling has no clock. It does not refill
-  at the top of an hour or a month, so a session that has spent it is refused until you raise
-  it.</p>
+  and on the embedded and CLI runners every new model turn asks before the model sees it. The
+  model calls inside a turn are not asked one by one: their usage is recorded after they run, from
+  the total OpenClaw reports, so a turn can end past the ceiling, as the session in the sample above
+  did. A refused tool call goes back to the model as the tool's result, and that model call runs
+  too. Once the total is past the ceiling, the next tool call is refused, and so is the next turn
+  wherever turns are asked. The ceiling has no clock. It does not refill at the top of an hour or a
+  month, so a session that has spent it is refused until you raise it.</p>
   <p>A subagent draws on its parent's ceiling when OpenClaw reports which session spawned it: the
   plugin reads <span class="inline">requesterSessionKey</span> from the
   <span class="inline">subagent_spawned</span> context and links the child to the parent's
@@ -299,7 +329,7 @@ ${HUB_ROWS.map(hubRow).join('\n')}
     <tbody>
       <tr><td>session_start</td><td>observe</td><td>Opens the session's task_ref, <span class="inline">openclaw:</span> plus the session key.</td></tr>
       <tr><td>subagent_spawned</td><td>observe</td><td>Links the child session to the parent's task_ref.</td></tr>
-      <tr><td>before_agent_run</td><td>gate</td><td>Calls preflight. On a refusal, returns the refusal sentence to OpenClaw.</td></tr>
+      <tr><td>before_agent_run</td><td>gate</td><td>Calls preflight. On a refusal, returns the refusal sentence to OpenClaw. Run by the embedded and CLI runners only.</td></tr>
       <tr><td>before_tool_call</td><td>gate</td><td>Calls preflight. On a refusal, returns the refusal sentence to OpenClaw.</td></tr>
       <tr><td>llm_output</td><td>observe</td><td>Records the usage total OpenClaw reports.</td></tr>
       <tr><td>after_tool_call</td><td>observe</td><td>Records <span class="inline">toolCallUnits</span>, when above zero.</td></tr>
