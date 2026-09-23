@@ -77,7 +77,13 @@ new name is `cv-` because the short ones are taken by page-local rules:
 - `.cv-table` (+ `.is-ruled`, `.num`, `.m`, `.mut`, `tr.is-no`), in
   `.cv-scroll` when it can outgrow a phone.
 - code: `.cv-code` (+ `.is-sm`) on the plate for the machine's answer;
-  `.cv-snip` / `.cv-snip-h` for your code.
+  `.cv-snip` / `.cv-snip-h` for your code; `.cv-plate` for one value a reader
+  copies whole (a key, the line that sets it): white, hairline, `--r-field`,
+  the Copy at the right, and `break-all` so `export AGENTBILL_API_KEY=agb_...`
+  starts on line one. `copyPlate()` in `copy.ts` renders it with the Copy.
+- `.cv-close`: the homepage's closing band, warm grey at `--r-card`, words
+  centred. Every done or dead end takes it: `/thanks`, and `/recover`'s sent,
+  refused and expired messages.
 - `.cv-callout` (+ `.is-no`), `.cv-flabel` / `.cv-field` (+ `.m`) /
   `.cv-hint` / `.cv-err`, `.cv-seg`, `.cv-navlink` (+ `.n`), `.cv-empty`.
 - helpers: `chip()`, `tag()`, `SAMPLE_TAG`, `label()`, `meter()`.
@@ -573,6 +579,9 @@ left-aligned label in a full-width button reads as broken.
 
 Not on `/app`, `/admin`, `/register`, `/terms`, `/privacy` or `/pricing`: you are
 already there, or a sticky sales button on a privacy policy is the wrong register.
+`/recover`, `/thanks` and `/status` joined on 2026-09-23 (`sticky: false` in the
+docs shell): their reader already has an account, and on the recovered-key page
+the bar sat over the "your console" line. The 404 keeps it.
 `/pricing` joined that list on 2026-09-06: its whole purpose is the tier buttons,
 so the bar put a second green fill on screen beside the one the reader came to
 press, which is the duplication this rule exists to prevent.

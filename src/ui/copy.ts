@@ -64,8 +64,20 @@ const c = inlineScript(src)
 export const COPY_JS = c.html
 export const COPY_HASH = c.hash
 
+const copyButton = (id: string, text: string): string =>
+  `<button type="button" class="cp-btn" data-copy="${id}" aria-label="Copy ${text}">Copy</button>`
+
 /** A copyable one-line command. `id` must be unique on the page. */
 export function copyPill(id: string, text: string): string {
-  return `<div class="cp"><code id="${id}">${text}</code>` +
-    `<button type="button" class="cp-btn" data-copy="${id}" aria-label="Copy ${text}">Copy</button></div>`
+  return `<div class="cp"><code id="${id}">${text}</code>` + copyButton(id, text) + `</div>`
+}
+
+/**
+ * The same control on the kit's plate (.cv-plate in src/ui/kit.ts), for a
+ * value that wraps: a key, or the line that sets one. Same button, same
+ * data-copy, same script; only the shape around it differs, a rounded
+ * rectangle that wraps its text with the Copy held at the right.
+ */
+export function copyPlate(id: string, text: string): string {
+  return `<div class="cv-plate"><code id="${id}">${text}</code>` + copyButton(id, text) + `</div>`
 }

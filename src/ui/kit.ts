@@ -164,6 +164,33 @@ export const KIT_CSS = `
   .cv-snip pre { padding: 14px 18px; overflow-x: auto; font-family: var(--mono); font-size: var(--fs-code);
                  line-height: 1.7; color: var(--text); }
   .cv-snip .cmt { color: var(--dim); }
+  /* The plate: one value a reader copies whole, a key or the line that sets
+     it. A white plate with a hairline at --r-field, the value in the mono,
+     and the Copy (.cp-btn, src/ui/copy.ts) at the right, where the homepage's
+     copy pill has it. A rounded rectangle and not a pill, because a
+     52-character key wraps at every phone width. break-all, because the line
+     that sets a key starts with a short word: with only overflow-wrap the
+     break falls after "export" and one command reads as two lines. A plate
+     with no Copy (the recovery page, which ships no script) keeps the shape. */
+  .cv-plate { display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+              padding: 6px var(--s4); background: var(--surface); border: 1px solid var(--border);
+              border-radius: var(--r-field); font-family: var(--mono); font-size: var(--fs-code);
+              line-height: 1.5; color: var(--code-ink); min-width: 0; }
+  .cv-plate:has(> button) { padding-right: 6px; }
+  .cv-plate > code, .cv-plate > span { font: inherit; color: inherit; min-width: 0; padding-block: 5px;
+              overflow-wrap: anywhere; word-break: break-all; }
+  .cv-plate > button { flex: none; }
+
+  /* ---- The close: the homepage's closing band, the warm-grey ground at
+     --r-card with its heading and sentences centred. The one shape for a
+     screen that is a done or a dead end: the receipt after checkout, and a
+     recovery link that was sent, refused or spent. Words and prose links
+     only; nothing in it is a second action. */
+  .cv-close { background: var(--panel-bg); border-radius: var(--r-card); padding: 80px var(--s7);
+              display: grid; justify-items: center; text-align: center; }
+  .cv-close h1 { max-width: 22ch; margin-bottom: var(--s4); }
+  .cv-close p { margin-inline: auto; max-width: 52ch; text-wrap: pretty; }
+  .cv-close p:last-child { margin-bottom: 0; }
 
   /* ---- Callout: a note that belongs to the page, not to a row. Sample-data
      banners, "what this view reads from", a refusal notice (.is-no). */
@@ -224,6 +251,7 @@ export const KIT_CSS = `
     .cv-body { padding: var(--s2) var(--s2) 14px; }
     .cv-side { padding: var(--s4); }
     .cv-table th, .cv-table td { padding-inline: 6px; }
+    .cv-close { padding: var(--s7) 20px; }
   }
 `
 

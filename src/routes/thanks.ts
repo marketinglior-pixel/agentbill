@@ -44,6 +44,13 @@ function allowance(tier: string): string {
   return `Your account now includes <b>${num(limit)}</b> preflight calls a month, at $${PLAN_PRICES[tier]} a month.`
 }
 
+/* Canvas, 2026-09-23. A receipt is the page's close, so it takes the
+   homepage's close: the kit's .cv-close band (src/ui/kit.ts), the heading and
+   its sentences centred in it. The recovery page's sent, refused and expired
+   messages use the same band, so every done or dead end reads the same. The
+   links stay the prose links the docs shell draws; nothing here is a second
+   action. */
+
 export async function thanksRoute(app: FastifyInstance) {
   app.get('/thanks', publicRoute(), async (request, reply) => {
     const q = request.query as Record<string, unknown>
@@ -127,9 +134,15 @@ export async function thanksRoute(app: FastifyInstance) {
         current: '',
         rail: false,
         navCta: !paid,
+        // Never the phone's sticky signup bar. The only way here is Polar's
+        // return from a checkout, and a checkout starts from an account
+        // (checkoutPath carries its id), so the reader has one already.
+        sticky: false,
         body: `
+  <div class="cv-close">
   <h1>${heading}</h1>
 ${body}
+  </div>
 `,
       }))
   })
