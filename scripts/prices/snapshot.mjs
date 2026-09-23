@@ -2,7 +2,7 @@
 // Build src/lib/price-snapshot.ts: a dated subset of LiteLLM's
 // model_prices_and_context_window.json, pinned to one commit.
 //
-//   node scripts/prices/snapshot.mjs <path to the json> <full commit sha> <commit date, YYYY-MM-DD>
+//   node scripts/prices/snapshot.mjs <full commit sha> <commit date, YYYY-MM-DD> < prices.json
 //
 // Fetch the file at a commit, never at a branch, so the bytes and the version
 // name agree:
@@ -31,9 +31,9 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
-const [file, sha, date] = process.argv.slice(2)
-if (!file || !/^[0-9a-f]{40}$/.test(sha ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) {
-  console.error('usage: node scripts/prices/snapshot.mjs <json> <40-char commit sha> <YYYY-MM-DD>')
+const [sha, date] = process.argv.slice(2)
+if (!/^[0-9a-f]{40}$/.test(sha ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) {
+  console.error('usage: node scripts/prices/snapshot.mjs <40-char commit sha> <YYYY-MM-DD> < prices.json')
   process.exit(2)
 }
 
@@ -41,7 +41,8 @@ const PROVIDERS = new Set(['openai', 'anthropic', 'gemini'])
 const MODES = new Set(['chat', 'responses'])
 const FIELD = /^(input_cost_per_token|output_cost_per_token|cache_read_input_token_cost|cache_creation_input_token_cost|output_cost_per_reasoning_token|input_cost_per_audio_token|output_cost_per_audio_token|cache_read_input_audio_token_cost)(_above_1hr)?(_above_\d+k_tokens)?(_flex|_priority)?$/
 
-const all = JSON.parse(readFileSync(file, 'utf8'))
+// The price file arrives on stdin, so no argument ever names a path to read.
+const all = JSON.parse(readFileSync(0, 'utf8'))
 const models = {}
 let skippedFields = 0
 for (const [key, entry] of Object.entries(all)) {
