@@ -2418,8 +2418,141 @@ ok('[meter] the console shows a tokens job as "300 / 900 tokens" and "600 tokens
    pageM.includes('<b>300</b> / 900 tokens</span>') && pageM.includes('600 tokens left'), (pageM.match(/meter-tok[\s\S]{0,600}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 300))
 ok('[meter] and a job in the developer\'s own unit exactly as before, with no unit word added',
    /<b>1<\/b> \/ 100<\/span>/.test(pageM) && !/<b>1<\/b> \/ 100 (tokens|units)/.test(pageM), (pageM.match(/meter-def[\s\S]{0,400}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 200))
-ok('[meter] and a job with unmeasured calls says how many, and that they were charged their reservation',
-   pageM.includes('3 calls with no usage reported, charged at their reservation'), 'no usage-missing note on the console')
+// One of meter-missing's three calls found no reservation open and was
+// recorded at the 0 it sent, so "charged at their reservation", the wording
+// before 2026-09-23, was false on this very row.
+ok('[meter] and a job with unmeasured calls says how many, and that the reservation was the floor only where one was open',
+   pageM.includes('3 calls with no usage reported, charged at least the reservation where one was open') && !pageM.includes('charged at their reservation'),
+   (pageM.match(/meter-missing[\s\S]{0,900}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 400))
+
+// ---------------------------------------------------------------- usage_missing with no reservation_id
+// Review of stage A, 2026-09-23: preflight reserving 70,000, then
+// record(units 0, usage_missing) WITHOUT reservation_id answered
+// units_recorded 0, the job showed 0 used with 70,000 still reserved until
+// the TTL, and every document said such a call "is charged at least what its
+// reservation held". The unnamed path now floors at the oldest open
+// reservation of the customer and task_ref and closes it whole.
+const unP = await preM({ agent_id: 'meter', task_ref: 'meter-missing-unnamed', task_ceiling: 500_000, estimated_units: 70_000 })
+const unR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-unnamed'), units: 0, usage_missing: true, task_ref: 'meter-missing-unnamed' })
+const tUn = await taskM('meter-missing-unnamed')
+ok('[meter] usage_missing without reservation_id is charged the 70,000 its job had open, not 0, and nothing stays held',
+   unP.body?.approved === true && unR.status === 200 && unR.body?.units_recorded === 70_000 && tUn.usedUnits === 70_000 && tUn.reservedUnits === 0
+     && await openForTask('meter-missing-unnamed') === 0 && tUn.usageMissingCalls === 1 && !('reservation_status' in (unR.body ?? {})),
+   `${unR.status} ${JSON.stringify(unR.body)} ${JSON.stringify(tUn)}`)
+// A reservation_id that matches nothing takes the unnamed path, floor included.
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-nf', task_ceiling: 500_000, estimated_units: 50_000 })
+const nfR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-nf'), units: 0, usage_missing: true, task_ref: 'meter-missing-nf',
+                         reservation_id: '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f' })
+const tNf = await taskM('meter-missing-nf')
+ok('[meter] usage_missing naming a reservation that is not_found is floored the same way: 50,000, closed whole',
+   nfR.body?.reservation_status === 'not_found' && nfR.body?.units_recorded === 50_000 && tNf.usedUnits === 50_000 && tNf.reservedUnits === 0,
+   `${JSON.stringify(nfR.body)} ${JSON.stringify(tNf)}`)
+// The floor is the OLDEST open reservation, the one the FIFO settle closes
+// first, and only that one: the newer one beside it keeps what it holds.
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-two', task_ceiling: 500_000, estimated_units: 30_000 })
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-two', estimated_units: 90_000 })
+const twoR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-two'), units: 0, usage_missing: true, task_ref: 'meter-missing-two' })
+const tTwo = await taskM('meter-missing-two')
+ok('[meter] with two open, it is the oldest (30,000) that sets the floor and closes; the newer 90,000 stays held',
+   twoR.body?.units_recorded === 30_000 && tTwo.usedUnits === 30_000 && tTwo.reservedUnits === 90_000 && await openForTask('meter-missing-two') === 90_000,
+   `${JSON.stringify(twoR.body)} ${JSON.stringify(tTwo)}`)
+// An old client's record (no usage_missing) on the unnamed path is untouched:
+// FIFO by the units it sent, no floor.
+await preM({ agent_id: 'meter', task_ref: 'meter-plain-unnamed', task_ceiling: 500_000, estimated_units: 70_000 })
+const plR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('plain-unnamed'), units: 8_000, task_ref: 'meter-plain-unnamed' })
+const tPl = await taskM('meter-plain-unnamed')
+ok('[meter] and a plain unnamed record still settles FIFO by what it sent: 8,000 used, 62,000 held, no units_recorded key',
+   plR.body?.status === 'recorded' && !('units_recorded' in plR.body) && tPl.usedUnits === 8_000 && tPl.reservedUnits === 62_000,
+   `${JSON.stringify(plR.body)} ${JSON.stringify(tPl)}`)
+
+// ---------------------------------------------------------------- metadata jsonb refuses
+// Review of stage A, 2026-09-23: with metadata stored as an object
+// (::text::jsonb), a NUL or a lone surrogate anywhere in it was a 500 that
+// rolled the whole record back, so the call was never recorded and its
+// reservation stayed held. On cc5a1d2 the same bodies were 200, stored inside
+// a JSON string. A string cut mid-emoji by .slice() is enough for the second.
+const metaCases = [
+  ['nul', { note: 'a\u0000b', 'k\u0000ey': 1 }, { note: 'ab', key: '1' }],
+  ['surrogate', { note: '\ud800', nested: [{ cut: 'ok \ud83d' }] }, { note: '\ufffd', cut: 'ok \ufffd' }],
+]
+for (const [label, meta, want] of metaCases) {
+  const mp = await preM({ agent_id: 'meter', task_ref: `meter-meta-${label}`, task_ceiling: 1_000, estimated_units: 40 })
+  const mk = keyM(`meta-${label}`)
+  const mr = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: mk, units: 5, task_ref: `meter-meta-${label}`, reservation_id: mp.body?.reservation_id, metadata: meta })
+  const row = (await sql`
+    SELECT units, jsonb_typeof(metadata) AS kind, metadata->>'note' AS note, metadata->>'key' AS key,
+           metadata #>> '{nested,0,cut}' AS cut
+    FROM events WHERE account_id = ${ACCT} AND idempotency_key = ${mk}`)[0]
+  const tm = await taskM(`meter-meta-${label}`)
+  const got = { note: row?.note, ...(want.key !== undefined ? { key: row?.key } : {}), ...(want.cut !== undefined ? { cut: row?.cut } : {}) }
+  ok(`[meter] metadata with a ${label === 'nul' ? 'NUL' : 'lone surrogate'} in a string (and a key) is recorded, 200, not a 500 that loses the call`,
+     mr.status === 200 && mr.body?.status === 'recorded' && row?.units === 5 && row?.kind === 'object',
+     `${mr.status} ${mr.text.slice(0, 160)} ${JSON.stringify(row)}`)
+  ok(`[meter] and stored made valid (${label === 'nul' ? 'NUL removed' : 'lone surrogate as U+FFFD'}), with the reservation settled`,
+     JSON.stringify(got) === JSON.stringify(want) && tm.reservedUnits === 0 && tm.usedUnits === 5,
+     `${JSON.stringify(got)} vs ${JSON.stringify(want)} task ${JSON.stringify(tm)}`)
+}
+
+// ---------------------------------------------------------------- a replayed preflight answers as it was answered
+// Review of stage A, 2026-09-23: a retried preflight with the same
+// idempotency_key after a task_unit_mismatch came back HTTP 200, text/plain,
+// carrying the 422 body, and the Python SDK's retry raised
+// KeyError('approved'). Two causes: remember() stored no status, and
+// ${JSON.stringify(body)}::json double-encoded every stored answer, so every
+// replay, approvals included, went out as text/plain.
+const rawPre = (b) => fetch(`${API}/preflight`, {
+  method: 'POST', headers: { 'Authorization': `Bearer ${KEYM}`, 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+}).then(async (r) => { const text = await r.text(); let json = null; try { json = JSON.parse(text) } catch {} return { status: r.status, type: r.headers.get('content-type') ?? '', body: json, text } })
+const isJsonType = (t) => /^application\/json/.test(t)
+const rpKey = keyM('replay')
+const rpA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', task_ceiling: 1_000, estimated_units: 7, unit: 'token', idempotency_key: rpKey })
+const rpB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', task_ceiling: 1_000, estimated_units: 7, unit: 'token', idempotency_key: rpKey })
+ok('[meter] a replayed approval is the same body, HTTP 200 and application/json (it was text/plain)',
+   rpA.status === 200 && rpB.status === 200 && rpA.body?.approved === true && rpB.text === rpA.text && isJsonType(rpA.type) && isJsonType(rpB.type)
+     && (await taskM('meter-replay')).reservedUnits === 7,
+   `${rpA.status} ${rpA.type} | ${rpB.status} ${rpB.type} ${rpB.text.slice(0, 120)}`)
+const mmKey = keyM('replay-mismatch')
+const mmA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', estimated_units: 5, unit: 'unit', idempotency_key: mmKey })
+const mmB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', estimated_units: 5, unit: 'unit', idempotency_key: mmKey })
+ok('[meter] task_unit_mismatch retried with the same key is a 422 again, as application/json, never a 200 with the 422 body',
+   mmA.status === 422 && mmB.status === 422 && mmB.body?.error === 'task_unit_mismatch' && isJsonType(mmB.type) && !('approved' in (mmB.body ?? {})),
+   `${mmA.status} | ${mmB.status} ${mmB.type} ${mmB.text.slice(0, 160)}`)
+const rqKey = keyM('replay-required')
+const rqA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+const rqB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+ok('[meter] task_ceiling_required retried with the same key is a 422 again, as application/json',
+   rqA.status === 422 && rqB.status === 422 && rqB.body?.error === 'task_ceiling_required' && isJsonType(rqB.type), `${rqA.status} | ${rqB.status} ${rqB.type} ${rqB.text.slice(0, 160)}`)
+// Nothing was reserved under a 422, so the key was never spent: once the job
+// is opened, the same key is decided again, and approved once.
+await callM('PUT', '/tasks/meter-replay-new/ceiling', { ceiling_units: 100 })
+const rqC = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+const rqD = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+ok('[meter] and once the job exists the same key is approved, and reserved once',
+   rqC.status === 200 && rqC.body?.approved === true && rqD.text === rqC.text && (await taskM('meter-replay-new')).reservedUnits === 5,
+   `${rqC.status} ${rqC.text.slice(0, 120)} | ${rqD.text.slice(0, 80)} ${JSON.stringify(await taskM('meter-replay-new'))}`)
+const rfKey = keyM('replay-refused')
+const rfA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 500, idempotency_key: rfKey })
+const rfB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 500, idempotency_key: rfKey })
+ok('[meter] a remembered refusal (approved:false, 200) replays as the same 200 JSON body',
+   rfA.status === 200 && rfA.body?.approved === false && rfA.body?.reason === 'task_ceiling_exceeded' && rfB.status === 200 && rfB.text === rfA.text && isJsonType(rfB.type),
+   `${rfA.text.slice(0, 120)} | ${rfB.status} ${rfB.type}`)
+// Rows an earlier build wrote are JSON strings holding JSON text. They must
+// replay as the object, with the status they were answered with.
+const legacyOk = { approved: true, reason: null, estimated_units: 3, remaining_units: null, reservation_expires_at: '2026-09-23T00:00:00.000Z', task_ref: 'meter-legacy', task_ceiling: 10, task_remaining_units: 7 }
+const legacyReq = { error: 'task_ceiling_required', message: 'Unknown task_ref "meter-legacy-422".' }
+const lgOkKey = keyM('legacy-ok'), lg422Key = keyM('legacy-422')
+await sql`INSERT INTO preflight_requests (account_id, idempotency_key, response) VALUES
+  (${ACCT}, ${lgOkKey}, to_json(${JSON.stringify(legacyOk)}::text)), (${ACCT}, ${lg422Key}, to_json(${JSON.stringify(legacyReq)}::text))`
+const lgKind = (await sql`SELECT json_typeof(response) AS k FROM preflight_requests WHERE account_id = ${ACCT} AND idempotency_key = ${lgOkKey}`)[0]?.k
+const lgOk = await rawPre({ agent_id: 'meter', task_ref: 'meter-legacy', estimated_units: 3, idempotency_key: lgOkKey })
+const lg422 = await rawPre({ agent_id: 'meter', task_ref: 'meter-legacy-422', estimated_units: 3, idempotency_key: lg422Key })
+ok('[meter] a row an earlier build stored as a JSON string replays as the object it holds, snake_case keys intact, 200 application/json',
+   lgKind === 'string' && lgOk.status === 200 && isJsonType(lgOk.type) && JSON.stringify(lgOk.body) === JSON.stringify(legacyOk),
+   `${lgKind} ${lgOk.status} ${lgOk.type} ${lgOk.text.slice(0, 160)}`)
+ok('[meter] and a 422 an earlier build remembered replays as a 422',
+   lg422.status === 422 && lg422.body?.error === 'task_ceiling_required' && isJsonType(lg422.type), `${lg422.status} ${lg422.type} ${lg422.text.slice(0, 120)}`)
+const rpStored = (await sql`SELECT json_typeof(response) AS k FROM preflight_requests WHERE account_id = ${ACCT} AND idempotency_key = ${rpKey}`)[0]?.k
+ok('[meter] and what this build stores is the object itself, not a string of it', rpStored === 'object', String(rpStored))
 
 // ---------------------------------------------------------------- BIGINT, and the parser that makes it safe
 const UNIT_COLUMNS_M = [
@@ -2520,6 +2653,24 @@ const numsM = {
 }
 const notNumM = Object.entries(numsM).filter(([, v]) => typeof v !== 'number')
 ok('[meter] every unit field on preflight, events, tasks, budget, checkpoint and decisions is a JSON number', notNumM.length === 0, JSON.stringify(Object.fromEntries(notNumM)))
+
+// ---------------------------------------------------------------- every answer sent once
+// Found while fixing the replay above, 2026-09-23. replay() returned the
+// Fastify reply, which is a thenable that resolves to undefined once sent, so
+// `if (await replay())` never took the early return: every replayed preflight
+// fell through into the reserve transaction, lost the claim and tried to
+// answer twice more. The claim kept it from reserving; the server logged
+// "Reply was already sent" each time, and nothing read the log. This does,
+// after every section above has run. Last, so it sees all of them.
+await settle(300)
+const { readFileSync: readServerLog } = await import('node:fs')
+const SERVER_LOG_M = process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log'
+let serverLogM = ''
+try { serverLogM = readServerLog(SERVER_LOG_M, 'utf8') } catch {}
+const doubleSendsM = serverLogM.match(/Reply was already sent[^"]*"[^"]*"[^"]*"[^"]*"/g) ?? []
+ok('[meter] the server answered every request once: no "Reply was already sent" anywhere in its log',
+   serverLogM.length > 0 && doubleSendsM.length === 0,
+   `${doubleSendsM.length} in ${SERVER_LOG_M} (${serverLogM.length} bytes) ${doubleSendsM.slice(0, 1).join('')}`)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()

@@ -488,8 +488,11 @@ event_type here is what the SDKs send agent_id as.
   is not this customer's and this task_ref's is not_found, and the record settles FIFO as one
   without an id does.
 - usage_missing true: the provider reported no usage for the call. It is not recorded as 0: the
-  call is charged at least what its reservation held, the event's metadata says usage_missing, the
-  task counts it in usage_missing_calls, and the answer carries usage_missing and units_recorded.
+  call is charged at least the reservation the record settles, which is the one reservation_id
+  names or, without a reservation_id that is found, the oldest open reservation of this customer
+  and task_ref, closed whole. With no reservation open there is nothing to go by and the units sent
+  are recorded. Either way the event's metadata says usage_missing, the task counts it in
+  usage_missing_calls, and the answer carries usage_missing and units_recorded.
 - a repeated idempotency_key: {"status":"duplicate_ignored"}, and no budget moves.
 - a customer whose limit_units would be crossed: 402 budget_exhausted, and no event row is written.
   This is the only 402 in the API, and it is the record path refusing, not preflight.

@@ -5,7 +5,8 @@ import { unitsOf, unitsOrNull } from '../db/int8.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
 import { mailOwner, ownerMailReady } from '../lib/mail.js'
 import { recordDecision } from '../lib/decisions.js'
-import { consumeReservations, findNamedReservation, settleNamedReservation, type NamedReservation } from '../lib/reservations.js'
+import { consumeReservations, findNamedReservation, oldestOpenReservationUnits, settleNamedReservation, type NamedReservation } from '../lib/reservations.js'
+import { jsonbSafe } from '../lib/jsonb.js'
 
 const ALERT_THRESHOLD = 800
 
@@ -42,8 +43,10 @@ const EventBody = z.object({
   // null is read as absent, so a client serialising an empty field is fine.
   reservation_id:   z.string().uuid().nullish(),
   // The provider reported no usage for this call. It is NOT read as 0: the
-  // call is charged at least what its reservation held, and counted on the
-  // job as usage_missing_calls. See migration 015.
+  // call is charged at least the reservation this record settles (the one
+  // reservation_id names, or else the oldest open one of this customer and
+  // task_ref), and counted on the job as usage_missing_calls. With no
+  // reservation open the units sent are recorded. See migration 015.
   usage_missing:    z.boolean().optional(),
 })
 
@@ -67,6 +70,13 @@ export async function eventsRoute(app: FastifyInstance) {
       metadata, success, task_ref, reservation_id, usage_missing,
     } = parsed.data
     const usageMissing = usage_missing === true
+    // The event row's metadata, as JSON text jsonb accepts, built before the
+    // transaction so nothing a caller put in it can roll the record back.
+    // The caller's part is made valid first and the flag added after, so no
+    // key of theirs can become usage_missing by losing a NUL.
+    const safeMetadata = metadata !== undefined ? jsonbSafe(metadata) as Record<string, unknown> : undefined
+    const rowMetadata = usageMissing ? { ...(safeMetadata ?? {}), usage_missing: true } : safeMetadata
+    const metadataText = rowMetadata !== undefined ? JSON.stringify(rowMetadata) : null
     const accountId = request.accountId
     const defaultBudget: number | null = null
     const taskRef = task_ref ?? null
@@ -118,14 +128,29 @@ export async function eventsRoute(app: FastifyInstance) {
           : null
 
         // What the call is charged. Normally what the caller reported. With
-        // usage_missing it is never less than what the call's own
-        // reservation held: the caller's worst-case estimate, made before the
-        // call, is the best number anyone has, and 0 would let a job look
-        // cheaper than it was. A named reservation already closed (settled or
-        // swept) still says how big it was, so it still sets the floor.
-        const units = usageMissing && named && named.state !== 'not_found'
-          ? Math.max(reportedUnits, named.units)
-          : reportedUnits
+        // usage_missing it is never less than the reservation the record
+        // settles: the caller's worst-case estimate, made before the call, is
+        // the best number anyone has, and 0 would let a job look cheaper than
+        // it was.
+        //   - Named and found: that reservation. One already closed (settled
+        //     or swept) still says how big it was, so it still sets the floor.
+        //   - Unnamed, or a name that matched nothing: the oldest open
+        //     reservation of this customer and task_ref, the one the FIFO
+        //     settle below closes first. units is raised to at least its size,
+        //     so that settle closes it whole. Until 2026-09-23 this path had no
+        //     floor at all: preflight reserving 70,000 and then
+        //     record(units 0, usage_missing) without reservation_id recorded 0
+        //     and left the 70,000 held until the TTL.
+        //   - No reservation open: there is nothing to go by, and the units
+        //     sent are recorded. The job still counts the call in
+        //     usage_missing_calls, so the total never reads as clean.
+        const found = named != null && named.state !== 'not_found' ? named : null
+        const floorUnits = !usageMissing
+          ? 0
+          : found
+            ? found.units
+            : await oldestOpenReservationUnits(tx, locked.id, taskRef)
+        const units = usageMissing ? Math.max(reportedUnits, floorUnits) : reportedUnits
 
         // ----------------------------------------------------------------
         // 3a. If success=false: release the preflight reservation only.
@@ -138,8 +163,8 @@ export async function eventsRoute(app: FastifyInstance) {
           // instead of being decremented a second time. A named reservation
           // is released whole; an unnamed release goes FIFO by `units`, as
           // before, and so does a name that matched nothing.
-          const consumed = named && named.state !== 'not_found'
-            ? await settleNamedReservation(tx, named)
+          const consumed = found
+            ? await settleNamedReservation(tx, found)
             : await consumeReservations(tx, locked.id, taskRef, reportedUnits)
           await tx`
             UPDATE customers
@@ -183,11 +208,13 @@ export async function eventsRoute(app: FastifyInstance) {
         //    read the column, which is how it lasted. Rows written before the
         //    fix are still strings; read them with (metadata #>> '{}')::jsonb.
         //    Same trap, same cast, as recordDecision in lib/decisions.ts.
-        const rowMetadata = usageMissing ? { ...(metadata ?? {}), usage_missing: true } : metadata
-        const metadataJson = rowMetadata !== undefined ? JSON.stringify(rowMetadata) : null
+        //    jsonbSafe because the cast made jsonb's own input rules apply:
+        //    a NUL or a lone surrogate in any string was accepted inside the
+        //    old JSON string and is a 22P05 / 22P02 as an object. See
+        //    lib/jsonb.ts; metadataText is built before the transaction.
         const [event] = await tx`
           INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata)
-          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataJson}::text::jsonb)
+          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataText}::text::jsonb)
           ON CONFLICT (account_id, idempotency_key) DO NOTHING
           RETURNING id
         `
@@ -224,8 +251,8 @@ export async function eventsRoute(app: FastifyInstance) {
         //        cannot subtract it a second time and push the counter below
         //        the units still in flight.
         // ----------------------------------------------------------------
-        const consumed = named && named.state !== 'not_found'
-          ? await settleNamedReservation(tx, named)
+        const consumed = found
+          ? await settleNamedReservation(tx, found)
           : await consumeReservations(tx, customer.id, taskRef, units)
 
         const [updated] = await tx`

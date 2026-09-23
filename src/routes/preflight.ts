@@ -75,40 +75,74 @@ export async function preflightRoute(app: FastifyInstance) {
     // Same key, same decision, one reservation. Without this a retried
     // preflight reserved a second time, so the mechanism meant to prevent
     // waste was the one consuming the budget.
-    const replay = async () => {
+    //
+    // And the same answer on the wire: the body, its status and
+    // application/json. Until 2026-09-23 a replay went out as
+    // HTTP 200 text/plain whatever it held, for two reasons. The body was
+    // written ${JSON.stringify(body)}::json, and postgres.js JSON.stringify's a
+    // json-typed parameter again, so every stored response was a JSON string
+    // holding JSON text, which reply.send() sends as text. And no status was
+    // kept, so a remembered 422 (task_ceiling_required) replayed as a 200 with
+    // no approved key, which the Python SDK read as KeyError('approved').
+    //
+    // Read back as text, never as json: the pool's camel transform renames
+    // the keys of a json value it parses (reservation_id would come back as
+    // reservationId), the same reason decisions.ts reads snapshot as text.
+    // A row written before the fix is that JSON string, so it is unwrapped
+    // once more. A stored body with an error and no approved key can only be
+    // a 422 that an earlier build remembered, and it is answered as a 422.
+    //
+    // It answers, and returns true when it did. Not the reply object: a
+    // Fastify reply is a thenable that resolves to undefined once sent, so
+    // `const replayed = await replay()` (the code until 2026-09-23) was
+    // always undefined, every replay fell through into the reserve
+    // transaction, lost the claim, and sent twice more ("Reply was already
+    // sent" in the server log, once per replayed call). The claim kept it
+    // from reserving again; it still cost a transaction and two warnings.
+    const replay = async (): Promise<boolean> => {
       const [prior] = await sql`
-        SELECT response FROM preflight_requests
+        SELECT response::text AS response FROM preflight_requests
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key!}
       `
-      if (!prior) return null
+      if (!prior) return false
       if (prior.response == null) {
         // The deciding request committed but has not written its body yet.
         // Answering anything else here would either invent a decision or let
         // this retry reserve on top of one already held.
-        return reply.status(409).send({
+        reply.status(409).send({
           error: 'preflight_in_progress',
           message: `A preflight with idempotency_key "${idempotency_key}" is still being decided. Retry in a moment.`,
         })
+        return true
       }
-      return reply.send(prior.response)
+      let stored: unknown = JSON.parse(prior.response)
+      if (typeof stored === 'string') stored = JSON.parse(stored)
+      const legacy422 = stored !== null && typeof stored === 'object'
+        && typeof (stored as Record<string, unknown>).error === 'string' && !('approved' in stored)
+      reply.status(legacy422 ? 422 : 200).send(stored)
+      return true
     }
 
-    // Remembers a decision reached outside the reserve transaction (the two
-    // early rejections, and the rollback paths). ON CONFLICT DO NOTHING so a
-    // concurrent evaluation of the same key keeps whichever answer landed first.
+    // Remembers a decision reached outside the reserve transaction: the early
+    // ceiling refusal and the approved:false refusals of the rollback path,
+    // all of them HTTP 200. The two 422s (task_unit_mismatch,
+    // task_ceiling_required) are deliberately not remembered: nothing was
+    // reserved and no quota was burned, the claim on the key rolled back
+    // with the transaction, so a retry with the same key is decided again,
+    // and gets the same 422 with its own status or, once the job exists,
+    // its approval. ::text::json so the column holds the object itself, not
+    // a string of it. ON CONFLICT DO NOTHING so a concurrent evaluation of
+    // the same key keeps whichever answer landed first.
     const remember = async (body: unknown) => {
       if (!idempotency_key) return
       await sql`
         INSERT INTO preflight_requests (account_id, idempotency_key, response)
-        VALUES (${accountId}, ${idempotency_key}, ${JSON.stringify(body)}::json)
+        VALUES (${accountId}, ${idempotency_key}, ${JSON.stringify(body)}::text::json)
         ON CONFLICT (account_id, idempotency_key) DO NOTHING
       `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
     }
 
-    if (idempotency_key) {
-      const replayed = await replay()
-      if (replayed) return replayed
-    }
+    if (idempotency_key && await replay()) return reply
 
     // Every approved:false below is also written to preflight_decisions
     // (migration 005) so the account has a record of what it was saved from.
@@ -327,8 +361,7 @@ export async function preflightRoute(app: FastifyInstance) {
       })
     } catch (err) {
       if (err instanceof ReplayNeeded) {
-        const replayed = await replay()
-        if (replayed) return replayed
+        if (await replay()) return reply
         // The claiming transaction rolled back and freed the key. Nothing was
         // reserved under it, so the caller is safe to retry.
         return reply.status(409).send({
@@ -347,7 +380,6 @@ export async function preflightRoute(app: FastifyInstance) {
             unit: jobUnit,
             declared_unit: unit,
           }
-          await remember(body)
           return reply.status(422).send(body)
         }
 
@@ -356,7 +388,6 @@ export async function preflightRoute(app: FastifyInstance) {
             error: 'task_ceiling_required',
             message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task, or open the job first with PUT /tasks/:task_ref/ceiling or in the console.`,
           }
-          await remember(body)
           return reply.status(422).send(body)
         }
 
@@ -466,7 +497,7 @@ export async function preflightRoute(app: FastifyInstance) {
     if (idempotency_key) {
       await sql`
         UPDATE preflight_requests
-        SET response = ${JSON.stringify(body)}::json
+        SET response = ${JSON.stringify(body)}::text::json
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key}
       `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
     }

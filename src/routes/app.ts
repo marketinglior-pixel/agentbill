@@ -1860,8 +1860,12 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   // in the developer's own unit reads as it always has.
   const tokens = t.unit === 'token'
   const per = tokens ? ' tokens' : ''
-  // Calls recorded without a usage count were charged their reservation, not
-  // 0, so the total is partly an estimate; the row says how many.
+  // Calls recorded without a usage count were charged at least the
+  // reservation they settled, not 0, so the total is partly an estimate; the
+  // row says how many. A call that found no reservation open was recorded at
+  // what was sent, which is why the note says "where one was open" and not
+  // "charged at their reservation", the wording before 2026-09-23 that was
+  // false for exactly those calls.
   const missing = Number(t.usageMissingCalls ?? 0)
   return `<div class="brow">
       <div class="bhead">
@@ -1873,7 +1877,7 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
         <i class="res" style="width:${resPct.toFixed(1)}%"></i>
       </div>
       <div class="bfoot">
-        <span>${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}${missing > 0 ? ` · ${num(missing)} ${missing === 1 ? 'call' : 'calls'} with no usage reported, charged at ${missing === 1 ? 'its' : 'their'} reservation` : ''}</span>
+        <span>${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''}${missing > 0 ? ` · ${num(missing)} ${missing === 1 ? 'call' : 'calls'} with no usage reported, charged at least the reservation where one was open` : ''}</span>
         ${editable ? `<form method="POST" action="/app/tasks" class="bset" autocomplete="off">
           <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
           <label for="ceil-${i}">ceiling</label>

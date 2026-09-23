@@ -69,6 +69,32 @@ export async function consumeReservations(
   return amount - remaining
 }
 
+/**
+ * The size of the oldest open reservation of this customer and task_ref, the
+ * one consumeReservations closes first, or 0 when none is open.
+ *
+ * It is the floor for a usage_missing record that names no reservation (or
+ * names one that is not found): charging at least this much and settling FIFO
+ * by that amount closes this row whole. Read, not locked, exactly like the
+ * FIFO settle's own SELECT: the caller holds the customer row lock, which is
+ * what serialises records for one customer, and the sweeper claims with SKIP
+ * LOCKED. If the sweeper takes this row in between, the floor still reflects
+ * what the job had reserved for the call, and the settle releases only what it
+ * finds open.
+ */
+export async function oldestOpenReservationUnits(tx: Tx, customerId: string, taskRef: string | null): Promise<number> {
+  const [row] = await tx`
+    SELECT units
+    FROM reservations
+    WHERE customer_id = ${customerId}
+      AND task_ref IS NOT DISTINCT FROM ${taskRef}
+      AND released_at IS NULL
+    ORDER BY created_at, id
+    LIMIT 1
+  `
+  return row ? unitsOf(row.units) : 0
+}
+
 /** What a record that named its reservation found. */
 export type NamedReservation =
   | { state: 'open'; id: string | number; units: number }

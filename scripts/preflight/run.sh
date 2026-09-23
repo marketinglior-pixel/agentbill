@@ -41,19 +41,12 @@ else
 fi
 
 # Dependency order matters: the numbered migrations build on the loose ones.
-for f in \
-  "$ROOT/src/db/schema.sql" \
-  "$ROOT/src/db/migrate-multitenancy.sql" \
-  "$ROOT/src/db/migration-reserved-units.sql" \
-  "$ROOT/src/db/migration-step-costs.sql" \
-  "$ROOT/src/db/migration-webhook.sql" \
-  "$ROOT/src/db/polar-migration.sql" \
-  "$ROOT/src/db/migration-register-fields.sql" \
-  "$ROOT"/src/db/migrations/*.sql
-do
+# The list lives in schema-files.sh, shared with alter-under-load.sh.
+SCHEMA_FILES="$("$ROOT/scripts/preflight/schema-files.sh")"
+while IFS= read -r f; do
   psql < "$f" >/dev/null
-done
-echo "schema + migrations applied"
+done <<< "$SCHEMA_FILES"
+echo "schema + migrations applied ($(printf '%s\n' "$SCHEMA_FILES" | wc -l | tr -d ' ') files)"
 
 psql <<SQL >/dev/null
 INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
@@ -75,7 +68,9 @@ SQL
 # path that csp.ts's one-string guarantee does not cover. A synthetic id puts
 # that script under the [pulse] CSP gate; the harness only fetches HTML, so
 # nothing here talks to Meta.
-META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+# The server's log is read by the last gate in verify.mjs (every answer sent once).
+SERVER_LOG="${SERVER_LOG:-/tmp/agentbill-verify-server.log}"
+META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break
@@ -83,5 +78,5 @@ for _ in $(seq 1 30); do
 done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
-  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" SERVER_LOG="$SERVER_LOG" \
   node "$ROOT/scripts/preflight/verify.mjs"

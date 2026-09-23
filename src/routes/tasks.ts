@@ -48,9 +48,10 @@ function serialize(t: {
     // What the numbers above count: 'unit' (yours) or 'token'. Declared when
     // the job opened; see migration 014.
     unit: asTaskUnit(t.unit),
-    // Calls recorded with usage_missing: charged at least their reservation,
-    // not at 0, and counted here so the total above is known to be partly an
-    // estimate. See migration 015.
+    // Calls recorded with usage_missing: charged at least the reservation
+    // they settled (at what was sent when none was open), not at 0, and
+    // counted here so the total above is known to be partly an estimate.
+    // See migration 015.
     usage_missing_calls: t.usageMissingCalls == null ? 0 : unitsOf(t.usageMissingCalls),
     created_at: t.createdAt,
     updated_at: t.updatedAt,

@@ -12,11 +12,14 @@
 -- without usage, a host event without the counts. Recording that as 0 would
 -- make the job look cheaper than it was, which is the one direction a ceiling
 -- must never drift. So it is a separate flag on the request, usage_missing,
--- and the record path charges the call at least what its own reservation held
--- (the caller's own worst-case estimate, made before the call), stamps
--- usage_missing: true into events.metadata, and counts the call here, so a job
--- with unmeasured calls says so on GET /tasks and in the console instead of
--- reading as a clean total.
+-- and the record path charges the call at least the reservation it settles
+-- (the caller's own worst-case estimate, made before the call): the one
+-- reservation_id names, or without one that is found, the oldest open
+-- reservation of that customer and task_ref. With no reservation open the
+-- units sent are recorded. Either way it stamps usage_missing: true into
+-- events.metadata and counts the call here, so a job with unmeasured calls
+-- says so on GET /tasks and in the console instead of reading as a clean
+-- total.
 --
 -- The constraint swap is NOT VALID first and validated second: VALIDATE takes
 -- a lock that does not block inserts, so events keeps accepting writes while
