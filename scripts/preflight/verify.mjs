@@ -652,8 +652,10 @@ ok('a malformed account id in a Polar webhook is 200, not 500',
 
 // A value the schema accepts must be a value the column accepts. That is the
 // same rule as the id rules above, in the other direction: every units and
-// ceiling column is INTEGER and every schema said z.number().int() with no
-// ceiling, so 3_000_000_000 was Postgres 22003 and a 500.
+// ceiling column was INTEGER and every schema said z.number().int() with no
+// ceiling, so 3_000_000_000 was Postgres 22003 and a 500. The columns are
+// BIGINT since migration 016 and the per-request bound stays INT4_MAX until a
+// later deploy raises it on purpose, so this still answers 422.
 const bigUnits = await rec({ customer_id: 'intmax', event_type: 'run', idempotency_key: `im-${Date.now()}`, units: 3_000_000_000 })
 ok('a number past INTEGER is 422, not 500', bigUnits.status === 422, `${bigUnits.status} ${JSON.stringify(bigUnits.body).slice(0, 120)}`)
 const bigEst = await pre({ agent_id: 'intmax', estimated_units: 3_000_000_000 })
@@ -2382,8 +2384,12 @@ await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM(
 await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('tok'), units: 0, task_ref: 'meter-tok', reservation_id: tokNone.body.reservation_id })
 const unitNoRef = await preM({ agent_id: 'meter', estimated_units: 5, unit: 'token' })
 ok('[meter] unit without a task_ref is a 422: it would describe no job', unitNoRef.status === 422 && /needs task_ref/.test(unitNoRef.body?.message ?? ''), `${unitNoRef.status} ${unitNoRef.text.slice(0, 120)}`)
-const unitBad = await preM({ agent_id: 'meter', task_ref: 'meter-tok', estimated_units: 5, unit: 'dollar' })
-ok('[meter] a unit that is neither "unit" nor "token" is a 422', unitBad.status === 422, `${unitBad.status} ${unitBad.text.slice(0, 120)}`)
+// On a job this call would OPEN, so the only thing that can refuse it is the
+// schema: aimed at meter-tok, a unit mismatch answered 422 too, and this gate
+// passed with the schema rule removed.
+const unitBad = await preM({ agent_id: 'meter', task_ref: 'meter-badunit', task_ceiling: 100, estimated_units: 5, unit: 'dollar' })
+ok('[meter] a unit that is neither "unit" nor "token" is a 422 validation_error and opens no job',
+   unitBad.status === 422 && unitBad.body?.error === 'validation_error' && !(await taskM('meter-badunit')), `${unitBad.status} ${unitBad.text.slice(0, 120)}`)
 const defOpen = await preM({ agent_id: 'meter', task_ref: 'meter-def', task_ceiling: 100, estimated_units: 1 })
 await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('def'), units: 1, task_ref: 'meter-def', reservation_id: defOpen.body?.reservation_id })
 const putOpen = await callM('PUT', '/tasks/meter-put/ceiling', { ceiling_units: 100 })
@@ -2475,11 +2481,15 @@ if (notBigM.length === 0) {
   // connection it failed on keeps serving.
   await callM('PUT', '/tasks/meter-huge/ceiling', { ceiling_units: 100 })
   await sql`UPDATE task_budgets SET used_units = 9007199254740993 WHERE account_id = ${ACCT} AND task_ref = 'meter-huge'`
-  const hugeGet = await callM('GET', '/tasks/meter-huge')
+  const deadM = (e) => ({ status: 0, body: null, text: `no answer: ${e?.cause?.code ?? e?.message ?? e}` })
+  const hugeGet = await callM('GET', '/tasks/meter-huge').catch(deadM)
   ok('[meter] a value past 2^53 is a loud 500, never a rounded number and never a string',
      hugeGet.status === 500 && !/900719925474099/.test(hugeGet.text), `${hugeGet.status} ${hugeGet.text.slice(0, 160)}`)
   await sql`DELETE FROM task_budgets WHERE account_id = ${ACCT} AND task_ref = 'meter-huge'`
-  const afterHuge = await Promise.all([callM('GET', '/tasks/meter-big'), callM('GET', '/tasks?limit=5'), fetch(`${API}/health/db`).then((r) => r.status)])
+  // A transport failure is an answer here, not a crash of the harness: the
+  // failure this gate exists for is a server that died on the throw.
+  await settle(200)
+  const afterHuge = await Promise.all([callM('GET', '/tasks/meter-big').catch(deadM), callM('GET', '/tasks?limit=5').catch(deadM), fetch(`${API}/health/db`).then((r) => r.status).catch(() => 0)])
   ok('[meter] and the server keeps answering on the same pool afterwards', afterHuge[0].status === 200 && afterHuge[1].status === 200 && afterHuge[2] === 200,
      afterHuge.map((x) => x.status ?? x).join(','))
 } else {
