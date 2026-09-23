@@ -62,9 +62,20 @@ const FAQ: readonly QA[] = [
     a: `Preflight reserves the units it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released early because a process was slow.`,
   },
   {
-    // src/routes/preflight.ts:26,128-158. plan_limit_exceeded is a rejection.
+    // src/routes/preflight.ts (the conditional quota UPDATE, and the rejection
+    // that rolls back so a refused call reserves nothing and burns no quota).
+    // The SDK half, corrected 2026-09-23: this answer used to say the quota
+    // refusal is "the same shape of refusal as a task ceiling, so your code
+    // catches it the same way", and it is not. Both SDKs raise only when the
+    // developer's own spend rule refused the call and RETURN approved false
+    // with upgrade_url on free_tier_exceeded and plan_limit_exceeded, on
+    // purpose (sdk/python/agentbill/client.py preflight(), sdk/node/src/index.ts
+    // preflight(), "free_tier_exceeded and plan_limit_exceeded deliberately do
+    // NOT throw"). Code written to this page's old sentence catches nothing and
+    // goes on calling the provider. The refusal answer above already said so;
+    // this one contradicted it. A gate in verify.mjs holds the correction.
     q: `What happens when I reach the free tier's ${free} calls?`,
-    a: `Preflight starts returning free_tier_exceeded (plan_limit_exceeded on a paid plan) and stops approving calls. It is the same shape of refusal as a task ceiling, so your code catches it the same way. Nothing is billed, nothing is silently allowed through, and the counter is checked and incremented in one statement so calls arriving together cannot all read the same number and all pass.`,
+    a: `Preflight starts answering approved: false with reason free_tier_exceeded (plan_limit_exceeded on a paid plan) and an upgrade_url. Unlike a ceiling refusal, the SDK returns that answer instead of raising, on purpose, so our quota running out does not crash your agent: check result.approved, and your code decides what happens next. Nothing is billed, a refused call reserves nothing and is not counted, and the counter is checked and incremented in one statement so calls arriving together cannot all read the same number and all pass.`,
   },
   {
     // Verified: nothing in src/ branches on plan except quota, display and the

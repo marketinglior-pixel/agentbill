@@ -112,7 +112,7 @@ export const PAGES: readonly PageMeta[] = [
   // whose noindex a crawler never gets to read.
   { path: '/recover', section: 'marketing', crumbs: [HOME], crumb: 'Recover access', og: 'default', index: false, updated: '2026-09-09', priority: 0, changefreq: 'yearly' },
 
-  { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-08', priority: 0.7, changefreq: 'monthly' },
+  { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
   { path: '/status', section: 'marketing', crumbs: [HOME], crumb: 'Status', og: 'default', index: true, updated: '2026-09-05', priority: 0.3, changefreq: 'weekly' },
   { path: '/about', section: 'marketing', crumbs: [HOME], crumb: 'About', og: 'default', index: true, updated: '2026-09-08', priority: 0.4, changefreq: 'yearly' },
 
