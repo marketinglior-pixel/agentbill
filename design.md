@@ -139,8 +139,8 @@ dark" under Genre; the three faces under Type (they are the dark theme's);
 "What pages must share"; the primary as a green 8px button under CTA voice; the
 console's green `--held` under the App family.
 
-**Held for Lior's approval** (review, 2026-09-23). The restyle kept copy as it
-was, with these additions still open for his yes or no: the site nav and
+**Approved by Lior on 2026-09-24** (they were held after the 2026-09-23 review). The restyle kept copy as it
+was, with these additions, all approved: the site nav and
 footer on the signed-out login and the checkout hand-off (the brief asks for
 the homepage's nav and footer on every page); the frame's mono labels, which
 are the approved frame's own parts (the column heads Task / Units / Burn-down /
