@@ -170,6 +170,27 @@ jobs:
       - name: Migrate a scratch DB, start the server, assert the gate
         run: ./scripts/preflight/run.sh
 
+  alter-under-load:
+    # The preflight job migrates before its server starts, so no connection
+    # ever holds a statement prepared against the old column types, and it
+    # cannot see what an ALTER ... TYPE does to a pool that is serving. This
+    # stops the chain before 016, warms a real server, applies 016 under load
+    # inside the DATABASE_PREPARE=false window that 016's header prescribes,
+    # restarts with prepared statements back on, and asserts every answer.
+    # With the window skipped (PLANT_SKIP_WINDOW=1) it is red.
+    name: ALTER ... TYPE rehearsed against a warm server under load
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Migrate to just before 016, serve, apply 016 under load, restart, assert
+        run: ./scripts/preflight/alter-under-load.sh
+
   snippets:
     name: Published code samples run against the SDKs in this repo
     runs-on: ubuntu-latest

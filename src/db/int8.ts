@@ -10,7 +10,10 @@
 // This parser is what makes moving those columns to BIGINT safe, and it has to
 // be live BEFORE the ALTER (migration 016), not after it: old code reading a
 // BIGINT column gets strings and does the arithmetic above. That is the one
-// place in this repo where the order is code first, migration second.
+// place in this repo where the order is code first, migration second. The
+// ALTER itself then runs with prepared statements off (DATABASE_PREPARE=false,
+// see ./index.ts), because a statement prepared before it fails after it; the
+// steps are in the header of migration 016.
 //
 // It returns a number only when the number is exact. Past
 // Number.MAX_SAFE_INTEGER (2^53 - 1) a JS number silently rounds, and a
