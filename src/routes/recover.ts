@@ -179,23 +179,38 @@ export async function sendRecoveryLink(log: FastifyBaseLogger, email: string, ac
 // Pages
 // ---------------------------------------------------------------------------
 
-function page(title: string, body: string): string {
+/**
+ * `band` is for a message and nothing else: the link was sent, refused, or is
+ * spent. Those render in the kit's closing band (.cv-close), the one /thanks
+ * uses, so every done or dead end on the site looks the same. The form, the
+ * two choices and the key page are pages with work on them and stay in the
+ * column.
+ */
+function page(title: string, body: string, band = false): string {
   return docsShell({
     path: '/recover',
     title: `${title} · AgentBill`,
     description: 'Get back into your AgentBill account if you no longer have your API key.',
     current: '',
     rail: false,
+    // No sticky signup bar on a phone. Whoever is here has an account and has
+    // lost its key; on the key page the bar sat over the "your console" line.
+    // The nav keeps its button on a desktop, as it does on /terms.
+    sticky: false,
     css: `
     /* Canvas, 2026-09-23. The form sits on the warm-grey panel with white
        fields, the recipe /register and the homepage's estimator use; the two
        choices a recovery link offers are two white cards on that panel, side
        by side, the lesser one (replace) on the outlined pill. A key and the
-       line that sets it are in the code frame the docs use for what a reader
-       copies. Every value is a token, every control the kit's. */
+       line that sets it are on the kit's plate (.cv-plate), the shape the key
+       screen on /register gives the same two values; no Copy here, because
+       this page ships no script. A message (sent, refused, spent) is the
+       kit's closing band at the column's full width. Every value is a token,
+       every control the kit's. */
     /* 880 so the two choice cards sit side by side; the prose keeps its own
        measure (54ch from the docs shell, the lede 52ch). */
     .rec { max-width: 880px; }
+    .rec.cv-close { max-width: none; }
     .rec .lede { max-width: 52ch; }
     .rec-form { display: grid; gap: 0; max-width: 520px; margin-block: var(--s5) var(--s4);
                 background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); }
@@ -212,9 +227,7 @@ function page(title: string, body: string): string {
        page writes (AGENTBILL_API_KEY, the client call, the header). */
     .rec p code { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
                   font-size: .875em; color: var(--text); overflow-wrap: anywhere; }
-    .rec .keyout { font-family: var(--mono); font-size: var(--fs-code); line-height: 1.6; color: var(--code-ink);
-                   background: var(--snip-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
-                   padding: var(--s4) 20px; overflow-wrap: anywhere; max-width: 640px; margin-block: var(--s4) var(--s5); }
+    .rec .cv-plate { max-width: 640px; margin-block: var(--s4) var(--s5); }
     .rec .fine { color: var(--dim); font-size: var(--fs-small); }
     @media (max-width: ${BP.md}px) {
       .rec-form { padding: var(--s4); }
@@ -222,7 +235,7 @@ function page(title: string, body: string): string {
       .rec .choice { padding: 20px var(--s4); }
     }
 `,
-    body: `<div class="rec">
+    body: `<div class="rec${band ? ' cv-close' : ''}">
 ${body}
 </div>`,
   })
@@ -257,7 +270,7 @@ export async function recoverRoute(app: FastifyInstance) {
      and expires in ${TTL_MINUTES} minutes.</p>
   <p class="fine">Nothing has changed on your account yet, and the mail carries no key.
      Not arrived in a few minutes? Check spam, then write to
-     <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`))
+     <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`, true))
     }
     return secure(reply).send(page('Recover access', `
   <h1>Get back into your account.</h1>
@@ -277,7 +290,7 @@ export async function recoverRoute(app: FastifyInstance) {
       return secure(reply).code(429).send(page('Too many attempts', `
   <h1>Too many attempts.</h1>
   <p class="lede">This address has asked for too many recovery links in the last hour.
-     Try again later, or write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`))
+     Try again later, or write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`, true))
     }
 
     const parsed = RequestBody.safeParse(request.body)
@@ -330,7 +343,7 @@ export async function recoverRoute(app: FastifyInstance) {
   app.get('/recover/:token', publicRoute(), async (request, reply) => {
     const token = (request.params as { token: string }).token
     if (!TOKEN_RE.test(token) || !(await tokenIsLive(token))) {
-      return secure(reply).code(410).send(page('Link expired', deadLink))
+      return secure(reply).code(410).send(page('Link expired', deadLink, true))
     }
 
     return secure(reply).send(page('Recover access', `
@@ -366,11 +379,11 @@ export async function recoverRoute(app: FastifyInstance) {
     const token = (request.params as { token: string }).token
     const action = (request.body as Record<string, unknown>)?.action
     if (!TOKEN_RE.test(token) || (action !== 'reveal' && action !== 'replace')) {
-      return secure(reply).code(410).send(page('Link expired', deadLink))
+      return secure(reply).code(410).send(page('Link expired', deadLink, true))
     }
 
     const accountId = await consumeToken(token)
-    if (!accountId) return secure(reply).code(410).send(page('Link expired', deadLink))
+    if (!accountId) return secure(reply).code(410).send(page('Link expired', deadLink, true))
 
     if (action === 'reveal') {
       // Every key still good, because an account may hold more than one and the
@@ -440,11 +453,11 @@ function keyPage(keys: { apiKey: string; label: string | null }[], note: string)
   <h1>Here is your key.</h1>
   <p class="lede">Copy it now. This page will not show it again, and the link you used is spent.
      ${note}</p>
-  ${keys.map((k) => `<p class="keyout">${k.apiKey}</p>`).join('\n  ')}
+  ${keys.map((k) => `<p class="cv-plate"><span>${k.apiKey}</span></p>`).join('\n  ')}
   <p>Nothing here needs it pasted back in: your code is what sends it, with every call. In Python or
      Node that means <code>AGENTBILL_API_KEY</code>, set in the terminal your code runs in, and this
      line does it with the key already in place:</p>
-  ${keys.map((k) => `<p class="keyout">export AGENTBILL_API_KEY=${k.apiKey}</p>`).join('\n  ')}
+  ${keys.map((k) => `<p class="cv-plate"><span>export AGENTBILL_API_KEY=${k.apiKey}</span></p>`).join('\n  ')}
   <p>No terminal? Pass the key to <code>AgentBillClient(api_key=...)</code>, or send it as an
      <code>Authorization: Bearer</code> header from whatever makes the call. The same value opens
      <a href="/app">your console</a>, which asks for it once and then does not show it.</p>

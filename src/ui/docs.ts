@@ -312,6 +312,17 @@ type ShellOpts = {
    * put at the top of a receipt.
    */
   navCta?: boolean
+  /**
+   * Suppress only the sticky twin, the full-width "Get API key" bar a phone
+   * shows at the bottom of the screen; the nav keeps its button on a desktop.
+   * Default true. False on the pages whose reader already has an account and
+   * came to do one thing that is not signing up: /recover, where the bar sat
+   * over the key page's "your console" line, and /status. It is the same
+   * option /terms and /privacy pass to siteNav (legal.ts). /thanks passes it
+   * too, beside navCta: after a payment both are off; on an incomplete
+   * checkout the nav keeps its button and the bar stays off.
+   */
+  sticky?: boolean
   /** The page body. Its <h2>s become the rail. */
   body: string
 }
@@ -354,7 +365,7 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, sticky = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
@@ -367,7 +378,7 @@ ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
                     css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
 <body>
-${siteNav(current, { cta: navCta })}
+${siteNav(current, { cta: navCta, sticky })}
 <div class="docs${wantRail ? '' : ' no-rail'}">
 ${crumb ? crumb.html : ''}
 ${rail}

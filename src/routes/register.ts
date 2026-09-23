@@ -11,7 +11,7 @@ import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent, clearRecove
 import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, ORIGIN } from '../ui/site.js'
-import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { PULSE_CLIENT_SRC } from '../ui/pulse-client.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -380,23 +380,19 @@ export async function registerRoute(app: FastifyInstance) {
        a reader who has a terminal has already been served by the line above and
        should be able to skip this on sight. */
     .success .noterm { color: var(--dim); font-size: var(--fs-small); line-height: 1.6; margin-top: var(--s2); }
-    /* The key itself, in the copy pill's shape: a white plate with a hairline
-       and the light-filled Copy inside it, so the key and the line that sets
-       it read as the same kind of object. A rounded rectangle, not a pill,
-       because a 52-character key wraps at every phone width. */
-    .key-value { margin: var(--s4) 20px 0; padding: 6px 6px 6px var(--s4); background: var(--surface);
-                 border: 1px solid var(--border); border-radius: var(--r-field);
-                 font-family: var(--mono); font-size: var(--fs-code); line-height: 1.5; color: var(--code-ink);
-                 display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-    .key-value span { overflow-wrap: anywhere; min-width: 0; padding-block: 5px; }
+    /* The key itself, and the line that sets it, are both on the kit's plate
+       (.cv-plate, src/ui/kit.ts): a white plate with a hairline and the
+       light-filled Copy at its right, so they read as the same kind of object.
+       Only the key plate's place in the card is set here. */
+    .key-value { margin: var(--s4) 20px 0; }
     .steps { padding: var(--s2) 20px var(--s3); }
     .ns { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0;
           border-bottom: 1px solid var(--border-soft); align-items: start; }
     .ns:last-child { border-bottom: 0; }
     /* One row, no ordinal column: the only thing left in this frame is the
        export line, and a 22px gutter beside a lone item reads as a missing
-       marker. A modifier on .ns on purpose, so the row keeps .ns's padding,
-       border and the .ns .cp wrapping rules below. */
+       marker. A modifier on .ns on purpose, so the row keeps .ns's padding
+       and border. */
     .ns.solo { grid-template-columns: minmax(0, 1fr); }
     .ns p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     /* p code, not bare code: the copy pill inside a step is also a <code>,
@@ -409,14 +405,11 @@ export async function registerRoute(app: FastifyInstance) {
        after the post-key screen entered the gate. */
     .ns p code, .success > p code, .success .where code { font-family: var(--mono); font-size: .875em; color: var(--text); background: var(--surface3);
                padding: 1px 6px; border-radius: var(--r-inline); overflow-wrap: anywhere; }
-    /* The shared pill keeps its command on one line and scrolls it. The
-       export line carries the reader's whole key, and a key that scrolls out
-       of a 320px column is a key half-copied by hand. Here it wraps instead,
-       and the button drops below the command when the two do not fit on one
-       row. fit-content keeps the pill hugging its text. */
-    .ns .cp { width: fit-content; max-width: 100%; padding-block: 6px; padding-right: 6px; flex-wrap: wrap;
-              border-radius: var(--r-field); }
-    .ns .cp code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; font-size: var(--fs-code); line-height: 1.5; }
+    /* The export line is on the plate, not the shared one-line pill. The pill
+       keeps its command on one line and scrolls it, and a line that carries
+       the reader's whole key and scrolls out of a 320px column is a key
+       half-copied by hand. The plate wraps it, from line one, with the Copy
+       held at the right as it is on the key above. */
     /* The one action on this screen. Under the key, in its own card, and the
        button above the sentence: at 320 a button and a sentence on one row
        break the sentence mid-word. */
@@ -519,7 +512,7 @@ ${siteNav('/register', { cta: false })}
          again to whoever can read the email you just used.</p>
       <div class="cv-card">
         <div class="cv-bar"><span class="cv-bar-t">${label('API key')}</span>${tag('shown once')}</div>
-        <div class="key-value">
+        <div class="key-value cv-plate">
           <span id="key-display"></span>
           <button class="cp-btn btn-copy" id="copy-key" type="button">Copy</button>
         </div>
@@ -546,7 +539,7 @@ ${siteNav('/register', { cta: false })}
            call. In Python or Node that means <code>AGENTBILL_API_KEY</code>, and the line below sets
            it in the terminal your code runs in.</p>
         <div class="steps">
-          <div class="ns solo"><div>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}<p class="noterm">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p></div></div>
+          <div class="ns solo"><div>${copyPlate('key-export', 'export AGENTBILL_API_KEY=')}<p class="noterm">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p></div></div>
         </div>
       </div>
       <!-- The same key again, as the line that sets it. A gap in a copyable

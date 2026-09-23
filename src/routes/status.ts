@@ -162,6 +162,10 @@ export async function statusRoute(app: FastifyInstance) {
         description: 'Live check of the AgentBill API and database, run when the page loads. No cached figures and no uptime history, because none is recorded.',
         current: '',
         rail: false,
+        // No sticky signup bar on a phone. A status page is read by someone
+        // checking whether the thing they already run is up, and it is a
+        // utility page like /terms, which drops the bar the same way.
+        sticky: false,
         css: STATUS_CSS,
         body: statusBody(checks, checkedAt),
       }))

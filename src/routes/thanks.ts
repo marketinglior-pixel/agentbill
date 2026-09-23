@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
-import { BP } from '../ui/theme.js'
 import { sql } from '../db/index.js'
 import { isUuid } from '../lib/ids.js'
 import { checkoutIsPaid, getCheckoutSummary, PLAN_LIMITS, PLAN_PRICES } from '../integrations/polar.js'
@@ -46,19 +45,11 @@ function allowance(tier: string): string {
 }
 
 /* Canvas, 2026-09-23. A receipt is the page's close, so it takes the
-   homepage's close: the warm-grey band at --r-card, the heading and its
-   sentences centred in it. The links stay the prose links the docs shell
-   draws; nothing here is a second action. */
-const THANKS_CSS = `
-    .thx { background: var(--panel-bg); border-radius: var(--r-card); padding: 80px var(--s7);
-           display: grid; justify-items: center; text-align: center; }
-    .thx h1 { max-width: 22ch; margin-bottom: var(--s4); }
-    .thx p { margin-inline: auto; max-width: 52ch; text-wrap: pretty; }
-    .thx p:last-child { margin-bottom: 0; }
-    @media (max-width: ${BP.md}px) {
-      .thx { padding: var(--s7) 20px; }
-    }
-`
+   homepage's close: the kit's .cv-close band (src/ui/kit.ts), the heading and
+   its sentences centred in it. The recovery page's sent, refused and expired
+   messages use the same band, so every done or dead end reads the same. The
+   links stay the prose links the docs shell draws; nothing here is a second
+   action. */
 
 export async function thanksRoute(app: FastifyInstance) {
   app.get('/thanks', publicRoute(), async (request, reply) => {
@@ -143,9 +134,12 @@ export async function thanksRoute(app: FastifyInstance) {
         current: '',
         rail: false,
         navCta: !paid,
-        css: THANKS_CSS,
+        // Never the phone's sticky signup bar. The only way here is Polar's
+        // return from a checkout, and a checkout starts from an account
+        // (checkoutPath carries its id), so the reader has one already.
+        sticky: false,
         body: `
-  <div class="thx">
+  <div class="cv-close">
   <h1>${heading}</h1>
 ${body}
   </div>
