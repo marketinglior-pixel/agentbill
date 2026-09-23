@@ -12,7 +12,6 @@ import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
-import { SWEEP_INTERVAL_MS } from '../lib/reservation-sweeper.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -2073,9 +2072,6 @@ function pickLine(p: Page): string {
   return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${k.units === 1 ? 'unit' : 'units'}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
 }
 
-/** Minutes an unrecorded call can keep its job out of the suggestion: the
- *  reservation's TTL, plus up to one sweep before it is released. */
-const HELD_OUT_MINUTES = RESERVATION_TTL_MINUTES + Math.ceil(SWEEP_INTERVAL_MS / 60_000)
 
 /**
  * The suggested ceilings. Hidden when no agent has a finished job, because a
@@ -2097,7 +2093,7 @@ function historyBlock(p: Page): string {
   return `<div class="hist">
       <p class="lbl">Suggested ceilings</p>
       ${rows}
-      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. At most ${num(HISTORY_AGENTS)} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or for up to ${num(HELD_OUT_MINUTES)} minutes if it never does, until its reservation expires and is released. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
+      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. At most ${num(HISTORY_AGENTS)} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${num(RESERVATION_TTL_MINUTES)} minutes and a sweep releases it. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
     </div>`
 }
 
