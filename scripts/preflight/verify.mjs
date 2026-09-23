@@ -2365,7 +2365,7 @@ ok('[integrations] /integrations/mcp carries the MCP README\'s install line and 
 // breaks are listed in the commit that added them.
 console.log('\n[suggest] a suggested ceiling from the account\'s own finished jobs, in units')
 await reset()
-const { HISTORY_JOBS: JOBS_S, percentileDisc: pdS } = await import('../../dist/lib/ceiling-suggest.js')
+const { HISTORY_JOBS: JOBS_S, HISTORY_AGENTS: AGENTS_S, percentileDisc: pdS } = await import('../../dist/lib/ceiling-suggest.js')
 const { RESERVATION_TTL_MINUTES: TTL_S } = await import('../../dist/lib/reservations.js')
 const { SWEEP_INTERVAL_MS: SWEEP_S } = await import('../../dist/lib/reservation-sweeper.js')
 const getS = (path, cookie = cookie8) => nav8(path, { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, html: await r.text() }))
@@ -2432,6 +2432,11 @@ ok('[suggest] hidden while no job on this account is finished: jobs exist, one i
 // preflight and record path: 30, 40, 50, so p50 40, p90 50, max 50, and a
 // counted sg-zero (0) would make that four jobs and a p50 of 30. And an agent
 // label made of markup, opened and settled through the real path: one job, 30.
+// And a second markup label with two jobs, 60 and 70, one of them through the
+// real path, because the line under the form has one branch for an agent with
+// one job and another for an agent with several, and each prints the label.
+// Then agents whose latest job is older than any of those, enough to make one
+// more agent than HISTORY_AGENTS: the oldest must get no row.
 for (let i = 0; i < 21; i++) {
   await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
             VALUES (${ACCT}, 'summarizer', ${`sg-s-${i}`}, 100000, ${i === 0 ? 99999 : i * 10}, 0, now() - ${`${200 - i} minutes`}::interval)`
@@ -2448,12 +2453,30 @@ const HOSTILE_URI_S = encodeURIComponent(HOSTILE_S)
 const hostilePutS = await putCeil('sg-hostile', { ceiling_units: 100, agent_id: HOSTILE_S })
 await pre8({ agent_id: HOSTILE_S, task_ref: 'sg-hostile', estimated_units: 30, idempotency_key: 'sg-hostile-pre' })
 await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-hostile-rec', units: 30, task_ref: 'sg-hostile' })
+const HOSTILE2_S = "'><img src=y style=z>"
+const HOSTILE2_ESC_S = '&#39;&gt;&lt;img src=y style=z&gt;'
+const HOSTILE2_URI_S = encodeURIComponent(HOSTILE2_S)
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${ACCT}, ${HOSTILE2_S}, 'sg-hostile2-a', 1000, 60, 0, now() - interval '100 minutes')`
+const hostile2PutS = await putCeil('sg-hostile2-b', { ceiling_units: 100, agent_id: HOSTILE2_S })
+await pre8({ agent_id: HOSTILE2_S, task_ref: 'sg-hostile2-b', estimated_units: 70, idempotency_key: 'sg-hostile2-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-hostile2-rec', units: 70, task_ref: 'sg-hostile2-b' })
+// summarizer, crawler and the two markup labels are four agents, the newest
+// job of each at most 180 minutes old. Each filler's one job is older than
+// that, and the last filler's is the oldest of all, so it is the one left out.
+const FILLERS_S = Array.from({ length: Math.max(1, AGENTS_S + 1 - 4) }, (_, j) => ({ agent: `sg-old-${j + 1}`, used: 6101 + j, mins: 300 + 10 * j }))
+for (const f of FILLERS_S) {
+  await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+            VALUES (${ACCT}, ${f.agent}, ${`sg-job-${f.agent}`}, 100000, ${f.used}, 0, now() - ${`${f.mins} minutes`}::interval)`
+}
+const DROPPED_S = FILLERS_S[FILLERS_S.length - 1]
 
 const pageS = await getS('/app?view=tasks')
 const blockS = histOfS(pageS.html)
 const sumS = rowOfS(blockS, 'summarizer')
 const crawlS = rowOfS(blockS, 'crawler')
 const hostRowS = rowOfS(blockS, HOSTILE_ESC_S)
+const host2RowS = rowOfS(blockS, HOSTILE2_ESC_S)
 // Every figure shown is one real finished job's used_units under that agent
 // on this account, read back from the table with a query of the gate's own.
 const realS = async (agent) => new Set((await sql`SELECT used_units FROM task_budgets WHERE account_id = ${ACCT} AND agent_id = ${agent}
@@ -2461,7 +2484,7 @@ const realS = async (agent) => new Set((await sql`SELECT used_units FROM task_bu
 const sumRealS = await realS('summarizer')
 const crawlRealS = await realS('crawler')
 ok('[suggest] p50, p90 and max come from the right rows: an agent\'s last 20 finished jobs, never one in flight, never one with nothing spent, never an older one, never the console label',
-   pageS.status === 200 && rowsOfS(blockS).length === 3
+   pageS.status === 200
      && sumS?.label === 'from your last 20 jobs of ' && sumS.figs.p50 === '100' && sumS.figs.p90 === '180' && sumS.figs.max === '200'
      && crawlS?.label === 'from your last 3 jobs of ' && crawlS.figs.p50 === '40' && crawlS.figs.p90 === '50' && crawlS.figs.max === '50'
      && hostRowS?.label === 'from your last job of ' && hostRowS.figs.one === '30' && Object.keys(hostRowS.figs).length === 1
@@ -2500,13 +2523,38 @@ ok('[suggest] another account\'s jobs never count: not under this account\'s age
 
 // Escaping: a label made of markup is text in its row and its link, and,
 // once picked, in the agent field and the line under the form.
+// The line under the form has two branches, one job and several, and both
+// print the label, so a markup label is picked in each: the one-job label
+// above, and the second, whose two jobs are 60 and 70 (p90 70).
 const hostPickS = await getS(`/app?view=tasks&history=${HOSTILE_URI_S}&pick=max`)
-ok('[suggest] an agent label made of markup is printed as text: in its row, its link, the agent field and the line under the form',
+const host2PickS = await getS(`/app?view=tasks&history=${HOSTILE2_URI_S}&pick=p90`)
+const rawImgS = (h) => (h.match(/[^\n]*<img src=[xy][^\n]*/) ?? [''])[0].slice(0, 200)
+ok('[suggest] an agent label made of markup is printed as text: in its row, its link, the agent field and the line under the form, for an agent with one job and for one with several',
    hostilePutS.status === 200 && !pageS.html.includes('<img src=x>') && !hostPickS.html.includes('<img src=x>')
      && blockS.includes(`<b class="ha">${HOSTILE_ESC_S}</b>`) && (hostRowS?.hrefs[0] ?? '').includes(`history=${HOSTILE_URI_S}&amp;pick=max`)
      && agentFieldS(hostPickS.html).includes(`value="${HOSTILE_ESC_S}"`) && /value="30"/.test(ceilFieldS(hostPickS.html))
-     && pickLineS(hostPickS.html).includes(`what your last job of ${HOSTILE_ESC_S} used`),
-   `${hostilePutS.status} ${(hostPickS.html.match(/[^\n]*<img src=x>[^\n]*/) ?? [pickLineS(hostPickS.html) || 'no line'])[0].slice(0, 200)}`)
+     && pickLineS(hostPickS.html).includes(`what your last job of ${HOSTILE_ESC_S} used`)
+     && hostile2PutS.status === 200 && !pageS.html.includes('<img src=y') && !host2PickS.html.includes('<img src=y')
+     && host2RowS?.label === 'from your last 2 jobs of ' && host2RowS.figs.p50 === '60' && host2RowS.figs.p90 === '70' && host2RowS.figs.max === '70'
+     && (host2RowS.hrefs[1] ?? '').includes(`history=${HOSTILE2_URI_S}&amp;pick=p90`)
+     && agentFieldS(host2PickS.html).includes(`value="${HOSTILE2_ESC_S}"`) && /value="70"/.test(ceilFieldS(host2PickS.html))
+     && pickLineS(host2PickS.html).includes(`the p90 of your last 2 jobs of ${HOSTILE2_ESC_S},`),
+   `${hostilePutS.status}/${hostile2PutS.status} one job: ${rawImgS(hostPickS.html) || pickLineS(hostPickS.html) || 'no line'} | two jobs ${figsS(host2RowS)}: ${rawImgS(host2PickS.html) || pickLineS(host2PickS.html) || 'no line'}`)
+
+// The cap. At most HISTORY_AGENTS agents get a row, the ones whose latest
+// finished jobs are the most recent. The fixture has one agent more than
+// that, and the one whose job is oldest gets no row, no figure in the block,
+// and a pick naming it fills nothing. The fine print and /docs print the same
+// constant (the wording gate below), so a reader with one agent too many can
+// tell why it is missing.
+const keptS = ['summarizer', 'crawler', HOSTILE_ESC_S, HOSTILE2_ESC_S, ...FILLERS_S.slice(0, -1).map((f) => f.agent)]
+const droppedPickS = await getS(`/app?view=tasks&history=${DROPPED_S.agent}&pick=max`)
+const droppedRealS = await realS(DROPPED_S.agent)
+ok(`[suggest] at most ${AGENTS_S} agents get a row, the ones whose latest finished jobs are the most recent: of ${keptS.length + 1} agents with finished jobs, the one whose job is oldest gets no row and a pick naming it fills nothing`,
+   rowsOfS(blockS).length === AGENTS_S && keptS.length === AGENTS_S && keptS.every((a) => rowOfS(blockS, a))
+     && !rowOfS(blockS, DROPPED_S.agent) && !blockS.includes(DROPPED_S.used.toLocaleString('en-US')) && droppedRealS.size === 1 && droppedRealS.has(DROPPED_S.used.toLocaleString('en-US'))
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(droppedPickS.html)) && pickLineS(droppedPickS.html) === '',
+   `${rowsOfS(blockS).length} rows: ${rowsOfS(blockS).map((r) => r.agent).join(' | ')} | dropped ${DROPPED_S.agent} row ${Boolean(rowOfS(blockS, DROPPED_S.agent))}, pick "${ceilFieldS(droppedPickS.html)}"`)
 
 // A click fills the field. Picking p90 puts 180 and the summarizer label in
 // the form, both editable, marks the figure that is in the field, writes
@@ -2574,13 +2622,16 @@ for (const [name, h] of [['tasks', pageS.html], ['tasks+pick', pickedS.html], ['
   const hit = shownS(h).match(OLD_S)
   if (hit) oldSaidS.push(`${name}: "${hit[0]}"`)
 }
-ok('[suggest] the footer, the fine print and /docs say what the code computes: one job\'s used_units, the last N finished jobs of one agent, finished defined, and the time an open reservation holds a job out',
+ok('[suggest] the footer, the fine print and /docs say what the code computes: one job\'s used_units, the last N finished jobs of one agent, finished defined, the time an open reservation holds a job out, and how many agents get a row',
    footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
      && fineS.includes(`Each row is the p50, p90 and max used_units of one agent's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
      && fineS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
      && fineS.includes(`a call still in flight keeps its job out until it records, or for up to ${heldS} minutes if it never does, until its reservation expires and is released.`)
      && fineS.includes('Jobs with the placeholder label console are left out.')
-     && docsS.includes(`for each agent, the p50, p90 and max used_units of its last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
+     && fineS.includes(`At most ${AGENTS_S} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion.`)
+     && docsS.includes(`For at most ${AGENTS_S} agents, those whose latest finished jobs are the most recent, it shows the p50, p90 and max used_units of each one's last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
+     && docsS.includes('Any other agent, including one with no finished job, gets no suggestion.')
+     && !/for each agent, the p50/i.test(docsS)
      && pathsS.length >= 10 && oldSaidS.length === 0,
    oldSaidS.join('; ') || `foot: ${footS.slice(-260)} | fine: ${fineS.slice(0, 160)}`)
 
@@ -2589,7 +2640,7 @@ ok('[suggest] the footer, the fine print and /docs say what the code computes: o
 // the form, the sample's button, the footer sentence and the /docs paragraph.
 // No money word of any kind, and none of the house's banned words.
 const docsParaS = (docsS.match(/Not sure what a job needs\?[^]*?gets no suggestion\./) ?? [''])[0]
-const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html),
+const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html), pickLineS(host2PickS.html),
   (demoS.html.match(/<a class="btn" href="\/register">[^<]*<\/a>/) ?? [''])[0], (footS.match(/A suggested ceiling is[^]*$/) ?? [''])[0]].map(shownS).join(' ') + ' ' + docsParaS
 const moneyS = newCopyS.match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
 const bannedS = newCopyS.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
