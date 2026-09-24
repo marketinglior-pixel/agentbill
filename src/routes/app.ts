@@ -11,6 +11,8 @@ import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
+import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -18,6 +20,7 @@ import {
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 import { INSTALL_PY } from '../ui/site.js'
+import { usageByEventType, type EventTypeUsage } from '../lib/usage.js'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -41,6 +44,9 @@ import { INSTALL_PY } from '../ui/site.js'
 // arrived because the empty state below used to send a reader back to their
 // editor to set a budget, and the founder, dogfooding, said that was the
 // product's whole problem. Every other number here is still read-only.
+// The suggested ceiling on the tasks view (2026-09-23) adds no write: it is a
+// link that reloads this view with one of the account's own used_units in the
+// ceiling field, and the save is still the reader's. See loadHistory below.
 // This page loads no script at all and the CSP below has no script-src; the
 // chart's hover layer is CSS. Corrected 2026-09-10: that sentence used to
 // justify itself with "a live key is rendered into it", which stopped being
@@ -110,6 +116,9 @@ export async function appRoute(app: FastifyInstance) {
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
     const view = typeof q?.view === 'string' && Object.hasOwn(VIEWS, q.view) ? (q.view as ViewKey) : DEFAULT_VIEW
     const filter = readFilter(q)
+    // The order belongs to the tasks view alone: the overview's "Recent tasks"
+    // reads the same rows and must stay recent whatever the query says.
+    const sort: TaskSort = view === 'tasks' && q?.sort === 'used' ? 'used' : 'recent'
     const flash = readFlash(q)
     const viewer = await loadSession(request)
 
@@ -119,13 +128,21 @@ export async function appRoute(app: FastifyInstance) {
     // check must stay ABOVE the login return: it used to sit below it, which
     // made ?demo=1 reachable only to people who had already signed up.
     if (!viewer) {
-      if (demo) return reply.send(consolePage({ v: DEMO_VIEWER, d: demoConsole(filter, RANGES[range].days), demo: true, anon: true, range, view, filter }))
+      if (demo) {
+        const sample = demoConsole(filter, RANGES[range].days, sort)
+        return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter, sort,
+                                        suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
+      }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
     }
 
-    const data = demo ? demoConsole(filter, RANGES[range].days) : await loadConsole(viewer.accountId, RANGES[range].days, filter)
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter,
-                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash) }))
+    const data = demo ? demoConsole(filter, RANGES[range].days, sort) : await loadConsole(viewer.accountId, RANGES[range].days, filter, sort)
+    // The tasks view's suggested ceilings: the account's own finished jobs,
+    // or, under sample data, the sample rows the same view lists below.
+    const suggest = view !== 'tasks' ? null
+      : readSuggest(demo ? demoHistory(data.tasks) : await loadHistory(viewer.accountId), q)
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort,
+                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest }))
   })
 
   // The console's one write: open a job with a ceiling, or change one. A plain
@@ -444,7 +461,7 @@ const VIEWS = {
   // "overview" is two names for the same first screen.
   start:     { title: 'Start',        lede: 'A job, a ceiling, the lines that run into it, and the refusal they produce.', hidden: true },
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
-  activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day.' },
+  activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day, and the units split by event_type.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
   refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, and every one that ran past a ceiling, newest first, with the literal body the agent got.' },
   customers: { title: 'Customers',    lede: 'One balance per customer_id. Balances are lifetime, not a period.' },
@@ -465,6 +482,18 @@ const DEFAULT_RANGE = '30d'
 
 /** Narrowing the refusals view. Both ids are opaque strings the caller chose. */
 type Filter = { task?: string; agent?: string; only?: 'leaks' }
+
+/** The tasks view's order. recent: most recently touched first, the order it
+ *  always had. used: most used_units first, the ranking GET /tasks?sort=used
+ *  gives too. Ties break the way each surface's default orders: by recency
+ *  here, by creation on the API. */
+type TaskSort = 'recent' | 'used'
+const TASK_SORTS: Record<TaskSort, string> = { recent: 'Recent', used: 'Most used' }
+
+/** The day the preflight span's records begin: migration 006 (99f0934) gave
+ *  every approved preflight a reservations row. Refusal rows begin a day
+ *  earlier, with 005, so this is the later of the two. */
+const PREFLIGHT_RECORDS_SINCE = '2026-09-03'
 
 function readFilter(q: Record<string, unknown>): Filter {
   const f: Filter = {}
@@ -522,7 +551,85 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
   return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
 }
 
-type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date }
+// ---------------------------------------------------------------------------
+// The tasks view's suggested ceiling (2026-09-23): per agent, the p50, p90
+// and max used_units of its last HISTORY_JOBS finished jobs, from this
+// account's own rows, in units. It writes nothing. Each figure is a link that
+// reloads the tasks view with that number in the ceiling field and the
+// agent's label beside it, both still editable, and the save is the reader's,
+// through the same form. The arithmetic is src/lib/ceiling-suggest.ts.
+//
+// "Finished" has to be defined here, because no event marks a job as done.
+// A job counts once it has spent units and holds no reservation
+// (used_units > 0 AND reserved_units = 0), and a job still carrying the
+// console's placeholder label is left out, because no agent has claimed it.
+// So a job resting between two calls counts, and a call that never records
+// keeps its job out until its reservation expires (RESERVATION_TTL_MINUTES)
+// and the sweeper releases it (every SWEEP_INTERVAL_MS). The fine print under
+// the suggestion says the same, from the same constants.
+// ---------------------------------------------------------------------------
+
+/** What the tasks view shows beside its form: the rows, and a figure the reader picked. */
+type Suggest = {
+  history: AgentHistory[]
+  /** Recomputed from the rows on every load, never read off the URL. */
+  pick: { agentId: string; which: Pick; units: number; jobs: number } | null
+}
+
+/**
+ * This account's finished jobs, HISTORY_JOBS per agent, for the
+ * HISTORY_AGENTS agents whose latest finished job is the most recent. The
+ * account clause is what keeps another account's jobs, under the same agent
+ * label or any other, out of this account's figures; the harness holds it.
+ */
+async function loadHistory(accountId: string): Promise<HistoryJob[]> {
+  const rows = await sql`
+    WITH finished AS (
+      SELECT agent_id, used_units, updated_at,
+             row_number() OVER (PARTITION BY agent_id ORDER BY updated_at DESC, id DESC) AS rn
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+        AND used_units > 0
+        AND reserved_units = 0
+        AND agent_id <> ${CONSOLE_AGENT}
+    ),
+    agents AS (
+      SELECT agent_id, max(updated_at) AS last_at
+      FROM finished
+      GROUP BY agent_id
+      ORDER BY last_at DESC, agent_id COLLATE "C"
+      LIMIT ${HISTORY_AGENTS}
+    )
+    SELECT f.agent_id, f.used_units, f.updated_at
+    FROM finished f JOIN agents a ON a.agent_id = f.agent_id
+    WHERE f.rn <= ${HISTORY_JOBS}
+  `
+  return rows.map((r) => ({ agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date) }))
+}
+
+/** The same test as loadHistory, on the sample rows ?demo=1 lists, so the
+ *  sample suggestion is worked out from the jobs on the same page. */
+function demoHistory(tasks: TaskRow[]): HistoryJob[] {
+  return tasks
+    .filter((t) => Number(t.usedUnits) > 0 && Number(t.reservedUnits) === 0 && t.agentId !== CONSOLE_AGENT)
+    .map((t) => ({ agentId: t.agentId, usedUnits: Number(t.usedUnits), updatedAt: new Date(t.updatedAt) }))
+}
+
+/** The pick names an agent and a statistic; the number comes from the rows,
+ *  so a link naming an agent this account has no finished job for fills nothing. */
+function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
+  const history = summarizeHistory(rows)
+  const which = PICKS.find((k) => k === q?.pick)
+  const row = isId(q?.history) ? history.find((h) => h.agentId === q.history) : undefined
+  return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs } : null }
+}
+
+/** firstSeen, lastSeen and preflights describe the preflights on record for
+ *  this job, approved or refused. See loadConsole for where they come from,
+ *  why they can be fewer than the preflights the job made, and why
+ *  task_budgets' own timestamps are not them. */
+type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date
+                 firstSeen: Date | null; lastSeen: Date | null; preflights: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date }
@@ -552,13 +659,17 @@ type Console = {
   customerWithLimit: number
   customerTotal: number
   keys: KeyRow[]
+  /** The window's recorded units split by event_type (src/lib/usage.ts, the
+   *  same function GET /usage runs). Its total is the units-metered sum of
+   *  `series`, because both read events over the same window. */
+  usage: EventTypeUsage
   decisions: DecisionRow[]
   /** Rows matching the current filter, across the whole account. */
   decisionMatched: number
   truncated: boolean
 }
 
-async function loadConsole(accountId: string, days: number, f: Filter): Promise<Console> {
+async function loadConsole(accountId: string, days: number, f: Filter, sort: TaskSort = 'recent'): Promise<Console> {
   const [totals] = await sql`
     SELECT count(*)                                AS total,
            count(*) FILTER (WHERE NOT blocked)     AS overruns,
@@ -601,12 +712,46 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     WHERE account_id = ${accountId} AND blocked AND created_at >= current_date - ${days - 1}::int
     GROUP BY reason
   `
+  // The page of jobs, then the preflights on record for each one. An
+  // approved preflight leaves a reservations row and a refused one a
+  // preflight_decisions row with source 'preflight'; both are stamped at
+  // insert and neither is ever deleted (a settle or the sweeper only releases
+  // a reservation). "On record" and not "seen", because the rows are fewer
+  // than the preflights: reservations exist from PREFLIGHT_RECORDS_SINCE
+  // (migration 006), so a job a preflight opened before then has no row for
+  // it, and a refusal row is written fire-and-forget (recordDecision), so a
+  // failed write drops that refusal. GET /tasks returns none of this, and
+  // the footer says so on every page that draws a span.
+  // task_budgets' own timestamps are not used, on purpose:
+  // created_at is when the job was opened, from code or from the console, and
+  // updated_at also moves on a ceiling save and when the sweeper releases an
+  // expired reservation, neither of which is a call. An ordinary record()
+  // leaves no per-task timestamp (events carry no task_ref; only a record
+  // that lands past the ceiling leaves a decision row, with source 'events'),
+  // which is why the row counts preflights and says preflight, not call.
+  const order = () => sort === 'used' ? sql`used_units DESC, updated_at DESC` : sql`updated_at DESC`
   const tasks = await sql`
-    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
-    FROM task_budgets
-    WHERE account_id = ${accountId}
-    ORDER BY updated_at DESC
-    LIMIT 20
+    WITH page AS (
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+      ORDER BY ${order()}
+      LIMIT 20
+    ), spans AS (
+      SELECT task_ref, min(at) AS first_seen, max(at) AS last_seen, count(*) AS preflights
+      FROM (
+        SELECT task_ref, created_at AS at FROM reservations
+        WHERE account_id = ${accountId} AND task_ref IN (SELECT task_ref FROM page)
+        UNION ALL
+        SELECT task_ref, created_at AS at FROM preflight_decisions
+        WHERE account_id = ${accountId} AND source = 'preflight' AND task_ref IN (SELECT task_ref FROM page)
+      ) seen
+      GROUP BY task_ref
+    )
+    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.updated_at,
+           spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights
+    FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
+    ORDER BY ${order()}
   `
   const customers = await sql`
     SELECT customer_ref, limit_units, used_units, reserved_units
@@ -646,6 +791,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     WHERE account_id = ${accountId}
     ORDER BY created_at ASC
   `
+  const usage = await usageByEventType(accountId, days, 20)
   const decisions = await sql`
     SELECT agent_id, task_ref, reason, blocked, estimated_units, ceiling_units,
            used_units, snapshot::text AS snapshot, created_at
@@ -666,7 +812,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     prevBlocked: Number(prev?.blocks ?? 0),
     series: (series as unknown as Series[]).map((s) => ({ day: s.day, blocks: Number(s.blocks), units: Number(s.units), refused: Number(s.refused) })),
     byReason,
-    tasks: tasks as unknown as TaskRow[],
+    tasks: (tasks as unknown as TaskRow[]).map((t) => ({ ...t, preflights: Number(t.preflights) })),
     taskCount: Number(ttotal?.n ?? 0),
     taskLive: Number(ttotal?.live ?? 0),
     taskNear: Number(ttotal?.near ?? 0),
@@ -675,6 +821,7 @@ async function loadConsole(accountId: string, days: number, f: Filter): Promise<
     customerWithLimit: Number(ctotal?.withLimit ?? 0),
     customerTotal: Number(ctotal?.total ?? 0),
     keys: keys as unknown as KeyRow[],
+    usage,
     decisions: decisions as unknown as DecisionRow[],
     decisionMatched: Number(matched?.n ?? 0),
     // From the count, not the page length: exactly 100 matching rows is a
@@ -726,7 +873,7 @@ const DEMO_AVG_ASK = 173
 // Exported so the homepage can render the same task and refusal rows this
 // console shows under ?demo=1. Two pages that describe one sample account must
 // read one source, or the numbers drift apart the first time either is edited.
-export function demoConsole(f: Filter = {}, days = 30): Console {
+export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'): Console {
   const day = (back: number) => new Date(Date.now() - back * 86_400_000)
   const iso = (back: number) => day(back).toISOString().slice(0, 10)
   const shape30 = [0,0,3,1,0,6,4,2,9,5,3,12,7,4,18,11,6,9,14,8,21,13,7,16,24,12,9,19,15,11]
@@ -795,13 +942,47 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
     { customerRef: 'cust_globex',   limitUnits: 5000, usedUnits: 2140, reservedUnits: 30 },
     { customerRef: 'cust_initech',  limitUnits: 1000, usedUnits: 1000, reservedUnits: 0 },
   ].sort((x, y) => y.usedUnits - x.usedUnits)
-  const tasks: TaskRow[] = [
-      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: new Date(Date.now() - 22 * 60_000) },
-      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: new Date(Date.now() - 3 * 3_600_000) },
-      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: new Date(Date.now() - 5 * 3_600_000) },
-      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1) },
-      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1025, reservedUnits: 0, updatedAt: new Date(Date.now() - 60 * 60_000) },
+  const ago = (mins: number) => new Date(Date.now() - mins * 60_000)
+  // lastSeen is the latest preflight the sample job made, approved or
+  // refused, so it agrees with the refusal rows above: job-8871 was refused
+  // 22 minutes ago, nightly-crawl 74, batch-2211 190. batch-2211 was touched
+  // more recently than that (updatedAt, 60 minutes) by the record that
+  // leaked, and a record is not a preflight, so its span stops at 190.
+  const sampleTasks: TaskRow[] = [
+      { taskRef: 'job-8871', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 492, reservedUnits: 0,  updatedAt: ago(22),
+        firstSeen: ago(240), lastSeen: ago(22), preflights: 13 },
+      { taskRef: 'job-8870', agentId: 'summarizer',  ceilingUnits: 200,  usedUnits: 96,  reservedUnits: 12, updatedAt: ago(180),
+        firstSeen: ago(205), lastSeen: ago(180), preflights: 9 },
+      { taskRef: 'nightly-crawl', agentId: 'crawler', ceilingUnits: 2000, usedUnits: 1840, reservedUnits: 60, updatedAt: ago(300),
+        firstSeen: ago(430), lastSeen: ago(74), preflights: 11 },
+      { taskRef: 'job-8864', agentId: 'researcher',  ceilingUnits: 500,  usedUnits: 118, reservedUnits: 0,  updatedAt: day(1),
+        firstSeen: ago(1920), lastSeen: ago(1440), preflights: 4 },
+      { taskRef: 'batch-2211', agentId: 'enricher',  ceilingUnits: 1000, usedUnits: 1025, reservedUnits: 0, updatedAt: ago(60),
+        firstSeen: ago(340), lastSeen: ago(190), preflights: 41 },
   ]
+  // The two orders loadConsole gives, applied to the sample rows, so the
+  // toggle means the same thing under sample data.
+  const recent = (a: TaskRow, b: TaskRow) => b.updatedAt.getTime() - a.updatedAt.getTime()
+  const tasks = [...sampleTasks].sort(sort === 'used' ? (a, b) => b.usedUnits - a.usedUnits || recent(a, b) : recent)
+  // The window's units split by event_type, cut from the same total the
+  // chart and the tiles sum, so the split cannot disagree with them. The
+  // labels are the sample agents because that is what record() sends as
+  // event_type; the last one takes the remainder so the parts sum exactly.
+  const metered = series.reduce((a, x) => a + x.units, 0)
+  const split: Array<[string, number, number]> = [['crawler', 0.5, 50], ['enricher', 0.28, 25], ['researcher', 0.18, 40], ['summarizer', 0, 12]]
+  let rest = metered
+  const groups = split.map(([eventType, frac, perRecord], i) => {
+    const units = i === split.length - 1 ? rest : Math.round(metered * frac)
+    rest -= units
+    return { eventType, units, events: units > 0 ? Math.max(1, Math.round(units / perRecord)) : 0 }
+  }).filter((g) => g.units > 0).sort((a, b) => b.units - a.units || a.eventType.localeCompare(b.eventType))
+  const usage: EventTypeUsage = {
+    since: iso(days - 1),
+    totalUnits: metered,
+    totalEvents: groups.reduce((a, g) => a + g.events, 0),
+    groupCount: groups.length,
+    groups,
+  }
   return {
     decisionTotal: all.length,
     overruns: all.filter((d) => !d.blocked).length,
@@ -822,6 +1003,7 @@ export function demoConsole(f: Filter = {}, days = 30): Console {
       { apiKey: DEMO_KEY, label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
       { apiKey: DEMO_KEY_CI, label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
     ],
+    usage,
     decisions,
     decisionMatched: decisions.length,
     truncated: false,
@@ -1040,6 +1222,8 @@ ${MARK_CSS}
      a colour it is the only mark that says it is a link. */
   .wrap p a:not(.btn), .lim .param a { text-decoration: underline; text-underline-offset: 2px; }
   .note { margin-top: var(--s3); color: var(--dim); max-width: 78ch; }
+  /* A sentence between a section head and its frame. */
+  .lede { color: var(--muted); max-width: 78ch; margin: 0 0 var(--s4); }
   .note code, .fine code, .nothing code { color: var(--muted); }
 
   /* ---- The frame's bar, as this page fills it: the tag that names what the
@@ -1178,6 +1362,10 @@ ${MARK_CSS}
   .tk-a { font-family: var(--sans); color: var(--dim); min-width: 0; max-width: 100%;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tk-f { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); font-variant-numeric: tabular-nums; }
+  /* When AgentBill saw the job's preflights (#74): a line of its own under
+     the counts, in the same mono voice, so it reads the same at every width
+     and never sits beside the relative time as if the two were one figure. */
+  .tk-f.tk-s { overflow-wrap: anywhere; }
   tr.is-no .tk-a, tr.is-no .tk-f { color: var(--row-no-ink); }
   td.burn { width: 22%; min-width: 96px; }
   .cv-meter.is-row { height: 6px; }
@@ -1288,6 +1476,37 @@ ${MARK_CSS}
   .bset label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .bset .cv-field { width: 10ch; min-height: var(--h-sm); padding: 4px 10px; font-size: var(--fs-micro); border-radius: var(--r-row); }
   .bset .btn-ghost { min-height: var(--h-sm); padding: 5px 14px; line-height: 20px; font-size: var(--fs-micro); }
+  /* Under sample data the form's button is a link (#75), so it needs the box
+     a button gets for free, at the L height the button beside these fields has. */
+  .setf .btn { min-height: var(--h-lg); }
+  .setf a.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+  /* The suggested ceilings under the form (#75). A white card on the panel's
+     grey, the kit's card recipe, opened by the mono label. Each figure is a
+     link that reloads this view with it in the field, drawn as a chip in the
+     kit's chip style; the one in the field is outlined in ink, the only mark
+     a picked value gets, because a suggestion is not a decision. */
+  .conv { color: var(--muted); overflow-wrap: anywhere; }
+  .conv b { color: var(--text); font-weight: 500; }
+  .hist { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
+          padding: 14px 20px 16px; display: grid; gap: var(--s2); min-width: 0; }
+  .hist .lbl { margin-bottom: var(--s1); }
+  .hist .fine { margin-top: var(--s2); }
+  .hrow { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); align-items: center; gap: var(--s2) var(--s4);
+          padding: var(--s2) 0; border-top: 1px solid var(--row-line); min-width: 0; }
+  .hp { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-family: var(--mono);
+        font-size: var(--fs-chip); color: var(--dim); min-width: 0; }
+  .pk { display: inline-flex; align-items: center; gap: 6px; min-height: var(--h-sm); padding: 3px 12px;
+        border: 1px solid var(--chip-line); border-radius: var(--r-pill); background: var(--surface);
+        font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); text-decoration: none;
+        white-space: nowrap; font-variant-numeric: tabular-nums; transition: border-color .15s; }
+  .pk b { color: var(--text); font-weight: 500; }
+  .pk:hover { border-color: var(--dim); color: var(--text); text-decoration: none; }
+  .pk.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); color: var(--text); }
+  .hw { color: var(--muted); font-size: var(--fs-small); min-width: 0; overflow-wrap: anywhere; }
+  .hw .ha { color: var(--text); font-family: var(--mono); font-weight: 500; }
+  @media (max-width: ${BP.lg}px) {
+    .hrow { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  }
 
   /* ---- The three-step start screen. One column at every width: these rows
      are read in order, and a step beside its neighbour is not a step. The
@@ -1587,21 +1806,29 @@ ${siteFooter()}
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; flash?: Flash | null }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; sort: TaskSort; flash?: Flash | null; suggest?: Suggest | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
   if (view !== DEFAULT_VIEW) q.push(`view=${view}`)
+  // The order is the tasks view's. It survives a link back to the same view
+  // (the sample-data toggle, the rail's current item) and no other.
+  const sort = extra.sort ?? (view === p.view ? p.sort : 'recent')
+  if (view === 'tasks' && sort === 'used') q.push('sort=used')
   const range = extra.range ?? p.range
   if (range !== DEFAULT_RANGE) q.push(`range=${encodeURIComponent(range)}`)
   if (extra.task) q.push(`task=${encodeURIComponent(extra.task)}`)
   if (extra.agent) q.push(`agent=${encodeURIComponent(extra.agent)}`)
   if (extra.only) q.push(`only=${encodeURIComponent(extra.only)}`)
+  // A suggested ceiling's link: which agent, which figure. The number itself
+  // is never on the URL; readSuggest looks it up in the rows.
+  if (extra.history) q.push(`history=${encodeURIComponent(extra.history)}`)
+  if (extra.pick) q.push(`pick=${extra.pick}`)
   return q.length ? `/app?${q.join('&amp;')}` : '/app'
 }
 
@@ -1696,6 +1923,15 @@ function rail(p: Page): string {
         ${action}
       </div>
     </aside>`
+}
+
+/** The tasks view's order, in the header slot the period control takes on
+ *  the views that carry a window. The kit's segmented control, as the period
+ *  control is; the current item keeps class="on" beside aria-current because
+ *  the harness reads the link whole. */
+function sortControl(p: Page): string {
+  return `<span class="cv-seg" aria-label="Order">${(Object.keys(TASK_SORTS) as TaskSort[]).map((k) =>
+    `<a class="${k === p.sort ? 'on' : ''}" href="${href(p, 'tasks', { sort: k })}"${k === p.sort ? ' aria-current="true"' : ''}>${esc(TASK_SORTS[k])}</a>`).join('')}</span>`
 }
 
 function periodControl(p: Page): string {
@@ -1850,6 +2086,30 @@ function activityTable(p: Page, series: Series[], rangeLabel: string): string {
   </table></div>`)
 }
 
+/** "2h 30m", as HTML: the two parts are joined by a no-break space so a
+ *  narrow row never splits the figure across lines. Minutes are floored, so a
+ *  span never reads longer than the rows it was measured from. */
+function fmtSpan(ms: number): string {
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 1) return 'under a minute'
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  if (h < 48) return `${h}h&nbsp;${mins % 60}m`
+  return `${Math.floor(h / 24)}d&nbsp;${h % 24}h`
+}
+
+/** The span of this job's preflights, labelled as exactly what it is: from
+ *  the first preflight on record to the last, approved or refused. "On
+ *  record", not "seen": a job can have made preflights that left no row (see
+ *  loadConsole), and "none seen" would be false for it. It is not the job's
+ *  own duration either: AgentBill has the calls your code asks about, not
+ *  when the job started or when it finished. */
+function seenLine(t: TaskRow): string {
+  if (!t.preflights || !t.firstSeen || !t.lastSeen) return 'no preflight on record'
+  if (t.preflights === 1) return 'one preflight on record'
+  return `${fmtSpan(new Date(t.lastSeen).getTime() - new Date(t.firstSeen).getTime())}, first to last preflight on record`
+}
+
 function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   const ceiling = Number(t.ceilingUnits)
   const used = Number(t.usedUnits)
@@ -1877,6 +2137,7 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
       <td class="lead"><div class="tk">
         <div class="tk-n"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a><span class="tk-a">${esc(t.agentId)}</span></div>
         <div class="tk-f">${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
+        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>
       </div></td>
       <td class="num" data-l="units"><b>${num(used)}</b> / ${num(ceiling)}</td>
       <td class="burn"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${usedPct.toFixed(1)}%"></i><s style="left:${usedPct.toFixed(1)}%;width:${resPct.toFixed(1)}%"></s><u></u></div></td>
@@ -1958,9 +2219,14 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
     : 'That ceiling is under what the job has already committed: spent, plus reserved by calls in flight. Set it at or above that number, or wait for the reservations to settle or expire.',
 }
 
-/** The form that opens a job or changes its ceiling. Tasks view only, and
- *  never under sample data, where a save would write to the real account
- *  behind a page that says nothing on it is real.
+/** The form that opens a job or changes its ceiling, with the suggested
+ *  ceilings under it. Tasks view only.
+ *
+ *  Under sample data the same fields render with no form around them and a
+ *  link where the button was (2026-09-23), so a prospect can try the
+ *  suggestion and nothing can be saved: a save there would write to the real
+ *  account behind a page that says nothing on it is real. Until then the
+ *  sample tasks view showed no form at all.
  *
  *  Until 2026-09-12 this doubled as the three-step first run for an account
  *  that had spent nothing, because POST /app/tasks always landed here. The
@@ -1977,16 +2243,65 @@ function ceilingForm(p: Page): string {
     : f.err ? `<p class="err cv-err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   const keep = f?.err && f.ref ? esc(f.ref) : ''
+  // A picked suggestion fills the ceiling and the agent label. Neither is
+  // read-only, and nothing is saved until the reader presses the button.
+  const pick = p.suggest?.pick ?? null
+  const fields = `
+      <div><label class="cv-flabel" for="t-ref">Job <code>task_ref</code></label><input id="t-ref" class="cv-field m" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
+      <div><label class="cv-flabel" for="t-ceil">Ceiling, in units</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${pick ? `value="${pick.units}"` : 'placeholder="500"'} required /></div>
+      <div><label class="cv-flabel" for="t-agent">Agent label, optional</label><input id="t-agent" class="cv-field m" name="agent_id" placeholder="researcher" maxlength="128"${pick ? ` value="${esc(pick.agentId)}"` : ''} /></div>`
+  const form = p.demo
+    ? `<div class="setf">${fields}
+      <a class="btn" href="${p.anon ? '/register' : href(p, 'tasks', { demo: false })}">${p.anon ? 'Get an API key to set it' : 'Set it on your account'}</a>
+    </div>`
+    : `<form method="POST" action="/app/tasks" class="setf" autocomplete="off">${fields}
+      <button class="btn btn-lg" type="submit">Set ceiling</button>
+    </form>`
   return `<div class="setc">
     ${said}${pointer}
-    <form method="POST" action="/app/tasks" class="setf" autocomplete="off">
-      <div><label class="cv-flabel" for="t-ref">Job <code>task_ref</code></label><input id="t-ref" class="cv-field m" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label class="cv-flabel" for="t-ceil">Ceiling, in units</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" placeholder="500" required /></div>
-      <div><label class="cv-flabel" for="t-agent">Agent label, optional</label><input id="t-agent" class="cv-field m" name="agent_id" placeholder="researcher" maxlength="128" /></div>
-      <button class="btn btn-lg" type="submit">Set ceiling</button>
-    </form>
+    ${form}
+    ${pickLine(p)}
+    ${historyBlock(p)}
     <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
+}
+
+/** The line under the form once a suggestion is in the field: which figure,
+ *  from which jobs, and that it is still the reader's to change. */
+function pickLine(p: Page): string {
+  const k = p.suggest?.pick
+  if (!k) return ''
+  // The label is escaped once, here, so neither branch below can print it raw.
+  const who = esc(k.agentId)
+  const from = k.jobs === 1
+    ? `what your last job of ${who} used`
+    : `the ${k.which} of your last ${num(k.jobs)} jobs of ${who}`
+  return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${k.units === 1 ? 'unit' : 'units'}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
+}
+
+
+/**
+ * The suggested ceilings. Hidden when no agent has a finished job, because a
+ * suggestion from no history would be a number made up. Each figure is a
+ * link that puts it in the ceiling field with that agent's label; the page
+ * then looks it up in the rows again rather than trusting the link.
+ */
+function historyBlock(p: Page): string {
+  const s = p.suggest
+  if (!s || s.history.length === 0) return ''
+  const rows = s.history.map((h) => {
+    const on = (k: Pick) => s.pick?.agentId === h.agentId && s.pick.which === k
+    const link = (k: Pick, name: string) =>
+      `<a class="pk${on(k) ? ' on' : ''}" href="${href(p, 'tasks', { history: h.agentId, pick: k })}"${on(k) ? ' aria-current="true"' : ''}>${name}<b>${num(h[k])}</b></a>`
+    // One job has one figure; three equal links would be noise.
+    const figures = h.jobs === 1 ? link('max', '') : PICKS.map((k) => link(k, `${k} `)).join('')
+    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">units</span></span></div>`
+  }).join('')
+  return `<div class="hist">
+      <p class="lbl cv-label">Suggested ceilings</p>
+      ${rows}
+      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. At most ${num(HISTORY_AGENTS)} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${num(RESERVATION_TTL_MINUTES)} minutes and a sweep releases it. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
+    </div>`
 }
 
 // The legend: the bar's two parts as swatches, then the three states, named
@@ -2033,6 +2348,30 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
     <tbody>${rows.map((r) => refusalRow(p, r, true)).join('')}</tbody>
   </table></div>`)}
   ${truncated ? `<p class="note">The latest 100 of ${num(p.d.decisionMatched)}${filtered ? ' that match' : ''}. The full list is on <code>GET /decisions</code>.</p>` : ''}`
+}
+
+/** The window's units by event_type. The bar is scaled to the heaviest
+ *  group, the percentage is of every unit in the window, the same shape the
+ *  customers table uses for share of spend. */
+function usageTable(p: Page, u: EventTypeUsage, rangeLabel: string): string {
+  if (u.groups.length === 0) {
+    return `<div class="cv-empty"><p class="nothing">Nothing recorded in the last ${esc(rangeLabel)}. Each event your code records lands here under its <code>event_type</code>.</p></div>`
+  }
+  const heaviest = Math.max(1, ...u.groups.map((g) => g.units))
+  const body = u.groups.map((g) => {
+    const share = u.totalUnits > 0 ? (g.units / u.totalUnits) * 100 : 0
+    const pct = share > 0 && share < 1 ? '&lt;1%' : `${Math.round(share)}%`
+    return `<tr>
+      <td class="id lead" title="${esc(g.eventType)}">${esc(g.eventType)}</td>
+      <td class="wide"><div class="share"><div class="cv-meter is-row" aria-hidden="true"><i style="width:${Math.max(2, Math.round((g.units / heaviest) * 100))}%"></i></div><span>${pct} of units</span></div></td>
+      <td class="num" data-l="units">${num(g.units)}</td>
+      <td class="num" data-l="records">${num(g.events)}</td>
+    </tr>`
+  }).join('')
+  return frame(p, barOf('event_type', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
+    <thead><tr><th>event_type</th><th>Share of units</th><th class="num">Units</th><th class="num">Records</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`)
 }
 
 function customersTable(p: Page, rows: CustomerRow[], total: number, compact = false): string {
@@ -2371,16 +2710,26 @@ function overviewView(p: Page, rangeLabel: string): string {
 }
 
 function activityView(p: Page, rangeLabel: string): string {
+  const u = p.d.usage
+  const more = u.groupCount > u.groups.length ? `The ${num(u.groups.length)} heaviest of ${num(u.groupCount)} event_types. ` : ''
   return `${chartBlock(p, p.d.series, rangeLabel)}
+    <h2>By event_type <span>the last ${esc(rangeLabel)}, heaviest first</span></h2>
+    <p class="lede">The units recorded in this window, in the units your code reported, grouped by the <code>event_type</code> each record carried. <code>record()</code> in both SDKs sends its <code>agent_id</code> as the <code>event_type</code>, so for those calls this is a split by agent; <code>meter()</code> and a direct <code>POST /events</code> carry the event name your code passed.</p>
+    ${usageTable(p, u, rangeLabel)}
+    ${u.groups.length ? `<p class="note">${more}Shares are of all ${num(u.totalUnits)} units recorded in the window. The same split is on <code>GET /usage?by=event_type</code>.</p>` : ''}
     <h2>Day by day <span>the last ${esc(rangeLabel)}, newest first</span></h2>
     ${activityTable(p, p.d.series, rangeLabel)}`
 }
 
 function tasksView(p: Page): string {
-  return `${p.demo ? '' : ceilingForm(p)}
+  const used = p.sort === 'used'
+  const page = p.d.taskCount > p.d.tasks.length
+    ? `The ${num(p.d.tasks.length)} ${used ? 'with the most units used' : 'most recently touched'} of ${num(p.d.taskCount)} tasks.`
+    : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, ${used ? 'most units used first' : 'most recently touched first'}.`
+  return `${ceilingForm(p)}
     ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
-    <p class="note">${p.d.taskCount > p.d.tasks.length ? `The ${num(p.d.tasks.length)} most recently touched of ${num(p.d.taskCount)} tasks.` : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, most recently touched first.`} The full attribution is on <code>GET /tasks</code> and <code>GET /tasks/:task_ref</code>.</p>`
+    <p class="note">${page} Units are the ones your code reported. The time on a row runs from the first to the last preflight on record for that job, approved or refused; it is not the job's own duration, and a record() does not move it. Those records begin ${PREFLIGHT_RECORDS_SINCE}, so a job older than that shows only its preflights since then. The same rows, without that time, are on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
 }
 
 function refusalsView(p: Page): string {
@@ -2440,6 +2789,11 @@ function consolePage(p: Page): string {
     : p.view === 'customers' ? customersView(p)
     : p.view === 'keys' ? keysView(p)
     : limitsBlock(p, rangeLabel)
+  // The footer says every number here is on the API too. The preflight span
+  // under a task row is not: GET /tasks serializes the budget and its two
+  // timestamps, and no route returns reservations. So a page that draws a
+  // span names it as the exception. taskRow is what draws one.
+  const spanShown = body.includes('<span class="bseen">')
 
   return `${HEAD(meta.title)}
 <body>
@@ -2449,13 +2803,13 @@ function consolePage(p: Page): string {
       <div class="wrap">
         <header class="vh">
           <div><h1>${meta.title}</h1><p class="sub">${meta.lede}</p></div>
-          ${RANGED.has(p.view) && !asStart ? periodControl(p) : ''}
+          ${RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
         </header>
         ${banner}
         ${body}
         <div class="foot">
-          Every number on this page is on the API too:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.
+          Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/usage?by=event_type</code> for the split by event_type, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
     </main>

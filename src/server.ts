@@ -29,6 +29,7 @@ import { adminRoute } from './routes/admin.js'
 import { keysRoute } from './routes/keys.js'
 import { tasksRoute } from './routes/tasks.js'
 import { decisionsRoute } from './routes/decisions.js'
+import { usageRoute } from './routes/usage.js'
 import { appRoute } from './routes/app.js'
 import { legalRoute } from './routes/legal.js'
 import { heCostPerClientRoute } from './routes/he-cost-per-client.js'
@@ -154,7 +155,7 @@ const CANONICAL_HOST = process.env.CANONICAL_HOST
 const API_PREFIXES = [
   '/preflight', '/events', '/keys', '/tasks', '/budget', '/customers',
   '/checkpoint', '/step', '/decisions', '/webhook-config', '/webhooks/',
-  '/health', '/pulse', '/account/',
+  '/health', '/pulse', '/account/', '/usage',
 ]
 const isApiPath = (path: string) => API_PREFIXES.some((p) => path === p || path.startsWith(p))
 app.addHook('onRequest', async (request, reply) => {
@@ -243,6 +244,7 @@ app.register(adminRoute)
 app.register(keysRoute)
 app.register(tasksRoute)
 app.register(decisionsRoute)
+app.register(usageRoute)
 app.register(appRoute)
 app.register(preflightRoute)
 app.register(pulseRoute)

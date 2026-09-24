@@ -310,6 +310,18 @@ stay dark.
     statement the endpoint runs (`src/lib/task-ceiling.ts`); a customer's
     ceiling and the per-request ceiling have no form here, because one is
     `PUT /budget` and the other is an argument to the call itself.
+  - **A suggested ceiling is a lookup, never a guess (2026-09-23).** Under
+    the task budgets form, for at most 5 agents (`HISTORY_AGENTS`), the ones
+    whose latest finished jobs are the most recent, the p50, p90 and max
+    `used_units` of each one's last 20 finished jobs (spent units, no
+    reservation, as the fine print defines), labelled "from your last N jobs
+    of" the agent, and hidden when there is no such job. The fine print and
+    `/docs` print that cap from the same constant, so a reader with one agent
+    too many can tell why it has no row. Every figure is one real job's
+    total, in units. A click fills the ceiling and agent fields, still
+    editable, and the save is the same `ceiling_units` write. Under `?demo=1`
+    the same fields render from the sample rows with no form around them, so
+    nothing there saves.
   - The sample-data banner sits at the top of the main column, inside the
     frame a screenshot would carry; the account card under sample data shows
     the sample plan, because a real quota above invented tiles was the one

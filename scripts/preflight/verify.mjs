@@ -2500,6 +2500,611 @@ ok('[integrations] /integrations/mcp carries the MCP README\'s install line and 
    `versions shown ${shown.join(', ')} vs ${Object.values(SDK_VERSIONS).join(', ')}; guides ${guides.map((r) => `${r.name}=${r.kind}`).join(', ')}`)
 }
 
+// ---------------------------------------------------------------- suggest: a ceiling from the account's own finished jobs, 2026-09-23
+// The task budgets view lists, per agent, the p50, p90 and max used_units of
+// its last HISTORY_JOBS finished jobs (spent units, no reservation, not the
+// console placeholder label), in units, and a click puts one in the ceiling
+// field, still editable. Nothing here writes, and ?demo=1 shows the same
+// suggestion worked out from the sample rows. Each gate below was made red
+// once by a planted break and green again after restoring from a copy; the
+// breaks are listed in the commit that added them.
+console.log('\n[suggest] a suggested ceiling from the account\'s own finished jobs, in units')
+await reset()
+const { HISTORY_JOBS: JOBS_S, HISTORY_AGENTS: AGENTS_S, percentileDisc: pdS } = await import('../../dist/lib/ceiling-suggest.js')
+const { RESERVATION_TTL_MINUTES: TTL_S } = await import('../../dist/lib/reservations.js')
+const getS = (path, cookie = cookie8) => nav8(path, { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, html: await r.text() }))
+// visible8 turns every tag into a space, so "used_units</code>, as" reads
+// "used_units , as"; a browser draws no space there, and neither does this.
+const shownS = (h) => visible8(h).replace(/\s+/g, ' ').replace(/ ([,.;:])/g, '$1').trim()
+// The suggestion block, from its frame to the form's own fine print after it.
+const histOfS = (h) => {
+  const a = h.indexOf('<div class="hist">')
+  if (a === -1) return ''
+  const b = h.indexOf('<p class="fine">One job, one budget', a)
+  return h.slice(a, b === -1 ? undefined : b)
+}
+// One row per agent: its label, the agent as printed, and each figure's name,
+// number and link. A one-job row has one figure, named "one" here.
+const rowsOfS = (block) => [...block.matchAll(/<div class="hrow"><span class="hw">([^<]*)<b class="ha">([^<]*)<\/b><\/span><span class="hp">([\s\S]*?)<\/span><\/div>/g)]
+  .map((m) => ({
+    label: m[1], agent: m[2],
+    figs: Object.fromEntries([...m[3].matchAll(/<a class="pk[^"]*" href="[^"]*"[^>]*>(p50 |p90 |max |)<b>([0-9,]+)<\/b><\/a>/g)].map((f) => [f[1].trim() || 'one', f[2]])),
+    hrefs: [...m[3].matchAll(/href="([^"]*)"/g)].map((f) => f[1]),
+  }))
+const rowOfS = (block, agent) => rowsOfS(block).find((r) => r.agent === agent)
+const figsS = (r) => (r ? JSON.stringify(r.figs) : 'no row')
+const ceilFieldS = (h) => (h.match(/<input id="t-ceil"[^>]*>/) ?? [''])[0]
+const agentFieldS = (h) => (h.match(/<input id="t-agent"[^>]*>/) ?? [''])[0]
+const pickLineS = (h) => (h.match(/<p class="conv">[\s\S]*?<\/p>/) ?? [''])[0]
+
+// Another account, whose finished jobs sit under this account's agent label
+// and one of its own, each with a count no job here has. Present from the
+// start, so the "hidden" gate below reads an account whose neighbour HAS history.
+const OTHER_S = '00000000-0000-0000-0000-0000000000ee'
+await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
+          VALUES (${OTHER_S}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${OTHER_S}, 'summarizer', 'sg-b-1', 100000, 5555, 0, now()), (${OTHER_S}, 'tenant-b-agent', 'sg-b-2', 100000, 4242, 0, now())`
+
+// Hidden without history: jobs exist on this account and none is finished.
+// One opened and never spent under, one with a call in flight (spent, then
+// reserved again through the real preflight path), one spent under the
+// console's placeholder label. Each stays in the fixture below as a row that
+// must not count.
+await putCeil('sg-zero', { ceiling_units: 50, agent_id: 'crawler' })
+await putCeil('sg-flight', { ceiling_units: 100000, agent_id: 'summarizer' })
+await pre8({ agent_id: 'summarizer', task_ref: 'sg-flight', estimated_units: 7777, idempotency_key: 'sg-flight-pre-1' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-flight-rec-1', units: 7777, task_ref: 'sg-flight' })
+await pre8({ agent_id: 'summarizer', task_ref: 'sg-flight', estimated_units: 5, idempotency_key: 'sg-flight-pre-2' })
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units)
+          VALUES (${ACCT}, 'console', 'sg-console', 100000, 8888, 0)`
+const flightS = await task8('sg-flight')
+const bareS = await getS('/app?view=tasks')
+const barePickS = await getS('/app?view=tasks&history=summarizer&pick=p90')
+ok('[suggest] hidden while no job on this account is finished: jobs exist, one in flight, one never spent under, one under the console label, and a neighbour account has history',
+   bareS.status === 200 && flightS?.usedUnits === 7777 && flightS?.reservedUnits === 5
+     && bareS.html.includes('sg-flight') && bareS.html.includes('sg-zero') && bareS.html.includes('action="/app/tasks"')
+     && !bareS.html.includes('class="hist"') && !bareS.html.includes('Suggested ceilings') && !bareS.html.includes('from your last')
+     && !bareS.html.includes('A suggested ceiling is')
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(barePickS.html)) && pickLineS(barePickS.html) === '',
+   `${bareS.status} ${JSON.stringify(flightS)} hist=${bareS.html.includes('class="hist"')} | ${histOfS(bareS.html).slice(0, 200)}`)
+
+// The fixture. summarizer: 21 finished jobs, the oldest far outside the rest
+// (99,999), so it must fall off the last 20; the newer twenty used 10, 20,
+// ..., 200, so p50 is the 10th smallest (100), p90 the 18th (180), max 200.
+// crawler: two jobs written here and one settled through the real PUT,
+// preflight and record path: 30, 40, 50, so p50 40, p90 50, max 50, and a
+// counted sg-zero (0) would make that four jobs and a p50 of 30. And an agent
+// label made of markup, opened and settled through the real path: one job, 30.
+// And a second markup label with two jobs, 60 and 70, one of them through the
+// real path, because the line under the form has one branch for an agent with
+// one job and another for an agent with several, and each prints the label.
+// Then agents whose latest job is older than any of those, enough to make one
+// more agent than HISTORY_AGENTS: the oldest must get no row.
+for (let i = 0; i < 21; i++) {
+  await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+            VALUES (${ACCT}, 'summarizer', ${`sg-s-${i}`}, 100000, ${i === 0 ? 99999 : i * 10}, 0, now() - ${`${200 - i} minutes`}::interval)`
+}
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${ACCT}, 'crawler', 'sg-c-1', 1000, 30, 0, now() - interval '150 minutes'),
+                 (${ACCT}, 'crawler', 'sg-c-2', 1000, 50, 0, now() - interval '140 minutes')`
+await putCeil('sg-c-api', { ceiling_units: 100, agent_id: 'crawler' })
+await pre8({ agent_id: 'crawler', task_ref: 'sg-c-api', estimated_units: 40, idempotency_key: 'sg-c-api-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-c-api-rec', units: 40, task_ref: 'sg-c-api' })
+const HOSTILE_S = '"><img src=x>'
+const HOSTILE_ESC_S = '&quot;&gt;&lt;img src=x&gt;'
+const HOSTILE_URI_S = encodeURIComponent(HOSTILE_S)
+const hostilePutS = await putCeil('sg-hostile', { ceiling_units: 100, agent_id: HOSTILE_S })
+await pre8({ agent_id: HOSTILE_S, task_ref: 'sg-hostile', estimated_units: 30, idempotency_key: 'sg-hostile-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-hostile-rec', units: 30, task_ref: 'sg-hostile' })
+const HOSTILE2_S = "'><img src=y style=z>"
+const HOSTILE2_ESC_S = '&#39;&gt;&lt;img src=y style=z&gt;'
+const HOSTILE2_URI_S = encodeURIComponent(HOSTILE2_S)
+await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+          VALUES (${ACCT}, ${HOSTILE2_S}, 'sg-hostile2-a', 1000, 60, 0, now() - interval '100 minutes')`
+const hostile2PutS = await putCeil('sg-hostile2-b', { ceiling_units: 100, agent_id: HOSTILE2_S })
+await pre8({ agent_id: HOSTILE2_S, task_ref: 'sg-hostile2-b', estimated_units: 70, idempotency_key: 'sg-hostile2-pre' })
+await rec8({ customer_id: 'default', event_type: 'llm', idempotency_key: 'sg-hostile2-rec', units: 70, task_ref: 'sg-hostile2-b' })
+// summarizer, crawler and the two markup labels are four agents, the newest
+// job of each at most 180 minutes old. Each filler's one job is older than
+// that, and the last filler's is the oldest of all, so it is the one left out.
+const FILLERS_S = Array.from({ length: Math.max(1, AGENTS_S + 1 - 4) }, (_, j) => ({ agent: `sg-old-${j + 1}`, used: 6101 + j, mins: 300 + 10 * j }))
+for (const f of FILLERS_S) {
+  await sql`INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, used_units, reserved_units, updated_at)
+            VALUES (${ACCT}, ${f.agent}, ${`sg-job-${f.agent}`}, 100000, ${f.used}, 0, now() - ${`${f.mins} minutes`}::interval)`
+}
+const DROPPED_S = FILLERS_S[FILLERS_S.length - 1]
+
+const pageS = await getS('/app?view=tasks')
+const blockS = histOfS(pageS.html)
+const sumS = rowOfS(blockS, 'summarizer')
+const crawlS = rowOfS(blockS, 'crawler')
+const hostRowS = rowOfS(blockS, HOSTILE_ESC_S)
+const host2RowS = rowOfS(blockS, HOSTILE2_ESC_S)
+// Every figure shown is one real finished job's used_units under that agent
+// on this account, read back from the table with a query of the gate's own.
+const realS = async (agent) => new Set((await sql`SELECT used_units FROM task_budgets WHERE account_id = ${ACCT} AND agent_id = ${agent}
+                                                AND used_units > 0 AND reserved_units = 0`).map((r) => r.usedUnits.toLocaleString('en-US')))
+const sumRealS = await realS('summarizer')
+const crawlRealS = await realS('crawler')
+ok('[suggest] p50, p90 and max come from the right rows: an agent\'s last 20 finished jobs, never one in flight, never one with nothing spent, never an older one, never the console label',
+   pageS.status === 200
+     && sumS?.label === 'from your last 20 jobs of ' && sumS.figs.p50 === '100' && sumS.figs.p90 === '180' && sumS.figs.max === '200'
+     && crawlS?.label === 'from your last 3 jobs of ' && crawlS.figs.p50 === '40' && crawlS.figs.p90 === '50' && crawlS.figs.max === '50'
+     && hostRowS?.label === 'from your last job of ' && hostRowS.figs.one === '30' && Object.keys(hostRowS.figs).length === 1
+     && !/99,999|7,777|8,888/.test(blockS) && !rowOfS(blockS, 'console')
+     && Object.values(sumS.figs).every((v) => sumRealS.has(v)) && Object.values(crawlS.figs).every((v) => crawlRealS.has(v)),
+   `summarizer ${figsS(sumS)} "${sumS?.label}", crawler ${figsS(crawlS)} "${crawlS?.label}", markup ${figsS(hostRowS)}, rows ${rowsOfS(blockS).map((r) => r.agent).join(' | ') || blockS.slice(0, 200)}`)
+
+// The rank rule on its own, against Postgres's percentile_disc, which is what
+// p50 and p90 mean here: 400 sets of 1 to 40 values with repeats.
+let seedS = 20260923
+const randS = (n) => { seedS ^= seedS << 13; seedS ^= seedS >>> 17; seedS ^= seedS << 5; return (seedS >>> 0) % n }
+const setsS = Array.from({ length: 400 }, (_, i) => Array.from({ length: 1 + (i % 40) }, () => 1 + randS(300)))
+const pgS = await sql`
+  SELECT t.i, percentile_disc(0.5) WITHIN GROUP (ORDER BY t.v) AS p50, percentile_disc(0.9) WITHIN GROUP (ORDER BY t.v) AS p90
+  FROM (SELECT (e.ord - 1)::int AS i, x.value::int AS v
+        FROM json_array_elements((${JSON.stringify(setsS)}::text)::json) WITH ORDINALITY AS e(arr, ord),
+             json_array_elements_text(e.arr) AS x(value)) t
+  GROUP BY t.i ORDER BY t.i`
+const rankMissS = pgS.filter((r) => {
+  const sorted = [...setsS[r.i]].sort((a, b) => a - b)
+  return pdS(sorted, 50) !== Number(r.p50) || pdS(sorted, 90) !== Number(r.p90)
+}).map((r) => `n=${setsS[r.i].length}: pg ${r.p50}/${r.p90}, ours ${pdS([...setsS[r.i]].sort((a, b) => a - b), 50)}/${pdS([...setsS[r.i]].sort((a, b) => a - b), 90)}`)
+ok('[suggest] p50 and p90 are Postgres\'s percentile_disc over 400 random sets of 1 to 40 values, so every figure is a value a job used',
+   pgS.length === 400 && rankMissS.length === 0, rankMissS.slice(0, 3).join('; ') || `${pgS.length} sets`)
+
+// Isolation: the neighbour's 5,555 under this account's own label and its
+// 4,242 under a label of its own never reach this page, and a link naming
+// the neighbour's agent fills nothing.
+const foreignPickS = await getS('/app?view=tasks&history=tenant-b-agent&pick=max')
+ok('[suggest] another account\'s jobs never count: not under this account\'s agent label, not under its own, and a pick naming its agent fills nothing',
+   !pageS.html.includes('tenant-b-agent') && !pageS.html.includes('5,555') && !pageS.html.includes('4,242')
+     && sumS?.label === 'from your last 20 jobs of ' && sumS.figs.max === '200' && sumS.figs.p50 === '100'
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(foreignPickS.html)) && pickLineS(foreignPickS.html) === ''
+     && !foreignPickS.html.includes('5,555') && !foreignPickS.html.includes('4,242'),
+   `tenant-b-agent ${pageS.html.includes('tenant-b-agent')}, 5,555 ${pageS.html.includes('5,555')}, 4,242 ${pageS.html.includes('4,242')}, summarizer ${figsS(sumS)}, foreign pick "${ceilFieldS(foreignPickS.html)}"`)
+
+// Escaping: a label made of markup is text in its row and its link, and,
+// once picked, in the agent field and the line under the form.
+// The line under the form has two branches, one job and several, and both
+// print the label, so a markup label is picked in each: the one-job label
+// above, and the second, whose two jobs are 60 and 70 (p90 70).
+const hostPickS = await getS(`/app?view=tasks&history=${HOSTILE_URI_S}&pick=max`)
+const host2PickS = await getS(`/app?view=tasks&history=${HOSTILE2_URI_S}&pick=p90`)
+const rawImgS = (h) => (h.match(/[^\n]*<img src=[xy][^\n]*/) ?? [''])[0].slice(0, 200)
+ok('[suggest] an agent label made of markup is printed as text: in its row, its link, the agent field and the line under the form, for an agent with one job and for one with several',
+   hostilePutS.status === 200 && !pageS.html.includes('<img src=x>') && !hostPickS.html.includes('<img src=x>')
+     && blockS.includes(`<b class="ha">${HOSTILE_ESC_S}</b>`) && (hostRowS?.hrefs[0] ?? '').includes(`history=${HOSTILE_URI_S}&amp;pick=max`)
+     && agentFieldS(hostPickS.html).includes(`value="${HOSTILE_ESC_S}"`) && /value="30"/.test(ceilFieldS(hostPickS.html))
+     && pickLineS(hostPickS.html).includes(`what your last job of ${HOSTILE_ESC_S} used`)
+     && hostile2PutS.status === 200 && !pageS.html.includes('<img src=y') && !host2PickS.html.includes('<img src=y')
+     && host2RowS?.label === 'from your last 2 jobs of ' && host2RowS.figs.p50 === '60' && host2RowS.figs.p90 === '70' && host2RowS.figs.max === '70'
+     && (host2RowS.hrefs[1] ?? '').includes(`history=${HOSTILE2_URI_S}&amp;pick=p90`)
+     && agentFieldS(host2PickS.html).includes(`value="${HOSTILE2_ESC_S}"`) && /value="70"/.test(ceilFieldS(host2PickS.html))
+     && pickLineS(host2PickS.html).includes(`the p90 of your last 2 jobs of ${HOSTILE2_ESC_S},`),
+   `${hostilePutS.status}/${hostile2PutS.status} one job: ${rawImgS(hostPickS.html) || pickLineS(hostPickS.html) || 'no line'} | two jobs ${figsS(host2RowS)}: ${rawImgS(host2PickS.html) || pickLineS(host2PickS.html) || 'no line'}`)
+
+// The cap. At most HISTORY_AGENTS agents get a row, the ones whose latest
+// finished jobs are the most recent. The fixture has one agent more than
+// that, and the one whose job is oldest gets no row, no figure in the block,
+// and a pick naming it fills nothing. The fine print and /docs print the same
+// constant (the wording gate below), so a reader with one agent too many can
+// tell why it is missing.
+const keptS = ['summarizer', 'crawler', HOSTILE_ESC_S, HOSTILE2_ESC_S, ...FILLERS_S.slice(0, -1).map((f) => f.agent)]
+const droppedPickS = await getS(`/app?view=tasks&history=${DROPPED_S.agent}&pick=max`)
+const droppedRealS = await realS(DROPPED_S.agent)
+ok(`[suggest] at most ${AGENTS_S} agents get a row, the ones whose latest finished jobs are the most recent: of ${keptS.length + 1} agents with finished jobs, the one whose job is oldest gets no row and a pick naming it fills nothing`,
+   rowsOfS(blockS).length === AGENTS_S && keptS.length === AGENTS_S && keptS.every((a) => rowOfS(blockS, a))
+     && !rowOfS(blockS, DROPPED_S.agent) && !blockS.includes(DROPPED_S.used.toLocaleString('en-US')) && droppedRealS.size === 1 && droppedRealS.has(DROPPED_S.used.toLocaleString('en-US'))
+     && !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(droppedPickS.html)) && pickLineS(droppedPickS.html) === '',
+   `${rowsOfS(blockS).length} rows: ${rowsOfS(blockS).map((r) => r.agent).join(' | ')} | dropped ${DROPPED_S.agent} row ${Boolean(rowOfS(blockS, DROPPED_S.agent))}, pick "${ceilFieldS(droppedPickS.html)}"`)
+
+// A click fills the field. Picking p90 puts 180 and the summarizer label in
+// the form, both editable, marks the figure that is in the field, writes
+// nothing, and a pick the rows do not back fills nothing. Then the form saves
+// it through the one write it always had.
+const countS = async () => Number((await sql`SELECT count(*) AS n FROM task_budgets WHERE account_id = ${ACCT}`)[0].n)
+const beforeS = await countS()
+const pickedS = await getS('/app?view=tasks&history=summarizer&pick=p90')
+const afterS = await countS()
+const noFillS = async (q) => { const h = (await getS(`/app?view=tasks&${q}`)).html; return !/<input id="t-ceil"[^>]*value=/.test(ceilFieldS(h)) && pickLineS(h) === '' }
+const unbackedS = await Promise.all(['history=nobody&pick=p90', 'history=summarizer&pick=p99', 'history=console&pick=max', 'pick=max', 'history=summarizer'].map(noFillS))
+const savedS = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=sg-next&ceiling_units=180&agent_id=summarizer' })
+const nextS = await task8('sg-next')
+ok('[suggest] picking p90 fills 180 and the summarizer label, both editable, writes nothing, and a pick the rows do not back fills nothing; the save is the form\'s own',
+   /value="180"/.test(ceilFieldS(pickedS.html)) && !/readonly|disabled/.test(ceilFieldS(pickedS.html))
+     && /value="summarizer"/.test(agentFieldS(pickedS.html)) && !/readonly|disabled/.test(agentFieldS(pickedS.html))
+     && pickedS.html.includes('<a class="pk on" href="/app?view=tasks&amp;history=summarizer&amp;pick=p90" aria-current="true">')
+     && shownS(pickLineS(pickedS.html)).includes('In the ceiling field: 180 units, the p90 of your last 20 jobs of summarizer')
+     && shownS(pickLineS(pickedS.html)).includes('Nothing is saved until you press Set ceiling')
+     && pickedS.html.includes('action="/app/tasks"') && beforeS === afterS && unbackedS.every(Boolean)
+     && savedS.headers.get('location') === '/app?view=tasks&saved=sg-next&created=1' && nextS?.ceilingUnits === 180 && nextS?.agentId === 'summarizer',
+   `${ceilFieldS(pickedS.html)} ${agentFieldS(pickedS.html)} | ${shownS(pickLineS(pickedS.html))} | unbacked ${unbackedS.join(',')} | ${beforeS}->${afterS} | ${savedS.headers.get('location')}`)
+
+// ?demo=1: the same suggestion, worked out from the labelled sample rows the
+// view lists below it, with no form that can save. researcher has two
+// settled sample jobs (118 and 492) and enricher one (1,025); summarizer and
+// crawler each have a call in flight in the sample, so neither is offered.
+// Signed in or not, the sample never shows this account's figures.
+const demoS = await getS('/app?demo=1&view=tasks', null)
+const demoBlockS = histOfS(demoS.html)
+const demoResS = rowOfS(demoBlockS, 'researcher')
+const demoEnrS = rowOfS(demoBlockS, 'enricher')
+const demoPickS = await getS('/app?demo=1&view=tasks&history=researcher&pick=p90', null)
+const demoInS = await getS('/app?demo=1&view=tasks')
+ok('[suggest] ?demo=1 shows the suggestion from the labelled sample rows, a click fills the field there too, and nothing on it can save',
+   demoS.status === 200 && demoS.html.includes('Sample data') && rowsOfS(demoBlockS).length === 2
+     && demoResS?.label === 'from your last 2 jobs of ' && demoResS.figs.p50 === '118' && demoResS.figs.p90 === '492' && demoResS.figs.max === '492'
+     && demoEnrS?.label === 'from your last job of ' && demoEnrS.figs.one === '1,025'
+     && !rowOfS(demoBlockS, 'summarizer') && !rowOfS(demoBlockS, 'crawler')
+     && demoResS.hrefs.every((u) => u.startsWith('/app?demo=1&amp;view=tasks&amp;history=researcher&amp;pick='))
+     && !/method="POST"/i.test(demoS.html) && !demoS.html.includes('action="/app/tasks"') && demoS.html.includes('<a class="btn" href="/register">')
+     && /value="492"/.test(ceilFieldS(demoPickS.html)) && /value="researcher"/.test(agentFieldS(demoPickS.html)) && !/method="POST"/i.test(demoPickS.html)
+     && shownS(pickLineS(demoPickS.html)).includes('the p90 of your last 2 jobs of researcher') && shownS(pickLineS(demoPickS.html)).includes('This is sample data, so nothing here is saved')
+     && histOfS(demoInS.html) === demoBlockS && !demoInS.html.includes('action="/app/tasks"'),
+   `${demoS.status} researcher ${figsS(demoResS)} "${demoResS?.label}", enricher ${figsS(demoEnrS)}, rows ${rowsOfS(demoBlockS).map((r) => r.agent).join(' | ') || 'none'}, POST form ${/method="POST"/i.test(demoS.html)}`)
+
+// The words say what the code computes. The footer and the fine print name
+// the same N, the same test for finished and the same held-out time as the
+// constants the server runs on, /docs says it in one paragraph, and no served
+// surface keeps the old review's sentence, which named GET /tasks?agent_id=
+// (created_at order, every job) as what the percentile was taken over.
+const footS = shownS((pageS.html.match(/<div class="foot">[\s\S]*?<\/div>/) ?? [''])[0])
+const fineS = shownS((blockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0])
+const docsS = shownS(await fetch(`${API}/docs`).then((r) => r.text()))
+const OLD_S = /percentile of the used_units that GET \/tasks\?agent_id=|GET \/tasks\?agent_id= returns/i
+const sitemapS = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const pathsS = [...new Set([...sitemapS.matchAll(/<loc>https?:\/\/[^/<]+(\/[^<]*)<\/loc>/g)].map((m) => m[1]))]
+const oldSaidS = []
+for (const path of [...pathsS, '/llms.txt', '/llms-full.txt']) {
+  const hit = shownS(await fetch(`${API}${path}`).then((r) => r.text())).match(OLD_S)
+  if (hit) oldSaidS.push(`${path}: "${hit[0]}"`)
+}
+for (const [name, h] of [['tasks', pageS.html], ['tasks+pick', pickedS.html], ['demo', demoS.html]]) {
+  const hit = shownS(h).match(OLD_S)
+  if (hit) oldSaidS.push(`${name}: "${hit[0]}"`)
+}
+ok('[suggest] the footer, the fine print and /docs say what the code computes: one job\'s used_units, the last N finished jobs of one agent, finished defined, the time an open reservation holds a job out, and how many agents get a row',
+   footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
+     && fineS.includes(`Each row is the p50, p90 and max used_units of one agent's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
+     && fineS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
+     && fineS.includes(`a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${TTL_S} minutes and a sweep releases it.`)
+     && fineS.includes('Jobs with the placeholder label console are left out.')
+     && fineS.includes(`At most ${AGENTS_S} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion.`)
+     && docsS.includes(`For at most ${AGENTS_S} agents, those whose latest finished jobs are the most recent, it shows the p50, p90 and max used_units of each one's last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
+     && docsS.includes('Any other agent, including one with no finished job, gets no suggestion.')
+     && !/for each agent, the p50/i.test(docsS)
+     && pathsS.length >= 10 && oldSaidS.length === 0,
+   oldSaidS.join('; ') || `foot: ${footS.slice(-260)} | fine: ${fineS.slice(0, 160)}`)
+
+// Units only, and the house words. Everything this change prints, read as
+// served: the suggestion on the real and the sample view, both lines under
+// the form, the sample's button, the footer sentence and the /docs paragraph.
+// No money word of any kind, and none of the house's banned words.
+const docsParaS = (docsS.match(/Not sure what a job needs\?[^]*?gets no suggestion\./) ?? [''])[0]
+const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html), pickLineS(host2PickS.html),
+  (demoS.html.match(/<a class="btn" href="\/register">[^<]*<\/a>/) ?? [''])[0], (footS.match(/A suggested ceiling is[^]*$/) ?? [''])[0]].map(shownS).join(' ') + ' ' + docsParaS
+const moneyS = newCopyS.match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
+const bannedS = newCopyS.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
+ok('[suggest] everything the suggestion prints is in units: no money word, and none of the banned house words',
+   newCopyS.length > 1500 && docsParaS.length > 200 && moneyS.length === 0 && bannedS.length === 0,
+   [...moneyS, ...bannedS].join(', ') || `${newCopyS.length} chars, docs paragraph ${docsParaS.length}`)
+await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
+
+// ---------------------------------------------------------------- jobs: which job used the most, 2026-09-23
+// From a builder's interview (vault, B-brain/05-research/2026-09-23-shahar-elhadad-interview.md,
+// 04:24 to 05:10): he wants to be shown which process costs the most and which takes the
+// longest, without working it out himself. Until this, the console ranked customers only:
+// tasks were listed by updated_at, GET /tasks by created_at, and nothing split the units by
+// event_type. What is asserted, each on what the server actually serves:
+//   1. GET /tasks keeps its order for a client that sends no sort; sort=used ranks by
+//      used_units; any other sort is a 422.
+//   2. The tasks view's Recent is the order it always had; Most used ranks the same rows.
+//   3. A row's time is the span between the first and the last preflight on record for that
+//      job (reservations, plus preflight-source decisions), and nothing else moves it: not
+//      task_budgets' own timestamps, not a record, not another account's rows. It says "on
+//      record", never "seen", and the footer names it as the number GET /tasks does not return.
+//   4. GET /usage?by=event_type and the activity view split this account's units the same
+//      way, and another account's records never appear in either.
+console.log('\n[jobs] which job used the most, and what the units were recorded under')
+await reset()
+await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
+const KEYJ = (await post('/keys/generate', { label: 'harness-jobs' })).body.api_key
+if (typeof KEYJ !== 'string' || !KEYJ.startsWith('agb_')) throw new Error('[jobs] could not mint its key')
+const OTHERJ = '00000000-0000-0000-0000-0000000000dd'
+const OTHERKEYJ = 'agb_testkey_other_account_jobs_0003'
+await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
+          VALUES (${OTHERJ}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHERJ}, ${OTHERKEYJ}, 'other-jobs') ON CONFLICT DO NOTHING`
+const authJ = (key) => ({ 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' })
+const preJ = (body, key = KEYJ) => fetch(`${API}/preflight`, { method: 'POST', headers: authJ(key), body: JSON.stringify(body) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+let seqJ = 0
+const recJ = (body, key = KEYJ) => fetch(`${API}/events`, { method: 'POST', headers: authJ(key),
+  body: JSON.stringify({ customer_id: 'default', idempotency_key: `jobs-${seqJ++}`, ...body }) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+const ceilJ = (ref, body, key = KEYJ) => fetch(`${API}/tasks/${encodeURIComponent(ref)}/ceiling`, { method: 'PUT', headers: authJ(key), body: JSON.stringify(body) })
+  .then(async r => ({ status: r.status, body: await r.json() }))
+const getJ = (path, key = KEYJ) => fetch(`${API}${path}`, { headers: key ? { 'Authorization': `Bearer ${key}` } : {} })
+  .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }))
+const T0 = Date.now()
+const agoJ = (mins) => new Date(T0 - mins * 60_000)
+
+// 1. Three jobs, created in one order, used in a second, touched in a third, so each
+//    order is a claim of its own and no two can pass for each other, including the two
+//    alpha jobs on their own (created: mid, old; used: old, mid).
+for (const [ref, agent, units] of [['jobs-old', 'alpha', 300], ['jobs-mid', 'alpha', 50], ['jobs-new', 'beta', 10]]) {
+  await ceilJ(ref, { ceiling_units: 1000, agent_id: agent })
+  await preJ({ agent_id: agent, task_ref: ref, estimated_units: units })
+  await recJ({ event_type: agent, units, task_ref: ref })
+}
+await sql`UPDATE task_budgets SET created_at = ${agoJ(180)}, updated_at = ${agoJ(1)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-old'`
+await sql`UPDATE task_budgets SET created_at = ${agoJ(120)}, updated_at = ${agoJ(10)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-mid'`
+await sql`UPDATE task_budgets SET created_at = ${agoJ(60)},  updated_at = ${agoJ(5)}  WHERE account_id = ${ACCT} AND task_ref = 'jobs-new'`
+// Another account's job, the newest, the most recently touched and the most used in the
+// database, under the agent label alpha this account also uses, so a list query that lost
+// its account filter would put it at the top of every order below. Until 2026-09-23 no
+// other account had a task when GET /tasks was called, and the review found that replacing
+// `account_id = ${accountId}` with `true` in the list query left the whole harness green.
+await ceilJ('jobs-other', { ceiling_units: 10000, agent_id: 'alpha' }, OTHERKEYJ)
+await sql`UPDATE task_budgets SET used_units = 9999, created_at = now(), updated_at = now() WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-other'`
+const otherTaskJ = await getJ('/tasks/jobs-other', OTHERKEYJ)
+ok('[jobs] setup: another account holds jobs-other, at 9999 units used', otherTaskJ.status === 200 && otherTaskJ.body?.used_units === 9999,
+   `${otherTaskJ.status} ${JSON.stringify(otherTaskJ.body).slice(0, 120)}`)
+const refsJ = (r) => (r.body?.tasks ?? []).map((t) => t.task_ref).join(',')
+const plainJ = await getJ('/tasks')
+ok('[jobs] GET /tasks with no sort is still newest job first, as every existing client got it',
+   plainJ.status === 200 && refsJ(plainJ) === 'jobs-new,jobs-mid,jobs-old', `${plainJ.status} ${refsJ(plainJ)}`)
+const createdJ = await getJ('/tasks?sort=created')
+ok('[jobs] and sort=created is that same order, named', refsJ(createdJ) === 'jobs-new,jobs-mid,jobs-old', refsJ(createdJ))
+const usedJ = await getJ('/tasks?sort=used')
+ok('[jobs] GET /tasks?sort=used ranks the jobs by used_units',
+   usedJ.status === 200 && refsJ(usedJ) === 'jobs-old,jobs-mid,jobs-new' && usedJ.body.tasks.map((t) => t.used_units).join(',') === '300,50,10',
+   `${usedJ.status} ${JSON.stringify(usedJ.body?.tasks?.map((t) => [t.task_ref, t.used_units]))}`)
+const alphaJ = await getJ('/tasks?agent_id=alpha&sort=used')
+ok('[jobs] sort=used composes with agent_id', refsJ(alphaJ) === 'jobs-old,jobs-mid', refsJ(alphaJ))
+const badSortJ = await getJ('/tasks?sort=cost')
+ok('[jobs] an unknown sort is a 422, not a silent default', badSortJ.status === 422 && badSortJ.body?.error === 'validation_error',
+   `${badSortJ.status} ${JSON.stringify(badSortJ.body).slice(0, 120)}`)
+const listsJ = [['/tasks', plainJ], ['?sort=created', createdJ], ['?sort=used', usedJ], ['?agent_id=alpha&sort=used', alphaJ]]
+const otherHereJ = await getJ('/tasks/jobs-other')
+ok('[jobs] another account\'s job is in none of GET /tasks, ?sort=created, ?sort=used or ?agent_id=alpha&sort=used, and is 404 by name',
+   listsJ.every(([, r]) => r.status === 200 && !refsJ(r).split(',').includes('jobs-other')) && otherHereJ.status === 404,
+   `${listsJ.map(([q, r]) => `${q}: ${refsJ(r)}`).join(' | ')} | /tasks/jobs-other: ${otherHereJ.status}`)
+
+// 2. The same three rows on the console.
+const loginJ = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEYJ}` })
+const cookieJ = (loginJ.headers.get('set-cookie') ?? '').split(';')[0]
+ok('[jobs] login for the console views', cookieJ.startsWith('agentbill_app='), cookieJ.slice(0, 20))
+const pageJ = (path) => nav8(path, { headers: { cookie: cookieJ } }).then((r) => r.text())
+// The row's name cell as the canvas console draws it (design/canvas-everywhere,
+// 2026-09-24): a table row whose lead cell opens with <div class="tk-n"><a>.
+// Until the merge it read the dark console's <div class="btask">.
+const rowsJ = (h) => [...h.matchAll(/<div class="tk-n"><a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1]).join(',')
+const recentJ = await pageJ('/app?view=tasks')
+ok('[jobs] the tasks view opens on Recent, most recently touched first, the order it always had',
+   rowsJ(recentJ) === 'jobs-old,jobs-new,jobs-mid' && recentJ.includes('<a class="on" href="/app?view=tasks" aria-current="true">Recent</a>'),
+   rowsJ(recentJ))
+const mostJ = await pageJ('/app?view=tasks&sort=used')
+ok('[jobs] Most used ranks the same rows by units used, and says so under them',
+   rowsJ(mostJ) === 'jobs-old,jobs-mid,jobs-new' && mostJ.includes('<a class="on" href="/app?view=tasks&amp;sort=used" aria-current="true">Most used</a>')
+     && mostJ.includes('most units used first'), rowsJ(mostJ))
+ok('[jobs] and another account\'s job is on neither order of this account\'s tasks view',
+   !recentJ.includes('jobs-other') && !mostJ.includes('jobs-other') && rowsJ(recentJ) !== '' && rowsJ(mostJ) !== '',
+   `recent: ${rowsJ(recentJ)} | most used: ${rowsJ(mostJ)}`)
+ok('[jobs] the order belongs to the tasks view: no link to another view carries it',
+   !/href="\/app\?view=(?!tasks)[a-z]+&amp;sort=used/.test(mostJ) && mostJ.includes('href="/app?view=activity"'), 'a link to another view kept sort=used')
+
+// 3. The span, on a job opened with a ceiling and no call yet.
+await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'alpha' })
+const rowOfJ = (h, ref) => {
+  const i = h.indexOf(`>${ref}</a>`)
+  if (i < 0) return ''
+  // The next row is the next <tr; the canvas rows are table rows, not .brow divs.
+  const j = h.indexOf('<tr', i)
+  return h.slice(i, j < 0 ? undefined : j)
+}
+const seenJ = async (ref) => visible8((rowOfJ(await pageJ('/app?view=tasks'), ref).match(/<span class="bseen">([\s\S]*?)<\/span>/) ?? [])[1] ?? '')
+  .replace(/\s+/g, ' ').trim()
+const decisionRowJ = async (ref, source, account = ACCT) => {
+  const started = Date.now()
+  let rows = []
+  while (Date.now() - started < PAGE_DEADLINE_MS) {
+    rows = await sql`SELECT id FROM preflight_decisions WHERE account_id = ${account} AND task_ref = ${ref} AND source = ${source} ORDER BY id`
+    if (rows.length) break
+    await settle(POLL_MS)
+  }
+  return rows
+}
+let seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a job opened with no preflight says so and shows no span', seenNowJ === 'no preflight on record', seenNowJ || 'no seen line on the row')
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] one preflight is one preflight, not a span', seenNowJ === 'one preflight on record', seenNowJ)
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 10 })
+const resJ = await sql`SELECT id FROM reservations WHERE account_id = ${ACCT} AND task_ref = 'jobs-span' ORDER BY id`
+ok('[jobs] setup: three approved preflights left three reservation rows', resJ.length === 3, String(resJ.length))
+await sql`UPDATE reservations SET created_at = ${agoJ(180)} WHERE id = ${resJ[0]?.id ?? 0}`
+await sql`UPDATE reservations SET created_at = ${agoJ(120)} WHERE id = ${resJ[1]?.id ?? 0}`
+await sql`UPDATE reservations SET created_at = ${agoJ(60)}  WHERE id = ${resJ[2]?.id ?? 0}`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] the span runs from the first stored preflight to the last, and is labelled as that',
+   seenNowJ === '2h 0m, first to last preflight on record', seenNowJ)
+const refusedJ = await preJ({ agent_id: 'alpha', task_ref: 'jobs-span', estimated_units: 500 })
+const refusedRowJ = await decisionRowJ('jobs-span', 'preflight')
+await sql`UPDATE preflight_decisions SET created_at = ${agoJ(30)} WHERE id = ${refusedRowJ[0]?.id ?? 0}`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a refused preflight is a preflight on record, so it extends the span',
+   refusedJ.body.reason === 'task_ceiling_exceeded' && refusedRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record',
+   `${refusedJ.body.reason} ${refusedRowJ.length} "${seenNowJ}"`)
+// task_budgets' own timestamps are not the span: a ceiling save moves updated_at, and
+// created_at is when the job was opened, not a call.
+const saveJ = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookieJ }, body: 'task_ref=jobs-span&ceiling_units=150' })
+await sql`UPDATE task_budgets SET created_at = ${agoJ(600)} WHERE account_id = ${ACCT} AND task_ref = 'jobs-span'`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a ceiling save and the job\'s created_at do not move it',
+   saveJ.status === 303 && seenNowJ === '2h 30m, first to last preflight on record', `${saveJ.status} "${seenNowJ}"`)
+// A record is not a preflight, even one that lands past the ceiling and leaves a row.
+const leakJ = await recJ({ event_type: 'alpha', units: 200, task_ref: 'jobs-span' })
+const leakRowJ = await decisionRowJ('jobs-span', 'events')
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] a record, even one that leaks and leaves a decision row, does not move it',
+   leakJ.body.task_exceeded === true && leakRowJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record',
+   `${JSON.stringify(leakJ.body).slice(0, 80)} ${leakRowJ.length} "${seenNowJ}"`)
+// Another account's job of the same name is its own, and so are its rows.
+await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'other' }, OTHERKEYJ)
+await preJ({ agent_id: 'other', task_ref: 'jobs-span', estimated_units: 5 }, OTHERKEYJ)
+await preJ({ agent_id: 'other', task_ref: 'jobs-span', estimated_units: 500 }, OTHERKEYJ)
+const otherRefusalJ = await decisionRowJ('jobs-span', 'preflight', OTHERJ)
+await sql`UPDATE reservations SET created_at = ${agoJ(1000)} WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-span'`
+await sql`UPDATE preflight_decisions SET created_at = ${agoJ(2)} WHERE account_id = ${OTHERJ} AND task_ref = 'jobs-span'`
+seenNowJ = await seenJ('jobs-span')
+ok('[jobs] another account\'s preflights on the same task_ref never enter this span',
+   otherRefusalJ.length === 1 && seenNowJ === '2h 30m, first to last preflight on record', `${otherRefusalJ.length} "${seenNowJ}"`)
+// The rows are fewer than the preflights: reservations begin with migration 006 on
+// 2026-09-03, and a refusal row is written fire-and-forget. The review's reproduction: a
+// job a preflight opened and spent under, whose reservation row is then removed, as if it
+// ran before 006. The job exists only because a preflight opened it, so "no preflight seen"
+// would be false. What is true is that none is on record.
+await preJ({ agent_id: 'alpha', task_ref: 'jobs-prerec', task_ceiling: 100, estimated_units: 10 })
+await recJ({ event_type: 'alpha', units: 10, task_ref: 'jobs-prerec' })
+const goneJ = await sql`DELETE FROM reservations WHERE account_id = ${ACCT} AND task_ref = 'jobs-prerec' AND released_at IS NOT NULL RETURNING id`
+const prerecRowJ = visible8(rowOfJ(await pageJ('/app?view=tasks'), 'jobs-prerec')).replace(/\s+/g, ' ')
+seenNowJ = await seenJ('jobs-prerec')
+ok('[jobs] a job whose preflights left no row shows its spend and says no preflight is on record, not that none was seen',
+   goneJ.length === 1 && /\b10 \/ 100\b/.test(prerecRowJ) && seenNowJ === 'no preflight on record',
+   `${goneJ.length} "${seenNowJ}" ${prerecRowJ.slice(0, 160)}`)
+// The footer says every number on the page is on the API too, and the span is not on it:
+// GET /tasks and GET /tasks/:task_ref serialize the budget and its two timestamps, and no
+// route returns reservations. So the footer and the served JSON must agree. While the JSON
+// carries no span field, each page that draws a span names it as the exception and a page
+// that draws none does not; if GET /tasks ever returns the span, the exception must go.
+const oneTaskJ = await getJ('/tasks/jobs-span')
+const listTaskJ = await getJ('/tasks')
+const servedKeysJ = [...Object.keys(oneTaskJ.body ?? {}), ...(listTaskJ.body?.tasks ?? []).flatMap((t) => Object.keys(t))]
+const spanKeysJ = [...new Set(servedKeysJ.filter((k) => /preflight|seen|span|first|last/i.test(k)))]
+const footJ = (h) => visible8((h.match(/<div class="foot">([\s\S]*?)<\/div>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+const EXCEPTION_J = 'except the preflight span on a task row, which the API does not return'
+const footPagesJ = []
+for (const [path, cookie, draws] of [['/app?view=tasks', cookieJ, true], ['/app', cookieJ, true], ['/app?view=keys', cookieJ, false],
+                                      ['/app?demo=1&view=tasks', null, true], ['/app?demo=1', null, true], ['/app?demo=1&view=activity', null, false]]) {
+  const h = await nav8(path, cookie ? { headers: { cookie } } : {}).then((r) => r.text())
+  footPagesJ.push({ path, draws: h.includes('<span class="bseen">'), expected: draws, foot: footJ(h) })
+}
+ok('[jobs] the footer and the served JSON agree: GET /tasks returns no preflight span, so each page that draws one names it as the exception, and a page that draws none does not',
+   oneTaskJ.status === 200 && servedKeysJ.includes('used_units')
+     && footPagesJ.every((f) => f.draws === f.expected && f.foot.startsWith('Every number on this page is on the API too')
+       && f.foot.includes(EXCEPTION_J) === (f.draws && spanKeysJ.length === 0)),
+   `served span fields ${JSON.stringify(spanKeysJ)} | ${footPagesJ.map((f) => `${f.path} draws=${f.draws} "${f.foot.slice(0, 120)}"`).join(' | ')}`)
+const tasksPageJ = await pageJ('/app?view=tasks')
+const noteNowJ = [...tasksPageJ.matchAll(/<p class="note">([\s\S]*?)<\/p>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' '))
+  .find((t) => t.includes('Units are the ones your code reported')) ?? ''
+ok('[jobs] the tasks note says the time is from records that begin 2026-09-03, that GET /tasks has the rows without it, and never "full attribution" or "seen"',
+   noteNowJ.includes('first to the last preflight on record') && noteNowJ.includes('Those records begin 2026-09-03')
+     && noteNowJ.includes('The same rows, without that time, are on GET /tasks') && !/full attribution|\bseen\b/i.test(noteNowJ),
+   noteNowJ || 'no tasks note')
+
+// 4. What the units were recorded under.
+await reset()
+for (const [event_type, units] of [['search', 20], ['search', 10], ['summarize', 10], ['archive', 500]]) await recJ({ event_type, units })
+await sql`UPDATE events SET created_at = now() - interval '40 days' WHERE account_id = ${ACCT} AND event_type = 'archive'`
+await recJ({ event_type: 'other-tenant-secret', units: 9999 }, OTHERKEYJ)
+const noKeyJ = await getJ('/usage?by=event_type', null)
+const badKeyJ = await getJ('/usage?by=event_type', 'agb_not_a_real_key_for_jobs_000')
+ok('[jobs] GET /usage is a bearer route: no key and a wrong key are both 401',
+   noKeyJ.status === 401 && badKeyJ.status === 401, `${noKeyJ.status} ${badKeyJ.status}`)
+const noByJ = await getJ('/usage')
+const byCustJ = await getJ('/usage?by=customer')
+const days0J = await getJ('/usage?by=event_type&days=0')
+const days91J = await getJ('/usage?by=event_type&days=91')
+ok('[jobs] by=event_type is required and days is 1 to 90, each a 422',
+   [noByJ, byCustJ, days0J, days91J].every((r) => r.status === 422 && r.body?.error === 'validation_error'),
+   [noByJ, byCustJ, days0J, days91J].map((r) => r.status).join(','))
+const u30J = await getJ('/usage?by=event_type')
+const groupsJ = (b) => JSON.stringify((b?.groups ?? []).map((g) => [g.event_type, g.units, g.events, g.share]))
+ok('[jobs] GET /usage splits the window by event_type, heaviest first, each with its share of the total',
+   u30J.status === 200 && u30J.body.by === 'event_type' && u30J.body.days === 30 && /^\d{4}-\d{2}-\d{2}$/.test(u30J.body.since)
+     && u30J.body.total_units === 40 && u30J.body.total_events === 3 && u30J.body.group_count === 2
+     && groupsJ(u30J.body) === JSON.stringify([['search', 30, 2, 0.75], ['summarize', 10, 1, 0.25]]),
+   JSON.stringify(u30J.body))
+const u90J = await getJ('/usage?by=event_type&days=90')
+ok('[jobs] the window is days: a record from 40 days ago is in 90 and not in 30',
+   u90J.body?.total_units === 540 && u90J.body.groups?.[0]?.event_type === 'archive' && !groupsJ(u30J.body).includes('archive'),
+   JSON.stringify(u90J.body))
+const u1J = await getJ('/usage?by=event_type&limit=1')
+ok('[jobs] a limit cuts the groups, never the totals',
+   u1J.body?.groups?.length === 1 && u1J.body.group_count === 2 && u1J.body.total_units === 40, JSON.stringify(u1J.body))
+ok('[jobs] another account\'s records never appear in this account\'s split, nor in its totals',
+   !JSON.stringify(u30J.body).includes('other-tenant-secret') && !JSON.stringify(u90J.body).includes('other-tenant-secret') && u90J.body?.total_units === 540,
+   JSON.stringify(u90J.body))
+const uOtherJ = await getJ('/usage?by=event_type', OTHERKEYJ)
+ok('[jobs] and that account sees its own records and none of this one\'s',
+   uOtherJ.body?.total_units === 9999 && groupsJ(uOtherJ.body) === JSON.stringify([['other-tenant-secret', 9999, 1, 1]]), JSON.stringify(uOtherJ.body))
+// The console reads the same function, so the page says what the API says.
+const splitJ = (h) => {
+  const s = h.slice(h.indexOf('<h2>By event_type'), h.indexOf('<h2>Day by day'))
+  return [...s.matchAll(/<td class="id lead" title="[^"]*">([^<]+)<\/td>[\s\S]*?<span>([^<]+) of units<\/span>[\s\S]*?<td class="num" data-l="units">([0-9,]+)<\/td>\s*<td class="num" data-l="records">([0-9,]+)<\/td>/g)]
+    .map((m) => [m[1], m[2], Number(m[3].replace(/,/g, '')), Number(m[4].replace(/,/g, ''))])
+}
+// The day-by-day table on canvas is the kit's table with the page's own
+// .days class; the dark console wrapped it in <div class="frame tw days">.
+const dayUnitsJ = (h) => [...h.slice(h.indexOf('<table class="cv-table is-ruled days">')).matchAll(/<td class="when">[\s\S]*?<\/td>\s*<td class="num">([0-9,]+)<\/td>/g)]
+  .reduce((a, m) => a + Number(m[1].replace(/,/g, '')), 0)
+const sumJ = (rows) => rows.reduce((a, r) => a + r[2], 0)
+const actJ = await pageJ('/app?view=activity')
+ok('[jobs] the activity view shows the same split, each share of every unit in the window',
+   JSON.stringify(splitJ(actJ)) === JSON.stringify([['search', '75%', 30, 2], ['summarize', '25%', 10, 1]]), JSON.stringify(splitJ(actJ)))
+ok('[jobs] and never another account\'s event_type', !actJ.includes('other-tenant-secret'))
+ok('[jobs] the split sums to the day-by-day units over the same window', sumJ(splitJ(actJ)) === dayUnitsJ(actJ) && dayUnitsJ(actJ) === 40,
+   `${sumJ(splitJ(actJ))} vs ${dayUnitsJ(actJ)}`)
+const act90J = await pageJ('/app?view=activity&range=90d')
+ok('[jobs] and it moves with the period control', splitJ(act90J)[0]?.[0] === 'archive' && sumJ(splitJ(act90J)) === dayUnitsJ(act90J) && dayUnitsJ(act90J) === 540,
+   `${JSON.stringify(splitJ(act90J))} vs ${dayUnitsJ(act90J)}`)
+const splitTextJ = visible8(actJ.slice(actJ.indexOf('<h2>By event_type'), actJ.indexOf('<h2>Day by day'))).replace(/\s+/g, ' ')
+ok('[jobs] the split says whose units they are and what event_type holds',
+   splitTextJ.includes('in the units your code reported') && splitTextJ.includes('record() in both SDKs sends its agent_id as the event_type')
+     && splitTextJ.includes('GET /usage?by=event_type'), splitTextJ.slice(0, 200))
+
+// The sample console shows both, from its own labelled sample rows. The
+// banner's label is the kit's mono label on canvas (it was <b>Sample data</b>
+// on the dark console).
+const SAMPLE_LABEL_J = '<span class="cv-label">Sample data</span>'
+const demoUsedJ = await fetch(`${API}/app?demo=1&view=tasks&sort=used`).then((r) => r.text())
+ok('[jobs] the sample console ranks its sample jobs by Most used, inside the sample frame',
+   rowsJ(demoUsedJ) === 'nightly-crawl,batch-2211,job-8871,job-8864,job-8870' && demoUsedJ.includes(SAMPLE_LABEL_J)
+     && demoUsedJ.includes('<a class="on" href="/app?demo=1&amp;view=tasks&amp;sort=used" aria-current="true">Most used</a>'), rowsJ(demoUsedJ))
+const demoRecentJ = await fetch(`${API}/app?demo=1&view=tasks`).then((r) => r.text())
+ok('[jobs] and Recent there is most recently touched first, as its note says', rowsJ(demoRecentJ) === 'job-8871,batch-2211,job-8870,nightly-crawl,job-8864',
+   rowsJ(demoRecentJ))
+const demoSeenJ = [...demoUsedJ.matchAll(/<span class="bseen">([\s\S]*?)<\/span>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' ').trim())
+ok('[jobs] every sample row carries its span, labelled the same way', demoSeenJ.length === 5 && demoSeenJ.every((s) => /^\S+( \S+)?, first to last preflight on record$/.test(s)),
+   JSON.stringify(demoSeenJ))
+for (const range of ['7d', '30d', '90d']) {
+  const h = await fetch(`${API}/app?demo=1&view=activity&range=${range}`).then((r) => r.text())
+  ok(`[jobs] the sample split sums to the sample day-by-day units (${range})`,
+     h.includes(SAMPLE_LABEL_J) && splitJ(h).length === 4 && sumJ(splitJ(h)) === dayUnitsJ(h) && dayUnitsJ(h) > 0,
+     `${sumJ(splitJ(h))} vs ${dayUnitsJ(h)}`)
+}
+
+// The words. Everything this lane added that a reader sees: the tasks note and seen lines,
+// the split on the activity view, and the two API sections on /docs.
+const docsJ = await fetch(`${API}/docs`).then((r) => r.text())
+const docsNewJ = docsJ.slice(docsJ.indexOf('<h3 id="get-tasks">'), docsJ.indexOf('<h3 id="put-budget">'))
+const tasksNoteJ = (mostJ.match(/<p class="note">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const newCopyJ = visible8([tasksNoteJ, demoSeenJ.join(' '), actJ.slice(actJ.indexOf('<h2>By event_type'), actJ.indexOf('<h2>Day by day')), docsNewJ].join(' '))
+ok('[jobs] /docs documents GET /tasks?sort and GET /usage', docsNewJ.includes('<h3 id="get-usage">GET /usage</h3>') && docsNewJ.includes('sort=used'), docsNewJ.slice(0, 80) || 'no new docs sections')
+ok('[jobs] the new copy never says stop, block, kill, halt or cut off, and names no money',
+   newCopyJ.length > 400 && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(newCopyJ),
+   (newCopyJ.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/gi) ?? []).join(', '))
+// server.ts: the canonical-host redirect skips only paths on this list, and a cross-host
+// 301 drops the Authorization header, so a bearer GET missing from it breaks on the old host.
+const prefixesJ = (readFileSync9(`${ROOT9}/src/server.ts`, 'utf8').match(/const API_PREFIXES = \[([\s\S]*?)\]/) ?? [])[1] ?? ''
+ok('[jobs] /usage is on the API prefix list, so the canonical-host redirect never strips its bearer header',
+   /'\/usage'/.test(prefixesJ), prefixesJ.replace(/\s+/g, ' '))
+await sql`DELETE FROM accounts WHERE id = ${OTHERJ}`
+
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
 process.exit(fail === 0 ? 0 : 1)
