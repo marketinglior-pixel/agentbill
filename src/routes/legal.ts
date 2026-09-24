@@ -28,18 +28,29 @@ function legalShell(title: string, path: string, body: string): string {
     description: `${title} for AgentBill, budget ceilings for AI agents.`,
     path,
     scriptHashes: [],
+    // Canvas, 2026-09-23: the column starts on the wordmark's edge (--shell is
+    // the nav's width, as on every other page) and reads at the docs' measure;
+    // the heading is the docs' h1, each numbered section one rung down at h3,
+    // the date in the label register the posts use for a dateline, the prose
+    // in --muted at the body size. Four font-size literals went to the scale.
     css: `${CHROME_CSS}
-    :root { --shell: 720px; }
-    body { line-height: 1.7; }
+    :root { --shell: var(--chrome-w); }
     .container { max-width: var(--shell); margin: 0 auto;
-                  padding-inline: var(--gutter); padding-block: var(--s8); }
-    /* --code is syntax only (design.md). Prose links are the brand green. */
-    a { color: var(--green); }
-    h1 { color: var(--white); font-size: 24px; margin-bottom: 8px; }
-    .updated { color: var(--dim); font-size: 13px; margin-bottom: 40px; }
-    h2 { color: var(--white); font-size: 16px; margin: 32px 0 10px; }
-    p, li { font-size: 14px; margin-bottom: 12px; }
-    ul { padding-left: 20px; margin-bottom: 12px; }
+                  padding-inline: var(--gutter); padding-block: var(--s7) 96px; }
+    /* The ink, underlined on a quiet rule that darkens on hover, as in the docs. */
+    .container a { color: var(--green); text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+    .container a:hover { text-decoration-color: currentColor; }
+    h1 { font-size: var(--fs-h1-sub); color: var(--text); margin-bottom: var(--s3); max-width: 26ch; }
+    .updated { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-bottom: var(--s7); }
+    h2 { font-size: var(--fs-h3); color: var(--text); margin: var(--s7) 0 var(--s3); max-width: 40ch; }
+    .updated + h2 { margin-top: 0; }
+    p, li { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: var(--s4); max-width: 62ch; }
+    strong { color: var(--text); font-weight: 600; }
+    ul { padding-inline-start: 20px; margin-bottom: var(--s4); }
+    @media (max-width: 720px) {
+      .container { padding-block: var(--s6) var(--s8); }
+      h2 { margin-top: var(--s6); }
+    }
 `,
   })}
 <body>

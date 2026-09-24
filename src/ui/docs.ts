@@ -15,67 +15,90 @@ import { head } from './theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from './chrome.js'
 
 /* Hallmark · genre: modern-minimal · macrostructure: Long Document + sticky rail (S3)
- * design-system: design.md · designed-as-app · nav: N1b, shared · footer: Ft2, shared
+ * theme: canvas (theme.ts, the default since 2026-09-23) · design-system: design.md
+ * designed-as-app · nav: N1b, shared · footer: Ft2, shared
  * enrichment: none, code blocks are the panels */
 export const DOCS_CSS = `${CHROME_CSS}
-  :root { --shell: 1080px; }
+  /* The nav's width, so the breadcrumb, the rail and the column start on the
+     wordmark's edge. It was 1080 against the nav's 1072: 4px off on each side. */
+  :root { --shell: var(--chrome-w); }
 
-  .docs { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; padding-block: 48px 96px;
-          display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
-  /* Without a rail the 220px track was still reserved and rendered empty, so
-     /status, /blog and /thanks each opened with a column of nothing beside a
-     column of content. A hidden rail should take no space, not invisible space. */
-  .docs.no-rail { grid-template-columns: minmax(0, 1fr); }
+  /* One column: the breadcrumb, then <main>. A page without a rail is that
+     and nothing more (/status, /blog and /thanks once opened with an empty
+     220px track beside their content; a hidden rail takes no space). */
+  .docs { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); padding-block: var(--s7) 96px;
+          display: grid; grid-template-columns: minmax(0, 1fr); gap: 56px; align-items: start; }
+  /* With a rail, <main> holds three parts in reading order: the page's head
+     (h1, lede, dateline), the rail, then the body. On a wide screen they sit
+     on two tracks, the rail in the first spanning both rows and sticky, head
+     and body in the second, so the desktop page is what it was. On a phone
+     main is one column and the DOM order IS the layout: the page starts with
+     its head, like the homepage, and "On this page" follows the lede. Until
+     2026-09-23 the rail sat before <main>, so at 390px it rendered above the
+     h1 and pushed it to 705px on /faq, 665 on /docs/first-run: the first
+     screen was eleven links and a sticky bar. */
+  .docs.has-rail > .container { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 56px;
+                                align-items: start; }
+  .docs.has-rail .rail { grid-column: 1; grid-row: 1 / span 2; }
+  .doc-head, .doc-body { grid-column: 2; min-width: 0; }
+  /* A grid item does not collapse margins with its neighbour, so the head's
+     last margin is dropped here and the body's first h2 carries the whole gap,
+     which is what the collapse used to produce. The rules below restate the
+     "first h2 sits closer" rules for the split, which a "+" can no longer see
+     across. */
+  .doc-head > :last-child { margin-bottom: 0; }
 
   /* Breadcrumb.
      A full-width first row of the grid rather than the first thing inside
-     <main>. At 960px and below the rail collapses to a horizontal strip and it
-     is first in DOM order, so a breadcrumb inside main would render BELOW "On
-     this page" on every phone.
-     Deliberately not --green: green is the brand and the primary action, and a
-     green trail competes with the page's real links. This is furniture. */
+     <main>, so the trail is always the first line under the nav.
+     Furniture, in the mono label voice's case and size but not its tracking:
+     a trail is read as words. */
   .crumbs { grid-column: 1 / -1; margin-bottom: 28px; }
   .crumbs ol { list-style: none; display: flex; flex-wrap: wrap; align-items: baseline;
                gap: 0 8px; row-gap: 4px; font-family: var(--mono); font-size: var(--fs-micro); }
   .crumbs a { color: var(--dim); text-decoration: none; }
   .crumbs a:hover { color: var(--text); text-decoration: underline; }
-  .crumbs .sep { color: var(--border2); }
-  .crumbs [aria-current="page"] { color: var(--muted); }
+  .crumbs .sep { color: var(--border-strong); }
+  .crumbs [aria-current="page"] { color: var(--text); }
 
-  /* The rail. Sticky beneath the nav, never over it. */
+  /* The rail. Sticky beneath the nav, never over it. A hairline with the
+     current section marked by an ink bar on it, the nav's own device turned
+     on its side. */
   .rail { position: sticky; top: calc(var(--banner-height) + 28px); z-index: 1; }
-  .rail-h { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  .rail-h { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: var(--track-label); text-transform: uppercase;
             color: var(--dim); margin-bottom: 12px; }
-  .rail a { display: block; color: var(--dim); text-decoration: none; font-size: 13.5px; line-height: 1.45;
-            padding: 7px 0 7px 12px; border-left: 1px solid var(--border); }
+  .rail a { display: block; color: var(--rail-ink); text-decoration: none; font-size: var(--fs-small); line-height: 1.45;
+            padding: 7px 0 7px 14px; border-left: 1px solid var(--border); margin-left: 0; }
   .rail a:hover { color: var(--text); }
-  .rail a[aria-current="true"] { color: var(--text); border-left-color: var(--green); }
-  .rail a:active { color: var(--white); }
+  .rail a[aria-current="true"] { color: var(--text); border-left: 2px solid var(--text); padding-left: 13px; font-weight: 500; }
+  .rail a:active { color: var(--text); }
 
   .container { min-width: 0; }
-  h1 { font-size: var(--fs-h1-sub); color: var(--white); margin-bottom: 12px; overflow-wrap: anywhere; max-width: 26ch; }
-  .lede { font-size: var(--fs-lede); color: var(--muted); max-width: 60ch; margin-bottom: 8px; }
+  h1 { font-size: var(--fs-h1-sub); color: var(--white); margin-bottom: 12px; overflow-wrap: anywhere; max-width: 26ch;
+       line-height: 1.04; }
+  .lede { font-size: var(--fs-lede); color: var(--muted); max-width: 60ch; margin-bottom: 8px; line-height: 1.55; }
   /* A post's dateline: date and reading time, in the label register. */
-  .meta { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 8px; }
+  .meta { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-bottom: 8px; }
   .meta + h2, .lede + h2 { margin-top: 44px; }
   /* A source line under a quote carries the full URL as its own text, so a
      reader can check it; at 390px that URL has to be allowed to break. */
   .meta a { overflow-wrap: anywhere; }
   blockquote { border-left: 2px solid var(--border2); padding-left: 20px; margin: 24px 0; max-width: 68ch; }
-  blockquote p { color: var(--dim); font-style: italic; }
+  blockquote p { color: var(--muted); font-style: italic; }
   /* Sections are separated by space, not by rules. The first h2 after the lede
      sits closer than the rest so the page does not open with a gap. */
   h2 { color: var(--white); margin: 72px 0 18px; overflow-wrap: anywhere; scroll-margin-top: calc(var(--banner-height) + 24px); }
   .lede ~ .badge + h2 { margin-top: 44px; }
-  /* The third rung was 12px --dim against 16px --muted body, so every h3 was
-     smaller and lighter than the text it introduced and read as a caption
-     belonging to the paragraph above it. It also matched the rail label, the
-     breadcrumb and the table headers exactly, so the page had one furniture
-     treatment doing four jobs. The mono family and the uppercase stay, which
-     design.md argues for; only the rung and the weight of the ink change.
-     .14em tracking is tuned for 12px and runs long at 22px. */
-  h3 { font-family: var(--mono); font-size: var(--fs-h3); font-weight: 500; color: var(--text);
-       margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .07em; }
+  /* The same two rules on a page whose head and body are split around the rail. */
+  .doc-head:has(> .lede:last-child, > .meta:last-child) ~ .doc-body > h2:first-child,
+  .doc-head:has(> .lede ~ .badge:last-child) ~ .doc-body > h2:first-child { margin-top: 44px; }
+  /* The third rung. Until 2026-09-23 it was set in the mono, uppercase and
+     tracked, which on the dark theme separated it from the display face. On
+     canvas the mono uppercase is the LABEL voice (column heads, the label over
+     a figure) and a 22px heading in it read as a label shouting; every heading
+     is Geist at 500 now, h3 one rung under h2, in the ink. */
+  h3 { font-family: var(--display); font-size: var(--fs-h3); color: var(--text);
+       margin: 34px 0 10px; letter-spacing: -0.01em; }
   /* 68ch measured 86 real characters, because ch is the width of a zero and not
      of an average character, so five stacked paragraphs read as one grey slab.
      54ch lands at 66 to 70. Code, tables and the headings keep the full column,
@@ -83,34 +106,36 @@ export const DOCS_CSS = `${CHROME_CSS}
      rhythm instead of one flat block. */
   p { font-size: var(--fs-body); color: var(--muted); line-height: 1.7; margin-bottom: 16px; max-width: 54ch; }
   /* The closing line of a step sequence, one lift above the prose around it.
-     It was var(--green), which design.md reserves for the brand and the primary
-     action: "Links are --green". Nothing here is a link, so the accent promised
-     a click that does not exist, and it made a throwaway reassurance the single
-     loudest piece of text on the page, brighter than the headings above it.
-     --text is the lift the sentence actually wants and is what h1 a and h2 a
-     already use on this shell for exactly this "brighter, not the accent" job.
-     Named for its role rather than .ok, because .ok means a green status
-     indicator in status.ts and playground.ts and this is neither. */
+     --text, not the primary's colour: nothing here is a link, and h1 a and h2 a
+     already use --text on this shell for the same "brighter, not the accent" job.
+     Named for its role rather than .ok, because .ok means a status indicator
+     in status.ts and playground.ts and this is neither. */
   p.closer { color: var(--text); }
   li { color: var(--muted); line-height: 1.7; max-width: 54ch; }
-  a { color: var(--green); }
+  /* Links in prose are the ink, underlined on a quiet rule that darkens on
+     hover. On canvas --green IS the ink; the underline is what says link. */
+  a { color: var(--green); text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+  a:hover { text-decoration-color: currentColor; }
+  b, strong { color: var(--text); font-weight: 600; }
   /* A link at display size is a title, not an action. The blog index renders each
-     post as <h2><a>, so both headings inherited full-strength green plus the prose
-     underline and became the entire chromatic content of the page: 2.02% on a page
-     with almost no ink. Linear, Polar and Stripe all set index links in text and
-     leave the accent for the meta line or a hover. */
+     post as <h2><a>, so both headings inherited the prose underline and read as
+     one long link. Linear, Polar and Stripe all set index links in text and
+     leave the affordance for a hover. */
   h1 a, h2 a { color: var(--text); text-decoration: none; }
-  h1 a:hover, h2 a:hover { color: var(--green); }
+  h1 a:hover, h2 a:hover { color: var(--text); text-decoration: underline; text-decoration-color: currentColor; }
 
-  /* The frame does not scroll and is never masked; the pre inside it does both.
+  /* The code frame: your code, the sample a reader copies. A warm-grey card on
+     the white page, --r-inner corners and a hairline, ink mono; the same object
+     as .cv-snip in the kit, under the name every docs page already renders.
+     The frame does not scroll and is never masked; the pre inside it does both.
      When overflow and the fade sat on this element, the mask ate the 1px border,
      both right corners and the last 48px of the top and bottom hairlines along
      with the text, so four blocks on /docs read as a failed render. Keeping the
      scroller inside also preserves the 20px right gutter, which a scroll
      container's own padding collapses at the scroll origin. */
-  .code { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 6px;
+  .code { background: var(--snip-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
           padding: 20px; margin: 16px 0; }
-  .code pre { font-family: var(--mono); font-size: 13px; color: var(--code-ink); line-height: 1.7;
+  .code pre { font-family: var(--mono); font-size: var(--fs-code); color: var(--text); line-height: 1.7;
               overflow-x: auto; }
   /* A block that scrolls sideways used to look exactly like one that does not,
      so a reader saw a sentence end mid-word and had no way to know there was
@@ -126,37 +151,48 @@ export const DOCS_CSS = `${CHROME_CSS}
      and scripts/snippets/extract.mjs drops any line carrying a class="out-"
      span, so a block of printed output is never parsed as a sample. */
   .out-dim { color: var(--dim); }
-  .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 8px; border-radius: 4px;
-            font-size: 13px; color: var(--code); }
+  /* Code set inside a sentence: the ink on the chip ground, not a syntax
+     colour. --code on canvas is a warm red-brown, and a paragraph dotted with
+     it spent the one accent the system reserves for the refusal. */
+  .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
+            font-size: .875em; color: var(--text); }
 
-  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;
+  /* Tables, in the kit's voice: mono uppercase column labels, a hairline under
+     every row because docs rows carry sentences, the name column in the mono. */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: var(--fs-small);
           font-variant-numeric: tabular-nums; }
-  th { text-align: left; color: var(--dim); font-weight: normal; padding: 8px 12px;
-       border-bottom: 1px solid var(--border2); font-family: var(--mono); font-size: 11.5px;
-       letter-spacing: .1em; text-transform: uppercase; }
-  td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); color: var(--muted); vertical-align: top; }
-  td:first-child { font-family: var(--mono); font-size: 13px; color: var(--text); white-space: nowrap; }
-  .tag { display: inline-block; font-family: var(--mono); background: var(--surface3); color: var(--dim);
-         font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
-  .badge { display: inline-block; font-family: var(--mono); background: var(--surface3);
-           border: 1px solid var(--border2); border-radius: 4px; padding: 2px 8px; font-size: 12px;
-           color: var(--dim); margin-right: 6px; margin-bottom: 12px; }
+  th { text-align: left; color: var(--th-ink); font-weight: 400; padding: 8px 12px;
+       border-bottom: 1px solid var(--border2); font-family: var(--mono); font-size: var(--fs-chip);
+       letter-spacing: var(--track-label); text-transform: uppercase; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--row-line); color: var(--muted); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-size: var(--fs-code); color: var(--text); white-space: nowrap; }
+  /* The kit's .tag, keeping its case: in a parameter table it carries
+     identifiers ("optional, on AgentBillClient(...)"), and uppercase would
+     rewrite them. */
+  .container .tag { display: inline-block; text-transform: none; letter-spacing: 0; margin-left: 8px; padding: 1px 8px; }
+  .badge { display: inline-block; font-family: var(--mono); background: var(--surface2);
+           border: 1px solid var(--card-line); border-radius: var(--r-pill); padding: 3px 10px; font-size: var(--fs-micro);
+           color: var(--muted); margin-right: 6px; margin-bottom: 12px; }
 
   .also { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--border); }
-  .also p { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  .also p { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: var(--track-label); text-transform: uppercase;
             color: var(--dim); margin-bottom: 10px; }
-  .also a { display: block; text-decoration: none; font-size: 14.5px; margin-bottom: 8px; }
+  .also a { display: block; text-decoration: none; font-size: var(--fs-body); font-weight: 500; margin-bottom: 8px; }
   .also a:hover { text-decoration: underline; }
   .end { margin-top: 56px; }
 
   @media (max-width: 960px) {
-    .docs { grid-template-columns: minmax(0, 1fr); gap: 0; padding-block: 32px 72px; }
+    .docs { gap: 0; padding-block: 32px 72px; }
     .crumbs { margin-bottom: 20px; }
+    /* One column, in DOM order: head, rail, body. */
+    .docs.has-rail > .container { display: block; }
+    /* The strip under the lede: between two hairlines, so it reads as the
+       page's index and not as the first section of it. */
     .rail { position: static; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px;
-            padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+            margin-block: var(--s6) var(--s5); padding-block: 20px; border-block: 1px solid var(--border); }
     .rail-h { margin: 0; flex-basis: 100%; margin-bottom: 4px; }
     .rail a { border-left: 0; padding: 8px 0; white-space: nowrap; }
-    .rail a[aria-current="true"] { border-left: 0; }
+    .rail a[aria-current="true"] { border-left: 0; padding-left: 0; }
     h2 { margin-top: 56px; }
   }
   /* Below --md the rail items wrap instead of being amputated. With nowrap and
@@ -169,15 +205,15 @@ export const DOCS_CSS = `${CHROME_CSS}
   }
   @media (max-width: 640px) {
     .code { padding: 16px; }
-    .code pre { font-size: 12.5px; }
-    table { font-size: 13.5px; }
+    .code pre { font-size: var(--fs-micro); }
+    table { font-size: var(--fs-small); }
     th, td { padding: 8px 8px; }
     /* The parameter tables are 420px inside a 342px box, and html/body clip the
        overflow, so half of every description was unreachable rather than merely
        cut. Stack each row instead: name and type on one line, description under
        it, full width. The header row carries no meaning once stacked. */
     table, tbody { display: block; }
-    tr { display: block; border-bottom: 1px solid var(--border-soft); padding: 10px 0; }
+    tr { display: block; border-bottom: 1px solid var(--row-line); padding: 10px 0; }
     tr:has(th) { display: none; }
     td { display: inline; border-bottom: 0; padding: 0; }
     /* Inline cells have no cell padding, so the name ran into its own type and
@@ -299,6 +335,17 @@ type ShellOpts = {
    * put at the top of a receipt.
    */
   navCta?: boolean
+  /**
+   * Suppress only the sticky twin, the full-width "Get API key" bar a phone
+   * shows at the bottom of the screen; the nav keeps its button on a desktop.
+   * Default true. False on the pages whose reader already has an account and
+   * came to do one thing that is not signing up: /recover, where the bar sat
+   * over the key page's "your console" line, and /status. It is the same
+   * option /terms and /privacy pass to siteNav (legal.ts). /thanks passes it
+   * too, beside navCta: after a payment both are off; on an incomplete
+   * checkout the nav keeps its button and the bar stays off.
+   */
+  sticky?: boolean
   /** The page body. Its <h2>s become the rail. */
   body: string
 }
@@ -341,25 +388,59 @@ function breadcrumb(path: string): { html: string; ld: unknown } | null {
   }
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, body }: ShellOpts): string {
+/**
+ * Split a body at its first top-level <h2>: the head (h1, lede, dateline) and
+ * everything from that heading on. The rail goes between them.
+ *
+ * Null when there is no <h2>, or when the first one sits inside a container
+ * that opened before it: cutting there would close a <div> in the wrong part.
+ * The caller then keeps the body whole and puts the rail first, which is how
+ * every page rendered before this split existed.
+ */
+const CONTAINERS = 'div|section|article|aside|ul|ol|table|blockquote|details|figure'
+export function splitHead(body: string): { head: string; rest: string } | null {
+  const i = body.search(/<h2[\s>]/)
+  if (i < 0) return null
+  const head = body.slice(0, i)
+  const opened = (head.match(new RegExp(`<(${CONTAINERS})[\\s>]`, 'g')) || []).length
+  const closed = (head.match(new RegExp(`</(${CONTAINERS})>`, 'g')) || []).length
+  return opened === closed ? { head, rest: body.slice(i) } : null
+}
+
+export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, sticky = true, body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
-  const rail = wantRail && toc.length
+  const hasRail = wantRail && toc.length > 0
+  const rail = hasRail
     ? `  <nav class="rail" aria-label="On this page">
     <p class="rail-h">On this page</p>
 ${toc.map((t) => `    <a href="#${t.id}">${t.label}</a>`).join('\n')}
   </nav>`
     : ''
+  const parts = hasRail ? splitHead(anchored) : null
+  const inner = !hasRail
+    ? anchored
+    : parts
+      ? `  <div class="doc-head">
+${parts.head}
+  </div>
+${rail}
+  <div class="doc-body">
+${parts.rest}
+  </div>`
+      : `${rail}
+  <div class="doc-body">
+${anchored}
+  </div>`
   return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
                     css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
 <body>
-${siteNav(current, { cta: navCta })}
-<div class="docs${wantRail ? '' : ' no-rail'}">
+${siteNav(current, { cta: navCta, sticky })}
+<div class="docs ${hasRail ? 'has-rail' : 'no-rail'}">
 ${crumb ? crumb.html : ''}
-${rail}
   <main class="container">
-${anchored}
+${inner}
   </main>
 </div>
 ${siteFooter()}

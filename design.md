@@ -12,10 +12,151 @@ is edited, so this file names the tokens and says how to use them, and
 genuinely page-local), then reference it. No hex below the `:root` line of any
 page.
 
+## The canvas system (2026-09-23)
+
+**Every page and the console render on canvas.** The homepage's design, approved
+by Lior in Figma (`uMcr4L26RQYChYmpykVGRQ`), became the system for every screen
+on 2026-09-23, on his instruction that day: "I love the design you made, but it
+does not look like the system in production. Design ALL the screens, including
+the console, in the same design and the same design language." This **reverses
+the earlier lock "do not restyle the /app console"** and the rule that the
+console keeps the dark theme because its `--held` green is semantics. The
+semantics survive, re-cast below; the green does not. It is a design pass on
+the branch `design/canvas-everywhere`, captured into Figma for review, **not
+merged and not deployed**. Where anything later in this file disagrees with
+this section, this section wins.
+
+**Tokens.** `head()` renders `TOKENS_CANVAS` unless a page passes a theme;
+`dark` (`TOKENS`) and `paper` stay defined as the revert path and nothing
+passes them. `ROLES` (also `theme.ts`) is rendered after the theme on every
+page and names each component role, aliasing the theme's own tokens, so it
+holds no colour of its own:
+
+- ground and ink: `--bg` / `--surface` white, `--surface2` and `--surface3`
+  the warm greys one and two steps down; `--text`, `--muted`, `--dim`;
+  hairlines `--border` / `--border2`, and `--border-strong` for anything that
+  marks a control (3:1).
+- the one accent: `--signal` (and `--plate-signal` on the plate, `--fail-bg`
+  its tint). `--green` keeps its name and is the ink: it is the primary
+  action's fill, the link colour, the focus ring.
+- radii by role: `--r-card` 24 (outer panel; `--r-card-sm` 20 on a phone),
+  `--r-inner` 16 (the card inside it, a code frame), `--r-field` 12 (an input,
+  a plate in a side column), `--r-row` 10 (a tinted row, a rail link),
+  `--r-inline` 6 (code in a sentence), `--r-pill` for actions, chips and tags.
+- heights: `--h-lg` 44 and `--h-md` 40, the Figma Button component's L and M;
+  `--h-sm` 32 only for a button inside another control.
+- type: Geist and Geist Mono, one family in two cuts. Every heading is Geist
+  at 500 (`--fw-h1..3`, read by BASE). `--fs-stat` the figure in a frame,
+  `--fs-code` code in a frame, and the existing scale for everything else.
+- roles (`ROLES`): `--panel-bg --card-bg --card-line --side-bg` (the frame),
+  `--th-ink --row-line --row-hover --row-no-bg --row-no-ink` (tables),
+  `--chip-bg --chip-ink --chip-line --chip-no-*` (chips),
+  `--callout-bg --callout-line`, `--field-bg --field-line --field-focus
+  --field-ph`, `--rail-w --rail-bg --rail-ink --rail-hover-bg --rail-on-bg
+  --rail-on-ink`, `--empty-line --empty-bg`, `--snip-bg` (your code's frame),
+  `--meter-track --meter-fill --meter-tick`, `--track-label --track-chip`.
+- the phone gutter is 16px on every page under `--md` (`ROLES`); every screen
+  holds 390 and 320 with no sideways scroll.
+
+**Components live in `src/ui/kit.ts`** (`KIT_CSS`, carried by `CHROME_CSS`, so
+every page with the nav has it; the console and `/admin` include it
+themselves). The homepage's own names were kept where it had them, and every
+new name is `cv-` because the short ones are taken by page-local rules:
+
+- actions: `.btn` (ink fill, M 40), `.btn-lg` (L 44), `.btn-alt` (light fill,
+  L 44, the secondary beside a primary, never a second ink fill), `.btn-ghost`
+  (outlined, M 40). All pills. One filled primary per fold.
+- labels: `.eyebrow` (section kicker), `.cv-label` (the in-frame label),
+  `.mono-in` (a code word in a sentence).
+- `.pill` / `.pill-tag` (the announcement over a hero); `.tag` / `.tag-id`
+  (names a thing: SAMPLE, `job-142`); chips `.chip-ok` `.chip-no` `.chip-near`
+  `.chip-fail`; `.cv-picks` / `.cv-pick` (what your code can do next, not
+  buttons).
+- the frame: `.cv-panel` > `.cv-card` > `.cv-bar` (+ `.cv-bar-t`) and
+  `.cv-body`, `.cv-split` with `.cv-side`; `.cv-stat`, `.cv-meter`, `.cv-no`.
+- `.cv-table` (+ `.is-ruled`, `.num`, `.m`, `.mut`, `tr.is-no`), in
+  `.cv-scroll` when it can outgrow a phone.
+- code: `.cv-code` (+ `.is-sm`) on the plate for the machine's answer;
+  `.cv-snip` / `.cv-snip-h` for your code; `.cv-plate` for one value a reader
+  copies whole (a key, the line that sets it): white, hairline, `--r-field`,
+  the Copy at the right, and `break-all` so `export AGENTBILL_API_KEY=agb_...`
+  starts on line one. `copyPlate()` in `copy.ts` renders it with the Copy.
+- `.cv-close`: the homepage's closing band, warm grey at `--r-card`, words
+  centred. Every done or dead end takes it: `/thanks`, and `/recover`'s sent,
+  refused and expired messages.
+- `.cv-callout` (+ `.is-no`), `.cv-flabel` / `.cv-field` (+ `.m`) /
+  `.cv-hint` / `.cv-err`, `.cv-seg`, `.cv-navlink` (+ `.n`), `.cv-empty`.
+- helpers: `chip()`, `tag()`, `SAMPLE_TAG`, `label()`, `meter()`.
+
+The shared partials follow the same values: the nav and footer (`chrome.ts`,
+one width, `--chrome-w` 1072, on every page), the copy pill (`copy.ts`), the
+tier cards (`tiers.ts`), the panel frame (`panels.ts`, `.panel` is the canvas
+card), and the docs shell (`docs.ts`).
+
+**Panel in panel is the frame for anything that shows product data.** A
+warm-grey outer panel holds a white card with a hairline. The card opens with a
+bar: an id tag, a muted label, and `SAMPLE` at its right when the numbers are
+not the reader's own. On the console the bar carries the tag and `SAMPLE`
+only: every count or order a muted label there could state ("5 jobs", "newest
+first") is already in the heading, lede or note on the same screen, and a
+second copy is copy a restyle added. A split card gives its right column the warm-grey ground;
+that is where the one figure, its meter and the machine's answer sit. Nothing
+that shows data floats on the page without the frame.
+
+**The mono label voice** is small, tracked, uppercase, in `--dim`: the column
+heads of a table (CALL, UNITS, TOTAL, ANSWER), the label over a figure (THIS
+JOB), a section kicker. It is never a heading and never a sentence; headings are
+Geist at 500, sentence case.
+
+**Chips carry decisions.** An approved call is `.chip-ok`, neutral, because an
+approved call is not a colour. The refusal is `.chip-no`, outlined in the
+signal. A leak (spend past a ceiling, needs a human) is `.chip-fail`, the signal
+filled. Approaching a limit is `.chip-near`, the one non-signal state colour. A
+state that is neither (running, ok) is a `.tag`.
+
+**A bar is ink, the signal, or the signal hatched.** A meter's fill is
+`--meter-fill` (ink) for ordinary spend, including a task or a plan within a
+fifth of its ceiling: that state is the `.chip-near` beside it, never a bar
+colour. The ceiling held (a task at its ceiling, a customer at their limit, a
+plan at 90%) is `--signal`. A leak is the signal hatched, the playground's mark
+for units past the ceiling (`.pg-ghost`), so held and leaked never differ by a
+shade of one hue. The console once drew near, held and leaked in `--amber`,
+`--signal` and `--fail-ink`, three browns a reader could not tell apart (review,
+2026-09-23); `--amber` and `--fail-ink` are not bar or text colours on canvas.
+
+**One accent, and it is the refusal.** `--signal` marks the approved-false
+moment and what belongs to it: the refused row's tint (`tr.is-no`), the
+refusal chip, the meter's ceiling tick, the one-line note under it, the
+`"approved": false` line on the plate. Apart from `.chip-near`'s amber, nothing
+else on a screen is chromatic: not links, not the brand, not an active tab, not
+inline code. `--red` is the
+same hue on canvas by design, so a form error reads as the form refusing; it is
+one line of text, never a filled block.
+
+**Superseded by this section**, and kept below as the record: "modern-minimal,
+dark" under Genre; the three faces under Type (they are the dark theme's);
+`--green` as a chromatic accent and the 12/8 radius rule under Colour and
+"What pages must share"; the primary as a green 8px button under CTA voice; the
+console's green `--held` under the App family.
+
+**Approved by Lior on 2026-09-24** (they were held after the 2026-09-23 review). The restyle kept copy as it
+was, with these additions, all approved: the site nav and
+footer on the signed-out login and the checkout hand-off (the brief asks for
+the homepage's nav and footer on every page); the frame's mono labels, which
+are the approved frame's own parts (the column heads Task / Units / Burn-down /
+State, THIS JOB over the figure); a tag and `SAMPLE` on every console frame;
+and the overview's latest refusals as the refusals view's table, so
+"researcher → job-8871" became an Agent and a Task column. The frame bars'
+facts ("5 jobs", "latest 5 of 6, newest first", "4 customers, heaviest first",
+the date range and the rest) were removed rather than held.
+
 ## Genre
 
-modern-minimal, dark. A brilliant systems engineer's page: terse, precise,
-trusts the reader, hates decoration.
+modern-minimal. A brilliant systems engineer's page: terse, precise,
+trusts the reader, hates decoration. On canvas since 2026-09-23 (the section
+above); the history of the themes follows. `/` alone is light since 2026-09-16 (paper)
+and, from 2026-09-23, the canvas theme; the console, docs, pricing and register
+stay dark.
 
 ## Macrostructure families
 
@@ -45,6 +186,28 @@ trusts the reader, hates decoration.
   rows are top-level sections, so their heads are `h2` at the section rung
   and no group heading governs them. The copy budget that produced this: hero
   subhead under 25 words, a row under 45, the not-list under 25 per item.
+
+  **The canvas homepage (2026-09-23).** Supersedes the order above for `/`.
+  Craft reference: x.ai/bot, read for the white canvas, near-black type, pale
+  warm-gray panels, the centred hero with two pill actions, the large
+  soft-cornered product frame under it, the split statement panel, the card
+  grid and the two-column FAQ; nothing of its product, palette or claims, and
+  none of its social-proof slot (ours holds a public incident instead). Built
+  from the approved Figma file `uMcr4L26RQYChYmpykVGRQ` after Lior's FIGMA GO.
+  Order, and nothing else: hero (announcement pill, the h1 `HOME_H1`, the
+  locked sub, the primary to `/register` and a secondary pill to `#estimate`,
+  the trust line, then the agent's-log frame rendered from `RUN` and labelled
+  sample), the statement (month and org caps conceded, then the job ceiling's
+  scope, with a sample figure of both states), the estimator (the visitor's
+  own arithmetic, `src/ui/estimator.ts`), the demo (the playground, restyled,
+  with your code on the language tabs under its wire), How it works (three
+  cards), the ICP chips (examples, never integrations or customers), the
+  evidence band (one sentence, its attribution, the link), the four tier
+  cards, the questions (the not-list is the first item, open), and the close.
+  Tokens: `TOKENS_CANVAS` in `theme.ts`, opt-in per route; Geist and Geist
+  Mono from Google Fonts on `/` only. Frames at 24px, inner cards at 16,
+  fields at 12, actions and chips as pills. No film and no Fig. 1: the frame
+  and the statement carry their numbers as text from the same walk of PLAN.
 
   **The fold (2026-09-12).** Craft reference: pressplaced.com, read for air,
   one demo and one action; nothing of its product, palette or claims. The
@@ -166,10 +329,19 @@ trusts the reader, hates decoration.
 - **Content (`/docs`, `/docs/*`, `/blog/*`):** Long Document with a sticky
   "On this page" rail (S3) docked beneath the nav. Typography only. Code blocks
   are the panels.
+  - On a phone the page starts with its head, as the homepage does: h1, lede,
+    dateline, then the rail as a strip between two hairlines, then the body.
+    `docsShell()` splits the body at its first top-level `<h2>` into
+    `.doc-head` and `.doc-body` and puts the rail between them inside
+    `<main>`; above 960 the three sit on two tracks and the desktop page is
+    pixel-identical to what it was. Until 2026-09-23 the rail rendered first
+    at every width, so on /faq at 390 the h1 sat at 705px under eleven links.
 
 ## Type
 
-Three faces, three jobs, no overlap (see the comment block in `theme.ts`):
+On canvas: Geist and Geist Mono, headings at 500 (the canvas system, above).
+The dark theme, the revert path, has three faces, three jobs, no overlap (see
+the comment block in `theme.ts`):
 
 - `--display` Archivo, every heading. The human voice.
 - `--sans` Inter, body. Preserved deliberately; the anti-slop canon dislikes
@@ -279,6 +451,14 @@ lines of code". `copyPill()` in `src/ui/copy.ts` is the control; one delegated
 listener covers every instance, so one CSP hash does too. The label changes to
 "Copied" and back, which is a state change rather than motion for mood.
 
+**Amended 2026-09-23 for `/` (Lior's decision 6 on the canvas redesign):** the
+hero has two actions, the filled primary to `/register` and one secondary pill,
+"Estimate a run", to `#estimate` (`.btn-alt`: a filled light pill on
+`--surface3`, never a second ink fill), measured as `estimate_click`; the text
+link to the demo below was retired with it, and `try_click` holds only its
+history. Everything else in this section still holds, and the paragraph below
+is kept as the record of why the hero had one action until then.
+
 The hero has one action. On 2026-09-09 its second button, an in-page jump to
 the playground, was retired: with the playground directly under the hero, a
 button that scrolls one screen is a button that says nothing. The paper
@@ -310,6 +490,9 @@ rather than where it goes.
 - Text link beside a primary (`.hero-try`): `--fs-small`, weight 600, underlined,
   rests `--muted` and darkens to `--text` on hover like the evidence links and
   the nav. Not a third button register; the `[fold]` gates keep it a link.
+- Secondary pill on `/` (`.btn-alt`, 2026-09-23): same height as the primary,
+  `--surface3` ground, `--text` label, pill radius. One per fold, beside the
+  primary, never a fill in ink.
 - One primary per fold. Labels are verbs and fit 272px at 320px viewport.
 
 ## What pages must share
@@ -333,6 +516,22 @@ bar ("python · the whole integration"), never window chrome.
 Macrostructure within their family. Shell width per family. Whether a grid
 break exists (marketing yes, content no). `/register` runs 560px inside the
 1080 shell because it is one form.
+
+**`/he/cost-per-client` renders neither the shared nav nor the shared footer.
+That is an exception on the record, not a settled rule: it is Lior's to
+decide.** The page is the Hebrew lead magnet, written to be passed on ("תעביר
+את הדף למישהו שכן", and its footer gives the address for whoever received a
+screenshot), and its second line promises "אין פה מה לקנות ואין טופס". The
+shared nav is English and carries Pricing, Console and "Get API key", so
+rendering it adds copy and an action to a page whose copy says there is
+neither: a copy decision, outside a restyle. What the page does share is
+everything below the chrome: the canvas tokens, the kit (`.cv-panel`, `.btn`),
+the card and plate frames, `--chrome-w` as its wide measure, and on a phone
+the console's labelled-card tables. The two ways to close it: (a) `siteNav()`
+and `siteFooter()` in a `dir="ltr"` wrapper around the RTL body, with
+`navCta: false` as `/thanks` does after a paid checkout, so the no-sale
+line stays true; or (b) keep this exception. Until he picks, (b) is what the
+branch renders.
 
 `/pricing` is the pricing variant of the marketing family. Until 2026-09-09 it
 was a spec-sheet table and its stamp said so; it is now the same four tier cards
@@ -439,6 +638,9 @@ left-aligned label in a full-width button reads as broken.
 
 Not on `/app`, `/admin`, `/register`, `/terms`, `/privacy` or `/pricing`: you are
 already there, or a sticky sales button on a privacy policy is the wrong register.
+`/recover`, `/thanks` and `/status` joined on 2026-09-23 (`sticky: false` in the
+docs shell): their reader already has an account, and on the recovered-key page
+the bar sat over the "your console" line. The 404 keeps it.
 `/pricing` joined that list on 2026-09-06: its whole purpose is the tier buttons,
 so the bar put a second green fill on screen beside the one the reader came to
 press, which is the duplication this rule exists to prevent.

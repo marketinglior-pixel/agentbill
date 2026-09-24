@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { publicRoute } from '../middleware/auth.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
+import { KIT_CSS } from '../ui/kit.js'
 
 // The lead magnet for the n8n/Make vertical, in Hebrew.
 //
@@ -20,12 +21,16 @@ import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
 // in full, and every money figure on it is the operator's own arithmetic from
 // their own mapping table, stated as such in the frame that carries it.
 //
-// DARK, not the light treatment the standalone draft used. That draft was a PDF
-// replacement and argued for inverting the ground so it read as a document. On
-// the site the same choice would be a second brand on one domain, and design.md
-// names the genre as dark. Every other rule it states is followed as written:
-// logical properties throughout (which is what lets the RTL flip work at all),
-// elevation by lightness, one deliberate break, no decorative motion.
+// CANVAS, since 2026-09-23, like every other page: the homepage's design
+// language, which Lior approved and then asked for on every screen. It was dark
+// until then, on the argument that a second ground would be a second brand on
+// one domain; the same argument now points the other way. The page keeps what
+// made it work: logical properties throughout (which is what lets the RTL flip
+// work at all), one deliberate break, no decorative motion. What changed is the
+// vocabulary, which is the kit's: warm-grey panels, white cards on a hairline,
+// the plate for the machine's answer, the ink pill for the one action, and the
+// one accent (the signal) kept for the refusal and for the one figure the page
+// sends the reader to find.
 //
 // The Latin runs are set one step down inside Hebrew body text. Hebrew has a
 // tall x-height and no ascenders, so `task_ref` at matched size reads as bold.
@@ -63,6 +68,23 @@ function statementRows(): string {
   }).join('')
 }
 
+/**
+ * Give every body cell its column's label, read from the same table's <thead>,
+ * so the phone layout can print the label beside the value (the console's
+ * `.cards` device) and a label can never drift from the header it repeats.
+ * Applied to every <table> on the page, after the page is rendered.
+ */
+function labelCells(table: string): string {
+  const thead = table.match(/<thead>[\s\S]*?<\/thead>/)?.[0] ?? ''
+  const labels = [...thead.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)]
+    .map((m) => m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().replace(/"/g, '&quot;'))
+  return table.replace(/<tbody>[\s\S]*?<\/tbody>/, (tbody) =>
+    tbody.replace(/<tr([^>]*)>([\s\S]*?)<\/tr>/g, (_row, attrs: string, cells: string) => {
+      let i = 0
+      return `<tr${attrs}>${cells.replace(/<td(?=[\s>])/g, () => `<td data-l="${labels[i++] ?? ''}"`)}</tr>`
+    }))
+}
+
 const CHECKLIST = [
   'הפרדתי לקוח אחד לוורקפלואו או לתרחיש משלו, או ודאתי שהוא כבר מופרד',
   'משכתי את ההיסטוריה של החודש שעבר, ובדקתי שהיא לא נחתכה ב-250',
@@ -75,183 +97,245 @@ const CHECKLIST = [
 
 const CSS = `
     /* Hallmark · genre: modern-minimal · macrostructure: Long Document, RTL
-     * design-system: design.md · nav: none, this is a forwarded asset
+     * design-system: design.md, the canvas system · nav: none, this is a forwarded asset
      * enrichment: none, the operator's own arithmetic is the panel */
 
-    :root { --shell: 900px; --wide: 1080px;
-            --he-display: 'Heebo', 'Assistant', system-ui, sans-serif;
-            --he-sans: 'Assistant', 'Heebo', system-ui, sans-serif; }
+    /* Heebo carries the Hebrew, at the canvas heading weight and the body
+       weights, one Hebrew family in two cuts as the site is one Latin family
+       in two. Every Latin run (.lat) is set in Geist, the site's own face, so
+       a word like n8n is the same word here that it is on every other page.
+       Geist Mono has no Hebrew, so the mono stack names Heebo next: a Hebrew
+       comment inside a code block falls to it and not to a system face. */
+    :root { --shell: 900px; --wide: var(--chrome-w, 1072px);
+            --he: 'Heebo', system-ui, sans-serif;
+            --he-mono: 'Geist Mono', 'Heebo', ui-monospace, monospace; }
 
-    body { font-family: var(--he-sans); font-size: var(--fs-body); line-height: 1.85; color: var(--muted); }
-    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; }
+    body { font-family: var(--he); font-size: var(--fs-body); line-height: 1.85; color: var(--muted); }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
     .wide { max-width: var(--wide); }
-    h1, h2, h3 { font-family: var(--he-display); color: var(--white); }
-    h1 { font-size: var(--fs-display); line-height: 1.15; letter-spacing: -0.01em; max-width: 17ch; }
-    h2 { font-size: var(--fs-h2); margin-bottom: var(--s4); }
+    /* No negative tracking: what tightens Latin display type crowds Hebrew. */
+    h1, h2, h3 { font-family: var(--he); color: var(--text); letter-spacing: 0; }
+    h1 { font-size: var(--fs-display); line-height: 1.15; max-width: 17ch; }
+    h2 { font-size: var(--fs-h2); line-height: 1.25; margin-bottom: var(--s4); }
     h3 { font-size: var(--fs-h3); margin-bottom: var(--s3); }
     p { margin-bottom: var(--s4); max-width: 58ch; }
-    strong { color: var(--text); font-weight: 700; }
+    strong { color: var(--text); font-weight: 600; }
     section { padding-block: var(--s8); }
     /* Hebrew has a tall x-height and no ascenders, so an embedded Latin run at a
        matched size reads as if it were bolded. One step down evens them out. */
-    .lat { font-size: .94em; }
-    code, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .lat { font-family: var(--sans); font-size: .94em; }
+    code, .mono { font-family: var(--he-mono); font-variant-numeric: tabular-nums; }
+    /* A code word inside a sentence: the ink on the chip ground, as on every
+       other page. It was the warm red-brown syntax colour, which on canvas
+       spends the one accent the system keeps for the refusal. */
+    p code, li code { background: var(--surface3); color: var(--text); padding: 1px 6px;
+                      border-radius: var(--r-inline); font-size: .9em; }
+    .band p code, .band li code { background: var(--surface); }
 
     .kick { padding-block: var(--s7) 0; font-size: var(--fs-small); }
-    /* --text. This page renders no nav and no wordmark, so this bold line is
-       the topmost element on it, sitting where a masthead would be and leading
-       with the product name. A green brand name in the nav slot is the one
-       thing on this site a reader would genuinely try to click. The two .lat
-       runs are inside this <b> and inherit, so they move with it.
-       Worth a separate decision, not a silent consequence: dropping the accent
-       leaves the page with no brand green above the fold. The honest fix for
-       that is to render the mark, which is green by definition, rather than to
-       tint a sentence. */
-    .kick b { color: var(--text); display: block; font-weight: 600; }
+    /* This page renders no nav and no wordmark, so this line is the topmost
+       element on it, sitting where a masthead would be and leading with the
+       product name, in the ink and not in an accent: a coloured brand name in
+       the nav's slot is the one thing a reader would try to click. */
+    .kick b { color: var(--text); display: block; font-weight: 500; }
     /* Direct child ONLY. A bare \`.kick span\` also matches the inline .lat runs
-       inside the <b>, turns each into a block, and breaks one line into four.
-       This is the same defect as the th-that-kept-its-border on /pricing and the
-       mask-on-the-framed-element in the docs shell: a structural rule scoped
-       wider than the thing it was written for. */
+       inside the <b>, turns each into a block, and breaks one line into four. */
     .kick > span { color: var(--dim); display: block; margin-top: var(--s1); }
     .lede { font-size: var(--fs-lede); color: var(--muted); margin-top: var(--s5); max-width: 54ch; }
-    .badge { display: inline-block; font-size: var(--fs-small); font-weight: 600; color: var(--text);
-             border: 1px solid var(--border-strong); border-radius: 8px;
-             padding: var(--s3) var(--s4); margin-top: var(--s5); line-height: 1.8; }
-    .note { border-inline-start: 3px solid var(--border-strong); padding-inline-start: var(--s4);
-            color: var(--dim); font-size: var(--fs-small); margin-block: var(--s5); max-width: 56ch; }
+    /* What is on the page, in one line: the homepage's announcement pill on
+       the warm-grey ground, a soft rectangle rather than an oval because it
+       wraps on a phone. */
+    .badge { display: inline-block; font-size: var(--fs-small); font-weight: 500; color: var(--text);
+             background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-field);
+             padding: var(--s2) var(--s4); margin-top: var(--s5); line-height: 1.8; }
+    /* A note that belongs to the page: the kit's callout. */
+    .note { background: var(--callout-bg); border: 1px solid var(--callout-line); border-radius: var(--r-inner);
+            padding: var(--s4) 20px; color: var(--muted); font-size: var(--fs-small); line-height: 1.75;
+            margin-block: var(--s5); max-width: 56ch; }
     .note strong { color: var(--text); }
-    .pull { font-family: var(--he-display); font-size: var(--fs-h3); font-weight: 700; color: var(--white);
-            border-inline-start: 4px solid var(--green); padding-inline-start: var(--s4);
-            margin-block: var(--s6); max-width: 46ch; line-height: 1.5; }
+    /* The line the page wants remembered, in the ink at the h3 size, as the
+       homepage sets its own thesis line: weight and ink, no rule beside it. */
+    .pull { font-family: var(--he); font-size: var(--fs-h3); font-weight: 500; color: var(--text);
+            margin-block: var(--s6); max-width: 40ch; line-height: 1.5; }
 
-    /* The three steps, given away above the fold. Source order 1, 2, 3: under
-       dir="rtl" the first element renders rightmost, which is where a Hebrew
-       reader starts, so no reversal is needed and adding one would re-break it. */
+    /* The three steps, given away above the fold, as the homepage's three
+       steps: warm-grey panels. Source order 1, 2, 3: under dir="rtl" the first
+       element renders rightmost, which is where a Hebrew reader starts, so no
+       reversal is needed and adding one would re-break it. */
     .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4);
              margin-top: var(--s5); }
-    .step { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-            border-radius: 12px; padding: var(--s5); box-shadow: var(--edge), var(--lift); }
-    /* --white, and NOT --text, which was the obvious choice and the wrong one:
-       .step p on the next line is already --text at the same font-size, so
-       --text here would leave the card title and its first body line identical
-       in size and ink, collapsing a three-rung card (title / --text body /
-       --dim footnote) to two. --white is this page's heading ink and these
-       <b>s are headings. An elevated card whose title is set in the accent is
-       the textbook clickable-card affordance. */
-    .step b { font-family: var(--mono); font-size: var(--fs-small); color: var(--white);
-              display: block; margin-bottom: var(--s3); }
+    .step { background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); }
+    .step b { font-size: var(--fs-body); font-weight: 500; color: var(--text); display: block; margin-bottom: var(--s3); }
     .step p { margin: 0 0 var(--s2); font-size: var(--fs-small); color: var(--text); }
-    .step p:last-child { margin: 0; color: var(--dim); }
+    .step p:last-child { margin: 0; color: var(--muted); }
 
-    .stepnum { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s4); }
-    /* --muted. Not --dim, which at this size and weight reads as a broken
-       heading rather than a quiet marker, and not --text, which is seven parts
-       in 255 away from the --white h2 beside it and would merge the ordinal
-       into the title. --muted is the rung that still reads as subordinate at
-       display size. */
-    .stepnum span { font-family: var(--mono); font-size: var(--fs-h3); font-weight: 700; color: var(--muted); }
+    /* A step's number in the homepage's ink disc, beside its heading. */
+    .stepnum { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+    .stepnum span { flex: none; display: inline-grid; place-items: center; width: 36px; height: 36px;
+                    border-radius: var(--r-pill); background: var(--text); color: var(--bg);
+                    font-family: var(--mono); font-size: var(--fs-small); font-weight: 500; line-height: 1; }
     .stepnum h2 { margin: 0; }
 
-    /* Every table scrolls itself; the document never scrolls sideways. */
-    .tw { overflow-x: auto; margin-block: var(--s5); border: 1px solid var(--border);
-          border-top-color: var(--border2); border-radius: 12px; background: var(--surface);
-          box-shadow: var(--edge), var(--lift); }
+    /* A table is a card, as on every other page: white, the card hairline,
+       --r-inner corners. Every table scrolls itself; the document never
+       scrolls sideways. */
+    .tw { overflow-x: auto; margin-block: var(--s5); background: var(--card-bg); border: 1px solid var(--card-line);
+          border-radius: var(--r-inner); }
     table { border-collapse: collapse; width: 100%; min-width: 520px; }
-    th, td { padding: 12px 16px; text-align: start; border-bottom: 1px solid var(--border-soft);
+    th, td { padding: 12px 16px; text-align: start; border-bottom: 1px solid var(--row-line);
              font-size: var(--fs-small); }
-    thead th { background: var(--surface2); color: var(--dim); font-weight: 500;
-               font-size: var(--fs-micro); white-space: nowrap; }
+    /* The column labels in the label voice's size and ink. Hebrew has no case
+       and takes no tracking, so the voice is kept by size, ink and weight. */
+    thead th { color: var(--th-ink); font-weight: 500; font-size: var(--fs-micro); white-space: nowrap;
+               border-bottom-color: var(--card-line); }
     tbody tr:last-child td { border-bottom: 0; }
-    td.n, th.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    /* .money was on two different columns doing two different jobs: the cost
-       cell, where green was decoration on an ordinary figure, and the remainder
-       cell, where green/red is the whole point ("סוגריים הם מינוס", and the
-       copy tells the reader to look down that column). Splitting them keeps the
-       signal and drops the decoration. .bal.neg rather than a bare .neg so the
-       red does not depend on source order. */
-    td.money { color: var(--text); }
-    td.bal { color: var(--green); }
-    td.bal.neg { color: var(--red); }
+    td.n, th.n { font-family: var(--he-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* The remainder column is the one place a figure carries a state: a
+       client who cost more than he paid, "סוגריים הם מינוס", and the copy
+       sends the reader down this column to find him. That is this page's
+       moment, so it takes the signal; a positive remainder is the ink, like
+       every other figure. */
+    td.money, td.bal { color: var(--text); }
+    td.bal.neg { color: var(--signal); }
     .blank td { height: 30px; }
-    .cap { font-size: var(--fs-micro); color: var(--dim); margin-top: calc(var(--s4) * -1);
+    /* The per-client statement is the one table on the page that shows the
+       product's kind of output, so it sits in the frame every such table sits
+       in: the table's card inside the warm-grey panel. */
+    .cv-panel { margin-block: var(--s5); }
+    .cv-panel .tw { margin: 0; }
+    /* A client's name is one token; on a phone "לקוח א" broke into two lines. */
+    .cv-panel td:first-child { white-space: nowrap; }
+    .cap { font-size: var(--fs-micro); color: var(--dim); margin-top: calc(var(--s2) * -1);
            margin-bottom: var(--s5); max-width: 64ch; }
 
-    .code { background: var(--bg-deep); border: 1px solid var(--border); border-radius: 12px;
+    /* Your code, a request to copy, on the light card with a label bar (the
+       kit's .cv-snip), white inside the band. The machine's answer on the
+       plate (.is-plate), where approved: false is the plate's signal and
+       nothing else is coloured. */
+    .code { background: var(--snip-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
             margin-block: var(--s4); overflow: hidden; }
-    .code-h { font-size: var(--fs-micro); color: var(--dim); padding: 10px 16px;
-              border-bottom: 1px solid var(--border); background: var(--surface); }
-    .code pre { margin: 0; padding: var(--s4) 16px; overflow-x: auto; direction: ltr; text-align: left;
-                font-family: var(--mono); font-size: var(--fs-micro); line-height: 1.75; color: var(--code-ink); }
+    .band .code { background: var(--surface); }
+    .code-h { display: flex; align-items: center; min-height: var(--h-lg); padding: 0 16px;
+              border-bottom: 1px solid var(--card-line); font-family: var(--he-mono); font-size: var(--fs-label);
+              color: var(--dim); }
+    .code pre { margin: 0; padding: 14px 18px; overflow-x: auto; direction: ltr; text-align: left;
+                font-family: var(--he-mono); font-size: var(--fs-code); line-height: 1.7; color: var(--text); }
     .code .c { color: var(--dim); }
-    .code .s { color: var(--code); }
-    .code .f { color: var(--red); font-weight: 700; }
+    .code .s { color: var(--text); }
+    .code.is-plate { background: var(--plate); border-color: var(--plate); }
+    .code.is-plate .code-h { min-height: 0; padding: 14px 18px 0; border-bottom: 0; color: var(--plate-dim); }
+    .code.is-plate pre, .code.is-plate .s { color: var(--plate-ink); }
+    .code.is-plate .f { color: var(--plate-signal); }
 
-    .limit { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-             padding: var(--s4) var(--s5); margin-block: var(--s4); font-size: var(--fs-small); color: var(--dim); }
+    /* A limit of the method, or the date it was checked: the kit's callout. */
+    .limit { background: var(--callout-bg); border: 1px solid var(--callout-line); border-radius: var(--r-inner);
+             padding: var(--s4) 20px; margin-block: var(--s4); font-size: var(--fs-small); color: var(--muted);
+             line-height: 1.75; }
     .limit strong { color: var(--text); }
-    .limit .when { display: block; margin-top: var(--s2); font-family: var(--mono);
+    .limit .when { display: block; margin-top: var(--s2); font-family: var(--he-mono);
                    font-size: var(--fs-micro); color: var(--dim); }
-    .warn { border-color: var(--fail-line); background: var(--fail-bg); }
-    .warn strong { color: var(--red); }
+    /* A warning, and not a refusal. The one accent stays with approved:
+       false, so the warning is the callout with a control-strength edge. */
+    .warn { border-color: var(--border-strong); }
 
-    /* The one deliberate break: the only full-bleed band on the page, and the
-       only place it shows the product rather than the method. */
-    .band { background: var(--surface); border-block: 1px solid var(--border);
-            padding-block: var(--s8); margin-block: var(--s8); }
-    .band h2, .band h3 { color: var(--white); }
+    /* The one deliberate break, and the only place the page shows the
+       product: the homepage's warm-grey band, a rounded panel at the wide
+       measure rather than a full-bleed strip. */
+    .band { background: var(--panel-bg); border-radius: var(--r-card); width: calc(100% - 2 * var(--gutter));
+            max-width: var(--wide); margin: var(--s8) auto; padding-block: var(--s8); }
     .band ul { list-style: none; margin: 0 0 var(--s5); padding: 0; }
-    .band li { padding-block: var(--s4); border-bottom: 1px solid var(--border-soft); max-width: 62ch; }
+    .band li { padding-block: var(--s4); border-bottom: 1px solid var(--border); max-width: 62ch; }
     .band li:last-child { border-bottom: 0; }
     .band li strong { display: block; margin-bottom: var(--s1); }
-    .band code { background: var(--surface3); padding: 2px 7px; border-radius: 4px; font-size: .9em; color: var(--code); }
 
     .check { list-style: none; margin: var(--s5) 0 0; padding: 0; max-width: 62ch; }
     .check li { display: flex; gap: var(--s4); align-items: flex-start; padding-block: var(--s4);
-                border-bottom: 1px solid var(--border-soft); color: var(--text); font-size: var(--fs-small); }
+                border-bottom: 1px solid var(--border); color: var(--text); font-size: var(--fs-small); }
     .check li:last-child { border-bottom: 0; }
     /* Drawn, not typed. U+2713 is missing from most Hebrew webfaces and falls
        through to a system UI font, which is the rendered-on-my-machine tell. */
-    .check svg { flex: none; margin-top: 3px; color: var(--dim); }
+    .check svg { flex: none; margin-top: 5px; color: var(--border-strong); }
 
-    .close { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-             border-radius: 12px; padding: var(--s6); margin-top: var(--s5); max-width: 64ch;
-             box-shadow: var(--edge), var(--lift); }
+    /* The close: the homepage's evidence card (white, the card hairline, the
+       frame's corners) and the site's own primary pill for the one action. */
+    .close { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-card);
+             padding: var(--s6); margin-top: var(--s5); max-width: 64ch; }
     .close p { margin-bottom: var(--s4); }
     .close p:last-child { margin-bottom: 0; }
-    .mailto { display: inline-flex; align-items: center; gap: var(--s2); background: var(--green);
-              color: var(--green-ink); text-decoration: none; font-weight: 700; font-size: var(--fs-body);
-              padding: 12px 20px; border-radius: 8px; min-height: 44px; margin-top: var(--s2); }
-    .mailto:hover { filter: brightness(1.06); }
-    .mailto:active { transform: translateY(1px); }
-    .sub { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-top: var(--s3); }
+    /* The kit's pill sets --sans, which has no Hebrew; the label is Hebrew. */
+    .close .btn { font-family: var(--he); margin-top: var(--s2); }
+    .sub { font-family: var(--he-mono); font-size: var(--fs-micro); color: var(--dim); margin-top: var(--s3); }
 
     .foot { border-top: 1px solid var(--border); padding-block: var(--s6) var(--s8); margin-top: var(--s8);
             font-size: var(--fs-micro); color: var(--dim); line-height: 2; }
-    .foot b { color: var(--text); }
+    .foot b { color: var(--text); font-weight: 500; }
     .foot a { color: var(--dim); }
 
     @media (max-width: 720px) {
       .steps { grid-template-columns: minmax(0, 1fr); }
       section { padding-block: var(--s7); }
+      .step { padding: var(--s4); border-radius: var(--r-card-sm); }
+      .band { border-radius: var(--r-card-sm); padding-block: var(--s7); margin-block: var(--s7); }
+      .close { padding: var(--s5) var(--s4); border-radius: var(--r-card-sm); }
       .cp { max-width: none; }
+    }
+
+    /* The tables on a phone: the same rows, laid out as cards, the console's
+       .cards device. At 390 all three scrolled sideways with no hint, and the
+       statement's last two columns, "מה גביתי" and "מה נשאר", sat off the
+       edge; the second holds the red figure the copy sends the reader down
+       the column to find. One DOM: each cell carries its column's label
+       (labelCells, read from the table's own header), the first cell is the
+       card's title, a figure prints as label and value on one line like a
+       receipt, a sentence prints under its label. A blank cell in the
+       fill-in table gets a line to write on. BP.sm, not a narrower width:
+       the statement, inside its panel, needs a 605px viewport before it
+       fits as a table, so a 560 switch left it scrolling at 600. */
+    @media (max-width: ${BP.sm}px) {
+      .tw { overflow-x: visible; }
+      table { min-width: 0; }
+      table, tbody, tr, td { display: block; }
+      thead { display: none; }
+      tr { padding: var(--s4); border-bottom: 1px solid var(--row-line); }
+      tbody tr:last-child { border-bottom: 0; }
+      /* The body's 1.85 is a paragraph's leading; a card is lines of figures. */
+      td { padding: 0; border: 0; line-height: 1.6; }
+      td:first-child { color: var(--text); font-weight: 500; margin-bottom: var(--s2); }
+      td + td { padding-block: 3px; }
+      td + td::before { content: attr(data-l); color: var(--th-ink); font-family: var(--he); font-size: var(--fs-micro);
+                        font-weight: 500; }
+      td.n, td:empty { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s4); }
+      td.n::before { white-space: nowrap; }
+      td + td:not(.n):not(:empty)::before { display: block; margin-bottom: 2px; }
+      .blank td { height: auto; }
+      .blank td:empty::after { content: ''; flex: 1 1 auto; max-width: 50%; border-bottom: 1px solid var(--border-strong);
+                               align-self: flex-end; margin-bottom: 4px; }
     }
 `
 
 export async function heCostPerClientRoute(app: FastifyInstance) {
   app.get('/he/cost-per-client', publicRoute(), async (_request, reply) => {
-    return reply.type('text/html').send(`${head({
+    const html = `${head({
       title: 'כמה כל לקוח עולה לך · AgentBill',
       description: 'שיטה ידנית בת שלושה שלבים למפעילי אוטומציה על n8n ו-Make: להוציא עלות אמיתית לכל לקוח מהנתונים שכבר יושבים אצלך בחשבון. בלי להירשם לכלום.',
       path: '/he/cost-per-client',
       lang: 'he',
       dir: 'rtl',
       og: { description: 'בלי לפתוח גיליון, איזה לקוח היה הכי פחות רווחי אצלך בחודש שעבר? שלושה שלבים, שתי שליפות מוכנות להעתקה, וטבלת מיפוי.' },
-      // Hebrew faces, this page only. Every other page loads three Latin faces
-      // and has no reason to pay for these.
-      extraHead: `  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@700;800&family=Assistant:wght@400;600;700&display=swap" rel="stylesheet" />`,
+      // The Hebrew face, this page only, through the same Google Fonts path the
+      // canvas theme loads Geist from (head() already preconnects to both
+      // hosts, and the CSP already allows them). Geist has no Hebrew glyphs.
+      // Heebo is one variable file across the weights the canvas uses: 400 for
+      // the body, 500 for headings and labels, 600 for a strong run. It was
+      // Heebo 700/800 for headings and Assistant for the body, two families
+      // and the dark theme's weights. Every other page loads only the Latin
+      // faces and has no reason to pay for this one.
+      extraHead: `  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400..700&display=swap" rel="stylesheet" />`,
       scriptHashes: [COPY_HASH],
-      css: `${COPY_CSS}${CSS}`,
+      // KIT_CSS for the frame (.cv-panel) and the pill (.btn): this page does
+      // not render the site nav, so CHROME_CSS, which carries the kit on
+      // every other page, is not here to bring it.
+      css: `${KIT_CSS}${COPY_CSS}${CSS}`,
     })}
 <body>
 <main>
@@ -396,13 +480,13 @@ curl -s "https://eu2.make.com/api/v2/scenarios/SCENARIO_ID/logs?from=17855424000
     היחידות כפול המיפוי שאתה כתבת, כלומר מספר שאתה ייצרת. אין בשרשרת הזו כלי שיודע להוציא
     אותו במקומך.</p>
 
-    <div class="tw">
+    <div class="cv-panel"><div class="tw">
       <table><thead><tr>
         <th>לקוח</th><th class="n">ריצות</th><th class="n">יחידות</th>
         <th class="n">עלות מוערכת</th><th class="n">מה גביתי</th><th class="n">מה נשאר</th>
       </tr></thead><tbody>${statementRows()}
       </tbody></table>
-    </div>
+    </div></div>
     <p class="cap">טבלת דוגמה. המספרים מומצאים לצורך ההסבר, והם לא צילום של חשבון אמיתי.
     עמודת "מה נשאר" מחושבת מהשתיים שלפניה ולא נכתבת לידן. סוגריים הם מינוס.</p>
 
@@ -451,11 +535,11 @@ curl -s "https://eu2.make.com/api/v2/scenarios/SCENARIO_ID/logs?from=17855424000
 }</pre>
       </div>
 
-      <div class="code">
+      <div class="code is-plate">
         <div class="code-h">json · התשובה על הקריאה החמישית של אותה משימה</div>
         <pre>{
-  "approved": <span class="f">false</span>,
-  "reason": <span class="f">"task_ceiling_exceeded"</span>,
+  <span class="f">"approved": false</span>,
+  "reason": <span class="s">"task_ceiling_exceeded"</span>,
   "estimated_units": 120,
   "task_ref": <span class="s">"run-2026-09-06-118"</span>,
   "task_ceiling": 500,
@@ -500,7 +584,7 @@ curl -s "https://eu2.make.com/api/v2/scenarios/SCENARIO_ID/logs?from=17855424000
       זה בסדר גמור. תעביר את הדף למישהו שכן.</p>
       <p><strong>נתקעת על השם?</strong> תריץ את שלושת השלבים על לקוח אחד ותשלח לי את השורה
       שיצאה. אני עונה לכל מייל בעצמי.</p>
-      <a class="mailto" href="mailto:hello@agentbill.dev?subject=%D7%9C%D7%A7%D7%95%D7%97%20%D7%90%D7%97%D7%93">שלח לי את השורה</a>
+      <a class="mailto btn btn-lg" href="mailto:hello@agentbill.dev?subject=%D7%9C%D7%A7%D7%95%D7%97%20%D7%90%D7%97%D7%93">שלח לי את השורה</a>
       <p class="sub"><span dir="ltr">hello@agentbill.dev</span> · נושא: לקוח אחד</p>
       <p>אין פה טופס, אין רשימת תפוצה ואין מה להירשם אליו. אני רוצה לדעת אם המספר הפתיע אותך,
       כי אם הוא לא הפתיע אף אחד, אין פה מוצר וכדאי לי לדעת את זה מוקדם.</p>
@@ -518,6 +602,7 @@ curl -s "https://eu2.make.com/api/v2/scenarios/SCENARIO_ID/logs?from=17855424000
 ${COPY_JS}
 </body>
 </html>
-`)
+`
+    return reply.type('text/html').send(html.replace(/<table>[\s\S]*?<\/table>/g, labelCells))
   })
 }

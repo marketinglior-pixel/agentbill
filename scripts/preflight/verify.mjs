@@ -1301,10 +1301,9 @@ ok('[onboarding] and the page says whose decision the refusal is',
 // found it three screens away. The check compares INDEXES and not presence,
 // because presence was already true of the copy it replaces.
 const fold8 = await fetch(`${API}/`).then(r => r.text())
-const iWork8 = fold8.indexOf('asks whether this job has units left')
-const iPre8 = fold8.search(/\bpreflight\b/i)
-ok('[fold] the concept is read before the name preflight',
-   iWork8 > -1 && iPre8 > -1 && iWork8 < iPre8, `concept at ${iWork8}, preflight at ${iPre8}`)
+// The concept-before-name gate itself moved below, onto the hero slice, on
+// 2026-09-23: until then both of its strings sat inside <meta name="description">
+// and it never read the page at all.
 // The sample is task_ref-only on purpose: the ceiling is set before the code
 // runs, and a task_ceiling sent after the job exists is not applied.
 // Before a save the sample is a literal <pre>, the one copy CI executes; the
@@ -1407,18 +1406,46 @@ const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('<
 // under one ceiling line. The plate carries the refusal, the h1 states the
 // contrast, and the figure demonstrates it. The Fig. 1 gate below is the one
 // that holds that.
-ok('[fold] the film sits after the headline and carries the burn-down to a refusal',
-   fold8.includes('class="plate"') && fold8.indexOf('class="plate"') > fold8.indexOf('A ceiling on this job')
-     && fold8.includes('492 of 500 units') && /refused/.test(visible8(hero8)),
-   'no plate in the fold, or it does not reach a refusal')
-// `preload="none"` means the film may never be fetched, and autoplay is refused
-// outright under Low Power Mode and by reduced-motion settings. So the argument
-// cannot live in the video alone: the poster and the two captions have to carry
-// it for a reader who sees no moving picture at all. That is what this asserts.
-ok('[fold] the argument survives a film that never plays',
-   fold8.includes('poster="/hero-poster.jpg"') && /aria-label="[^"]+"/.test(fold8)
-     && fold8.includes('job-142 burns down') && fold8.includes('researcher asks 12'),
-   'the film is the only thing saying what happens')
+//
+// Rewritten again 2026-09-23 for the canvas redesign (T1 of the value pack,
+// Lior's FIGMA GO). The film and Fig. 1 left the page, and the two gates that
+// held them went with them on purpose; what they guaranteed did not leave. The
+// film's gate said the fold reaches a refusal after the headline, and its
+// fallback gate said the argument survives a reader who never sees a moving
+// picture. The frame below is static text, so the second is true by
+// construction, and this gate holds the first: a product frame inside the hero,
+// after the h1, reaching the playground's own refusal in visible text, with the
+// numbers read from the same RUN the page renders from rather than typed here
+// (a gate that typed 492 would go red on a change that changed nothing), and
+// labelled sample inside its own frame. No video and no image in the fold.
+const { RUN: RUN8, REFUSAL: REFUSAL8 } = await import('../../dist/ui/playground.js')
+const frAt8 = hero8.indexOf('<figure class="frame"')
+const frame8 = frAt8 < 0 ? '' : hero8.slice(frAt8)
+const frVis8 = visible8(frame8).replace(/\s+/g, ' ')
+const n8 = (x) => Number(x).toLocaleString('en-US')
+ok('[fold] the product frame follows the h1 in the hero and reaches the playground\'s own refusal, in text, labelled sample',
+   frAt8 > -1 && hero8.indexOf('<h1') > -1 && frAt8 > hero8.indexOf('<h1')
+     && frVis8.includes(RUN8.taskRef) && frVis8.includes(`${n8(RUN8.used)} / ${n8(RUN8.ceiling)} units`)
+     && frVis8.includes(RUN8.refused.name) && frVis8.includes(`asks ${n8(RUN8.refused.asked)}`)
+     && frVis8.includes('approved: false') && frVis8.includes(REFUSAL8.name) && /\bsample\b/i.test(frVis8)
+     && !hero8.includes('<video') && !/<img\b/.test(frame8),
+   frame8 ? frVis8.slice(0, 200) : 'no product frame in the hero')
+// The h1 is locked the way the sub is, 2026-09-23: Lior's decision 1 kept this
+// line for the experiment, and a gate is what keeps an edit from being the
+// thing that ends it. Typed here on purpose, unlike the numbers: the point is
+// that the words do not move, and HOME_H1 is the thing that would move them.
+const LOCKED_H1_8 = 'Give the job you leave running overnight its own ceiling'
+const h1Text8 = ((hero8.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) ?? [])[1] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+ok('[fold] the h1 is the locked line, byte for byte', h1Text8 === LOCKED_H1_8, `h1 reads: ${h1Text8}`)
+// The concept before the name, on the hero and not in <head>. The rule (see
+// above): the reader meets the thing before our endpoint's name. The h1 names
+// the concept, the sub is the first place preflight appears, and the pill
+// above the h1 must not say it.
+const heroVis8 = visible8(hero8).replace(/\s+/g, ' ')
+const iConcept8 = heroVis8.indexOf('its own ceiling')
+const iPreName8 = heroVis8.search(/\bpreflight\b/i)
+ok('[fold] the concept is read before the name preflight, in the hero and not in <head>',
+   hero8.length > 0 && iConcept8 > -1 && iPreName8 > -1 && iConcept8 < iPreName8, `concept at ${iConcept8}, preflight at ${iPreName8}`)
 // 2026-09-22: the sub under the h1 is a locked sentence (the pause-Broad,
 // hygiene, one-targeted-relaunch ticket). "not a proxy" left the sub with it
 // and lives in the request-path row's eyebrow, so this gate follows the
@@ -1431,9 +1458,19 @@ ok('[fold] the argument survives a film that never plays',
 const LOCKED_SUB8 = 'AgentBill is a per-task spending ceiling for autonomous AI agents. Before the next model call, preflight returns approved: false when this task_ref is out of units. Your code decides whether to stop, skip, or replan.'
 const subHtml8 = (hero8.match(/<p class="sub">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
 const subText8 = subHtml8.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
-ok('[fold] the copy still says what the ceiling is and is not',
-   fold8.includes('not on the month') && fold8.includes('No proxy') && subText8.startsWith('AgentBill is a per-task spending ceiling'),
-   `sub reads: ${subText8.slice(0, 80)}`)
+// 2026-09-23: the month/job contrast left the h1 with the redesign and lives in
+// the statement panel, so this gate follows it there, and it reads the BODY:
+// the old version was satisfied by <title> for "not on the month" and would
+// have stayed green with the contrast gone from the page.
+const body8 = fold8.slice(fold8.indexOf('<body'))
+const stAt8 = fold8.indexOf('<section class="wrap sec statement">')
+const st8 = stAt8 < 0 ? '' : fold8.slice(stAt8, fold8.indexOf('</section>', stAt8))
+const stVis8 = visible8(st8).replace(/\s+/g, ' ')
+ok('[fold] the page still says what the ceiling is and is not: the statement draws month against job, the body says no proxy, the sub is locked',
+   st8.length > 0 && stVis8.includes('Month caps, org caps, and session or window budgets are real')
+     && stVis8.includes('A job ceiling meters one job') && stVis8.includes('only if it asks preflight')
+     && visible8(body8).includes('No proxy') && subText8.startsWith('AgentBill is a per-task spending ceiling'),
+   `statement ${st8.length} bytes; sub reads: ${subText8.slice(0, 80)}`)
 ok('[fold] the sub under the h1 is the locked sentence, byte for byte, and the hero carries no em dash',
    subText8 === LOCKED_SUB8 && !hero8.includes('&mdash;') && !hero8.includes('\u2014'),
    subText8 === LOCKED_SUB8 ? 'an em dash (literal or &mdash;) is in the hero' : `sub reads: ${subText8}`)
@@ -1450,22 +1487,20 @@ ok('[fold] the hero never says we stop the run: no stops, stopped, runaway, or "
 // tolerate a line break inside it: the first version matched single spaces,
 // cut nothing, and the loop went red on the locked sentence itself.
 const heroBan8 = hero8.replace(/whether to stop,\s+skip,\s+or replan/g, ' ')
-// Fig. 1: the dual state, DRAWN. Three meters under the cap (a clock, an
-// org-month, a USD window), this task_ref refused, one ceiling line across all
-// four. The numbers are read off the plate's foot line rather than typed here:
-// home.ts draws the plate foot, the figure's lit row and the figure's ceiling
-// label from one heroRefusalBody(), so the three must agree, and a gate that
-// typed 492 would go red on a change that changed nothing.
-const plateFoot8 = fold8.match(/(\d[\d,]*) of (\d[\d,]*) units &middot; [a-z_-]+ asks (\d[\d,]*) &middot; refused/)
-const [, used8, ceil8] = plateFoot8 ?? ['', '', '']
-const figStart8 = fold8.indexOf('<figure class="fig"')
-const fig8 = figStart8 < 0 ? '' : fold8.slice(figStart8, fold8.indexOf('</figure>', figStart8))
-ok('[fold] Fig. 1 draws both states under one ceiling line: a month meter with room, this task_ref refused',
-   plateFoot8 !== null && fig8.includes('Fig. 1') && fig8.includes(`ceiling &middot; ${ceil8}`)
-     && /class="mrow">\s*<span class="m-l">Org &middot; month<\/span>[\s\S]*?<span class="m-s">under the cap<\/span>/.test(fig8)
-     && /class="mrow lit">\s*<span class="m-l">task_ref [^<]*<\/span>[\s\S]*?<span class="m-s">refused<\/span>/.test(fig8)
-     && fig8.includes(`${used8} / ${ceil8}`),
-   fig8 ? `the figure does not show a month meter under the cap beside this job refused at ${used8} / ${ceil8}` : 'no Fig. 1 under the hero')
+// The dual state, DRAWN, 2026-09-23: Fig. 1 left with the redesign and the
+// statement's figure carries its argument: the same account in the same minute,
+// a month meter with room beside this job at its ceiling, the next call
+// refused. The job's numbers are RUN's, not typed, and the month row is a share
+// of a window labelled sample, because this product has no month meter to read.
+const stFigAt8 = st8.indexOf('<figure class="st-fig">')
+const stFig8 = stFigAt8 < 0 ? '' : st8.slice(stFigAt8, st8.indexOf('</figure>', stFigAt8))
+const stFigVis8 = visible8(stFig8).replace(/\s+/g, ' ')
+ok('[fold] the statement draws both states in one frame: a month meter under the cap, this job refused at its ceiling, labelled sample',
+   stFig8.length > 0 && /\bsample\b/i.test(stFigVis8)
+     && /Org month cap \d+% used under the cap/.test(stFigVis8)
+     && stFigVis8.includes(`${RUN8.taskRef} ${n8(RUN8.used)} / ${n8(RUN8.ceiling)}`)
+     && stFigVis8.includes(`next call asks ${n8(RUN8.refused.asked)}`) && /\brefused\b/.test(stFigVis8),
+   stFig8 ? stFigVis8.slice(0, 200) : 'no figure in the statement')
 // The claims guard, now standing on its own. It was the second half of the
 // caption gate and had NOTHING to do with the caption: it bans the words that
 // carry a claim about somebody else, from the one surface most likely to grow
@@ -1478,13 +1513,30 @@ ok('[fold] Fig. 1 draws both states under one ceiling line: a month meter with r
 // Extended here to the hero's aria-labels. `visible8` strips tags, so attribute
 // text never reached this regex, and an aria-label is read aloud to a screen
 // reader: it is a claim surface the guard could not see.
-const heroClaims8 = visible8(hero8) + ' ' + (hero8.match(/aria-label="([^"]*)"/g) ?? []).join(' ')
+// And, 2026-09-23, to title, alt and placeholder, the other attributes a reader
+// or an assistive tool reads out, now that the hero carries a whole frame.
+const heroClaims8 = visible8(hero8) + ' ' + (hero8.match(/(?:aria-label|title|alt|placeholder)="([^"]*)"/g) ?? []).join(' ')
 ok('[fold] the hero claims nothing about anyone else',
    !/\b(only|first|nobody)\b/i.test(heroClaims8),
    (heroClaims8.match(/\b(only|first|nobody)\b/gi) ?? []).join(', '))
-ok('[fold] one primary action in the hero, and the brochure rows are gone',
-   (hero8.match(/class="btn btn-lg"/g) ?? []).length === 1 && !hero8.includes('btn-ghost')
-     && !fold8.includes('Keys you can revoke') && !fold8.includes('What the ceiling saved you from'))
+// Two hero actions from 2026-09-23 (Lior's decision 6): the one primary, filled,
+// to /register, and one secondary pill to #estimate that is not a second fill.
+// The tag is selected first and its class tested after, so attribute order
+// cannot hide a button; the primary keeps the exact class shots.mjs selects.
+const heroA8 = [...hero8.matchAll(/<a\b[^>]*>/g)].map((m) => m[0])
+const hrefOf8 = (t) => (t.match(/\bhref="([^"]*)"/) ?? [])[1]
+// Class TOKENS, not a regex over the attribute: \bbtn\b also matches the btn
+// in btn-alt, because a hyphen is a word boundary. The first version of this
+// gate did exactly that and failed on the page it was written for.
+const classes8 = (t) => ((t.match(/\bclass="([^"]*)"/) ?? [])[1] ?? '').split(/\s+/).filter(Boolean)
+const prim8 = heroA8.filter((t) => /\bclass="btn btn-lg"/.test(t))
+const fills8 = heroA8.filter((t) => classes8(t).includes('btn'))
+const sec8 = heroA8.filter((t) => hrefOf8(t) === '#estimate')
+ok('[fold] two hero actions and no third: one filled primary to /register, one secondary pill to #estimate, brochure rows gone',
+   prim8.length === 1 && hrefOf8(prim8[0]) === '/register' && fills8.length === 1
+     && sec8.length === 1 && !classes8(sec8[0]).some((c) => c === 'btn' || c === 'btn-lg' || c === 'btn-ghost') && heroA8.length === 2
+     && !fold8.includes('Keys you can revoke') && !fold8.includes('What the ceiling saved you from'),
+   heroA8.join(' | '))
 // 2026-09-18, the depth question. The demo sits about two screens down on a
 // desktop and three on a phone, and none of the first 40 paid visits reached
 // it. Lior chose the measured alternative to a reorder: one text link in the
@@ -1501,14 +1553,21 @@ ok('[fold] one primary action in the hero, and the brochure rows are gone',
 // (this gate alone red); class-first class="btn btn-lg" (this gate and the
 // one above both red); a second #playground link in the closing section
 // (2 on the page, 1 in the hero, red).
+//
+// 2026-09-23: Lior retired the text link with the redesign (decision 6) and the
+// second hero action is a pill to #estimate. The same shape holds for it: one
+// link to #estimate on the whole page, in the hero (the beacon is document-wide
+// and the tile is read as "the hero's pill", so a second one would pool into
+// it); no link to #playground left anywhere, so no dead try_click wiring points
+// at nothing; and both anchors exist.
 const tryRe8 = /<a\b[^>]*\bhref="#playground"[^>]*>/g
-const tryPage8 = fold8.match(tryRe8) ?? []
-const tryHero8 = hero8.match(tryRe8) ?? []
-ok('[fold] the hero carries one text link to the demo, a link and not a second button, and the anchor exists',
-   tryPage8.length === 1 && tryHero8.length === 1
-     && !/\bclass="[^"]*\bbtn\b/.test(tryPage8[0])
-     && fold8.includes('id="playground"'),
-   `${tryPage8.length} on the page, ${tryHero8.length} in the hero; ${tryPage8[0] ?? 'no tag'}`)
+const estRe8 = /<a\b[^>]*\bhref="#estimate"[^>]*>/g
+const estPage8 = fold8.match(estRe8) ?? []
+const estHero8 = hero8.match(estRe8) ?? []
+ok('[fold] the hero carries the one link to #estimate, the retired demo link is gone, and both anchors exist',
+   estPage8.length === 1 && estHero8.length === 1 && (fold8.match(tryRe8) ?? []).length === 0
+     && /\bid="estimate"/.test(fold8) && fold8.includes('id="playground"'),
+   `${estPage8.length} #estimate links on the page, ${estHero8.length} in the hero, ${(fold8.match(tryRe8) ?? []).length} to #playground`)
 // /register, 2026-09-12: setup language above one form, nothing under it
 // that pitches, and a key screen whose one action signs the key into the
 // start screen rather than sending the reader to a login card.
@@ -1701,9 +1760,20 @@ ok('[register] the harness accounts are gone again',
 // the page offers task_ceiling on a first call as a peer of that path; the
 // task-budgets and refusals panels are off the cold path; and the not-list is
 // four lines that say nothing about anyone else.
-ok('[home] the ceiling is taught console-first with ceiling_units, and task_ceiling is not a peer path',
-   fold8.includes('PUT /tasks/:task_ref/ceiling') && visible8(fold8).includes('ceiling_units')
-     && !/on\s+its first call/.test(fold8) && !/pass <span class="mono-in">task_ceiling/.test(fold8))
+//
+// 2026-09-23: the request-path row left with the redesign and "How it works"
+// teaches the order now, so the gate reads that section's VISIBLE text. The
+// old version was half-satisfied by the JSON-LD, which also names the PUT
+// route, and would have stayed green with the lesson gone from the page.
+const howAt8 = fold8.indexOf('<section class="wrap sec how">')
+const how8 = howAt8 < 0 ? '' : fold8.slice(howAt8, fold8.indexOf('</section>', howAt8))
+const howVis8 = visible8(how8).replace(/\s+/g, ' ')
+ok('[home] How it works teaches the ceiling console-first with ceiling_units, and task_ceiling is not a peer path',
+   how8.length > 0 && /in the console/.test(howVis8) && howVis8.includes('PUT /tasks/:task_ref/ceiling')
+     && howVis8.includes('ceiling_units') && howVis8.indexOf('console') < howVis8.indexOf('PUT /tasks')
+     && !/\btask_ceiling\b/.test(visible8(body8)) && !/on\s+its first call/.test(fold8)
+     && !/pass <span class="mono-in">task_ceiling/.test(fold8),
+   howVis8.slice(0, 200) || 'no How it works section')
 ok('[home] the task-budgets and refusals panels are off the cold path',
    !fold8.includes('what the agent got back') && !fold8.includes('one job, many calls, one ceiling') && !fold8.includes('class="ref-row"'))
 const notsAt8 = fold8.indexOf('class="nots"')
@@ -1816,6 +1886,65 @@ for (const [name, html] of [['the console first run', virgin8], ['the console af
   ok(`[onboarding] ${name} never says the run is stopped, killed, blocked or dies`, hits.length === 0, hits.join(', '))
 }
 
+// ---------------------------------------------------------------- the redesigned homepage's new surfaces, 2026-09-23
+// Every section the canvas redesign added is a claim surface the gates above
+// did not read: the statement, the estimator, the demo's new copy, How it works,
+// the ICP chips and the questions. Each is sliced by an exact, first anchor and
+// the slice is asserted before anything is asserted about it, because a gate on
+// an empty slice passes for free. Lior's rules for this pack, in his words:
+// estimator dollars are the visitor's and never "AgentBill measured $"; no
+// stop, kill or bill-metering claims; no em dash; no "first".
+const slice8 = (open) => { const i = fold8.indexOf(open); return i < 0 ? '' : fold8.slice(i, fold8.indexOf('</section>', i)) }
+const est8 = slice8('<section class="wrap sec est-sec" id="estimate">')
+const pgSec8 = slice8('<section class="wrap sec pg-sec" id="playground">')
+const icp8 = slice8('<section class="wrap sec icp">')
+const faq8 = slice8('<section class="wrap sec faq" id="faq">')
+const pricing8 = slice8('<section class="wrap sec pricing" id="pricing">')
+ok('[home] every new section is on the page and has a slice of its own',
+   [st8, est8, pgSec8, how8, icp8, faq8, pricing8].every((x) => x.length > 0),
+   ['statement', 'estimate', 'demo', 'how', 'icp', 'faq', 'pricing'].filter((_, i) => ![st8, est8, pgSec8, how8, icp8, faq8, pricing8][i].length).join(', ') || 'all present')
+for (const [name, html] of [['the statement', st8], ['the estimator', est8], ['the demo', pgSec8], ['How it works', how8],
+                            ['the ICP chips', icp8], ['the questions', faq8]]) {
+  const hits = readable8(html).match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\b(first|nobody)\b|\bno way to\b/gi) ?? []
+  ok(`[home] ${name} never says stop, kill, block, dies, first, nobody or "no way to"`, html.length > 0 && hits.length === 0, hits.join(', ') || (html.length ? '' : 'empty slice'))
+}
+// The estimator: the visitor's arithmetic, labelled as theirs and as an
+// estimate inside its own frame, one way out to /register, and no sentence that
+// says AgentBill measured, tracked or billed a dollar.
+const estVis8 = visible8(est8).replace(/\s+/g, ' ')
+ok('[estimate] the dollars are the visitor\'s arithmetic: three inputs, labelled example and estimate, units not dollars, one link to /register',
+   (est8.match(/<input\b/g) ?? []).length === 3 && /\bid="est-ex">example</.test(est8)
+     && estVis8.includes('An estimate, not a measurement') && estVis8.includes('AgentBill counts units, not dollars')
+     && estVis8.includes('Your cost per call') && (est8.match(/<a [^>]*href="\/register"/g) ?? []).length === 1
+     && !/<form\b/.test(est8),
+   estVis8.slice(0, 200))
+const METER8 = /\b(we|agentbill|it)\s+(measures?|measured|meters?|tracks?|reads?|bills?)\s+(your\s+)?(bill|invoice|spend|dollars?|costs?|money)\b|\bmeasured\s+\$|\bwe\s+read\s+your\b/i
+ok('[home] no sentence on the page says AgentBill measures, tracks or reads anyone\'s dollars or bill',
+   !METER8.test(readable8(body8)), (readable8(body8).match(METER8) ?? [''])[0])
+// The estimator's own script makes no network call. The page's one pulse
+// client counts that it was used and never what was typed; this reads the
+// script the page ships, from the build, and fails on any way out.
+const { ESTIMATOR_SOURCE: EST_SRC8 } = await import('../../dist/ui/estimator.js')
+ok('[estimate] the estimator script has no way to send what was typed: no fetch, beacon, XHR, WebSocket or image ping',
+   EST_SRC8.length > 0 && !/\bfetch\s*\(|sendBeacon|XMLHttpRequest|WebSocket|new\s+Image\b|\.src\s*=/.test(EST_SRC8)
+     && fold8.includes(EST_SRC8.trim().slice(0, 40)),
+   'the estimator script carries a network call, or is not the script the page serves')
+// No em dash a reader can see, on the whole page (the hero gate covers the
+// hero only, and hygiene greps the source, not the served page).
+ok('[home] no em dash anywhere a reader can see it, literal or entity',
+   !/\u2014|&mdash;|&#8212;|&#x2014;/i.test(body8.replace(/<style[\s\S]*?<\/style>/g, '').replace(/<script[\s\S]*?<\/script>/g, '')))
+ok('[home] no "first" anywhere on the page a reader can read it',
+   !/\bfirst\b/i.test(readable8(body8)), (readable8(body8).match(/.{0,30}\bfirst\b.{0,30}/i) ?? [''])[0])
+// Decision 7: Free keeps the only filled plan button; Team is marked by its
+// border and chip, never by a second fill. Tag first, class after.
+const planA8 = [...pricing8.matchAll(/<a\b[^>]*>/g)].map((m) => m[0])
+const planFill8 = planA8.filter((t) => /\bclass="btn"/.test(t))
+ok('[home] Free carries the only filled plan button, to /register; every paid plan is the outlined one',
+   planFill8.length === 1 && /href="\/register"/.test(planFill8[0])
+     && planA8.filter((t) => /data-tier=/.test(t)).every((t) => /\bclass="btn-ghost"/.test(t))
+     && planA8.filter((t) => /data-tier=/.test(t)).length === 3,
+   planA8.join(' | '))
+
 // ---------------------------------------------------------------- pulse: the events between a landing and an account
 // 2026-09-18, the first day the site had paid traffic. Meta counted 40 landing
 // page views, accounts gained 0 rows, and site_pulse, our own table, had no
@@ -1882,8 +2011,21 @@ ok('[pulse] the homepage script defines pulse() and wires every link to /registe
      && homeJs9.indexOf('function pulse(') < homeJs9.indexOf("pulse('cta_click')"))
 // Break that proved it: the listener's call replaced by a setAttribute; this
 // gate alone went red.
-ok('[pulse] the homepage wires the demo link to a try_click beacon',
-   homeJs9.includes('a[href="#playground"]') && homeJs9.includes("pulse('try_click')"))
+// 2026-09-23: the demo link was retired with the redesign and its wiring went
+// with it; the hero's second action is the pill to #estimate. The last clause
+// is the part the old gate lacked: the selector has to match a link that is
+// actually on the page, or the beacon is wired to nothing and the tile reads
+// zero for a reason that is not the visitors'.
+ok('[pulse] the homepage wires the hero\'s #estimate pill to estimate_click, and the pill exists',
+   homeJs9.includes('a[href="#estimate"]') && homeJs9.includes("pulse('estimate_click')")
+     && homeJs9.indexOf('function pulse(') < homeJs9.indexOf("pulse('estimate_click')")
+     && (home9.match(/<a\b[^>]*\bhref="#estimate"/g) ?? []).length === 1
+     && !homeJs9.includes('a[href="#playground"]'))
+ok('[pulse] estimate_use fires once per load, from the estimator\'s own inputs, and carries no number',
+   homeJs9.includes("document.querySelectorAll('#est input')") && /if \(estUsed\) return;\s*estUsed = true;\s*pulse\('estimate_use'\);/.test(homeJs9)
+     && (homeJs9.match(/pulse\('estimate_use'/g) ?? []).length === 1)
+ok('[pulse] the Meta pixel is still on / (the ads measure the landing through it)',
+   home9.includes("fbq('init', '1234567890')"))
 const regJs9 = scripts9(register9).join('\n')
 // On /register the order is load-bearing: helper, then the submit listener,
 // then the beacon. Placed above the listener, a helper that failed to arrive
@@ -1905,12 +2047,14 @@ const st9 = [await post9({ event: 'cta_click', view_id: view9 }),
              await post9({ event: 'register_view', view_id: view9 }),
              await post9({ event: 'try_click', view_id: view9 }),
              await post9({ event: 'page_view', view_id: view9 }),
+             await post9({ event: 'estimate_click', view_id: view9 }),
+             await post9({ event: 'estimate_use', view_id: view9 }),
              await post9({ event: 'cta_view', view_id: view9 })]
 const rows9 = (await sql`SELECT event FROM site_pulse WHERE view_id = ${view9} ORDER BY event`).map((r) => r.event)
-ok('[pulse] cta_click, page_view, register_view and try_click are on the allowlist and land as rows',
-   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'page_view', 'register_view', 'try_click']), rows9.join(', ') || 'no rows')
+ok('[pulse] cta_click, estimate_click, estimate_use, page_view, register_view and try_click are on the allowlist and land as rows',
+   JSON.stringify(rows9) === JSON.stringify(['cta_click', 'estimate_click', 'estimate_use', 'page_view', 'register_view', 'try_click']), rows9.join(', ') || 'no rows')
 ok('[pulse] and the list is still closed: an unknown name is dropped and still answers 204',
-   st9.every((c) => c === 204) && rows9.length === 4, `statuses ${st9.join('/')}, ${rows9.length} rows`)
+   st9.every((c) => c === 204) && rows9.length === 6, `statuses ${st9.join('/')}, ${rows9.length} rows`)
 // page_view, 2026-09-22: the funnel's first step in our own rows. Once per
 // load, after the helper it calls and before the playground guard, so a page
 // with no playground on it (or a guard that returns early) still counts the
@@ -2008,8 +2152,9 @@ const clientRe9 = (readFileSync9(`${ROOT9}/src/ui/pulse-client.ts`, 'utf8').matc
 ok('[source] the page and the handler apply the same pattern, character for character',
    serverRe9 === clientRe9 && serverRe9 !== 'server?', `server ${serverRe9} vs client ${clientRe9}`)
 
-// 2. The page tags its own links to /register. Six of them on the homepage,
-// from three shared components across six routes, which is why the rewrite is
+// 2. The page tags its own links to /register. Seven of them on the homepage
+// since 2026-09-23 (nav, sticky bar, hero, the estimator's card, the Free tier
+// card, the close, the footer), from shared components and the page, which is why the rewrite is
 // one loop where the beacon already lives rather than a parameter threaded
 // through nav, the tier card and the footer.
 //
@@ -2019,9 +2164,9 @@ ok('[source] the page and the handler apply the same pattern, character for char
 const taggedJs9 = scripts9(homeTagged9).join('\n')
 const anchors9 = (homeTagged9.match(/<a [^>]*href="\/register"/g) ?? []).length
 ok('[source] the homepage carries the /register links the rewrite is written against, and the loop that rewrites them',
-   anchors9 === 6 && taggedJs9.includes("querySelectorAll('a[href=\"/register\"]')")
+   anchors9 === 7 && taggedJs9.includes("querySelectorAll('a[href=\"/register\"]')")
      && taggedJs9.includes("setAttribute('href', '/register?src='"),
-   `${anchors9} anchors (expected 6)`)
+   `${anchors9} anchors (expected 7)`)
 
 // 3. And the click beacon still matches them AFTER the rewrite. An exact
 // attribute selector matches nothing once the href gains a query string: the
@@ -2733,7 +2878,10 @@ const loginJ = await nav8('/app/session', { method: 'POST', headers: FORM8, body
 const cookieJ = (loginJ.headers.get('set-cookie') ?? '').split(';')[0]
 ok('[jobs] login for the console views', cookieJ.startsWith('agentbill_app='), cookieJ.slice(0, 20))
 const pageJ = (path) => nav8(path, { headers: { cookie: cookieJ } }).then((r) => r.text())
-const rowsJ = (h) => [...h.matchAll(/<div class="btask"><a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1]).join(',')
+// The row's name cell as the canvas console draws it (design/canvas-everywhere,
+// 2026-09-24): a table row whose lead cell opens with <div class="tk-n"><a>.
+// Until the merge it read the dark console's <div class="btask">.
+const rowsJ = (h) => [...h.matchAll(/<div class="tk-n"><a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1]).join(',')
 const recentJ = await pageJ('/app?view=tasks')
 ok('[jobs] the tasks view opens on Recent, most recently touched first, the order it always had',
    rowsJ(recentJ) === 'jobs-old,jobs-new,jobs-mid' && recentJ.includes('<a class="on" href="/app?view=tasks" aria-current="true">Recent</a>'),
@@ -2753,7 +2901,8 @@ await ceilJ('jobs-span', { ceiling_units: 100, agent_id: 'alpha' })
 const rowOfJ = (h, ref) => {
   const i = h.indexOf(`>${ref}</a>`)
   if (i < 0) return ''
-  const j = h.indexOf('<div class="brow">', i)
+  // The next row is the next <tr; the canvas rows are table rows, not .brow divs.
+  const j = h.indexOf('<tr', i)
   return h.slice(i, j < 0 ? undefined : j)
 }
 const seenJ = async (ref) => visible8((rowOfJ(await pageJ('/app?view=tasks'), ref).match(/<span class="bseen">([\s\S]*?)<\/span>/) ?? [])[1] ?? '')
@@ -2899,7 +3048,9 @@ const splitJ = (h) => {
   return [...s.matchAll(/<td class="id lead" title="[^"]*">([^<]+)<\/td>[\s\S]*?<span>([^<]+) of units<\/span>[\s\S]*?<td class="num" data-l="units">([0-9,]+)<\/td>\s*<td class="num" data-l="records">([0-9,]+)<\/td>/g)]
     .map((m) => [m[1], m[2], Number(m[3].replace(/,/g, '')), Number(m[4].replace(/,/g, ''))])
 }
-const dayUnitsJ = (h) => [...h.slice(h.indexOf('<div class="frame tw days">')).matchAll(/<td class="when">[\s\S]*?<\/td>\s*<td class="num">([0-9,]+)<\/td>/g)]
+// The day-by-day table on canvas is the kit's table with the page's own
+// .days class; the dark console wrapped it in <div class="frame tw days">.
+const dayUnitsJ = (h) => [...h.slice(h.indexOf('<table class="cv-table is-ruled days">')).matchAll(/<td class="when">[\s\S]*?<\/td>\s*<td class="num">([0-9,]+)<\/td>/g)]
   .reduce((a, m) => a + Number(m[1].replace(/,/g, '')), 0)
 const sumJ = (rows) => rows.reduce((a, r) => a + r[2], 0)
 const actJ = await pageJ('/app?view=activity')
@@ -2916,10 +3067,13 @@ ok('[jobs] the split says whose units they are and what event_type holds',
    splitTextJ.includes('in the units your code reported') && splitTextJ.includes('record() in both SDKs sends its agent_id as the event_type')
      && splitTextJ.includes('GET /usage?by=event_type'), splitTextJ.slice(0, 200))
 
-// The sample console shows both, from its own labelled sample rows.
+// The sample console shows both, from its own labelled sample rows. The
+// banner's label is the kit's mono label on canvas (it was <b>Sample data</b>
+// on the dark console).
+const SAMPLE_LABEL_J = '<span class="cv-label">Sample data</span>'
 const demoUsedJ = await fetch(`${API}/app?demo=1&view=tasks&sort=used`).then((r) => r.text())
 ok('[jobs] the sample console ranks its sample jobs by Most used, inside the sample frame',
-   rowsJ(demoUsedJ) === 'nightly-crawl,batch-2211,job-8871,job-8864,job-8870' && demoUsedJ.includes('<b>Sample data</b>')
+   rowsJ(demoUsedJ) === 'nightly-crawl,batch-2211,job-8871,job-8864,job-8870' && demoUsedJ.includes(SAMPLE_LABEL_J)
      && demoUsedJ.includes('<a class="on" href="/app?demo=1&amp;view=tasks&amp;sort=used" aria-current="true">Most used</a>'), rowsJ(demoUsedJ))
 const demoRecentJ = await fetch(`${API}/app?demo=1&view=tasks`).then((r) => r.text())
 ok('[jobs] and Recent there is most recently touched first, as its note says', rowsJ(demoRecentJ) === 'job-8871,batch-2211,job-8870,nightly-crawl,job-8864',
@@ -2930,7 +3084,7 @@ ok('[jobs] every sample row carries its span, labelled the same way', demoSeenJ.
 for (const range of ['7d', '30d', '90d']) {
   const h = await fetch(`${API}/app?demo=1&view=activity&range=${range}`).then((r) => r.text())
   ok(`[jobs] the sample split sums to the sample day-by-day units (${range})`,
-     h.includes('<b>Sample data</b>') && splitJ(h).length === 4 && sumJ(splitJ(h)) === dayUnitsJ(h) && dayUnitsJ(h) > 0,
+     h.includes(SAMPLE_LABEL_J) && splitJ(h).length === 4 && sumJ(splitJ(h)) === dayUnitsJ(h) && dayUnitsJ(h) > 0,
      `${sumJ(splitJ(h))} vs ${dayUnitsJ(h)}`)
 }
 

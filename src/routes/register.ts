@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { pixelSnippet } from '../lib/pixel.js'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
+import { label, tag } from '../ui/kit.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
-import { PANEL_CSS } from '../ui/panels.js'
 import { sql } from '../db/index.js'
 import { plain } from '../lib/ids.js'
 import { randomBytes } from 'crypto'
@@ -11,7 +11,7 @@ import { allowRegisterAttempt, recoveryInCooldown, markRecoverySent, clearRecove
 import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { publicRoute } from '../middleware/auth.js'
 import { HEADLINE, ORIGIN } from '../ui/site.js'
-import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
 import { inlineScript } from '../lib/csp.js'
 import { PULSE_CLIENT_SRC } from '../ui/pulse-client.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -274,7 +274,7 @@ export async function registerRoute(app: FastifyInstance) {
       extraHead: pixelSnippet(),
       scriptHashes: [REGISTER_HASH, COPY_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PANEL_CSS}${COPY_CSS}
+      css: `${CHROME_CSS}${COPY_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: One Column (the form is the page)
      * design-system: design.md · designed-as-app · nav: N1b shared, CTA hidden here · footer: Ft2 shared
      * enrichment: none. Restyled 2026-09-12 with pressplaced.com as the craft
@@ -282,12 +282,18 @@ export async function registerRoute(app: FastifyInstance) {
      * three reassurance rows that sat beside the form are gone; a reader who
      * wants the argument has the homepage one click back. */
 
-    :root { --shell: 1080px; }
+    /* Canvas, 2026-09-23, on Lior's instruction to put every screen in the
+       homepage's design language. The homepage's hero shape at one column:
+       the pitch centred over the frame, and the form on the warm-grey panel
+       the estimator's inputs sit on. After the key, the same panel holds the
+       key screen's white cards, which is the panel-in-panel frame everything
+       that shows the reader's own data uses. Every value is a token. */
+    :root { --shell: var(--chrome-w); }
     .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
 
-    /* One column, 560 wide, centred on the shell. The head, then the card. */
+    /* One column, 560 wide, centred on the shell. The head, then the panel. */
     .reg { max-width: 560px; margin: 0 auto; padding-block: var(--s9) 96px; }
-    .pitch { margin-bottom: var(--s6); }
+    .pitch { margin-bottom: var(--s6); text-align: center; display: grid; justify-items: center; }
 
     /* Scoped to .pitch, because every declaration here is about the marketing
        headline: 14ch is what breaks "Give one job a ceiling." over two lines at
@@ -295,60 +301,59 @@ export async function registerRoute(app: FastifyInstance) {
        h1 on 2026-09-12 and wrapped "Your API key is ready." after "API" at
        22px, which is the selector-named-for-a-component trap: the rule reads
        like "the h1 on this page" and this page now has two, in two states. */
-    .pitch h1 { color: var(--white); font-size: var(--fs-h1-sub); max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
+    .pitch h1 { color: var(--white); font-size: var(--fs-h1-sub); letter-spacing: -0.03em; line-height: 1.02;
+                max-width: 14ch; overflow-wrap: anywhere; min-width: 0; }
     /* The lede is setup language, not a pitch: what happens once, what the
        ceiling is on, what comes back, whose decision it is. */
-    .lede { font-size: var(--fs-lede); color: var(--muted); margin: 18px 0 0; max-width: 46ch; line-height: 1.6; }
+    .lede { font-size: var(--fs-lede); color: var(--muted); margin: var(--s4) 0 0; max-width: 46ch; line-height: 1.55;
+            text-wrap: pretty; }
     .lede code { font-family: var(--mono); font-size: .9em; color: var(--text); }
-    .trust { margin-top: 18px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+    /* The homepage's line under its hero button, in its voice. */
+    .trust { margin-top: var(--s4); font-size: var(--fs-small); line-height: 20px; color: var(--dim); }
     .trust b { color: var(--muted); font-weight: 500; }
 
-    /* Form. Inputs and the button share one 44px floor; state changes move
-       colour, outline and background, never border width, so nothing shifts.
-       The whole column sits on the panel frame the rest of the site leads
-       with, so the thing to fill in reads as one object, not loose fields. */
-    .form-card { background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-                 border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s6); }
-    .form-h h2 { color: var(--white); margin-bottom: 6px; font-size: var(--fs-h3); }
+    /* The form, on the panel ground (the estimator's recipe on /): white
+       fields with a 3:1 border on warm grey, one ink pill under them. Fields
+       and the button share the 44px floor; a state changes colour and
+       outline, never border width, so nothing shifts. */
+    .form-card { background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s6); }
+    .form-h h2 { color: var(--white); margin-bottom: 6px; font-size: var(--fs-h3); letter-spacing: -0.01em; }
     .form-h p { color: var(--muted); font-size: var(--fs-small); margin-bottom: var(--s5); }
-    .form { display: grid; gap: 16px; }
-    .field { display: grid; gap: 6px; }
-    label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+    .form { display: grid; gap: var(--s4); }
+    /* .cv-flabel carries its own gap under it, so the field adds none. */
+    .field { display: grid; }
     label .opt { color: var(--dim); font-weight: 400; margin-left: 4px; }
-    input, select { min-height: 44px; width: 100%; background: var(--bg); color: var(--text);
-                    border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 14px;
-                    font-family: var(--sans); font-size: 15px;
-                    outline: 2px solid transparent; outline-offset: 1px;
-                    transition: border-color .15s, background-color .15s; }
-    input::placeholder { color: var(--dim); }
+    @media (hover: hover) { .cv-field:hover { border-color: var(--dim); } .cv-field:focus { border-color: var(--field-focus); } }
+    .cv-field[aria-invalid="true"] { border-color: var(--red); }
+    .cv-field:disabled { opacity: .55; cursor: not-allowed; }
     /* One form, one convention for "nothing here yet". The inputs greyed their
        placeholder and the selects rendered their empty option at full --text,
        identical to a real choice, so the bottom half of the form read as already
        answered and the top half as blank. No script and no extra class. */
-    select:has(option[value=""]:checked) { color: var(--dim); }
-    select option { color: var(--text); }
-    @media (hover: hover) { input:hover, select:hover { border-color: var(--dim); } }
-    input:focus-visible, select:focus-visible { outline-color: var(--green); }
-    input[aria-invalid="true"] { border-color: var(--red); }
-    input:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
-    /* The arrow is the one colour that cannot come through a token: an SVG data
-       URI takes no var(). %23a0a8a3 is --muted. */
-    select { appearance: none; padding-right: 36px; cursor: pointer;
-             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a8a3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-             background-repeat: no-repeat; background-position: right 12px center; }
-    select option { background: var(--surface2); }
+    select.cv-field:has(option[value=""]:checked) { color: var(--field-ph); }
+    select.cv-field option { color: var(--text); background: var(--surface); }
+    /* The arrow, drawn from two gradients in --muted, so it follows the token
+       instead of a colour baked into an SVG data URI (that URI carried the
+       dark theme's --muted, a grey that no longer exists on canvas). */
+    select.cv-field { appearance: none; padding-right: 40px; cursor: pointer;
+                      background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                                        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+                      background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+                      background-position: calc(100% - 21px) 50%, calc(100% - 16px) 50%; }
     /* Reserved slot, so an error appearing does not push the button down. */
     .msg-slot { min-height: 1lh; }
-    .err { color: var(--red); font-size: 13.5px; line-height: 1.5; display: none; }
-    .btn-submit { min-height: 44px; background: var(--green); color: var(--green-ink); border: 0; border-radius: 8px;
-                  padding: 0 22px; font-family: var(--sans); font-size: 15px; font-weight: 700; cursor: pointer;
-                  white-space: nowrap; transition: filter .15s, transform .12s; }
-    @media (hover: hover) { .btn-submit:hover { filter: brightness(1.06); } }
-    .btn-submit:active { transform: translateY(1px); }
-    .btn-submit:disabled { opacity: .55; cursor: not-allowed; transform: none; }
-    .form-note { font-size: 12.5px; color: var(--dim); line-height: 1.6; }
+    .err { display: none; margin-top: 0; }
+    /* The slot sits in the form's grid; half the gap on each side of it, so
+       an empty slot reads as spacing and not as a missing line. */
+    .form > .msg-slot { margin-block: calc(var(--s2) * -1); }
+    /* The kit's L pill, the width of the form: the one action of this fold. */
+    .btn-submit { width: 100%; }
+    .form-note { font-size: var(--fs-micro); color: var(--dim); line-height: 1.6; }
+    .form-note a, .success > p a { color: var(--text); text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+    .form-note a:hover, .success > p a:hover { text-decoration-color: currentColor; }
 
-    /* Success. Same panel frame as everywhere else on the site. */
+    /* Success. The panel above now holds the key screen: white cards, each
+       opening on the frame's bar, on the warm-grey ground. */
     .success { display: none; flex-direction: column; gap: 20px; }
     /* Once the key is on screen the pitch above it has done its job, and it was
        the reason the answer sat below the fold.
@@ -364,40 +369,32 @@ export async function registerRoute(app: FastifyInstance) {
        The whole pitch goes, h1 included, because .done-h below replaces it. */
     .reg.done .pitch { display: none; }
     .success h2, .success .done-h { color: var(--white); }
-    .success .done-h { font-size: var(--fs-h3); line-height: 1.25; }
-    .success > p { color: var(--muted); font-size: 14.5px; line-height: 1.7; }
-    /* The answer, inside the frame that holds the key it is about. Same type as
-       the instructional rows below it (.ns p), and the panel's own 18px gutter,
-       so it reads as part of the key panel and not as a paragraph that drifted
-       into one. */
-    .success .where { padding: 12px 18px 0; font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+    /* The console's own h1 rung: this is the account's first screen. */
+    .success .done-h { font-size: var(--fs-h1-app); line-height: 1.2; letter-spacing: -0.02em; }
+    .success > p { color: var(--muted); font-size: var(--fs-small); line-height: 1.7; }
+    /* The answer, inside the frame that holds the key it is about, on the
+       frame's own 20px gutter, so it reads as part of the key card and not as
+       a paragraph that drifted into one. */
+    .success .where { padding: var(--s3) 20px 0; font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     /* The minority path, under the line it is an alternative to. --dim, because
        a reader who has a terminal has already been served by the line above and
        should be able to skip this on sight. */
-    .success .noterm { color: var(--dim); font-size: var(--fs-small); line-height: 1.6; margin-top: 8px; }
-    /* --code-ink: design.md calls it "the base ink inside a code frame", and
-       this is one. .panel carries the ground and border (panels.ts:14) and
-       .panel-h the label bar. A long green mono string sitting beside a
-       bordered Copy button read like a link. */
-    .key-value { padding: 14px 18px; font-family: var(--mono); font-size: 13px; color: var(--code-ink);
-                 display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .key-value span { overflow-wrap: anywhere; min-width: 0; }
-    .btn-copy { min-height: 36px; padding: 0 12px; background: transparent; color: var(--text);
-                border: 1px solid var(--border-strong); border-radius: 6px; font-family: var(--sans);
-                font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
-                transition: border-color .15s; }
-    @media (hover: hover) { .btn-copy:hover { border-color: var(--text); } }
-    .btn-copy:active { transform: translateY(1px); }
-    .steps { padding: 6px 18px 10px; }
+    .success .noterm { color: var(--dim); font-size: var(--fs-small); line-height: 1.6; margin-top: var(--s2); }
+    /* The key itself, and the line that sets it, are both on the kit's plate
+       (.cv-plate, src/ui/kit.ts): a white plate with a hairline and the
+       light-filled Copy at its right, so they read as the same kind of object.
+       Only the key plate's place in the card is set here. */
+    .key-value { margin: var(--s4) 20px 0; }
+    .steps { padding: var(--s2) 20px var(--s3); }
     .ns { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 0;
           border-bottom: 1px solid var(--border-soft); align-items: start; }
     .ns:last-child { border-bottom: 0; }
     /* One row, no ordinal column: the only thing left in this frame is the
        export line, and a 22px gutter beside a lone item reads as a missing
-       marker. A modifier on .ns on purpose, so the row keeps .ns's padding,
-       border and the .ns .cp wrapping rules below. */
+       marker. A modifier on .ns on purpose, so the row keeps .ns's padding
+       and border. */
     .ns.solo { grid-template-columns: minmax(0, 1fr); }
-    .ns p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    .ns p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     /* p code, not bare code: the copy pill inside a step is also a <code>,
        and the chip ground on it drew a box inside a box. */
     /* overflow-wrap, because these chips carry the longest unbreakable tokens
@@ -406,19 +403,17 @@ export async function registerRoute(app: FastifyInstance) {
        166px and they measure 187, which pushed the panel 3px past its own
        overflow:hidden and cut the header. Found by npm run shots the first run
        after the post-key screen entered the gate. */
-    .ns p code, .success > p code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface3);
-               padding: 1px 5px; border-radius: 3px; overflow-wrap: anywhere; }
-    /* The shared pill keeps its command on one line and scrolls it. The
-       export line carries the reader's whole key, and a key that scrolls out
-       of a 320px column is a key half-copied by hand. Here it wraps instead,
-       and the button drops below the command when the two do not fit on one
-       row. fit-content keeps the pill hugging its text. */
-    .ns .cp { margin-top: 8px; width: fit-content; max-width: 100%; padding-block: var(--s2); flex-wrap: wrap; }
-    .ns .cp code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
-    /* The one action on this screen. Under the key, in its own frame, and the
+    .ns p code, .success > p code, .success .where code { font-family: var(--mono); font-size: .875em; color: var(--text); background: var(--surface3);
+               padding: 1px 6px; border-radius: var(--r-inline); overflow-wrap: anywhere; }
+    /* The export line is on the plate, not the shared one-line pill. The pill
+       keeps its command on one line and scrolls it, and a line that carries
+       the reader's whole key and scrolls out of a 320px column is a key
+       half-copied by hand. The plate wraps it, from line one, with the Copy
+       held at the right as it is on the key above. */
+    /* The one action on this screen. Under the key, in its own card, and the
        button above the sentence: at 320 a button and a sentence on one row
        break the sentence mid-word. */
-    .ns-go { padding: 14px 18px 16px; border-top: 1px solid var(--border-soft); display: grid; gap: 10px; justify-items: start; }
+    .ns-go { padding: 20px; display: grid; gap: var(--s3); justify-items: start; }
     .ns-go p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
     /* Docs and the questions page, at the footnote register. They used to sit
        in the sentence under the button as two more links, one line below the
@@ -433,24 +428,34 @@ export async function registerRoute(app: FastifyInstance) {
        would spend that budget on questions nobody has to answer. Below it,
        the reader who wants the console never sees a form in the way, and the
        reader who lingers is the one being asked. */
-    .profile { padding: 14px 18px 16px; display: grid; gap: 14px; }
+    .profile { padding: 20px; display: grid; gap: var(--s4); }
     .profile > p { font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
-    .profile .row { display: grid; gap: 10px; align-items: center; grid-template-columns: auto minmax(0, 1fr); }
-    .btn-save { min-height: 36px; padding: 0 14px; background: transparent; color: var(--text);
-                border: 1px solid var(--border-strong); border-radius: 6px; font-family: var(--sans);
-                font-size: var(--fs-small); font-weight: 600; cursor: pointer; white-space: nowrap;
-                transition: border-color .15s; }
-    @media (hover: hover) { .btn-save:hover { border-color: var(--text); } }
-    .btn-save:disabled { opacity: .55; cursor: default; }
+    .profile .row { display: grid; gap: var(--s3); align-items: center; grid-template-columns: auto minmax(0, 1fr); }
     .profile .note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); min-height: 1lh; }
-    .btn-go { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; background: var(--green);
-              color: var(--green-ink); border: 0; border-radius: 8px; font-family: var(--sans); font-size: var(--fs-small);
-              font-weight: 700; text-decoration: none; cursor: pointer; transition: filter .15s; }
-    @media (hover: hover) { .btn-go:hover { filter: brightness(1.06); text-decoration: none; } }
+    /* The kit's .btn at L, written out here rather than added as a class.
+       scripts/preflight/verify.mjs holds this button's order on the page by
+       its exact class attribute, a single class, so a second class beside it
+       would turn that gate into -1 < n, true whatever the page says. (Never
+       spell that attribute out in this comment: this stylesheet is served
+       above the button, and the gate would find the comment first.) Same
+       tokens as .btn.btn-lg in src/ui/kit.ts; change them together. */
+    .btn-go { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); min-height: var(--h-lg);
+              padding: 10px 24px; line-height: 24px; border: 0; background: var(--green); color: var(--green-ink);
+              border-radius: var(--r-control); font-family: var(--sans); font-size: var(--fs-body); font-weight: 500;
+              text-decoration: none; white-space: nowrap; cursor: pointer; transition: background .15s, transform .12s; }
+    .btn-go:hover { background: var(--btn-hover); text-decoration: none; }
+    .btn-go:active { transform: translateY(1px); }
 
     @media (max-width: 900px) {
       .reg { padding-block: var(--s7) var(--s8); }
       .form-card { padding: var(--s4); }
+    }
+    @media (max-width: ${BP.md}px) {
+      .lede { font-size: var(--fs-body); }
+      .success .where { padding-inline: var(--s3); }
+      .key-value { margin-inline: var(--s3); }
+      .steps { padding-inline: var(--s3); }
+      .ns-go, .profile { padding: var(--s4) var(--s3); }
     }
 `,
     })}
@@ -488,11 +493,11 @@ ${siteNav('/register', { cta: false })}
              scripts/shots.mjs measures this button against the fold so they
              cannot drift back. -->
         <div class="field">
-          <label for="email">Work email</label>
-          <input type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" />
+          <label class="cv-flabel" for="email">Work email</label>
+          <input class="cv-field" type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" />
         </div>
-        <div class="msg-slot"><p class="err" id="err" aria-live="polite"></p></div>
-        <button type="submit" class="btn-submit" id="submit-btn">Generate my API key &rarr;</button>
+        <div class="msg-slot"><p class="cv-err err" id="err" aria-live="polite"></p></div>
+        <button type="submit" class="btn btn-lg btn-submit" id="submit-btn">Generate my API key &rarr;</button>
         <p class="form-note">By registering you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email. Just a key.</p>
         <p class="form-note">Already registered and no longer have the key? <a href="/recover">Get back in</a>.</p>
       </form>
@@ -505,11 +510,11 @@ ${siteNav('/register', { cta: false })}
       <h1 class="done-h">Your API key is ready.</h1>
       <p>Copy it now. We won't show it again. If you lose it, <a href="/recover">/recover</a> shows it
          again to whoever can read the email you just used.</p>
-      <div class="panel">
-        <div class="panel-h"><span>API key</span><span>shown once</span></div>
-        <div class="key-value">
+      <div class="cv-card">
+        <div class="cv-bar"><span class="cv-bar-t">${label('API key')}</span>${tag('shown once')}</div>
+        <div class="key-value cv-plate">
           <span id="key-display"></span>
-          <button class="btn-copy" id="copy-key" type="button">Copy</button>
+          <button class="cp-btn btn-copy" id="copy-key" type="button">Copy</button>
         </div>
         <!-- The reader's question, answered in the frame that holds his key
              rather than in a paragraph above it. Dogfood run 4 asked "where do
@@ -534,7 +539,7 @@ ${siteNav('/register', { cta: false })}
            call. In Python or Node that means <code>AGENTBILL_API_KEY</code>, and the line below sets
            it in the terminal your code runs in.</p>
         <div class="steps">
-          <div class="ns solo"><div>${copyPill('key-export', 'export AGENTBILL_API_KEY=')}<p class="noterm">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p></div></div>
+          <div class="ns solo"><div>${copyPlate('key-export', 'export AGENTBILL_API_KEY=')}<p class="noterm">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p></div></div>
         </div>
       </div>
       <!-- The same key again, as the line that sets it. A gap in a copyable
@@ -560,7 +565,7 @@ ${siteNav('/register', { cta: false })}
            what I need to do". The sequence has one owner, the console's start
            screen (src/ui/steps.ts, src/routes/app.ts), and the button below
            signs the reader into it. -->
-      <div class="panel">
+      <div class="cv-card">
         <div class="ns-go">
           <!-- A form, not a link, and it moves THIS tab. The form POSTs this
                key to /app/session, the same request the console's login card
@@ -591,17 +596,17 @@ ${siteNav('/register', { cta: false })}
            takes it has lost nothing by skipping this. Saved by fetch to
            /app/profile on the session the 201 set, so the key on screen is
            never navigated away from and never leaves this page. -->
-      <div class="panel">
-        <div class="panel-h"><span>Optional</span><span>it can wait</span></div>
+      <div class="cv-card">
+        <div class="cv-bar"><span class="cv-bar-t">${label('Optional')}</span>${tag('it can wait')}</div>
         <form class="profile" id="profile-form">
           <p>A little context, if you want to give it. Nothing here is required, and the console works the same without it.</p>
           <div class="field">
-            <label for="name">Your name <span class="opt">(optional)</span></label>
-            <input type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
+            <label class="cv-flabel" for="name">Your name <span class="opt">(optional)</span></label>
+            <input class="cv-field" type="text" id="name" name="name" maxlength="128" placeholder="Ada Lovelace" autocomplete="name" />
           </div>
           <div class="field">
-            <label for="use_case">What are you building? <span class="opt">(optional)</span></label>
-            <select id="use_case" name="use_case">
+            <label class="cv-flabel" for="use_case">What are you building? <span class="opt">(optional)</span></label>
+            <select class="cv-field" id="use_case" name="use_case">
               <option value="">Select one&hellip;</option>
               <option value="ai_saas">AI SaaS product</option>
               <option value="internal_agents">Internal agent workflows</option>
@@ -611,8 +616,8 @@ ${siteNav('/register', { cta: false })}
             </select>
           </div>
           <div class="field">
-            <label for="stack">Primary language <span class="opt">(optional)</span></label>
-            <select id="stack" name="stack">
+            <label class="cv-flabel" for="stack">Primary language <span class="opt">(optional)</span></label>
+            <select class="cv-field" id="stack" name="stack">
               <option value="">Select one&hellip;</option>
               <option value="python">Python</option>
               <option value="nodejs">Node.js</option>
@@ -620,7 +625,7 @@ ${siteNav('/register', { cta: false })}
             </select>
           </div>
           <div class="row">
-            <button class="btn-save" id="profile-save" type="submit">Save</button>
+            <button class="btn-ghost btn-save" id="profile-save" type="submit">Save</button>
             <p class="note" id="profile-note" aria-live="polite"></p>
           </div>
         </form>
