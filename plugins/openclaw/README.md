@@ -160,10 +160,10 @@ rather than the repository path, which does not:
 ```bash
 npm run build
 npm pack
-clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin \
+clawhub package publish ./agentbill-openclaw-0.2.0.tgz --family code-plugin \
   --source-repo https://github.com/marketinglior-pixel/agentbill \
   --source-commit "$(git rev-parse HEAD)" --dry-run
-clawhub package publish ./agentbill-openclaw-0.1.0.tgz --family code-plugin \
+clawhub package publish ./agentbill-openclaw-0.2.0.tgz --family code-plugin \
   --source-repo https://github.com/marketinglior-pixel/agentbill \
   --source-commit "$(git rev-parse HEAD)"
 ```
