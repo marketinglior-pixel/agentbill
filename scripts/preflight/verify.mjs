@@ -1799,6 +1799,17 @@ ok('[home] the not-list is four lines, none about stopping a run or about who ha
    (nots8.match(/<li>/g) ?? []).length === 4 && !fold8.includes('Stop your run') && !fold8.includes('Nobody has agreed')
      && !/\bnobody\b/i.test(visible8(fold8)) && !/\b(stop|kill|block|dies)[a-z]*\b/i.test(visible8(nots8)),
    `${(nots8.match(/<li>/g) ?? []).length} items`)
+// The bill line of the not-list, 2026-09-24. "The API never turns units into
+// dollars" was true until list_price_usd_estimate (GET /tasks/:task_ref,
+// src/lib/prices.ts) started serving a dollar figure for a token job. The line
+// now says what the figure is (an estimate, at public list price, on calls
+// wrap() measured) and keeps the phrase /upgrade counts on, "units refused is
+// not money".
+const billLine8 = visible8((nots8.match(/<li><b>Read your provider bill\.<\/b>([\s\S]*?)<\/li>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+ok('[home] the bill line calls the dollar figure an estimate at list price on calls wrap() measured, and never says the API turns no units into dollars',
+   billLine8.includes('A dollar figure appears only as an estimate at public list price, on calls wrap() measured.')
+     && billLine8.includes('units refused is not money') && !/never turns units into dollars|no dollar estimate/i.test(visible8(fold8)),
+   billLine8.slice(0, 160) || 'no bill line')
 ok('[start] the footer names the endpoint with the field it takes, and does not teach task_ceiling from code',
    visible8(virgin8).includes('ceiling_units') && !/\btask_ceiling\b/.test(visible8(virgin8)))
 

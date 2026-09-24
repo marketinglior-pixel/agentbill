@@ -602,9 +602,9 @@ ${playgroundSection(codeFrame())}
       <li><b>Sit in your request path.</b> No proxy, no base URL to change, no provider keys held. A call
       that never asks preflight, or a retry buried in a library, is never checked against the ceiling
       before it runs. If it records, its units still count.</li>
-      <li><b>Read your provider bill.</b> No invoice access, and the API never turns units into dollars. The
-      estimator above is your rate times your count, run in your browser. Units are yours to define, and
-      units refused is not money.</li>
+      <li><b>Read your provider bill.</b> No invoice access. A dollar figure appears only as an estimate at
+      public list price, on calls wrap() measured. The estimator above is your rate times your count, run
+      in your browser. Units are yours to define, and units refused is not money.</li>
       <li><b>Reach into a running job.</b> Preflight answers <span class="mono-in">approved: false</span>, and
       on a ceiling refusal the SDK raises. Your code decides what happens next.</li>
       <li><b>Undo what already ran.</b> Calls are refused, not reversed, and the ceiling is keyed on
