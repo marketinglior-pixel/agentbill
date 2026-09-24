@@ -6,7 +6,8 @@ import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
-import { CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { CONSOLE_AGENT, TASK_UNITS, unitMismatchMessage } from '../lib/task-ceiling.js'
+import { unitsOf, unitsOrNull } from '../db/int8.js'
 
 const PreflightBody = z.object({
   agent_id: zId(),
@@ -16,6 +17,11 @@ const PreflightBody = z.object({
   task_ref: zId().optional(),
   task_ceiling: z.number().int().positive().max(INT4_MAX).optional(),
   idempotency_key: zId().optional(),
+  // What this job's numbers count. Read when this call opens the job (with
+  // task_ceiling); on a job that already exists it is checked, and a
+  // different unit is a 422, never a relabel. Omitted, nothing is checked and
+  // a job this call opens is counted in 'unit'. See migration 014.
+  unit: z.enum(TASK_UNITS).optional(),
 })
 
 // Every rejection inside the reserve transaction is thrown, never returned.
@@ -29,7 +35,8 @@ class PreflightRejection extends Error {
       | 'plan_limit_exceeded'
       | 'budget_exhausted'
       | 'task_ceiling_exceeded'
-      | 'task_ceiling_required',
+      | 'task_ceiling_required'
+      | 'task_unit_mismatch',
     public detail: Record<string, unknown> = {}
   ) {
     super(reason)
@@ -50,8 +57,17 @@ export async function preflightRoute(app: FastifyInstance) {
 
     const {
       agent_id, customer_id, estimated_units, ceiling,
-      task_ref, task_ceiling, idempotency_key,
+      task_ref, task_ceiling, idempotency_key, unit,
     } = parse.data
+    // A unit belongs to a job. Sent without one it would be read by nothing,
+    // and a field the server silently ignores is how a caller comes to
+    // believe a job is counted in tokens when no job was named.
+    if (unit !== undefined && task_ref === undefined) {
+      return reply.status(422).send({
+        error: 'validation_error',
+        message: 'unit describes a job, so it needs task_ref. Pass task_ref (and task_ceiling to open the job), or leave unit out.',
+      })
+    }
     const accountId = (request as any).accountId
     const customerRef = customer_id || 'default'
     const taskRef = task_ref ?? null
@@ -59,40 +75,74 @@ export async function preflightRoute(app: FastifyInstance) {
     // Same key, same decision, one reservation. Without this a retried
     // preflight reserved a second time, so the mechanism meant to prevent
     // waste was the one consuming the budget.
-    const replay = async () => {
+    //
+    // And the same answer on the wire: the body, its status and
+    // application/json. Until 2026-09-23 a replay went out as
+    // HTTP 200 text/plain whatever it held, for two reasons. The body was
+    // written ${JSON.stringify(body)}::json, and postgres.js JSON.stringify's a
+    // json-typed parameter again, so every stored response was a JSON string
+    // holding JSON text, which reply.send() sends as text. And no status was
+    // kept, so a remembered 422 (task_ceiling_required) replayed as a 200 with
+    // no approved key, which the Python SDK read as KeyError('approved').
+    //
+    // Read back as text, never as json: the pool's camel transform renames
+    // the keys of a json value it parses (reservation_id would come back as
+    // reservationId), the same reason decisions.ts reads snapshot as text.
+    // A row written before the fix is that JSON string, so it is unwrapped
+    // once more. A stored body with an error and no approved key can only be
+    // a 422 that an earlier build remembered, and it is answered as a 422.
+    //
+    // It answers, and returns true when it did. Not the reply object: a
+    // Fastify reply is a thenable that resolves to undefined once sent, so
+    // `const replayed = await replay()` (the code until 2026-09-23) was
+    // always undefined, every replay fell through into the reserve
+    // transaction, lost the claim, and sent twice more ("Reply was already
+    // sent" in the server log, once per replayed call). The claim kept it
+    // from reserving again; it still cost a transaction and two warnings.
+    const replay = async (): Promise<boolean> => {
       const [prior] = await sql`
-        SELECT response FROM preflight_requests
+        SELECT response::text AS response FROM preflight_requests
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key!}
       `
-      if (!prior) return null
+      if (!prior) return false
       if (prior.response == null) {
         // The deciding request committed but has not written its body yet.
         // Answering anything else here would either invent a decision or let
         // this retry reserve on top of one already held.
-        return reply.status(409).send({
+        reply.status(409).send({
           error: 'preflight_in_progress',
           message: `A preflight with idempotency_key "${idempotency_key}" is still being decided. Retry in a moment.`,
         })
+        return true
       }
-      return reply.send(prior.response)
+      let stored: unknown = JSON.parse(prior.response)
+      if (typeof stored === 'string') stored = JSON.parse(stored)
+      const legacy422 = stored !== null && typeof stored === 'object'
+        && typeof (stored as Record<string, unknown>).error === 'string' && !('approved' in stored)
+      reply.status(legacy422 ? 422 : 200).send(stored)
+      return true
     }
 
-    // Remembers a decision reached outside the reserve transaction (the two
-    // early rejections, and the rollback paths). ON CONFLICT DO NOTHING so a
-    // concurrent evaluation of the same key keeps whichever answer landed first.
+    // Remembers a decision reached outside the reserve transaction: the early
+    // ceiling refusal and the approved:false refusals of the rollback path,
+    // all of them HTTP 200. The two 422s (task_unit_mismatch,
+    // task_ceiling_required) are deliberately not remembered: nothing was
+    // reserved and no quota was burned, the claim on the key rolled back
+    // with the transaction, so a retry with the same key is decided again,
+    // and gets the same 422 with its own status or, once the job exists,
+    // its approval. ::text::json so the column holds the object itself, not
+    // a string of it. ON CONFLICT DO NOTHING so a concurrent evaluation of
+    // the same key keeps whichever answer landed first.
     const remember = async (body: unknown) => {
       if (!idempotency_key) return
       await sql`
         INSERT INTO preflight_requests (account_id, idempotency_key, response)
-        VALUES (${accountId}, ${idempotency_key}, ${JSON.stringify(body)}::json)
+        VALUES (${accountId}, ${idempotency_key}, ${JSON.stringify(body)}::text::json)
         ON CONFLICT (account_id, idempotency_key) DO NOTHING
       `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
     }
 
-    if (idempotency_key) {
-      const replayed = await replay()
-      if (replayed) return replayed
-    }
+    if (idempotency_key && await replay()) return reply
 
     // Every approved:false below is also written to preflight_decisions
     // (migration 005) so the account has a record of what it was saved from.
@@ -217,7 +267,7 @@ export async function preflightRoute(app: FastifyInstance) {
           `
           throw new PreflightRejection('budget_exhausted', {
             remaining_units: current
-              ? Math.max(0, current.limitUnits - current.usedUnits - current.reservedUnits)
+              ? Math.max(0, unitsOf(current.limitUnits) - unitsOf(current.usedUnits) - unitsOf(current.reservedUnits))
               : 0,
           })
         }
@@ -236,10 +286,23 @@ export async function preflightRoute(app: FastifyInstance) {
             // carry the ceiling that decided them as task_ceiling; the other
             // refusals are decided before this row is consulted.
             await tx`
-              INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units)
-              VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling})
+              INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, unit)
+              VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling}, ${unit ?? 'unit'})
               ON CONFLICT (account_id, task_ref) DO NOTHING
             `
+          }
+
+          // A declared unit is checked before anything is reserved, so a
+          // mismatch rolls back like every other rejection here: no quota
+          // burned, nothing held. The unit is fixed when the job opens.
+          if (unit !== undefined) {
+            const [declared] = await tx`
+              SELECT unit FROM task_budgets
+              WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+            `
+            if (declared && declared.unit !== unit) {
+              throw new PreflightRejection('task_unit_mismatch', { unit: declared.unit })
+            }
           }
 
           // A job opened from the console or the API without an agent label
@@ -269,10 +332,10 @@ export async function preflightRoute(app: FastifyInstance) {
             // Rolls back the customer reservation and the quota increment too.
             throw current
               ? new PreflightRejection('task_ceiling_exceeded', {
-                  task_ceiling: current.ceilingUnits,
-                  task_used_units: current.usedUnits,
+                  task_ceiling: unitsOf(current.ceilingUnits),
+                  task_used_units: unitsOf(current.usedUnits),
                   task_remaining_units: Math.max(
-                    0, current.ceilingUnits - current.usedUnits - current.reservedUnits
+                    0, unitsOf(current.ceilingUnits) - unitsOf(current.usedUnits) - unitsOf(current.reservedUnits)
                   ),
                 })
               : new PreflightRejection('task_ceiling_required')
@@ -283,17 +346,22 @@ export async function preflightRoute(app: FastifyInstance) {
         // The reservation becomes a row, not just a bump on a counter. This is
         // what lets an abandoned run be reclaimed: the counter alone cannot be
         // swept because it does not know how much of itself is stale.
-        await tx`
+        //
+        // public_id is the handle the answer carries as reservation_id, so
+        // record() can settle THIS reservation whole instead of shrinking the
+        // oldest ones FIFO. Random, not the BIGSERIAL id, which is global and
+        // would tell any caller how many preflights everyone else made.
+        const [held] = await tx`
           INSERT INTO reservations (account_id, customer_id, task_ref, units, expires_at)
           VALUES (${accountId}, ${reserved[0].id}, ${taskRef}, ${reserveUnits}, ${expiresAt})
+          RETURNING public_id
         `
 
-        return { row: reserved[0], task, monthlyCalls: quota.monthlyCalls }
+        return { row: reserved[0], task, monthlyCalls: quota.monthlyCalls, reservationId: held.publicId as string }
       })
     } catch (err) {
       if (err instanceof ReplayNeeded) {
-        const replayed = await replay()
-        if (replayed) return replayed
+        if (await replay()) return reply
         // The claiming transaction rolled back and freed the key. Nothing was
         // reserved under it, so the caller is safe to retry.
         return reply.status(409).send({
@@ -303,12 +371,23 @@ export async function preflightRoute(app: FastifyInstance) {
       }
 
       if (err instanceof PreflightRejection) {
+        if (err.reason === 'task_unit_mismatch') {
+          const jobUnit = String(err.detail.unit)
+          const body = {
+            error: 'task_unit_mismatch',
+            message: unitMismatchMessage(task_ref!, jobUnit, unit!),
+            task_ref,
+            unit: jobUnit,
+            declared_unit: unit,
+          }
+          return reply.status(422).send(body)
+        }
+
         if (err.reason === 'task_ceiling_required') {
           const body = {
             error: 'task_ceiling_required',
             message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task, or open the job first with PUT /tasks/:task_ref/ceiling or in the console.`,
           }
-          await remember(body)
           return reply.status(422).send(body)
         }
 
@@ -377,8 +456,9 @@ export async function preflightRoute(app: FastifyInstance) {
     }
 
     const row = result.row
-    const remaining = row.limitUnits != null
-      ? row.limitUnits - row.usedUnits - row.reservedUnits
+    const limit = unitsOrNull(row.limitUnits)
+    const remaining = limit != null
+      ? limit - unitsOf(row.usedUnits) - unitsOf(row.reservedUnits)
       : null
 
     // For paid accounts: report usage to Polar for billing
@@ -395,6 +475,11 @@ export async function preflightRoute(app: FastifyInstance) {
       // When settling this run, call record() before this timestamp. After it
       // the sweeper reclaims the reservation and the units stop being held.
       reservation_expires_at: expiresAt.toISOString(),
+      // Pass this back on POST /events as reservation_id and the record
+      // settles this reservation whole: the actual moves used_units and the
+      // unused rest is released at once. Without it the record closes the
+      // oldest reservations FIFO by the actual only.
+      reservation_id: result.reservationId,
       ...(task
         ? {
             task_ref,
@@ -402,9 +487,9 @@ export async function preflightRoute(app: FastifyInstance) {
             // answer did not carry it, so a task_ceiling the server did not
             // apply was invisible from code; the console row was the only
             // place the real number showed.
-            task_ceiling: task.ceilingUnits,
+            task_ceiling: unitsOf(task.ceilingUnits),
             task_remaining_units:
-              task.ceilingUnits - task.usedUnits - task.reservedUnits,
+              unitsOf(task.ceilingUnits) - unitsOf(task.usedUnits) - unitsOf(task.reservedUnits),
           }
         : {}),
     }
@@ -412,7 +497,7 @@ export async function preflightRoute(app: FastifyInstance) {
     if (idempotency_key) {
       await sql`
         UPDATE preflight_requests
-        SET response = ${JSON.stringify(body)}::json
+        SET response = ${JSON.stringify(body)}::text::json
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key}
       `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
     }

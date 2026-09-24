@@ -10,7 +10,7 @@ import { KEY_CTA, KEY_CTA_SHORT, CHROME_CSS, siteNav, siteFooter } from '../ui/c
 import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
-import { setTaskCeiling, CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { setTaskCeiling, CONSOLE_AGENT, unitWord } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import {
@@ -180,7 +180,9 @@ export async function appRoute(app: FastifyInstance) {
     if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return fail('ceiling')
 
     const result = await setTaskCeiling(viewer.accountId, ref, Number(raw), agent || null)
-    if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.minimum}`)
+    // The form sends no unit, so a save here never meets a unit mismatch; the
+    // narrowing is for the type, and the job keeps the unit it opened with.
+    if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.reason === 'below_committed' ? result.minimum : 0}`)
     // An agent label typed for a job that already existed was not applied
     // (the label is read only when a save opens the job); say so.
     const kept = agent && !result.row.taskCreated ? '&agent=kept' : ''
@@ -628,7 +630,8 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
  *  this job, approved or refused. See loadConsole for where they come from,
  *  why they can be fewer than the preflights the job made, and why
  *  task_budgets' own timestamps are not them. */
-type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; updatedAt: Date
+// unit and usageMissingCalls are absent on the demo rows, which read as 'unit' and 0.
+type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; unit?: string; usageMissingCalls?: number; updatedAt: Date
                  firstSeen: Date | null; lastSeen: Date | null; preflights: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
@@ -732,7 +735,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
   const order = () => sort === 'used' ? sql`used_units DESC, updated_at DESC` : sql`updated_at DESC`
   const tasks = await sql`
     WITH page AS (
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, updated_at
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, updated_at
       FROM task_budgets
       WHERE account_id = ${accountId}
       ORDER BY ${order()}
@@ -748,7 +751,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
       ) seen
       GROUP BY task_ref
     )
-    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.updated_at,
+    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.unit, page.usage_missing_calls, page.updated_at,
            spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights
     FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
     ORDER BY ${order()}
@@ -2133,13 +2136,27 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
       ? '<span class="chip-no">ceiling hit</span>'
       : ratio >= 0.8 ? '<span class="chip-near">close</span>' : tag('running')
   const refusedRow = leaked || used >= ceiling
+  // A job counted in tokens says so beside its numbers (migration 014). A job
+  // in the developer's own unit reads as it always has.
+  const tokens = t.unit === 'token'
+  const per = tokens ? ' tokens' : ''
+  // Calls recorded without a usage count were charged at least the
+  // reservation they settled, not 0, so the total is partly an estimate; the
+  // row says how many. A call that found no reservation open was recorded at
+  // what was sent, which is why the note says "where one was open" and not
+  // "charged at their reservation", the wording before 2026-09-23 that was
+  // false for exactly those calls.
+  const missing = Number(t.usageMissingCalls ?? 0)
+  const missingLine = missing > 0
+    ? `<div class="tk-f tk-s"><span class="bmiss">${num(missing)} ${missing === 1 ? 'call' : 'calls'} with no usage reported, charged at least the reservation where one was open</span></div>`
+    : ''
   return `<tr${refusedRow ? ' class="is-no"' : ''}>
       <td class="lead"><div class="tk">
         <div class="tk-n"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a><span class="tk-a">${esc(t.agentId)}</span></div>
-        <div class="tk-f">${leaked ? `${num(used - ceiling)} past the ceiling` : `${num(remaining)} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
-        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>
+        <div class="tk-f">${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
+        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>${missingLine}
       </div></td>
-      <td class="num" data-l="units"><b>${num(used)}</b> / ${num(ceiling)}</td>
+      <td class="num" data-l="units"><b>${num(used)}</b> / ${num(ceiling)}${per}</td>
       <td class="burn"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${usedPct.toFixed(1)}%"></i><s style="left:${usedPct.toFixed(1)}%;width:${resPct.toFixed(1)}%"></s><u></u></div></td>
       <td class="state">${state}</td>${editable ? `
       <td class="wide"><form method="POST" action="/app/tasks" class="bset" autocomplete="off">
@@ -2627,7 +2644,7 @@ except TaskCeilingExceededError as refused:
        <p class="fine">That is the body your code received, kept as a row. Every refusal on this account lands on the <a href="${href(p, 'refusals')}">refusals view</a> the same way, and the overview is now your console.</p>
        <p><a class="btn" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
   } else if (job && spent > 0) {
-    third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} units and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
+    third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} ${unitWord(job.unit)} and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
   } else {
     third = `<p>Nothing here yet. Run the lines above, then <a href="${href(p, 'start')}">reload this page</a>: the refusal appears here with the body your code received.</p>`
   }
@@ -2651,7 +2668,7 @@ except TaskCeilingExceededError as refused:
             <p class="fine">Read only when a save opens the job. Leave it blank and the job is listed as <code>console</code> until an approved call names one.</p>
           </details>
           <button class="btn btn-lg" type="submit">${job ? 'Save the ceiling' : 'Set the ceiling'}</button>
-          ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${ceiling === 1 ? 'unit' : 'units'}. Change either and save again; the last save wins.</p>` : ''}
+          ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${unitWord(job.unit, ceiling)}. Change either and save again; the last save wins.</p>` : ''}
         </div></div>
       </form>
       <div class="ns3"><span class="ns3-n">2</span><div>

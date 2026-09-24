@@ -234,6 +234,49 @@ Note the direction. An abandoned reservation makes the ceiling tighter, never lo
 
 Settle every run, including the ones that fail. `record(..., success=False)` releases the reservation without billing, and the `gate` decorator does it for you.
 
+**A reservation bigger than the call.** A record that does not name its reservation settles the oldest reservations of that customer and `task_ref` by the units you pass, and no more: reserve 70,000 and record 8,000, and the other 62,000 stay held until the reservation expires. Every approved check carries `check.reservation_id`. Settle with `check.record(units=actual)`, which carries the agent, customer, `task_ref` and reservation for you, or pass `reservation_id=check.reservation_id` to `client.record(...)`: that reservation closes whole, the actual is what the job spent, and the rest is released at once. `gate` does it for you. Settling the same reservation twice releases it once.
+
+> **Since 0.7.0.** `reservation_id`, `PreflightResult.record()`, and `record()`'s `idempotency_key`, `reservation_id`, `metadata` and `usage_missing` arguments are in 0.7.0 and later, not in 0.6.5 or earlier. They also need an AgentBill API that returns `reservation_id` on preflight; against one that does not, `check.reservation_id` is `None` and records settle as before.
+
+---
+
+## Automatic metering with `wrap()`
+
+> **Since 0.7.0.** `wrap()` is in 0.7.0 and later, not in 0.6.5 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
+
+Wrap your model client once. Every call it makes through `chat.completions.create` and `responses.create` (OpenAI), `messages.create` (Anthropic) or `models.generate_content` and `generate_content_stream` (google-genai, `aio` included), sync or async, streamed or not, is measured from the usage the provider returned: a preflight on the job in tokens before the call, a record of the reported tokens after it. You pass no estimate and record no number.
+
+```python
+from openai import OpenAI
+from agentbill import wrap, Refusal
+
+# Reads AGENTBILL_API_KEY. The job is counted in tokens; task_ceiling opens it.
+llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher", task_ceiling=50_000)
+
+reply = llm.chat.completions.create(
+    model="gpt-4o-mini",
+    max_tokens=300,
+    messages=[{"role": "user", "content": "Summarize the quarter in one line."}],
+)
+if isinstance(reply, Refusal):
+    # The call that would have passed the ceiling was not sent. Nothing is
+    # raised: reply.reason, reply.used, reply.ceiling, reply.remaining.
+    print(reply)
+else:
+    print(reply.choices[0].message.content)
+```
+
+- **A refusal is returned, never raised.** The measured call's value is a `Refusal` (`approved=False`, `reason`, `task_ref`, `asked`, `used`, `ceiling`, `remaining`, `upgrade_url` on a quota refusal, and `answer`, the preflight answer whole); `bool()` of it is `False`, and it has no `choices`, `content`, `candidates` or `usage`, so it cannot be read as a provider response. A refused streaming call returns the same `Refusal`, which iterates to nothing (`for` and `async for` run zero times, and a `with` block is a no-op); the one stream that can be refused after it started, a Gemini automatic-function-calling stream whose later round is refused, ends after the earlier round's chunks and sets its `.refusal`. An exception out of a wrapped call is a failure: the provider's own error, or from AgentBill `AuthenticationError` (401), `requests.HTTPError` (any other HTTP error, a 422 `task_unit_mismatch` included) or `requests.ConnectionError`. `preflight()` and `record()` on the plain client are not changed by this: `preflight()` still raises `TaskCeilingExceededError` on a ceiling refusal and returns on the quota.
+
+- **The estimate needs no number from you.** Before the job's first measured call in this process it is `default_estimate` (2,000); after, the job's running average per call, never more than the average prompt plus the call's own `max_tokens` (or `max_completion_tokens`, `max_output_tokens`). The prompt is not counted before the call, and no request is added. A call that uses more than it reserved is still recorded at what it used, so one call can take the job past its ceiling, by at most that call for each caller running at the same moment; the next preflight is refused. That bound holds while preflight checks the ceiling; see the quota below.
+- **After the call** the record carries `idempotency_key` = the provider's response id (a random key on a `-compatible` endpoint, whose ids need not be unique), the preflight's `reservation_id`, and metadata: provider, model, tokens by type (`input`, `cache_read`, `cache_write`, `output`, `reasoning`), `duration_ms`, and the `step` you named. No prompt, no answer. For another step of the same job, `wrap(llm, step="review")`.
+- **Tokens by type:** OpenAI's `cached_tokens` and `cache_write_tokens` are `cache_read` and `cache_write`; with Gemini's automatic function calling (a Python function in `tools`), each round the SDK sends is its own measured call, because the response it returns carries only the last round's usage.
+- **Missing usage is recorded as missing, never as 0.** A provider error releases the reservation. A record that fails after the provider answered warns and still returns the answer. A stream is recorded when it ends, is closed, or a `for` loop over it stops.
+- **Each measured call is one preflight**, so it uses one preflight of your account's monthly quota. Once that quota is spent no ceiling can be checked, so by default (`on_quota="refuse"`) the wrapped call returns a `Refusal` with reason `free_tier_exceeded` or `plan_limit_exceeded` and `.upgrade_url`, and is not sent. `wrap(..., on_quota="send")` sends it unchecked and records it, with a warning once per job, and nothing bounds the job until the quota resets or you upgrade.
+- **Only wrapped calls are measured.** Another method, an unwrapped client, a tool call or a GPU run counts only if your code records it with the same `task_ref`. A client pointed at another host is recorded as `openai-compatible` (or `anthropic-compatible`) and gets no list price.
+- **The job is counted in tokens.** One opened in units answers 422 `task_unit_mismatch`, and the call is not sent.
+- **What it cost:** `client.get_task("tokens-1").breakdown` has the job by model and by step, with tokens and `list_price_usd_estimate`, an estimate at public list price from a dated price table. List price, your invoice may differ; a model with no list price is counted in `unpriced_calls`, never as $0.
+
 ---
 
 ## Node.js
@@ -400,6 +443,24 @@ reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never
 | `idempotency_key` | `str` | none | Stable across retries: same key, same decision, one reservation. |
 | `ceiling` | `int` | none | Set on `AgentBillClient(...)`, not per call. Refuses any single call whose `estimated_units` exceed it. |
 
+### `client.record(...)` and `check.record(...)`
+
+`check.record(...)` takes `units`, `success`, `idempotency_key`, `usage_missing` and `metadata`, and reads `agent_id`, `customer_id`, `task_ref` and `reservation_id` from the preflight that made `check`.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `agent_id` | `str` | required | The same attribution label you passed to preflight. |
+| `units` | `int` | `1` | What the call actually used. `0` is allowed: a call that ran and cost nothing records 0. |
+| `customer_id` | `str` | `"default"` | The customer the preflight named. |
+| `task_ref` | `str` | none | The job the preflight named. Without it the units settle against no job. |
+| `reservation_id` | `str` | none | `check.reservation_id`. Closes that reservation whole and releases what it held beyond `units`. Without it the oldest reservations are settled by `units` only. |
+| `success` | `bool` | `True` | `False` releases the reservation and bills nothing. |
+| `idempotency_key` | `str` | a fresh random key | Same key, one event: a retried record is ignored as a duplicate. Pass something stable, such as your provider's response id. |
+| `usage_missing` | `bool` | `False` | Your provider reported no usage for this call. Not read as 0: the call is charged at least the reservation the record settles, the one `reservation_id` names or, without it, the oldest open reservation of this customer and `task_ref`. With no reservation open, `units` is recorded as sent. Either way the job counts it in `usage_missing_calls`. |
+| `metadata` | `dict` | none | Stored on the event, never counted. |
+
+`client.preflight(...)` also takes `unit`, `"unit"` (yours, the default) or `"token"`, with a `task_ref`: it is read when the call opens the job and checked on a job that exists, and a different unit is a 422. `client.get_task(...)` returns it as `status.unit`, beside `status.usage_missing_calls`.
+
 ### `@meter(event, options)`
 
 Separate tool, for **outcome-based metering** rather than enforcement: it records what a run was
@@ -431,9 +492,11 @@ worth after the fact, with `units` as a function of the result.
 | `PreflightInProgressError` | A preflight with the same `idempotency_key` is still being decided |
 | `AgentBillError` | Network error or unexpected server response |
 
-`FreeTierExceededError` and `PlanLimitExceededError` are still exported but nothing raises them:
-AgentBill's own quota running out returns `approved=False` with `.upgrade_url` instead. Our billing
-must never crash your agent.
+`preflight()` never raises `FreeTierExceededError` or `PlanLimitExceededError`: AgentBill's own
+quota running out returns `approved=False` with `.upgrade_url` instead. Our billing must never crash
+your agent. A client made with `wrap()` raises for no refusal at all: every one, the quota included,
+is returned as a `Refusal` (once the quota is spent no ceiling can be checked), and `on_quota="send"`
+sends the call unchecked instead.
 
 ---
 

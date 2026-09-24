@@ -18,11 +18,16 @@
 import postgres from 'postgres'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { ipOrigin } from '../../dist/lib/ip-origin.js'
+import { int8Type, parseInt8 } from '../../dist/db/int8.js'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
 const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
 const ACCT = process.env.ACCOUNT_ID ?? '00000000-0000-0000-0000-0000000000aa'
-const sql = postgres(process.env.DATABASE_URL, { ssl: false, transform: postgres.camel })
+// The same int8 parser the server uses. Migration 016 makes every unit column
+// BIGINT, and without it this harness's own reads (c.reservedUnits === 12)
+// would compare strings to numbers and fail for a reason that is not the
+// code under test. The API responses are read over HTTP and are unaffected.
+const sql = postgres(process.env.DATABASE_URL, { ssl: false, transform: postgres.camel, types: { int8: int8Type } })
 
 let pass = 0, fail = 0
 const ok = (name, cond, detail = '') => {
@@ -647,17 +652,29 @@ ok('a malformed account id in a Polar webhook is 200, not 500',
 
 // A value the schema accepts must be a value the column accepts. That is the
 // same rule as the id rules above, in the other direction: every units and
-// ceiling column is INTEGER and every schema said z.number().int() with no
-// ceiling, so 3_000_000_000 was Postgres 22003 and a 500.
+// ceiling column was INTEGER and every schema said z.number().int() with no
+// ceiling, so 3_000_000_000 was Postgres 22003 and a 500. The columns are
+// BIGINT since migration 016 and the per-request bound stays INT4_MAX until a
+// later deploy raises it on purpose, so this still answers 422.
 const bigUnits = await rec({ customer_id: 'intmax', event_type: 'run', idempotency_key: `im-${Date.now()}`, units: 3_000_000_000 })
 ok('a number past INTEGER is 422, not 500', bigUnits.status === 422, `${bigUnits.status} ${JSON.stringify(bigUnits.body).slice(0, 120)}`)
 const bigEst = await pre({ agent_id: 'intmax', estimated_units: 3_000_000_000 })
 ok('estimated_units past INTEGER is 422, not 500', bigEst.status === 422, `${bigEst.status} ${JSON.stringify(bigEst.body).slice(0, 120)}`)
 
-// events.units had min(0) while the table has CHECK (units >= 1), so a value
-// the route accepted was one the database refused.
-const zeroUnits = await rec({ customer_id: 'zero', event_type: 'run', idempotency_key: `z-${Date.now()}`, units: 0 })
-ok('units 0 is 422, not the 500 the CHECK produced', zeroUnits.status === 422, `${zeroUnits.status} ${JSON.stringify(zeroUnits.body).slice(0, 120)}`)
+// events.units had min(0) while the table had CHECK (units >= 1), so a value
+// the route accepted was one the database refused: a 500. That was closed as
+// a 422 on 2026-09-07. Migration 015 then made 0 a real answer (a provider
+// can report 0 tokens, and a tool call in a tokens job costs 0 on its own),
+// with the route and the column agreeing on it, so the rule this line holds
+// is the original one: what the schema accepts, the column accepts.
+const zeroKey = `z-${Date.now()}`
+const zeroUnits = await rec({ customer_id: 'zero', event_type: 'run', idempotency_key: zeroKey, units: 0 })
+const zeroRow = (await sql`SELECT units FROM events WHERE account_id = ${ACCT} AND idempotency_key = ${zeroKey}`)[0]
+ok('units 0 is recorded as a zero-cost call: 200 and a row of 0, not a 422 and not a 500',
+   zeroUnits.status === 200 && zeroUnits.body.status === 'recorded' && zeroRow?.units === 0,
+   `${zeroUnits.status} ${JSON.stringify(zeroUnits.body).slice(0, 120)} row ${JSON.stringify(zeroRow)}`)
+const negUnits = await rec({ customer_id: 'zero', event_type: 'run', idempotency_key: `zn-${Date.now()}`, units: -1 })
+ok('units -1 is still a 422', negUnits.status === 422, `${negUnits.status} ${JSON.stringify(negUnits.body).slice(0, 120)}`)
 
 // preflight, checkpoint and step all read "" as "the default customer", so the
 // id rule must keep accepting it: this regressed to 422 when zId landed.
@@ -1782,6 +1799,17 @@ ok('[home] the not-list is four lines, none about stopping a run or about who ha
    (nots8.match(/<li>/g) ?? []).length === 4 && !fold8.includes('Stop your run') && !fold8.includes('Nobody has agreed')
      && !/\bnobody\b/i.test(visible8(fold8)) && !/\b(stop|kill|block|dies)[a-z]*\b/i.test(visible8(nots8)),
    `${(nots8.match(/<li>/g) ?? []).length} items`)
+// The bill line of the not-list, 2026-09-24. "The API never turns units into
+// dollars" was true until list_price_usd_estimate (GET /tasks/:task_ref,
+// src/lib/prices.ts) started serving a dollar figure for a token job. The line
+// now says what the figure is (an estimate, at public list price, on calls
+// wrap() measured) and keeps the phrase /upgrade counts on, "units refused is
+// not money".
+const billLine8 = visible8((nots8.match(/<li><b>Read your provider bill\.<\/b>([\s\S]*?)<\/li>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+ok('[home] the bill line calls the dollar figure an estimate at list price on calls wrap() measured, and never says the API turns no units into dollars',
+   billLine8.includes('A dollar figure appears only as an estimate at public list price, on calls wrap() measured.')
+     && billLine8.includes('units refused is not money') && !/never turns units into dollars|no dollar estimate/i.test(visible8(fold8)),
+   billLine8.slice(0, 160) || 'no bill line')
 ok('[start] the footer names the endpoint with the field it takes, and does not teach task_ceiling from code',
    visible8(virgin8).includes('ceiling_units') && !/\btask_ceiling\b/.test(visible8(virgin8)))
 
@@ -2290,6 +2318,959 @@ ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_
      && /if result\.reason == "task_ceiling_exceeded":\s*raise TaskCeilingExceededError/.test(py10)
      && node10.includes('free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw'),
    'an SDK branches on a quota refusal, so the /faq answer may no longer be true')
+
+// ---------------------------------------------------------------- meter, stage A: 2026-09-23
+// Four ledger changes every later metering option depends on, each held by
+// gates that name the failure they prevent. The memo that ordered them is
+// O-output/2026-09-23-agent-metrics-decision-memo.md in the vault.
+//
+//   1. A record settles the call's OWN reservation (reservation_id). Before it,
+//      record(units=actual) shrank the oldest reservation by `actual` and left
+//      the rest held for the 60-minute TTL, so a caller reserving the worst
+//      case and recording the real usage was refused long before its ceiling.
+//   2. Every unit column is BIGINT, read through an int8 parser that returns
+//      an exact number or fails loudly, never a string and never a rounded one.
+//   3. A job declares what it counts (task_budgets.unit), fixed when it opens.
+//   4. A call that cost 0 records 0; a call with no usage reported is charged
+//      at least its reservation and counted, never recorded as a silent 0.
+//
+// Everything here is additive: the first gates below run the old client's
+// exact request shape and assert the old answer, byte for byte where it matters.
+console.log('\n[meter] a call settles its own reservation, and the ledger holds past INT4')
+await reset()
+const KEYM = (await post('/keys/generate', { label: 'harness-section-meter' })).body.api_key
+if (typeof KEYM !== 'string' || !KEYM.startsWith('agb_')) throw new Error('[meter] could not mint its key')
+const callM = (method, path, body, key = KEYM) => fetch(`${API}${path}`, {
+  method, headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(async r => { const text = await r.text(); let json = null; try { json = JSON.parse(text) } catch {} return { status: r.status, body: json, text } })
+const preM = (b, key) => callM('POST', '/preflight', b, key)
+const recM = (b, key) => callM('POST', '/events', b, key)
+const taskM = async (ref) => (await sql`
+  SELECT ceiling_units, used_units, reserved_units, unit, usage_missing_calls FROM task_budgets WHERE account_id=${ACCT} AND task_ref=${ref}`)[0]
+const openForTask = async (ref) => Number((await sql`
+  SELECT COALESCE(SUM(units),0) AS s FROM reservations WHERE account_id=${ACCT} AND task_ref=${ref} AND released_at IS NULL`)[0].s)
+const UUID_M = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+let seqM = 0
+const keyM = (p) => `${p}-${Date.now()}-${++seqM}`
+
+// One job, the memo's numbers: every call reserves 70,000 (input plus
+// max_tokens, say), uses 8,000, against a ceiling of 500,000.
+const runJobM = async (ref, named, maxCalls) => {
+  const out = { refusedAt: null, usedAtRefusal: null, maxReserved: 0, statuses: new Set(), released: new Set(), recordKeys: new Set(), bad: null }
+  for (let i = 1; i <= maxCalls; i++) {
+    const p = await preM({ agent_id: 'meter', task_ref: ref, task_ceiling: 500_000, estimated_units: 70_000 })
+    if (p.body?.approved !== true) { out.refusedAt = i; out.usedAtRefusal = p.body?.task_used_units; break }
+    const r = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM(ref), units: 8_000, task_ref: ref,
+                           ...(named ? { reservation_id: p.body.reservation_id } : {}) })
+    if (r.status !== 200 || r.body?.status !== 'recorded') { out.bad = `call ${i}: ${r.status} ${r.text.slice(0, 120)}`; break }
+    for (const k of Object.keys(r.body)) out.recordKeys.add(k)
+    if (named) { out.statuses.add(r.body.reservation_status); out.released.add(r.body.reservation_released_units) }
+    out.maxReserved = Math.max(out.maxReserved, (await taskM(ref)).reservedUnits)
+  }
+  return out
+}
+
+// The old client's request, unchanged: no reservation_id. Same answer as ever,
+// including the stranding, because that is what an installed 0.6.x / 0.4.x
+// SDK does and it must keep getting the answer it was written against.
+const oldJob = await runJobM('meter-old', false, 12)
+ok('[meter] an old client (no reservation_id) is still refused on call 8, with 56,000 spent: its answer did not change',
+   oldJob.refusedAt === 8 && oldJob.usedAtRefusal === 56_000 && oldJob.bad === null, JSON.stringify({ ...oldJob, statuses: undefined, released: undefined, recordKeys: undefined }))
+ok('[meter] and its record answer carries no new key',
+   [...oldJob.recordKeys].sort().join(',') === 'customer_created,customer_remaining_units,event_id,status,task_exceeded,task_remaining_units,task_used_units',
+   [...oldJob.recordKeys].sort().join(','))
+ok('[meter] the stranding the fix exists for is real: the old job holds 7 x 62,000 reserved after its refusal',
+   (await taskM('meter-old')).reservedUnits === 434_000 && await openForTask('meter-old') === 434_000, JSON.stringify(await taskM('meter-old')))
+
+// The same job naming each reservation: the ceiling is reached by what was
+// USED. 54 calls fit (54 x 8,000 = 432,000, and 432,000 + 70,000 > 500,000
+// refuses the 55th), and nothing is held between calls.
+const namedJob = await runJobM('meter-named', true, 60)
+ok('[meter] naming the reservation, the job is NOT refused around call 7 or 8: 54 calls run and the 55th is refused at 432,000 used',
+   namedJob.refusedAt === 55 && namedJob.usedAtRefusal === 432_000 && namedJob.bad === null, JSON.stringify({ ...namedJob, statuses: [...namedJob.statuses], released: [...namedJob.released], recordKeys: undefined }))
+ok('[meter] and after every record nothing of the job stays reserved', namedJob.maxReserved === 0, `max reserved ${namedJob.maxReserved}`)
+ok('[meter] every record says it settled its reservation and released all 70,000 it held',
+   [...namedJob.statuses].join() === 'settled' && [...namedJob.released].join() === '70000', `${[...namedJob.statuses]} ${[...namedJob.released]}`)
+const custM = await cust()
+ok('[meter] invariant: the customer reserved == SUM(open rows) after both jobs', custM.reservedUnits === await openSum(custM.id), `${custM.reservedUnits} vs ${await openSum(custM.id)}`)
+
+// The handle itself.
+const idA = await preM({ agent_id: 'meter', task_ref: 'meter-id', task_ceiling: 1_000, estimated_units: 5, idempotency_key: 'meter-id-k1' })
+const idB = await preM({ agent_id: 'meter', task_ref: 'meter-id', task_ceiling: 1_000, estimated_units: 5, idempotency_key: 'meter-id-k1' })
+const idC = await preM({ agent_id: 'meter', task_ref: 'meter-id', estimated_units: 5 })
+ok('[meter] an approved answer carries reservation_id as a random uuid, not the global row id',
+   UUID_M.test(idA.body?.reservation_id ?? '') && UUID_M.test(idC.body?.reservation_id ?? '') && idA.body.reservation_id !== idC.body.reservation_id,
+   `${idA.body?.reservation_id} ${idC.body?.reservation_id}`)
+ok('[meter] a replayed preflight (same idempotency_key) carries the same reservation_id', idB.body?.reservation_id === idA.body?.reservation_id, `${idA.body?.reservation_id} vs ${idB.body?.reservation_id}`)
+ok('[meter] and the approved answer is the old answer plus reservation_id, nothing else',
+   Object.keys(idA.body).sort().join(',') === 'approved,estimated_units,reason,remaining_units,reservation_expires_at,reservation_id,task_ceiling,task_ref,task_remaining_units',
+   Object.keys(idA.body).sort().join(','))
+const refusedM = await preM({ agent_id: 'meter', task_ref: 'meter-id', estimated_units: 5_000 })
+ok('[meter] a refusal carries no reservation_id: nothing was reserved', refusedM.body?.approved === false && !('reservation_id' in refusedM.body), JSON.stringify(refusedM.body))
+
+// Settling is idempotent per reservation, whatever the idempotency_key does.
+const once = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('once'), units: 3, task_ref: 'meter-id', reservation_id: idA.body.reservation_id })
+const tOnce = await taskM('meter-id')
+const twice = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('twice'), units: 3, task_ref: 'meter-id', reservation_id: idA.body.reservation_id })
+const tTwice = await taskM('meter-id')
+ok('[meter] the first record naming a reservation settles it (5 released) and moves used by 3',
+   once.body?.reservation_status === 'settled' && once.body?.reservation_released_units === 5 && tOnce.reservedUnits === 5 && tOnce.usedUnits === 3,
+   `${JSON.stringify(once.body)} task ${JSON.stringify(tOnce)}`)
+ok('[meter] a second record naming the same reservation releases nothing more: already_closed, the other call\'s 5 still held',
+   twice.body?.reservation_status === 'already_closed' && twice.body?.reservation_released_units === 0 && tTwice.reservedUnits === 5 && tTwice.usedUnits === 6,
+   `${JSON.stringify(twice.body)} task ${JSON.stringify(tTwice)}`)
+const dupKey = keyM('dup')
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: dupKey, units: 2, task_ref: 'meter-id', reservation_id: idC.body.reservation_id })
+const tDup1 = await taskM('meter-id')
+const dup = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: dupKey, units: 2, task_ref: 'meter-id', reservation_id: idC.body.reservation_id })
+const tDup2 = await taskM('meter-id')
+ok('[meter] a retried record (same idempotency_key) is duplicate_ignored and moves nothing',
+   dup.body?.status === 'duplicate_ignored' && tDup1.usedUnits === tDup2.usedUnits && tDup1.reservedUnits === tDup2.reservedUnits && tDup2.reservedUnits === 0,
+   `${JSON.stringify(dup.body)} ${JSON.stringify(tDup1)} -> ${JSON.stringify(tDup2)}`)
+
+// success:false naming the reservation releases all of it, whatever units says.
+const failP = await preM({ agent_id: 'meter', task_ref: 'meter-fail', task_ceiling: 500_000, estimated_units: 70_000 })
+const failR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('fail'), units: 1, task_ref: 'meter-fail', success: false, reservation_id: failP.body.reservation_id })
+const tFail = await taskM('meter-fail')
+ok('[meter] success:false naming the reservation releases all 70,000 (the unnamed path would release only the 1 it was sent) and bills nothing',
+   failR.body?.status === 'released' && failR.body?.reservation_released_units === 70_000 && tFail.reservedUnits === 0 && tFail.usedUnits === 0,
+   `${JSON.stringify(failR.body)} ${JSON.stringify(tFail)}`)
+
+// A handle that is not this customer's and this task's matches nothing, and
+// the record falls back to the unnamed path instead of touching it.
+const aP = await preM({ agent_id: 'meter', task_ref: 'meter-a', task_ceiling: 1_000, estimated_units: 70 })
+await preM({ agent_id: 'meter', task_ref: 'meter-b', task_ceiling: 1_000, estimated_units: 40 })
+const wrongTask = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('wrong'), units: 10, task_ref: 'meter-b', reservation_id: aP.body.reservation_id })
+ok('[meter] a reservation_id from another task_ref is not_found; that task\'s 70 stay held and this record settles FIFO (40 shrinks to 30)',
+   wrongTask.body?.reservation_status === 'not_found' && (await taskM('meter-a')).reservedUnits === 70 && (await taskM('meter-b')).reservedUnits === 30 && await openForTask('meter-b') === 30,
+   `${JSON.stringify(wrongTask.body)} a ${JSON.stringify(await taskM('meter-a'))} b ${JSON.stringify(await taskM('meter-b'))}`)
+const garbled = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('garbled'), units: 1, reservation_id: 'not-a-uuid' })
+ok('[meter] a reservation_id that is not a uuid is a 422, never a 500', garbled.status === 422, `${garbled.status} ${garbled.text.slice(0, 120)}`)
+
+// Another account's handle is not a handle here, even for the same names.
+const ACCT_BM = '00000000-0000-0000-0000-0000000000bd'
+const KEY_BM = `agb_meter_b_${Date.now().toString(16)}`
+await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_BM}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_BM}, ${KEY_BM}, 'harness-meter-b')`
+const bP = await preM({ agent_id: 'meter', task_ref: 'meter-x', task_ceiling: 1_000, estimated_units: 40 }, KEY_BM)
+await preM({ agent_id: 'meter', task_ref: 'meter-x', task_ceiling: 1_000, estimated_units: 25 })
+const crossM = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('cross'), units: 25, task_ref: 'meter-x', reservation_id: bP.body?.reservation_id })
+const bHeld = Number((await sql`SELECT reserved_units FROM task_budgets WHERE account_id = ${ACCT_BM} AND task_ref = 'meter-x'`)[0]?.reservedUnits)
+ok('[meter] another account\'s reservation_id is not_found here, and that account\'s 40 stay held',
+   bP.body?.approved === true && crossM.body?.reservation_status === 'not_found' && bHeld === 40, `${JSON.stringify(crossM.body)} b held ${bHeld}`)
+await sql`DELETE FROM accounts WHERE id = ${ACCT_BM}`
+
+// A reservation the sweeper already reclaimed, named late: nothing is released
+// twice, and a live reservation beside it keeps what it holds.
+const swP = await preM({ agent_id: 'meter', task_ref: 'meter-sw', task_ceiling: 1_000, estimated_units: 30 })
+await sql`UPDATE reservations SET expires_at = now() - interval '1 minute' WHERE public_id = ${swP.body.reservation_id}`
+const { sweepExpiredReservations: sweepM } = await import('../../dist/lib/reservation-sweeper.js')
+await sweepM()
+await preM({ agent_id: 'meter', task_ref: 'meter-sw', estimated_units: 12 })
+const swR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('sw'), units: 10, task_ref: 'meter-sw', reservation_id: swP.body.reservation_id })
+const tSw = await taskM('meter-sw')
+ok('[meter] naming a reservation the sweeper took: already_closed, 0 released, the live 12 beside it still held, used moves by 10',
+   swR.body?.reservation_status === 'already_closed' && swR.body?.reservation_released_units === 0 && tSw.reservedUnits === 12 && tSw.usedUnits === 10 && await openForTask('meter-sw') === 12,
+   `${JSON.stringify(swR.body)} ${JSON.stringify(tSw)}`)
+
+// ---------------------------------------------------------------- zero and missing usage
+const zP = await preM({ agent_id: 'meter', task_ref: 'meter-zero', task_ceiling: 500_000, estimated_units: 2_000 })
+const zR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('zero'), units: 0, task_ref: 'meter-zero', reservation_id: zP.body.reservation_id })
+const tZero = await taskM('meter-zero')
+ok('[meter] units 0 naming its reservation (a tool call in a tokens job) settles it: 2,000 released, 0 used',
+   zR.status === 200 && zR.body?.reservation_released_units === 2_000 && tZero.reservedUnits === 0 && tZero.usedUnits === 0,
+   `${zR.status} ${JSON.stringify(zR.body)} ${JSON.stringify(tZero)}`)
+ok('[meter] and a plain record carries no usage_missing key', !('usage_missing' in (zR.body ?? {})) && !('units_recorded' in (zR.body ?? {})), JSON.stringify(zR.body))
+
+const mP = await preM({ agent_id: 'meter', task_ref: 'meter-missing', task_ceiling: 500_000, estimated_units: 70_000 })
+const mKey = keyM('missing')
+const mR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: mKey, units: 0, usage_missing: true, task_ref: 'meter-missing',
+                        reservation_id: mP.body.reservation_id, metadata: { step: 'draft' } })
+const tMissing = await taskM('meter-missing')
+// Read with SQL's own JSON operators, not through the driver: the harness's
+// camel transform would rename the keys, and the question is whether the
+// database can see the flag. It could not before 2026-09-23: every metadata
+// /events wrote was a JSON string holding JSON text (jsonb_typeof 'string'),
+// so metadata->>'usage_missing' was NULL whatever the request said.
+const mRow = (await sql`
+  SELECT units, jsonb_typeof(metadata) AS kind, metadata->>'usage_missing' AS flag, metadata->>'step' AS step
+  FROM events WHERE account_id = ${ACCT} AND idempotency_key = ${mKey}`)[0]
+ok('[meter] usage_missing is NOT a 0: the call is charged its whole 70,000 reservation, and the answer says so',
+   mR.status === 200 && mR.body?.usage_missing === true && mR.body?.units_recorded === 70_000 && tMissing.usedUnits === 70_000 && tMissing.reservedUnits === 0,
+   `${mR.status} ${JSON.stringify(mR.body)} ${JSON.stringify(tMissing)}`)
+ok('[meter] the job counts it as a call with no usage reported', tMissing.usageMissingCalls === 1, JSON.stringify(tMissing))
+ok('[meter] and the event row itself says so, as a JSON object the database can query, keeping the caller\'s metadata',
+   mRow?.units === 70_000 && mRow?.kind === 'object' && mRow?.flag === 'true' && mRow?.step === 'draft', JSON.stringify(mRow))
+const plainKey = keyM('plain-meta')
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: plainKey, units: 1, metadata: { step: 'plan', model: 'm' } })
+const plainRow = (await sql`
+  SELECT jsonb_typeof(metadata) AS kind, metadata->>'step' AS step, metadata ? 'usage_missing' AS flagged
+  FROM events WHERE account_id = ${ACCT} AND idempotency_key = ${plainKey}`)[0]
+ok('[meter] a plain record\'s metadata is stored as a JSON object too, and is not flagged', plainRow?.kind === 'object' && plainRow?.step === 'plan' && plainRow?.flagged === false, JSON.stringify(plainRow))
+const mP2 = await preM({ agent_id: 'meter', task_ref: 'meter-missing', estimated_units: 70_000 })
+const mR2 = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing2'), units: 90_000, usage_missing: true, task_ref: 'meter-missing', reservation_id: mP2.body.reservation_id })
+ok('[meter] usage_missing with units above the reservation charges the larger number', mR2.body?.units_recorded === 90_000 && (await taskM('meter-missing')).usedUnits === 160_000,
+   `${JSON.stringify(mR2.body)} ${JSON.stringify(await taskM('meter-missing'))}`)
+const mR3 = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing3'), units: 0, usage_missing: true, task_ref: 'meter-missing' })
+const tMissing3 = await taskM('meter-missing')
+ok('[meter] usage_missing with no reservation to go by records what was sent, and is still counted, so the total is never silently clean',
+   mR3.body?.units_recorded === 0 && tMissing3.usedUnits === 160_000 && tMissing3.usageMissingCalls === 3, `${JSON.stringify(mR3.body)} ${JSON.stringify(tMissing3)}`)
+const mGet = await callM('GET', '/tasks/meter-missing')
+ok('[meter] GET /tasks/:task_ref carries usage_missing_calls', mGet.body?.usage_missing_calls === 3, JSON.stringify(mGet.body))
+
+// ---------------------------------------------------------------- the unit a job counts in
+const quotaBeforeUnit = await acct()
+const tokOpen = await preM({ agent_id: 'meter', task_ref: 'meter-tok', task_ceiling: 900, estimated_units: 300, unit: 'token' })
+const tokGet = await callM('GET', '/tasks/meter-tok')
+ok('[meter] a job opened with unit "token" says token on GET /tasks/:task_ref', tokOpen.body?.approved === true && tokGet.body?.unit === 'token', `${JSON.stringify(tokOpen.body)} ${JSON.stringify(tokGet.body)}`)
+const quotaAfterOpen = await acct()
+const tokMismatch = await preM({ agent_id: 'meter', task_ref: 'meter-tok', estimated_units: 5, unit: 'unit' })
+ok('[meter] a later call declaring a different unit is a 422 task_unit_mismatch that names both',
+   tokMismatch.status === 422 && tokMismatch.body?.error === 'task_unit_mismatch' && tokMismatch.body?.unit === 'token' && tokMismatch.body?.declared_unit === 'unit'
+     && /counted in tokens/.test(tokMismatch.body?.message ?? '') && /declared units/.test(tokMismatch.body?.message ?? ''),
+   `${tokMismatch.status} ${tokMismatch.text.slice(0, 200)}`)
+ok('[meter] and reserves nothing and burns no quota', (await taskM('meter-tok')).reservedUnits === 300 && await acct() === quotaAfterOpen && quotaAfterOpen === quotaBeforeUnit + 1,
+   `${JSON.stringify(await taskM('meter-tok'))} quota ${quotaBeforeUnit} -> ${quotaAfterOpen} -> ${await acct()}`)
+const tokSame = await preM({ agent_id: 'meter', task_ref: 'meter-tok', estimated_units: 5, unit: 'token' })
+const tokNone = await preM({ agent_id: 'meter', task_ref: 'meter-tok', estimated_units: 5 })
+ok('[meter] the same unit, or none at all (every existing client), is approved as before', tokSame.body?.approved === true && tokNone.body?.approved === true, `${JSON.stringify(tokSame.body)} ${JSON.stringify(tokNone.body)}`)
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('tok'), units: 300, task_ref: 'meter-tok', reservation_id: tokOpen.body.reservation_id })
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('tok'), units: 0, task_ref: 'meter-tok', reservation_id: tokSame.body.reservation_id })
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('tok'), units: 0, task_ref: 'meter-tok', reservation_id: tokNone.body.reservation_id })
+const unitNoRef = await preM({ agent_id: 'meter', estimated_units: 5, unit: 'token' })
+ok('[meter] unit without a task_ref is a 422: it would describe no job', unitNoRef.status === 422 && /needs task_ref/.test(unitNoRef.body?.message ?? ''), `${unitNoRef.status} ${unitNoRef.text.slice(0, 120)}`)
+// On a job this call would OPEN, so the only thing that can refuse it is the
+// schema: aimed at meter-tok, a unit mismatch answered 422 too, and this gate
+// passed with the schema rule removed.
+const unitBad = await preM({ agent_id: 'meter', task_ref: 'meter-badunit', task_ceiling: 100, estimated_units: 5, unit: 'dollar' })
+ok('[meter] a unit that is neither "unit" nor "token" is a 422 validation_error and opens no job',
+   unitBad.status === 422 && unitBad.body?.error === 'validation_error' && !(await taskM('meter-badunit')), `${unitBad.status} ${unitBad.text.slice(0, 120)}`)
+const defOpen = await preM({ agent_id: 'meter', task_ref: 'meter-def', task_ceiling: 100, estimated_units: 1 })
+await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('def'), units: 1, task_ref: 'meter-def', reservation_id: defOpen.body?.reservation_id })
+const putOpen = await callM('PUT', '/tasks/meter-put/ceiling', { ceiling_units: 100 })
+ok('[meter] a job opened without a unit, from preflight or PUT, is counted in "unit"',
+   (await taskM('meter-def')).unit === 'unit' && putOpen.body?.unit === 'unit' && defOpen.body?.approved === true, `${JSON.stringify(await taskM('meter-def'))} ${JSON.stringify(putOpen.body)}`)
+const putMismatch = await callM('PUT', '/tasks/meter-put/ceiling', { ceiling_units: 200, unit: 'token' })
+ok('[meter] PUT declaring a different unit on an existing job is a 422 task_unit_mismatch and leaves the ceiling alone',
+   putMismatch.status === 422 && putMismatch.body?.error === 'task_unit_mismatch' && (await taskM('meter-put')).ceilingUnits === 100, `${putMismatch.status} ${putMismatch.text.slice(0, 160)}`)
+const putTok = await callM('PUT', '/tasks/meter-put-tok/ceiling', { ceiling_units: 5_000, unit: 'token' })
+const putTok2 = await callM('PUT', '/tasks/meter-put-tok/ceiling', { ceiling_units: 6_000 })
+ok('[meter] PUT can open a job in tokens, and a later save without a unit keeps it in tokens',
+   putTok.body?.unit === 'token' && putTok.body?.task_created === true && putTok2.status === 200 && putTok2.body?.unit === 'token' && putTok2.body?.ceiling_units === 6_000,
+   `${JSON.stringify(putTok.body)} ${JSON.stringify(putTok2.body)}`)
+const listM = await callM('GET', '/tasks?limit=200')
+const listTok = listM.body?.tasks?.find((t) => t.task_ref === 'meter-tok')
+const listDef = listM.body?.tasks?.find((t) => t.task_ref === 'meter-def')
+ok('[meter] GET /tasks lists each job with its unit', listTok?.unit === 'token' && listDef?.unit === 'unit', `${JSON.stringify(listTok)} ${JSON.stringify(listDef)}`)
+
+// The console prints the unit beside a tokens job's numbers, and nothing new
+// beside a job in the developer's own unit. The number sits in the canvas
+// row's units cell (<td class="num" data-l="units">, src/routes/app.ts
+// taskRow) since the canvas restyle merged on 2026-09-24; before that it was
+// a <span> in .bnum, which is what these two gates closed on.
+const navM = (path, init = {}) => fetch(`${API}${path}`, { redirect: 'manual', ...init })
+const loginM = await navM('/app/session', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }, body: `api_key=${KEYM}` })
+const cookieM = (loginM.headers.get('set-cookie') ?? '').split(';')[0]
+const pageM = await navM('/app?view=tasks', { headers: { cookie: cookieM } }).then((r) => r.text())
+ok('[meter] the console shows a tokens job as "300 / 900 tokens" and "600 tokens left"',
+   pageM.includes('<b>300</b> / 900 tokens</td>') && pageM.includes('600 tokens left'), (pageM.match(/meter-tok[\s\S]{0,600}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 300))
+ok('[meter] and a job in the developer\'s own unit exactly as before, with no unit word added',
+   /<b>1<\/b> \/ 100<\/td>/.test(pageM) && !/<b>1<\/b> \/ 100 (tokens|units)/.test(pageM), (pageM.match(/meter-def[\s\S]{0,400}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 200))
+// One of meter-missing's three calls found no reservation open and was
+// recorded at the 0 it sent, so "charged at their reservation", the wording
+// before 2026-09-23, was false on this very row.
+ok('[meter] and a job with unmeasured calls says how many, and that the reservation was the floor only where one was open',
+   pageM.includes('3 calls with no usage reported, charged at least the reservation where one was open') && !pageM.includes('charged at their reservation'),
+   (pageM.match(/meter-missing[\s\S]{0,900}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 400))
+
+// ---------------------------------------------------------------- usage_missing with no reservation_id
+// Review of stage A, 2026-09-23: preflight reserving 70,000, then
+// record(units 0, usage_missing) WITHOUT reservation_id answered
+// units_recorded 0, the job showed 0 used with 70,000 still reserved until
+// the TTL, and every document said such a call "is charged at least what its
+// reservation held". The unnamed path now floors at the oldest open
+// reservation of the customer and task_ref and closes it whole.
+const unP = await preM({ agent_id: 'meter', task_ref: 'meter-missing-unnamed', task_ceiling: 500_000, estimated_units: 70_000 })
+const unR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-unnamed'), units: 0, usage_missing: true, task_ref: 'meter-missing-unnamed' })
+const tUn = await taskM('meter-missing-unnamed')
+ok('[meter] usage_missing without reservation_id is charged the 70,000 its job had open, not 0, and nothing stays held',
+   unP.body?.approved === true && unR.status === 200 && unR.body?.units_recorded === 70_000 && tUn.usedUnits === 70_000 && tUn.reservedUnits === 0
+     && await openForTask('meter-missing-unnamed') === 0 && tUn.usageMissingCalls === 1 && !('reservation_status' in (unR.body ?? {})),
+   `${unR.status} ${JSON.stringify(unR.body)} ${JSON.stringify(tUn)}`)
+// A reservation_id that matches nothing takes the unnamed path, floor included.
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-nf', task_ceiling: 500_000, estimated_units: 50_000 })
+const nfR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-nf'), units: 0, usage_missing: true, task_ref: 'meter-missing-nf',
+                         reservation_id: '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f' })
+const tNf = await taskM('meter-missing-nf')
+ok('[meter] usage_missing naming a reservation that is not_found is floored the same way: 50,000, closed whole',
+   nfR.body?.reservation_status === 'not_found' && nfR.body?.units_recorded === 50_000 && tNf.usedUnits === 50_000 && tNf.reservedUnits === 0,
+   `${JSON.stringify(nfR.body)} ${JSON.stringify(tNf)}`)
+// The floor is the OLDEST open reservation, the one the FIFO settle closes
+// first, and only that one: the newer one beside it keeps what it holds.
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-two', task_ceiling: 500_000, estimated_units: 30_000 })
+await preM({ agent_id: 'meter', task_ref: 'meter-missing-two', estimated_units: 90_000 })
+const twoR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('missing-two'), units: 0, usage_missing: true, task_ref: 'meter-missing-two' })
+const tTwo = await taskM('meter-missing-two')
+ok('[meter] with two open, it is the oldest (30,000) that sets the floor and closes; the newer 90,000 stays held',
+   twoR.body?.units_recorded === 30_000 && tTwo.usedUnits === 30_000 && tTwo.reservedUnits === 90_000 && await openForTask('meter-missing-two') === 90_000,
+   `${JSON.stringify(twoR.body)} ${JSON.stringify(tTwo)}`)
+// An old client's record (no usage_missing) on the unnamed path is untouched:
+// FIFO by the units it sent, no floor.
+await preM({ agent_id: 'meter', task_ref: 'meter-plain-unnamed', task_ceiling: 500_000, estimated_units: 70_000 })
+const plR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('plain-unnamed'), units: 8_000, task_ref: 'meter-plain-unnamed' })
+const tPl = await taskM('meter-plain-unnamed')
+ok('[meter] and a plain unnamed record still settles FIFO by what it sent: 8,000 used, 62,000 held, no units_recorded key',
+   plR.body?.status === 'recorded' && !('units_recorded' in plR.body) && tPl.usedUnits === 8_000 && tPl.reservedUnits === 62_000,
+   `${JSON.stringify(plR.body)} ${JSON.stringify(tPl)}`)
+
+// ---------------------------------------------------------------- metadata jsonb refuses
+// Review of stage A, 2026-09-23: with metadata stored as an object
+// (::text::jsonb), a NUL or a lone surrogate anywhere in it was a 500 that
+// rolled the whole record back, so the call was never recorded and its
+// reservation stayed held. On cc5a1d2 the same bodies were 200, stored inside
+// a JSON string. A string cut mid-emoji by .slice() is enough for the second.
+const metaCases = [
+  ['nul', { note: 'a\u0000b', 'k\u0000ey': 1 }, { note: 'ab', key: '1' }],
+  ['surrogate', { note: '\ud800', nested: [{ cut: 'ok \ud83d' }] }, { note: '\ufffd', cut: 'ok \ufffd' }],
+]
+for (const [label, meta, want] of metaCases) {
+  const mp = await preM({ agent_id: 'meter', task_ref: `meter-meta-${label}`, task_ceiling: 1_000, estimated_units: 40 })
+  const mk = keyM(`meta-${label}`)
+  const mr = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: mk, units: 5, task_ref: `meter-meta-${label}`, reservation_id: mp.body?.reservation_id, metadata: meta })
+  const row = (await sql`
+    SELECT units, jsonb_typeof(metadata) AS kind, metadata->>'note' AS note, metadata->>'key' AS key,
+           metadata #>> '{nested,0,cut}' AS cut
+    FROM events WHERE account_id = ${ACCT} AND idempotency_key = ${mk}`)[0]
+  const tm = await taskM(`meter-meta-${label}`)
+  const got = { note: row?.note, ...(want.key !== undefined ? { key: row?.key } : {}), ...(want.cut !== undefined ? { cut: row?.cut } : {}) }
+  ok(`[meter] metadata with a ${label === 'nul' ? 'NUL' : 'lone surrogate'} in a string (and a key) is recorded, 200, not a 500 that loses the call`,
+     mr.status === 200 && mr.body?.status === 'recorded' && row?.units === 5 && row?.kind === 'object',
+     `${mr.status} ${mr.text.slice(0, 160)} ${JSON.stringify(row)}`)
+  ok(`[meter] and stored made valid (${label === 'nul' ? 'NUL removed' : 'lone surrogate as U+FFFD'}), with the reservation settled`,
+     JSON.stringify(got) === JSON.stringify(want) && tm.reservedUnits === 0 && tm.usedUnits === 5,
+     `${JSON.stringify(got)} vs ${JSON.stringify(want)} task ${JSON.stringify(tm)}`)
+}
+
+// ---------------------------------------------------------------- a replayed preflight answers as it was answered
+// Review of stage A, 2026-09-23: a retried preflight with the same
+// idempotency_key after a task_unit_mismatch came back HTTP 200, text/plain,
+// carrying the 422 body, and the Python SDK's retry raised
+// KeyError('approved'). Two causes: remember() stored no status, and
+// ${JSON.stringify(body)}::json double-encoded every stored answer, so every
+// replay, approvals included, went out as text/plain.
+const rawPre = (b) => fetch(`${API}/preflight`, {
+  method: 'POST', headers: { 'Authorization': `Bearer ${KEYM}`, 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+}).then(async (r) => { const text = await r.text(); let json = null; try { json = JSON.parse(text) } catch {} return { status: r.status, type: r.headers.get('content-type') ?? '', body: json, text } })
+const isJsonType = (t) => /^application\/json/.test(t)
+const rpKey = keyM('replay')
+const rpA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', task_ceiling: 1_000, estimated_units: 7, unit: 'token', idempotency_key: rpKey })
+const rpB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', task_ceiling: 1_000, estimated_units: 7, unit: 'token', idempotency_key: rpKey })
+ok('[meter] a replayed approval is the same body, HTTP 200 and application/json (it was text/plain)',
+   rpA.status === 200 && rpB.status === 200 && rpA.body?.approved === true && rpB.text === rpA.text && isJsonType(rpA.type) && isJsonType(rpB.type)
+     && (await taskM('meter-replay')).reservedUnits === 7,
+   `${rpA.status} ${rpA.type} | ${rpB.status} ${rpB.type} ${rpB.text.slice(0, 120)}`)
+const mmKey = keyM('replay-mismatch')
+const mmA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', estimated_units: 5, unit: 'unit', idempotency_key: mmKey })
+const mmB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay', estimated_units: 5, unit: 'unit', idempotency_key: mmKey })
+ok('[meter] task_unit_mismatch retried with the same key is a 422 again, as application/json, never a 200 with the 422 body',
+   mmA.status === 422 && mmB.status === 422 && mmB.body?.error === 'task_unit_mismatch' && isJsonType(mmB.type) && !('approved' in (mmB.body ?? {})),
+   `${mmA.status} | ${mmB.status} ${mmB.type} ${mmB.text.slice(0, 160)}`)
+const rqKey = keyM('replay-required')
+const rqA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+const rqB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+ok('[meter] task_ceiling_required retried with the same key is a 422 again, as application/json',
+   rqA.status === 422 && rqB.status === 422 && rqB.body?.error === 'task_ceiling_required' && isJsonType(rqB.type), `${rqA.status} | ${rqB.status} ${rqB.type} ${rqB.text.slice(0, 160)}`)
+// Nothing was reserved under a 422, so the key was never spent: once the job
+// is opened, the same key is decided again, and approved once.
+await callM('PUT', '/tasks/meter-replay-new/ceiling', { ceiling_units: 100 })
+const rqC = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+const rqD = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 5, idempotency_key: rqKey })
+ok('[meter] and once the job exists the same key is approved, and reserved once',
+   rqC.status === 200 && rqC.body?.approved === true && rqD.text === rqC.text && (await taskM('meter-replay-new')).reservedUnits === 5,
+   `${rqC.status} ${rqC.text.slice(0, 120)} | ${rqD.text.slice(0, 80)} ${JSON.stringify(await taskM('meter-replay-new'))}`)
+const rfKey = keyM('replay-refused')
+const rfA = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 500, idempotency_key: rfKey })
+const rfB = await rawPre({ agent_id: 'meter', task_ref: 'meter-replay-new', estimated_units: 500, idempotency_key: rfKey })
+ok('[meter] a remembered refusal (approved:false, 200) replays as the same 200 JSON body',
+   rfA.status === 200 && rfA.body?.approved === false && rfA.body?.reason === 'task_ceiling_exceeded' && rfB.status === 200 && rfB.text === rfA.text && isJsonType(rfB.type),
+   `${rfA.text.slice(0, 120)} | ${rfB.status} ${rfB.type}`)
+// Rows an earlier build wrote are JSON strings holding JSON text. They must
+// replay as the object, with the status they were answered with.
+const legacyOk = { approved: true, reason: null, estimated_units: 3, remaining_units: null, reservation_expires_at: '2026-09-23T00:00:00.000Z', task_ref: 'meter-legacy', task_ceiling: 10, task_remaining_units: 7 }
+const legacyReq = { error: 'task_ceiling_required', message: 'Unknown task_ref "meter-legacy-422".' }
+const lgOkKey = keyM('legacy-ok'), lg422Key = keyM('legacy-422')
+await sql`INSERT INTO preflight_requests (account_id, idempotency_key, response) VALUES
+  (${ACCT}, ${lgOkKey}, to_json(${JSON.stringify(legacyOk)}::text)), (${ACCT}, ${lg422Key}, to_json(${JSON.stringify(legacyReq)}::text))`
+const lgKind = (await sql`SELECT json_typeof(response) AS k FROM preflight_requests WHERE account_id = ${ACCT} AND idempotency_key = ${lgOkKey}`)[0]?.k
+const lgOk = await rawPre({ agent_id: 'meter', task_ref: 'meter-legacy', estimated_units: 3, idempotency_key: lgOkKey })
+const lg422 = await rawPre({ agent_id: 'meter', task_ref: 'meter-legacy-422', estimated_units: 3, idempotency_key: lg422Key })
+ok('[meter] a row an earlier build stored as a JSON string replays as the object it holds, snake_case keys intact, 200 application/json',
+   lgKind === 'string' && lgOk.status === 200 && isJsonType(lgOk.type) && JSON.stringify(lgOk.body) === JSON.stringify(legacyOk),
+   `${lgKind} ${lgOk.status} ${lgOk.type} ${lgOk.text.slice(0, 160)}`)
+ok('[meter] and a 422 an earlier build remembered replays as a 422',
+   lg422.status === 422 && lg422.body?.error === 'task_ceiling_required' && isJsonType(lg422.type), `${lg422.status} ${lg422.type} ${lg422.text.slice(0, 120)}`)
+const rpStored = (await sql`SELECT json_typeof(response) AS k FROM preflight_requests WHERE account_id = ${ACCT} AND idempotency_key = ${rpKey}`)[0]?.k
+ok('[meter] and what this build stores is the object itself, not a string of it', rpStored === 'object', String(rpStored))
+
+// ---------------------------------------------------------------- BIGINT, and the parser that makes it safe
+const UNIT_COLUMNS_M = [
+  ['accounts', 'default_budget_units'], ['customers', 'limit_units'], ['customers', 'used_units'], ['customers', 'reserved_units'],
+  ['task_budgets', 'ceiling_units'], ['task_budgets', 'used_units'], ['task_budgets', 'reserved_units'],
+  ['reservations', 'units'], ['events', 'units'], ['step_costs', 'units'],
+]
+const colTypesM = await sql`
+  SELECT table_name, column_name, data_type FROM information_schema.columns
+  WHERE table_schema = current_schema()
+    AND table_name IN ('accounts', 'customers', 'task_budgets', 'reservations', 'events', 'step_costs')`
+const typeOfM = (t, c) => colTypesM.find((r) => r.tableName === t && r.columnName === c)?.dataType
+const notBigM = UNIT_COLUMNS_M.filter(([t, c]) => typeOfM(t, c) !== 'bigint')
+ok('[meter] every unit column is BIGINT after the migration chain (016)', notBigM.length === 0,
+   JSON.stringify(notBigM.map(([t, c]) => `${t}.${c}=${typeOfM(t, c)}`)))
+
+// The parser, directly: exact numbers, and a throw where a JS number would round.
+const { parseInt8: parseInt8M, unitsOf: unitsOfM } = await import('../../dist/db/int8.js')
+const throwsM = (f) => { try { f(); return false } catch { return true } }
+ok('[meter] parseInt8 returns exact numbers up to 2^53 - 1 and throws past it, either sign',
+   parseInt8M('42') === 42 && parseInt8M('9007199254740991') === Number.MAX_SAFE_INTEGER && parseInt8M('-9007199254740991') === -Number.MAX_SAFE_INTEGER
+     && throwsM(() => parseInt8M('9007199254740992')) && throwsM(() => parseInt8M('-9007199254740992')))
+ok('[meter] unitsOf reads a number or a NUMERIC string exactly and refuses everything else',
+   unitsOfM(7) === 7 && unitsOfM('3000000000') === 3_000_000_000 && throwsM(() => unitsOfM('1005x')) && throwsM(() => unitsOfM(null)) && throwsM(() => unitsOfM(1.5)) && throwsM(() => unitsOfM('')))
+
+if (notBigM.length === 0) {
+  // A running total past INT4, which an INTEGER column would have refused
+  // with 22003 and a 500. Read back exact, and done arithmetic on as numbers.
+  await callM('PUT', '/tasks/meter-big/ceiling', { ceiling_units: 2_000_000_000 })
+  await sql`UPDATE task_budgets SET ceiling_units = 5000000000, used_units = 3000000000 WHERE account_id = ${ACCT} AND task_ref = 'meter-big'`
+  const bigGet = await callM('GET', '/tasks/meter-big')
+  ok('[meter] GET /tasks reads a job past INT4 exactly, as numbers',
+     bigGet.body?.ceiling_units === 5_000_000_000 && bigGet.body?.used_units === 3_000_000_000 && bigGet.body?.remaining_units === 2_000_000_000,
+     bigGet.text.slice(0, 200))
+  const bigP = await preM({ agent_id: 'meter', task_ref: 'meter-big', estimated_units: 1_000 })
+  const bigR = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('big'), units: 1_000, task_ref: 'meter-big', reservation_id: bigP.body?.reservation_id })
+  ok('[meter] and preflight and record do the arithmetic as numbers past INT4',
+     bigP.body?.task_remaining_units === 1_999_999_000 && bigR.body?.task_used_units === 3_000_001_000 && bigR.body?.task_remaining_units === 1_999_999_000,
+     `${JSON.stringify(bigP.body)} ${JSON.stringify(bigR.body)}`)
+
+  // events.ts: `used + units > limit`. On strings that is concatenation, and
+  // "3000000000" + 2000 compared to "3000001000" as text says the record fits.
+  await callM('PUT', '/budget', { customer_id: 'meter-bigc', limit_units: 2_000_000_000 })
+  await sql`UPDATE customers SET limit_units = 3000001000, used_units = 3000000000 WHERE account_id = ${ACCT} AND customer_ref = 'meter-bigc'`
+  const overC = await recM({ customer_id: 'meter-bigc', event_type: 'meter', idempotency_key: keyM('bigc'), units: 2_000 })
+  const fitC = await recM({ customer_id: 'meter-bigc', event_type: 'meter', idempotency_key: keyM('bigc'), units: 1_000 })
+  ok('[meter] the customer budget check past INT4 is integer arithmetic: 3,000,000,000 + 2,000 over a 3,000,001,000 limit is 402',
+     overC.status === 402 && overC.body?.error === 'budget_exhausted', `${overC.status} ${overC.text.slice(0, 160)}`)
+  ok('[meter] and + 1,000 fits exactly, leaving 0', fitC.status === 200 && fitC.body?.customer_remaining_units === 0, `${fitC.status} ${fitC.text.slice(0, 160)}`)
+  const budC = await callM('GET', '/budget?customer_id=meter-bigc')
+  const custsM = await callM('GET', '/customers')
+  const rowC = custsM.body?.find?.((r) => (r.customer_id ?? r.customerId) === 'meter-bigc')
+  ok('[meter] GET /budget and GET /customers return those totals as exact numbers, not strings',
+     budC.body?.limit === 3_000_001_000 && budC.body?.used === 3_000_001_000 && rowC?.used === 3_000_001_000 && typeof rowC?.limit === 'number',
+     `${budC.text.slice(0, 160)} ${JSON.stringify(rowC)}`)
+
+  // Past 2^53 a JS number rounds. The parser throws, so the read is one loud
+  // 500 that carries neither the true value nor a rounded one, and the
+  // connection it failed on keeps serving.
+  await callM('PUT', '/tasks/meter-huge/ceiling', { ceiling_units: 100 })
+  await sql`UPDATE task_budgets SET used_units = 9007199254740993 WHERE account_id = ${ACCT} AND task_ref = 'meter-huge'`
+  const deadM = (e) => ({ status: 0, body: null, text: `no answer: ${e?.cause?.code ?? e?.message ?? e}` })
+  const hugeGet = await callM('GET', '/tasks/meter-huge').catch(deadM)
+  ok('[meter] a value past 2^53 is a loud 500, never a rounded number and never a string',
+     hugeGet.status === 500 && !/900719925474099/.test(hugeGet.text), `${hugeGet.status} ${hugeGet.text.slice(0, 160)}`)
+  await sql`DELETE FROM task_budgets WHERE account_id = ${ACCT} AND task_ref = 'meter-huge'`
+  // A transport failure is an answer here, not a crash of the harness: the
+  // failure this gate exists for is a server that died on the throw.
+  await settle(200)
+  const afterHuge = await Promise.all([callM('GET', '/tasks/meter-big').catch(deadM), callM('GET', '/tasks?limit=5').catch(deadM), fetch(`${API}/health/db`).then((r) => r.status).catch(() => 0)])
+  ok('[meter] and the server keeps answering on the same pool afterwards', afterHuge[0].status === 200 && afterHuge[1].status === 200 && afterHuge[2] === 200,
+     afterHuge.map((x) => x.status ?? x).join(','))
+} else {
+  console.log(`  SKIP  [meter] the past-INT4 gates: ${notBigM.length} unit column(s) are not BIGINT yet (migration 016 not applied)`)
+}
+
+// Every unit field on every endpoint this stage touched is a JSON number.
+const typeProbeP = await preM({ agent_id: 'meter', task_ref: 'meter-types', task_ceiling: 100, estimated_units: 4, customer_id: 'meter-typesc' })
+await callM('PUT', '/budget', { customer_id: 'meter-typesc', limit_units: 1_000 })
+const typeProbeP2 = await preM({ agent_id: 'meter', task_ref: 'meter-types', estimated_units: 4, customer_id: 'meter-typesc' })
+const typeProbeR = await recM({ customer_id: 'meter-typesc', event_type: 'meter', idempotency_key: keyM('types'), units: 4, task_ref: 'meter-types', reservation_id: typeProbeP.body.reservation_id })
+const typeProbeT = await callM('GET', '/tasks/meter-types')
+const typeProbePut = await callM('PUT', '/tasks/meter-types/ceiling', { ceiling_units: 200 })
+const typeProbeB = await callM('GET', '/budget?customer_id=meter-typesc')
+const typeProbeC = await callM('POST', '/checkpoint', { agent_id: 'meter', customer_id: 'meter-typesc', units_so_far: 3 })
+const typeProbeD = await callM('GET', '/decisions?task_ref=meter-id')
+const numsM = {
+  'preflight.task_ceiling': typeProbeP.body?.task_ceiling, 'preflight.task_remaining_units': typeProbeP.body?.task_remaining_units,
+  'preflight.remaining_units': typeProbeP2.body?.remaining_units,
+  'events.task_used_units': typeProbeR.body?.task_used_units, 'events.task_remaining_units': typeProbeR.body?.task_remaining_units,
+  'events.customer_remaining_units': typeProbeR.body?.customer_remaining_units, 'events.reservation_released_units': typeProbeR.body?.reservation_released_units,
+  'tasks.ceiling_units': typeProbeT.body?.ceiling_units, 'tasks.used_units': typeProbeT.body?.used_units, 'tasks.reserved_units': typeProbeT.body?.reserved_units,
+  'tasks.remaining_units': typeProbeT.body?.remaining_units, 'tasks.usage_missing_calls': typeProbeT.body?.usage_missing_calls,
+  'put.ceiling_units': typeProbePut.body?.ceiling_units, 'put.used_units': typeProbePut.body?.used_units,
+  'budget.limit': typeProbeB.body?.limit, 'budget.used': typeProbeB.body?.used, 'budget.remaining': typeProbeB.body?.remaining,
+  'checkpoint.remaining_units': typeProbeC.body?.remaining_units,
+  'decisions.estimated_units': typeProbeD.body?.decisions?.[0]?.estimated_units, 'decisions.blocked_total': typeProbeD.body?.blocked_total,
+}
+const notNumM = Object.entries(numsM).filter(([, v]) => typeof v !== 'number')
+ok('[meter] every unit field on preflight, events, tasks, budget, checkpoint and decisions is a JSON number', notNumM.length === 0, JSON.stringify(Object.fromEntries(notNumM)))
+
+// ---------------------------------------------------------------- [price] list price on the record
+// Stage B, 2026-09-24. A record whose metadata names a model call (provider,
+// model, tokens: the shape wrap() writes, and any HTTP client may write) is
+// priced by the server at public list price from a dated snapshot, and the
+// figure is stored beside the snapshot's name. The one rule every gate below
+// leans on: a call that cannot be priced is NEVER $0. It stores no figure and
+// a sentence saying why, and every reader counts it as unpriced.
+{ // [price], in its own block scope so its names cannot collide with the sections above
+console.log('\n[price] a model call is priced at list price, exactly, and a call that cannot be priced is never $0')
+const { PRICE_VERSION: PV, priceCall: priceCallP, usdFromPico: usdP } = await import('../../dist/lib/prices.js')
+const KEYP = (await post('/keys/generate', { label: 'harness-section-price' })).body.api_key
+if (typeof KEYP !== 'string' || !KEYP.startsWith('agb_')) throw new Error('[price] could not mint its key')
+const callP = (method, path, body) => fetch(`${API}${path}`, {
+  method, headers: { 'Authorization': `Bearer ${KEYP}`, 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(async r => { const text = await r.text(); let json = null; try { json = JSON.parse(text) } catch {} return { status: r.status, body: json, text } })
+let seqP = 0
+const keyP = (p) => `${p}-${Date.now()}-${++seqP}`
+const recP = (taskRef, metadata, extra = {}) => callP('POST', '/events', {
+  customer_id: 'price-c', event_type: 'price', idempotency_key: keyP(taskRef), units: extra.units ?? 1, task_ref: taskRef,
+  ...(metadata === undefined ? {} : { metadata }), ...extra,
+})
+const rowP = async (key) => (await sql`
+  SELECT task_ref AS ref, price_version AS version, list_price_usd::text AS usd, price_note AS note, units FROM events
+  WHERE account_id = ${ACCT} AND idempotency_key = ${key}`)[0]
+const toks = (o) => ({ input: 0, cache_read: 0, cache_write: 0, output: 0, reasoning: 0, ...o })
+// One record, then its row, by the key it was sent with.
+const pricedRow = async (taskRef, metadata, extra = {}) => {
+  const k = keyP(taskRef)
+  const r = await callP('POST', '/events', { customer_id: 'price-c', event_type: 'price', idempotency_key: k, units: extra.units ?? 1,
+    task_ref: taskRef, ...(metadata === undefined ? {} : { metadata }), ...extra })
+  return { answer: r, row: await rowP(k) }
+}
+
+await callP('PUT', '/tasks/price-job/ceiling', { ceiling_units: 10_000_000, unit: 'token' })
+
+const mini = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini-2024-07-18', requested_model: 'gpt-4o-mini', step: 'plan',
+  tokens: toks({ input: 1000, cache_read: 200, output: 500 }) }, { units: 1700 })
+ok('[price] gpt-4o-mini: 1,000 input, 200 cache read, 500 output is $0.000465 exactly, stored as NUMERIC with the snapshot name',
+   mini.row?.usd === '0.000465000000' && mini.row?.version === PV && mini.row?.note === null && mini.row?.ref === 'price-job',
+   JSON.stringify(mini.row))
+ok('[price] and the record answer is the old answer: pricing adds no key to it',
+   Object.keys(mini.answer.body ?? {}).sort().join(',') === 'customer_created,customer_remaining_units,event_id,status,task_exceeded,task_remaining_units,task_used_units',
+   Object.keys(mini.answer.body ?? {}).sort().join(','))
+
+const unknown = await pricedRow('price-job', { provider: 'openai', model: 'gpt-9-imaginary', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok('[price] a model the table does not have: no figure, and the note says "no list price for" that model, not $0',
+   unknown.row?.usd === null && unknown.row?.note === 'no list price for gpt-9-imaginary' && unknown.row?.version === PV, JSON.stringify(unknown.row))
+
+const zero = await pricedRow('price-job', { provider: 'gemini', model: 'gemma-4-31b-it', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok('[price] a model the table lists at 0 is not priced at $0: the table writes 0 for unknown prices too',
+   zero.row?.usd === null && /^no list price for gemma-4-31b-it: the price table lists 0/.test(zero.row?.note ?? ''), JSON.stringify(zero.row))
+
+const longCtx = await pricedRow('price-job', { provider: 'anthropic', model: 'claude-sonnet-4-5-20250929',
+  tokens: toks({ input: 150_000, cache_read: 60_000, output: 1_000 }) }, { units: 211_000 })
+ok('[price] a 210k-token prompt on claude-sonnet-4-5 is priced at the above-200k rates for every token: $0.9585, not the base $0.483',
+   longCtx.row?.usd === '0.958500000000', JSON.stringify(longCtx.row))
+const oneHour = await pricedRow('price-job', { provider: 'anthropic', model: 'claude-sonnet-4-5',
+  tokens: toks({ input: 1000, cache_write: 1000, cache_write_1h: 1000, output: 100 }) }, { units: 3100 })
+ok('[price] a one-hour cache write is priced at its own rate: 1,000 input + 1,000 five-minute + 1,000 one-hour writes + 100 output = $0.01425',
+   oneHour.row?.usd === '0.014250000000', JSON.stringify(oneHour.row))
+
+const gap = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5.4', service_tier: 'priority', tokens: toks({ input: 300_000, output: 10 }) }, { units: 300_010 })
+ok('[price] above a tier at a service tier the table has no rate for: not priced, and the note names both',
+   gap.row?.usd === null && gap.row?.note === 'no list price for gpt-5.4 above 272k input tokens and at service tier priority (input tokens)', JSON.stringify(gap.row))
+
+const flex = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5-mini', service_tier: 'flex', tokens: toks({ input: 1000, output: 100 }) }, { units: 1100 })
+ok('[price] a flex call is priced at the flex rates: $0.000225, not the standard $0.00045', flex.row?.usd === '0.000225000000', JSON.stringify(flex.row))
+const scale = await pricedRow('price-job', { provider: 'openai', model: 'gpt-5-mini', service_tier: 'scale', tokens: toks({ input: 1000, output: 100 }) }, { units: 1100 })
+ok('[price] a service tier the pricer does not know is not priced', scale.row?.usd === null && scale.row?.note === 'no list price for gpt-5-mini at service tier scale', JSON.stringify(scale.row))
+
+const thinking = await pricedRow('price-job', { provider: 'gemini', model: 'gemini-robotics-er-2-preview', step: 'think',
+  tokens: toks({ output: 100, reasoning: 60 }) }, { units: 100 })
+ok('[price] reasoning with its own rate: 40 output at $5/M + 60 reasoning at $10/M = $0.0008',
+   thinking.row?.usd === '0.000800000000', JSON.stringify(thinking.row))
+
+const missingP = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini' }, { units: 0, usage_missing: true })
+ok('[price] usage missing: no figure, and the note says there was nothing to price',
+   missingP.row?.usd === null && /^usage missing/.test(missingP.row?.note ?? ''), JSON.stringify(missingP.row))
+
+const compat = await pricedRow('price-job', { provider: 'openai-compatible', model: 'gpt-4o-mini', tokens: toks({ input: 10, output: 10 }) }, { units: 20 })
+ok("[price] a call through another host is not priced at OpenAI's list price",
+   compat.row?.usd === null && compat.row?.note === "no list price for gpt-4o-mini: it was called through an endpoint other than OpenAI's own API", JSON.stringify(compat.row))
+
+const junk = await pricedRow('price-job', { provider: 'openai', model: 'gpt-4o-mini', tokens: { input: 1.5, output: 'many' } }, { units: 5 })
+ok('[price] token counts that are not whole numbers are not priced, and the record still lands',
+   junk.answer.status === 200 && junk.row?.usd === null && /whole numbers/.test(junk.row?.note ?? ''), `${junk.answer.status} ${JSON.stringify(junk.row)}`)
+
+const plain = await pricedRow('price-job', undefined, { units: 7 })
+ok('[price] a record with no model named is not a model call: task_ref stored, no price columns',
+   plain.row?.ref === 'price-job' && plain.row?.usd === null && plain.row?.version === null && plain.row?.note === null, JSON.stringify(plain.row))
+
+// The pure pricer agrees with the stored rows, from the same code the server runs.
+const pure = priceCallP({ provider: 'openai', model: 'gpt-4o-mini', tokens: { input: 1000, cache_read: 200, cache_write: 0, cache_write_1h: 0, output: 500, reasoning: 0, audio_input: 0, audio_output: 0 } })
+ok('[price] the pricer is exact integer arithmetic: 465,000,000 picodollars', pure.ok === true && pure.picoUsd === 465_000_000n && usdP(pure.picoUsd) === '0.000465000000', JSON.stringify({ ...pure, picoUsd: String(pure.picoUsd) }))
+
+// ---------------------------------------------------------------- [price] the read side
+const taskP = await callP('GET', '/tasks/price-job')
+const bd = taskP.body?.breakdown
+const oldTaskKeys = 'agent_id,ceiling_units,created_at,exceeded,remaining_units,reserved_units,task_ref,unit,updated_at,usage_missing_calls,used_units'
+ok('[price] GET /tasks/:task_ref is the old answer plus breakdown, nothing else changed',
+   taskP.status === 200 && Object.keys(taskP.body).filter((k) => k !== 'breakdown').sort().join(',') === oldTaskKeys && typeof bd === 'object',
+   `${taskP.status} ${Object.keys(taskP.body ?? {}).sort().join(',')}`)
+const listP = await callP('GET', '/tasks?limit=5')
+ok('[price] the list endpoint carries no breakdown', listP.status === 200 && listP.body.tasks.every((t) => !('breakdown' in t)), JSON.stringify(listP.body?.tasks?.[0] ?? {}))
+const expectUsd = 0.000465 + 0.9585 + 0.01425 + 0.000225 + 0.0008
+// 13 records on price-job: 5 priced (mini, longCtx, oneHour, flex, thinking), 8 not.
+const callsP = 13
+ok('[price] the job total is the exact sum of the priced calls, and unpriced calls are counted, never added as $0',
+   bd?.calls === callsP && bd?.priced_calls === 5 && bd?.unpriced_calls === 8 && Math.abs(bd?.list_price_usd_estimate - expectUsd) < 1e-12,
+   JSON.stringify({ calls: bd?.calls, priced: bd?.priced_calls, unpriced: bd?.unpriced_calls, usd: bd?.list_price_usd_estimate, expectUsd }))
+ok('[price] the estimate carries its label and the snapshot it came from',
+   /your invoice may differ/.test(bd?.list_price_label ?? '') && /never counted as \$0/.test(bd?.list_price_label ?? '') && JSON.stringify(bd?.price_versions) === JSON.stringify([PV]),
+   JSON.stringify({ label: bd?.list_price_label, versions: bd?.price_versions }))
+const m4 = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini-2024-07-18')
+ok('[price] by model: the gpt-4o-mini row has its tokens by type and its own estimate',
+   m4?.provider === 'openai' && m4?.calls === 1 && m4?.units === 1700 && JSON.stringify(m4?.tokens) === JSON.stringify({ input: 1000, cache_read: 200, cache_write: 0, cache_write_1h: 0, output: 500, reasoning: 0 }) && m4?.list_price_usd_estimate === 0.000465,
+   JSON.stringify(m4))
+const mUnknown = bd?.by_model?.find((m) => m.model === 'gpt-9-imaginary')
+ok('[price] a row whose every call is unpriced shows null, not 0, and says why',
+   mUnknown?.list_price_usd_estimate === null && mUnknown?.unpriced_calls === 1 && mUnknown?.unpriced_reasons?.[0] === 'no list price for gpt-9-imaginary', JSON.stringify(mUnknown))
+const mNone = bd?.by_model?.find((m) => m.model === null)
+ok('[price] the record with no model is its own row, unpriced, with that reason',
+   mNone?.calls === 1 && mNone?.units === 7 && mNone?.list_price_usd_estimate === null && /no model named/.test(mNone?.unpriced_reasons?.[0] ?? ''), JSON.stringify(mNone))
+// openai/gpt-4o-mini holds the usage_missing record and the malformed one; the
+// openai-compatible call with the same model name is a row of its own.
+const mMissing = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini' && m.provider === 'openai')
+const mCompat = bd?.by_model?.find((m) => m.model === 'gpt-4o-mini' && m.provider === 'openai-compatible')
+ok('[price] a usage_missing call is counted as such in its row, and a compatible endpoint is a row of its own',
+   mMissing?.calls === 2 && mMissing?.usage_missing_calls === 1 && mMissing?.list_price_usd_estimate === null && mCompat?.calls === 1 && mCompat?.list_price_usd_estimate === null,
+   JSON.stringify({ mMissing, mCompat }))
+const sPlan = bd?.by_step?.find((s) => s.step === 'plan'), sThink = bd?.by_step?.find((s) => s.step === 'think'), sNone = bd?.by_step?.find((s) => s.step === null)
+ok('[price] by step: plan, think, and the calls with no step, each with its own estimate',
+   sPlan?.calls === 1 && sPlan?.list_price_usd_estimate === 0.000465 && sThink?.list_price_usd_estimate === 0.0008 && sNone?.calls === 11 && bd?.by_step?.length === 3,
+   JSON.stringify(bd?.by_step?.map((s) => [s.step, s.calls, s.list_price_usd_estimate])))
+const usedP = taskP.body?.used_units
+ok('[price] every unit of this job is attributed: unattributed_units is 0 and the rows add up to used_units',
+   bd?.unattributed_units === 0 && bd?.units === usedP, `units ${bd?.units} used ${usedP} unattributed ${bd?.unattributed_units}`)
+// A job that existed before events carried task_ref: its units are not hidden.
+await callP('PUT', '/tasks/price-old/ceiling', { ceiling_units: 1000 })
+await sql`UPDATE task_budgets SET used_units = 40 WHERE account_id = ${ACCT} AND task_ref = 'price-old'`
+const oldP = (await callP('GET', '/tasks/price-old')).body?.breakdown
+ok('[price] units recorded before migration 017 are reported as unattributed, not dropped',
+   oldP?.unattributed_units === 40 && oldP?.calls === 0 && oldP?.list_price_usd_estimate === null && Array.isArray(oldP?.by_model) && oldP.by_model.length === 0, JSON.stringify(oldP))
+
+} // end [price]
+
+{ // [wrap], in its own block scope for the same reason
+// ---------------------------------------------------------------- [wrap] the Node SDK against this server
+// The built Node SDK (sdk/node/dist, built by run.sh), a fake OpenAI client
+// shaped like the real one, and everything on AgentBill's side real.
+console.log('\n[wrap] wrap() against a real server: the refused call is not sent, the rest is recorded and priced')
+const KEYW = (await post('/keys/generate', { label: 'harness-section-wrap' })).body.api_key
+if (typeof KEYW !== 'string' || !KEYW.startsWith('agb_')) throw new Error('[wrap] could not mint its key')
+process.env.AGENTBILL_BASE_URL = API
+process.env.AGENTBILL_API_KEY = KEYW
+const { existsSync: existsW } = await import('node:fs')
+const sdkPathW = new URL('../../sdk/node/dist/index.js', import.meta.url)
+const nodeSdk = existsW(sdkPathW) ? await import(sdkPathW.href) : null
+ok('[wrap] the Node SDK is built (run.sh builds sdk/node before this runs)', typeof nodeSdk?.wrap === 'function', sdkPathW.pathname)
+const callW = (method, path, body) => fetch(`${API}${path}`, {
+  method, headers: { 'Authorization': `Bearer ${KEYW}`, 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }))
+const runW = Date.now().toString(36)
+// jsonb keeps its own key order, so objects read back are compared by entries.
+const sameW = (a, b) => a != null && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
+
+if (nodeSdk) {
+  // 1,200 tokens a call (1,000 prompt of which 200 cached, 200 completion);
+  // ceiling 5,000; default estimate 1,000. Calls 1-4 fit (4,800), and the 5th
+  // (4,800 + 1,200 > 5,000) is refused before the fake is called.
+  let sentW = 0
+  const fakeOpenAI = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create(body) {
+      sentW++
+      if (body.stream) {
+        const withUsage = body.stream_options?.include_usage === true
+        return { async *[Symbol.asyncIterator]() {
+          yield { id: `chatcmpl-w-${runW}-s`, model: 'gpt-4o-mini-2024-07-18', choices: [{ delta: { content: 'a' } }], usage: null }
+          if (withUsage) yield { id: `chatcmpl-w-${runW}-s`, model: 'gpt-4o-mini-2024-07-18', choices: [], usage: { prompt_tokens: 40, completion_tokens: 5 } }
+        } }
+      }
+      if (body.messages?.[0]?.content === 'no usage') return { id: `chatcmpl-w-${runW}-nou`, model: 'gpt-4o-mini-2024-07-18', choices: [] }
+      return { id: `chatcmpl-w-${runW}-${sentW}`, model: 'gpt-4o-mini-2024-07-18', service_tier: 'default', choices: [{ message: { content: 'x' } }],
+        usage: { prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 200 }, completion_tokens_details: { reasoning_tokens: 0 } } }
+    } } },
+  }
+  const refW = `wrap-node-${runW}`
+  const llmW = nodeSdk.wrap(fakeOpenAI, { taskRef: refW, agentId: 'node-e2e', step: 'plan', taskCeiling: 5_000, defaultEstimate: 1_000 })
+  // 2026-09-24 (Lior): a refusal is a value the wrapped call returns, never
+  // an exception; exceptions are for failures. So the loop breaks on a
+  // returned Refusal, and anything thrown is a red.
+  let refusedAt = null, refusalW = null, threwW = null
+  for (let i = 1; i <= 8; i++) {
+    try {
+      const r = await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }] })
+      if (nodeSdk.isRefusal(r)) { refusedAt = i; refusalW = r; break }
+    } catch (e) { threwW = e; break }
+  }
+  ok('[wrap] node: the 5th call comes back as a Refusal (task_ceiling_exceeded, 4,800/5,000, asked 1,200, approved false, no choices, nothing thrown), and the fake provider was sent 4 calls, not 5',
+     refusedAt === 5 && threwW === null && refusalW instanceof nodeSdk.Refusal && refusalW.approved === false && refusalW.reason === 'task_ceiling_exceeded' &&
+     refusalW.used === 4_800 && refusalW.ceiling === 5_000 && refusalW.remaining === 200 && refusalW.asked === 1_200 && refusalW.taskRef === refW &&
+     refusalW.answer?.reason === 'task_ceiling_exceeded' && !('choices' in refusalW) && sentW === 4,
+     `refusedAt=${refusedAt} sent=${sentW} threw=${threwW?.name}: ${threwW?.message} ${refusalW}`)
+  // A throw here is a FAIL with the error named, never a crash of this script:
+  // planted (wrap throwing again) on 2026-09-24 it ended the run at this line
+  // and hid every red after it.
+  let refusedStreamW = null, refusedChunksW = 0, streamThrewW = null
+  try {
+    refusedStreamW = await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }], stream: true })
+    for await (const _c of refusedStreamW) refusedChunksW++
+  } catch (e) { streamThrewW = e }
+  ok('[wrap] node: a streamed call on the same refused job is the Refusal itself, iterates to nothing, and the fake was still sent 4',
+     streamThrewW === null && nodeSdk.isRefusal(refusedStreamW) && refusedChunksW === 0 && sentW === 4,
+     `threw=${streamThrewW?.name}: ${streamThrewW?.message} isRefusal=${nodeSdk.isRefusal(refusedStreamW)} chunks=${refusedChunksW} sent=${sentW}`)
+  const tW = await callW('GET', `/tasks/${refW}`)
+  ok('[wrap] node: the job is a tokens job with 4,800 used and nothing left reserved',
+     tW.body?.unit === 'token' && tW.body?.used_units === 4_800 && tW.body?.reserved_units === 0 && tW.body?.ceiling_units === 5_000, JSON.stringify(tW.body && { ...tW.body, breakdown: undefined }))
+  // metadata as text: the harness pool camel-cases the keys of a jsonb value it parses.
+  const evW = (await sql`SELECT idempotency_key, units, list_price_usd::text AS usd, metadata::text AS meta FROM events WHERE task_ref = ${refW} ORDER BY created_at`)
+    .map((e) => ({ ...e, metadata: JSON.parse(e.meta) }))
+  ok('[wrap] node: 4 events, each keyed by the provider response id, each priced at $0.000255',
+     evW.length === 4 && evW.every((e, i) => e.idempotencyKey === `chatcmpl-w-${runW}-${i + 1}` && e.units === 1_200 && e.usd === '0.000255000000'),
+     JSON.stringify(evW.map((e) => [e.idempotencyKey, e.units, e.usd])))
+  ok('[wrap] node: the metadata on the row is what wrap() sent: provider, model, the token breakdown, step, duration, and nothing of the conversation',
+     evW[0]?.metadata?.provider === 'openai' && evW[0]?.metadata?.model === 'gpt-4o-mini-2024-07-18' && evW[0]?.metadata?.step === 'plan' &&
+     sameW(evW[0]?.metadata?.tokens, { input: 800, cache_read: 200, cache_write: 0, output: 200, reasoning: 0 }) &&
+     Number.isInteger(evW[0]?.metadata?.duration_ms) && !JSON.stringify(evW).includes('"go"'),
+     JSON.stringify(evW[0]?.metadata))
+  const bW = tW.body?.breakdown
+  ok('[wrap] node: GET /tasks breaks the job down by model and by step: 4 calls, $0.00102 at list price',
+     bW?.by_model?.length === 1 && bW.by_model[0].model === 'gpt-4o-mini-2024-07-18' && bW.by_model[0].calls === 4 && bW.list_price_usd_estimate === 0.00102 &&
+     bW?.by_step?.[0]?.step === 'plan' && bW.by_step[0].tokens.output === 800, JSON.stringify(bW && { ...bW, list_price_label: undefined }))
+
+  // A stream: include_usage turned on, the usage chunk hidden, the call recorded.
+  const refS = `wrap-node-stream-${runW}`
+  const streamW = nodeSdk.wrap(fakeOpenAI, { taskRef: refS, agentId: 'node-e2e', taskCeiling: 5_000 })
+  const seenW = []
+  for await (const c of await streamW.chat.completions.create({ model: 'gpt-4o-mini', messages: [], stream: true })) seenW.push(c.choices.length)
+  const tS = await callW('GET', `/tasks/${refS}`)
+  ok('[wrap] node: a streamed call is recorded from its usage chunk, and the caller never saw that chunk',
+     JSON.stringify(seenW) === '[1]' && tS.body?.used_units === 45 && tS.body?.reserved_units === 0, `${JSON.stringify(seenW)} ${JSON.stringify(tS.body && { ...tS.body, breakdown: undefined })}`)
+
+  // No usage: recorded as missing, charged at the reservation, never 0.
+  const refN = `wrap-node-nousage-${runW}`
+  const nou = nodeSdk.wrap(fakeOpenAI, { taskRef: refN, agentId: 'node-e2e', taskCeiling: 5_000, defaultEstimate: 900 })
+  await nou.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'no usage' }] })
+  const tN = await callW('GET', `/tasks/${refN}`)
+  ok('[wrap] node: a response with no usage is charged its 900-token reservation, counted as usage missing, and not priced',
+     tN.body?.used_units === 900 && tN.body?.reserved_units === 0 && tN.body?.usage_missing_calls === 1 &&
+     tN.body?.breakdown?.list_price_usd_estimate === null && /^usage missing/.test(tN.body?.breakdown?.by_model?.[0]?.unpriced_reasons?.[0] ?? ''),
+     JSON.stringify(tN.body))
+
+  // A job opened in units cannot be counted in tokens: the call is not sent.
+  await callW('PUT', `/tasks/wrap-units-${runW}/ceiling`, { ceiling_units: 100 })
+  const sentBefore = sentW
+  let mismatch = null
+  try { await nodeSdk.wrap(fakeOpenAI, { taskRef: `wrap-units-${runW}`, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { mismatch = e }
+  ok('[wrap] node: a job counted in units is a task_unit_mismatch that names both units, and the call is not sent',
+     mismatch instanceof nodeSdk.AgentBillError && /422/.test(mismatch.message) && /task_unit_mismatch/.test(mismatch.message) && /tokens/.test(mismatch.message) && sentW === sentBefore,
+     `${mismatch?.message} sent ${sentW - sentBefore}`)
+
+  // The account's own monthly quota spent. preflight answers it before it
+  // looks at the job, so no ceiling is checked; each wrapped model call is one
+  // preflight, so the free tier's 1,000 are 1,000 model calls. Reproduced
+  // 2026-09-24 before the fix: 10 calls sent, 0 refused, 12,000 used against a
+  // 3,000 ceiling, one warning. On its own account, so the rest keep their quota.
+  const ACCT_Q = '00000000-0000-0000-0000-0000000000be'
+  const KEY_Q = `agb_wrap_quota_${runW}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_Q}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 0, plan = 'free'`
+  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_Q}, ${KEY_Q}, 'harness-wrap-quota')`
+  const refQ = `wrap-quota-${runW}`
+  const openQ = await fetch(`${API}/tasks/${refQ}/ceiling`, { method: 'PUT', headers: { 'Authorization': `Bearer ${KEY_Q}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ceiling_units: 3_000, unit: 'token' }) })
+  await sql`UPDATE accounts SET monthly_calls = 1000, billing_period_start = date_trunc('month', CURRENT_DATE)::date WHERE id = ${ACCT_Q}`
+  const warnedQ = []
+  const onWarnQ = (w) => { if (w.name === 'AgentBillWarning') warnedQ.push(w.message) }
+  process.on('warning', onWarnQ)
+  process.env.AGENTBILL_API_KEY = KEY_Q
+  const taskQ = async () => (await sql`SELECT used_units, reserved_units, ceiling_units FROM task_budgets WHERE account_id = ${ACCT_Q} AND task_ref = ${refQ}`)[0]
+  try {
+    const sentQ0 = sentW
+    let spentQ = null, threwQ = null
+    try { spentQ = await nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { threwQ = e }
+    const tQ = await taskQ()
+    ok('[wrap] node: with the monthly quota spent (1,000 of 1,000 on free) the call comes back as a Refusal (free_tier_exceeded) with the upgrade link, nothing thrown, is not sent, and the job is untouched',
+       openQ.status === 200 && threwQ === null && nodeSdk.isRefusal(spentQ) && spentQ.reason === 'free_tier_exceeded' && /pricing/.test(spentQ.upgradeUrl ?? '') &&
+       spentQ.answer?.plan === 'free' && sentW === sentQ0 && tQ?.usedUnits === 0 && tQ?.reservedUnits === 0,
+       `put ${openQ.status} threw=${threwQ?.name}: ${threwQ?.message} got ${spentQ} sent ${sentW - sentQ0} ${JSON.stringify(tQ)}`)
+    const llmQ = nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e', onQuota: 'send' })
+    for (let i = 0; i < 5; i++) await llmQ.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+    await settle(50)
+    const tQ2 = await taskQ()
+    const quotaWarnings = warnedQ.filter((w) => /quota/.test(w))
+    ok("[wrap] node: onQuota 'send' is the documented carve-out: 5 calls sent unchecked, 6,000 used past the 3,000 ceiling, and one warning that says nothing bounds the job",
+       sentW === sentQ0 + 5 && tQ2?.usedUnits === 6_000 && tQ2?.reservedUnits === 0 && quotaWarnings.length === 1 && /nothing bounds the job/.test(quotaWarnings[0] ?? ''),
+       `sent ${sentW - sentQ0} ${JSON.stringify(tQ2)} warnings ${JSON.stringify(quotaWarnings)}`)
+  } finally {
+    process.env.AGENTBILL_API_KEY = KEYW
+    process.off('warning', onWarnQ)
+  }
+
+  // An OpenAI-compatible server that reuses response ids (Ollama's layer
+  // issues chatcmpl-<0..998>). Keyed by that id, calls 2 and 3 were
+  // duplicate_ignored: 1,200 used of 3,600, 2,400 held until the TTL.
+  let sentC = 0
+  const compatible = {
+    baseURL: 'http://localhost:11434/v1',
+    chat: { completions: { async create() { sentC++; return { id: 'chatcmpl-7', model: 'llama3', choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200 } } } } },
+  }
+  const refC = `wrap-compatible-${runW}`
+  const llmC = nodeSdk.wrap(compatible, { taskRef: refC, agentId: 'node-e2e', taskCeiling: 50_000 })
+  for (let i = 0; i < 3; i++) await llmC.chat.completions.create({ model: 'llama3', messages: [] })
+  const tC = await callW('GET', `/tasks/${refC}`)
+  const keysC = (await sql`SELECT idempotency_key FROM events WHERE task_ref = ${refC}`).map((e) => e.idempotencyKey)
+  ok('[wrap] node: a compatible endpoint that repeats one response id: 3 calls, 3 records under 3 keys, 3,600 used, nothing held',
+     sentC === 3 && tC.body?.used_units === 3_600 && tC.body?.reserved_units === 0 && tC.body?.breakdown?.calls === 3 && new Set(keysC).size === 3,
+     `sent ${sentC} ${JSON.stringify(tC.body && { ...tC.body, breakdown: tC.body.breakdown?.calls })} keys ${keysC.join(' ')}`)
+
+  // The provider's own API reusing an id is not expected, but a duplicate on
+  // a record wrap() made once is a collision whatever the endpoint.
+  const officialDup = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create() { return { id: `chatcmpl-dup-${runW}`, model: 'gpt-4o-mini-2024-07-18', choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200 } } } } },
+  }
+  const refD = `wrap-dup-${runW}`
+  const llmD = nodeSdk.wrap(officialDup, { taskRef: refD, agentId: 'node-e2e', taskCeiling: 50_000 })
+  await llmD.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  await llmD.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const tD = await callW('GET', `/tasks/${refD}`)
+  ok('[wrap] node: a response id the server already has is re-recorded under a random key, so both calls count and nothing is held',
+     tD.body?.used_units === 2_400 && tD.body?.reserved_units === 0 && tD.body?.breakdown?.calls === 2,
+     JSON.stringify(tD.body && { ...tD.body, breakdown: tD.body.breakdown?.calls }))
+
+  // OpenAI cache writes: 40,400 of a 50,000-token gpt-5.6 prompt written to
+  // the cache, priced at the table's cache-write rate ($5/M) and not as input
+  // ($4/M): 1,600 x 4e-6 + 8,000 x 4e-7 + 40,400 x 5e-6 + 400 x 2e-5 = $0.2196.
+  // Read as uncached input it was $0.1792.
+  const cacheWriter = {
+    baseURL: 'https://api.openai.com/v1',
+    chat: { completions: { async create() { return { id: `chatcmpl-cw-${runW}`, model: 'gpt-5.6', service_tier: 'default', choices: [],
+      usage: { prompt_tokens: 50_000, completion_tokens: 400, prompt_tokens_details: { cached_tokens: 8_000, cache_write_tokens: 40_400 } } } } } },
+  }
+  const refP = `wrap-cachewrite-${runW}`
+  await nodeSdk.wrap(cacheWriter, { taskRef: refP, agentId: 'node-e2e', taskCeiling: 500_000 }).chat.completions.create({ model: 'gpt-5.6', messages: [] })
+  const evP = (await sql`SELECT units, list_price_usd::text AS usd, metadata::text AS meta FROM events WHERE task_ref = ${refP}`).map((e) => ({ ...e, metadata: JSON.parse(e.meta) }))
+  ok('[price] gpt-5.6 with cache writes is priced at the cache-write rate: 40,400 cache_write tokens, $0.2196 at list price',
+     evP.length === 1 && evP[0].units === 50_400 && evP[0].usd === '0.219600000000' &&
+     sameW(evP[0].metadata?.tokens, { input: 1_600, cache_read: 8_000, cache_write: 40_400, output: 400, reasoning: 0 }),
+     JSON.stringify(evP.map((e) => [e.units, e.usd, e.metadata?.tokens])))
+
+  // Gemini automatic function calling: one generateContent, three model
+  // requests, only the last response returned. Shaped like @google/genai's
+  // Models (public methods are arrows bound in the constructor, each round is
+  // this.generateContentInternal). Before the fix: 1 preflight, 1 record of
+  // the last round's usage.
+  class GenAIModelsW {
+    constructor(apiClient) {
+      this.apiClient = apiClient
+      this.generateContent = async (params) => {
+        let r
+        for (let i = 0; i < 3; i++) { r = await this.generateContentInternal(params); if (!r.functionCalls) break }
+        return r
+      }
+      this.generateContentStream = async (params) => this.generateContentStreamInternal(params)
+    }
+    async generateContentInternal() {
+      const i = this.apiClient.sent++
+      return { responseId: `gem-afc-${runW}-${i}`, modelVersion: 'gemini-2.5-flash', functionCalls: i < 2 ? [{ name: 'lookup' }] : undefined,
+        usageMetadata: { promptTokenCount: 1000 + 100 * i, candidatesTokenCount: 50 } }
+    }
+    async generateContentStreamInternal() { return (async function* () {})() }
+  }
+  const apiW = { sent: 0 }
+  const refG = `wrap-gemini-afc-${runW}`
+  const gemW = nodeSdk.wrap({ models: new GenAIModelsW(apiW) }, { taskRef: refG, agentId: 'node-e2e', taskCeiling: 50_000, provider: 'gemini' })
+  const lastG = await gemW.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [{ callTool: async () => [] }] } })
+  const tG = await callW('GET', `/tasks/${refG}`)
+  ok('[wrap] node: gemini automatic function calling is measured per round: 3 requests, 3 records, 3,450 used, the caller gets the last response',
+     apiW.sent === 3 && lastG?.responseId === `gem-afc-${runW}-2` && tG.body?.used_units === 3_450 && tG.body?.reserved_units === 0 && tG.body?.breakdown?.calls === 3,
+     `sent ${apiW.sent} ${JSON.stringify(tG.body && { ...tG.body, breakdown: tG.body.breakdown?.calls })}`)
+}
+
+// ---------------------------------------------------------------- [wrap] the Python SDK against this server
+const { spawnSync: spawnW } = await import('node:child_process')
+const PYW = process.env.WRAP_PYTHON
+const sdkPyW = new URL('../../sdk/python', import.meta.url).pathname
+const e2eW = new URL('./wrap_e2e.py', import.meta.url).pathname
+// Scenario C needs an account whose monthly quota is spent, planted here.
+const ACCT_QP = '00000000-0000-0000-0000-0000000000bf'
+const KEY_QP = `agb_wrap_quota_py_${runW}`
+await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_QP}, 'free', 1000, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 1000, plan = 'free', billing_period_start = date_trunc('month', CURRENT_DATE)::date`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_QP}, ${KEY_QP}, 'harness-wrap-quota-py')`
+const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW, AGENTBILL_QUOTA_KEY: KEY_QP } }) : null
+let pyOut = null
+try { pyOut = JSON.parse((pyRun?.stdout ?? '').trim().split('\n').pop()) } catch {}
+ok('[wrap] python: the e2e script ran (run.sh sets WRAP_PYTHON to a venv with requests and httpx)',
+   pyRun?.status === 0 && pyOut !== null, PYW ? `status ${pyRun?.status} ${(pyRun?.stderr ?? '').slice(-400)}` : 'WRAP_PYTHON is not set')
+if (pyOut) {
+  const refP = pyOut.sync?.refused
+  ok('[wrap] python: the 4th Anthropic call comes back as a Refusal (task_ceiling_exceeded, 3,900/4,000, asked 1,300, falsy, no content, nothing raised), and the fake was sent 3',
+     pyOut.sync?.sent === 3 && pyOut.sync?.raised == null && refP?.at_call === 4 && refP?.type === 'Refusal' && refP?.reason === 'task_ceiling_exceeded' &&
+     refP?.used === 3_900 && refP?.ceiling === 4_000 && refP?.remaining === 100 && refP?.asked === 1_300 && refP?.falsy === true && refP?.has_content === false &&
+     refP?.answer_reason === 'task_ceiling_exceeded', JSON.stringify(pyOut.sync))
+  ok('[wrap] python: a streamed call on the same refused job is the Refusal itself, iterates to nothing, and the fake was still sent 3',
+     pyOut.sync?.stream?.type === 'Refusal' && pyOut.sync?.stream?.items === 0 && pyOut.sync?.stream?.sent === 3, JSON.stringify(pyOut.sync?.stream))
+  const tPy = await callW('GET', `/tasks/wrap-py-${runW}`)
+  const evPy = await sql`SELECT idempotency_key, units, list_price_usd::text AS usd FROM events WHERE task_ref = ${`wrap-py-${runW}`} ORDER BY created_at`
+  ok('[wrap] python: 3 records of 1,300 tokens, keyed by the message id, each $0.00738 at list price, nothing left reserved',
+     tPy.body?.unit === 'token' && tPy.body?.used_units === 3_900 && tPy.body?.reserved_units === 0 && evPy.length === 3 &&
+     evPy.every((e, i) => e.idempotencyKey === `msg_e2e_${runW}_${i + 1}` && e.units === 1_300 && e.usd === '0.007380000000'),
+     JSON.stringify({ task: tPy.body && { ...tPy.body, breakdown: undefined }, ev: evPy }))
+  const pre3 = (await sql`SELECT estimated_units FROM preflight_decisions WHERE account_id = ${ACCT} AND task_ref = ${`wrap-py-${runW}`}`)[0]
+  ok('[wrap] python: the refused preflight asked for the running average, 1,300, not a number the developer typed',
+     pre3?.estimatedUnits === 1_300, JSON.stringify(pre3))
+  const tPyS = await callW('GET', `/tasks/wrap-py-stream-${runW}`)
+  ok('[wrap] python: an async stream is recorded from the usage chunk wrap() asked for, and the caller saw only the text chunks',
+     JSON.stringify(pyOut.async_stream?.texts) === '["he","llo"]' && pyOut.async_stream?.include_usage === true && tPyS.body?.used_units === 69 && tPyS.body?.reserved_units === 0,
+     JSON.stringify({ out: pyOut.async_stream, task: tPyS.body && { ...tPyS.body, breakdown: undefined } }))
+  const eventsQP = await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${ACCT_QP}`
+  ok('[wrap] python: with the monthly quota spent, wrap() returns a Refusal (free_tier_exceeded) with the upgrade link, raises nothing, the fake was sent nothing, and nothing was recorded',
+     pyOut.quota?.returned === 'Refusal' && pyOut.quota?.reason === 'free_tier_exceeded' && pyOut.quota?.raised == null &&
+     /pricing/.test(pyOut.quota?.upgrade_url ?? '') && pyOut.quota?.sent === 0 && eventsQP[0]?.n === 0,
+     JSON.stringify({ quota: pyOut.quota, events: eventsQP }))
+  const tPyB = await callW('GET', `/tasks/wrap-py-break-${runW}`)
+  ok('[wrap] python: a for loop that breaks, with no close() and no with-block, is recorded as usage missing and holds nothing',
+     tPyB.body?.used_units === 700 && tPyB.body?.reserved_units === 0 && tPyB.body?.usage_missing_calls === 1,
+     JSON.stringify(tPyB.body && { ...tPyB.body, breakdown: undefined }))
+  const tPyC = await callW('GET', `/tasks/wrap-py-compatible-${runW}`)
+  ok('[wrap] python: a compatible endpoint that repeats one response id: 3 calls, 3 records, 3,600 used, nothing held',
+     pyOut.compatible?.sent === 3 && tPyC.body?.used_units === 3_600 && tPyC.body?.reserved_units === 0 && tPyC.body?.breakdown?.calls === 3,
+     JSON.stringify(tPyC.body && { ...tPyC.body, breakdown: tPyC.body.breakdown?.calls }))
+  const tPyG = await callW('GET', `/tasks/wrap-py-afc-${runW}`)
+  ok('[wrap] python: gemini automatic function calling is measured per round: 3 requests, 3 records, 3,450 used, the caller gets the last response',
+     pyOut.afc?.sent === 3 && pyOut.afc?.last === `gem-py-afc-${runW}-2` && tPyG.body?.used_units === 3_450 && tPyG.body?.reserved_units === 0 && tPyG.body?.breakdown?.calls === 3,
+     JSON.stringify({ out: pyOut.afc, task: tPyG.body && { ...tPyG.body, breakdown: tPyG.body.breakdown?.calls } }))
+}
+} // end [wrap]
+
+// ---------------------------------------------------------------- every answer sent once
+// Found while fixing the replay above, 2026-09-23. replay() returned the
+// Fastify reply, which is a thenable that resolves to undefined once sent, so
+// `if (await replay())` never took the early return: every replayed preflight
+// fell through into the reserve transaction, lost the claim and tried to
+// answer twice more. The claim kept it from reserving; the server logged
+// "Reply was already sent" each time, and nothing read the log. This does,
+// after every section above has run. Last, so it sees all of them.
+await settle(300)
+const { readFileSync: readServerLog } = await import('node:fs')
+const SERVER_LOG_M = process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log'
+let serverLogM = ''
+try { serverLogM = readServerLog(SERVER_LOG_M, 'utf8') } catch {}
+const doubleSendsM = serverLogM.match(/Reply was already sent[^"]*"[^"]*"[^"]*"[^"]*"/g) ?? []
+ok('[meter] the server answered every request once: no "Reply was already sent" anywhere in its log',
+   serverLogM.length > 0 && doubleSendsM.length === 0,
+   `${doubleSendsM.length} in ${SERVER_LOG_M} (${serverLogM.length} bytes) ${doubleSendsM.slice(0, 1).join('')}`)
+
 
 // ---------------------------------------------------------------- integrations: the pages that name what we plug into, 2026-09-23
 // /integrations and its pages, plus every guide under /docs/. No gate read the

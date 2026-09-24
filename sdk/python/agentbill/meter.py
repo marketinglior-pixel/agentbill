@@ -47,9 +47,14 @@ class BudgetExhaustedError(Exception):
             result = await run_agent(customer_id="cust_123", topic="...")
         except BudgetExhaustedError as e:
             print(f"Customer {e.customer_id} is out of budget.")
+
+    A client made with wrap() does not raise it: the measured call returns a
+    Refusal with reason "budget_exhausted" instead (see agentbill.wrap).
     """
-    def __init__(self, customer_id: str, message: str = "") -> None:
+    def __init__(self, customer_id: str, message: str = "", answer: Optional[dict] = None) -> None:
         self.customer_id = customer_id
+        # The preflight answer as the server sent it, when preflight() raised this.
+        self.answer = answer
         super().__init__(message or f"Customer {customer_id!r} has no remaining budget.")
 
 

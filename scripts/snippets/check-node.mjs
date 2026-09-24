@@ -4,7 +4,7 @@
 // here) and, when a block imports nothing but agentbill, that it runs with the
 // SDK's own HTTP client stubbed so nothing can reach the network. Also polices
 // install lines in shell blocks.
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -51,7 +51,7 @@ nodeBlocks.forEach((s, n) => {
   files.push({ s, f, external })
 })
 // Third-party modules the docs mention but the harness does not install.
-writeFileSync(join(WORK, 'stubs.d.ts'), `declare module '@langchain/*';\ndeclare module 'langchain*';\ndeclare module 'openai';\ndeclare module 'anthropic';\ndeclare module '@anthropic-ai/*';\n`)
+writeFileSync(join(WORK, 'stubs.d.ts'), `declare module '@langchain/*';\ndeclare module 'langchain*';\ndeclare module 'openai';\ndeclare module 'anthropic';\ndeclare module '@anthropic-ai/*';\ndeclare module '@google/genai';\n`)
 const tsconfig = {
   compilerOptions: {
     target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler', lib: ['ES2022', 'DOM'],
@@ -101,7 +101,11 @@ const { MockAgent, setGlobalDispatcher } = createRequire(${JSON.stringify(join(W
 const canned = (path) => {
   if (path.startsWith('/preflight')) return { approved: true, reason: null, estimated_units: 1, remaining_units: 999, task_ref: 'job-142', task_ceiling: 500, task_remaining_units: 488 }
   if (path.startsWith('/events')) return { event_id: 'evt_ci', status: 'recorded', customer_created: false, customer_remaining_units: 999, task_used_units: 12, task_remaining_units: 488, task_exceeded: false }
-  if (path.startsWith('/tasks')) return { task_ref: 'job-142', agent_id: 'researcher', ceiling_units: 500, used_units: 12, reserved_units: 0, remaining_units: 488, exceeded: false }
+  if (path.startsWith('/tasks')) return { task_ref: 'job-142', agent_id: 'researcher', ceiling_units: 500, used_units: 12, reserved_units: 0, remaining_units: 488, exceeded: false, unit: 'unit', usage_missing_calls: 0,
+    breakdown: { calls: 1, units: 12, unattributed_units: 0, list_price_usd_estimate: 0.0000036, priced_calls: 1, unpriced_calls: 0, price_versions: ['litellm-ci'],
+      list_price_label: 'An estimate at public list price. List price, your invoice may differ.',
+      by_model: [{ provider: 'openai', model: 'gpt-4o-mini', calls: 1, units: 12, tokens: { input: 8, cache_read: 0, cache_write: 0, cache_write_1h: 0, output: 4, reasoning: 0 }, usage_missing_calls: 0, list_price_usd_estimate: 0.0000036, priced_calls: 1, unpriced_calls: 0, unpriced_reasons: [] }],
+      by_step: [{ step: null, calls: 1, units: 12, tokens: { input: 8, cache_read: 0, cache_write: 0, cache_write_1h: 0, output: 4, reasoning: 0 }, usage_missing_calls: 0, list_price_usd_estimate: 0.0000036, priced_calls: 1, unpriced_calls: 0, unpriced_reasons: [] }] } }
   if (path.startsWith('/budget')) return { customer_id: 'default', limit: 1000, used: 1, remaining: 999, is_blocked: false }
   return { ok: true }
 }
@@ -116,9 +120,67 @@ agent.get(BASE).intercept({ path: /.*/, method: /.*/ })
   .reply(200, (req) => JSON.stringify(canned(req.path)), { headers: { 'content-type': 'application/json' } })
   .persist()
 `)
+// Stand-ins for the model SDKs a sample may import (openai, @anthropic-ai/sdk,
+// @google/genai). The harness installs none of them and must never reach one,
+// so a sample that calls a model gets a client shaped like the real one: the
+// same constructor, the methods wrap() measures, and a response carrying the
+// usage the real API reports. That proves the agentbill half of the sample
+// (wrap()'s options and what it reads off the response), not the provider's.
+// Written after the SDK install, which would prune them, and only where no
+// real package is there.
+const PROVIDER_STUBS = {
+  openai: `
+const usage = { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12, prompt_tokens_details: { cached_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 0 } }
+async function* chunks(body) {
+  yield { id: 'chatcmpl-ci', model: body.model, usage: null, choices: [{ index: 0, delta: { content: 'stub' } }] }
+  if (body.stream_options?.include_usage) yield { id: 'chatcmpl-ci', model: body.model, usage, choices: [] }
+}
+export default class OpenAI {
+  constructor() {
+    this.baseURL = 'https://api.openai.com/v1'
+    this.chat = { completions: { create: async (body) => body.stream ? chunks(body)
+      : { id: 'chatcmpl-ci', model: body.model, usage, choices: [{ index: 0, message: { role: 'assistant', content: 'stub answer' } }] } } }
+    this.responses = { create: async (body) => ({ id: 'resp_ci', model: body.model, output_text: 'stub answer',
+      usage: { input_tokens: 8, output_tokens: 4, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } }) }
+  }
+}
+export { OpenAI }
+`,
+  '@anthropic-ai/sdk': `
+export default class Anthropic {
+  constructor() {
+    this.baseURL = 'https://api.anthropic.com'
+    this.messages = { create: async (body) => ({ id: 'msg_ci', model: body.model, type: 'message', role: 'assistant',
+      content: [{ type: 'text', text: 'stub answer' }], usage: { input_tokens: 8, output_tokens: 4, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }) }
+  }
+}
+export { Anthropic }
+`,
+  '@google/genai': `
+const reply = (model) => ({ responseId: 'gemini-ci', modelVersion: String(model).replace('models/', ''), text: 'stub answer',
+  usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 4, thoughtsTokenCount: 0, totalTokenCount: 12 } })
+export class GoogleGenAI {
+  constructor() {
+    this.models = {
+      generateContent: async (p) => reply(p.model),
+      generateContentStream: async (p) => (async function* () { yield reply(p.model) })(),
+    }
+  }
+}
+`,
+}
+for (const [name, code] of Object.entries(PROVIDER_STUBS)) {
+  const dir = join(WORK, 'node_modules', name)
+  if (existsSync(join(dir, 'package.json'))) continue
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version: '0.0.0-ci-stub', type: 'module', main: 'index.js', exports: './index.js' }))
+  writeFileSync(join(dir, 'index.js'), code)
+}
+const STUBBED = new Set(Object.keys(PROVIDER_STUBS))
+
 files.forEach(({ s, f, external }, n) => {
   if (broken.has(n) || fragments.has(n)) return   // already red, or a fragment: typechecked only
-  const third = external.filter((m) => m !== 'agentbill' && !m.startsWith('node:'))
+  const third = external.filter((m) => m !== 'agentbill' && !m.startsWith('node:') && !STUBBED.has(m))
   if (third.length) { warnings.push(`${where(s)} imports ${third.join(', ')}; typechecked only`); return }
   // .mts: ESM no matter what package.json is nearest (published mode drops a CommonJS one there)
   const runner = f.replace(/\.ts$/, '.run.mts')

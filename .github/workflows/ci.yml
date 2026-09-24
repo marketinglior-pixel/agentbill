@@ -122,6 +122,27 @@ jobs:
         working-directory: sdk/python
         run: python -m pytest tests -q
 
+  node-sdk:
+    # sdk/node had no tests until 2026-09-23, so nothing checked what it
+    # sends: the reservation_id it carries from preflight to record, the
+    # idempotency key it passes through, and that a record asking for nothing
+    # new still sends exactly the payload installed 0.4.x copies send. The
+    # snippets job typechecks the samples against it; this runs it.
+    name: Node SDK builds and its request tests pass
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      - run: npm test
+
   mcp:
     name: MCP server smoke test
     runs-on: ubuntu-latest
@@ -136,6 +157,9 @@ jobs:
         run: python -c "import agentbill_mcp; print('MCP server OK')"
 
   preflight:
+    # Also runs both SDKs' wrap() against the server it starts ([wrap] gates):
+    # run.sh builds sdk/node and makes a throwaway venv with the Python SDK's
+    # two dependencies, so this job needs Python as well as Node.
     name: Preflight gate correctness against a real Postgres
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -145,9 +169,34 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
       - run: npm ci
       - name: Migrate a scratch DB, start the server, assert the gate
         run: ./scripts/preflight/run.sh
+
+  alter-under-load:
+    # The preflight job migrates before its server starts, so no connection
+    # ever holds a statement prepared against the old column types, and it
+    # cannot see what an ALTER ... TYPE does to a pool that is serving. This
+    # applies every migration except 016 (the later ones are additive and the
+    # code needs them), warms a real server, applies 016 under load
+    # inside the DATABASE_PREPARE=false window that 016's header prescribes,
+    # restarts with prepared statements back on, and asserts every answer.
+    # With the window skipped (PLANT_SKIP_WINDOW=1) it is red.
+    name: ALTER ... TYPE rehearsed against a warm server under load
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Migrate to just before 016, serve, apply 016 under load, restart, assert
+        run: ./scripts/preflight/alter-under-load.sh
 
   snippets:
     name: Published code samples run against the SDKs in this repo

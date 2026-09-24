@@ -20,6 +20,7 @@ ADMIN_SECRET="preflight-verify-admin-secret"
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
   [ "$MODE" = "docker" ] && docker rm -f agentbill-preflight-test >/dev/null 2>&1 || true
+  [ -n "${WRAP_VENV:-}" ] && rm -rf "$(dirname "$WRAP_VENV")" || true
 }
 trap cleanup EXIT
 
@@ -41,19 +42,12 @@ else
 fi
 
 # Dependency order matters: the numbered migrations build on the loose ones.
-for f in \
-  "$ROOT/src/db/schema.sql" \
-  "$ROOT/src/db/migrate-multitenancy.sql" \
-  "$ROOT/src/db/migration-reserved-units.sql" \
-  "$ROOT/src/db/migration-step-costs.sql" \
-  "$ROOT/src/db/migration-webhook.sql" \
-  "$ROOT/src/db/polar-migration.sql" \
-  "$ROOT/src/db/migration-register-fields.sql" \
-  "$ROOT"/src/db/migrations/*.sql
-do
+# The list lives in schema-files.sh, shared with alter-under-load.sh.
+SCHEMA_FILES="$("$ROOT/scripts/preflight/schema-files.sh")"
+while IFS= read -r f; do
   psql < "$f" >/dev/null
-done
-echo "schema + migrations applied"
+done <<< "$SCHEMA_FILES"
+echo "schema + migrations applied ($(printf '%s\n' "$SCHEMA_FILES" | wc -l | tr -d ' ') files)"
 
 psql <<SQL >/dev/null
 INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
@@ -66,6 +60,17 @@ SQL
 
 (cd "$ROOT" && npm run build --silent)
 
+# The [wrap] gates run both SDKs' wrap() against this server: the Node SDK as
+# built from sdk/node, and the Python SDK from sdk/python in a throwaway venv
+# with its two dependencies. A gate that needed either and found it missing
+# fails rather than skips, so neither step here is optional.
+[ -d "$ROOT/sdk/node/node_modules" ] || (cd "$ROOT/sdk/node" && npm ci --silent --no-audit --no-fund)
+(cd "$ROOT/sdk/node" && npm run build --silent)
+WRAP_VENV="$(mktemp -d)/venv"
+python3 -m venv "$WRAP_VENV"
+"$WRAP_VENV/bin/pip" install -q --disable-pip-version-check "requests>=2.28" "httpx>=0.27"
+export WRAP_PYTHON="$WRAP_VENV/bin/python"
+
 # APP_SESSION_SECRET so the console login is real in the harness: without it
 # every login answers err=unavailable and the checkout hand-off cannot be tested.
 # RATE_LIMIT_PER_MINUTE: the suite makes ~90 API calls on one key and CI runs it in ~30s,
@@ -75,7 +80,9 @@ SQL
 # path that csp.ts's one-string guarantee does not cover. A synthetic id puts
 # that script under the [pulse] CSP gate; the harness only fetches HTML, so
 # nothing here talks to Meta.
-META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >/tmp/agentbill-verify-server.log 2>&1 &
+# The server's log is read by the last gate in verify.mjs (every answer sent once).
+SERVER_LOG="${SERVER_LOG:-/tmp/agentbill-verify-server.log}"
+META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break
@@ -83,5 +90,5 @@ for _ in $(seq 1 30); do
 done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
-  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" SERVER_LOG="$SERVER_LOG" \
   node "$ROOT/scripts/preflight/verify.mjs"

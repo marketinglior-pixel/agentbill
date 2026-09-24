@@ -15,9 +15,13 @@
  *                                run does not reach the model
  *   before_tool_call   gate      preflight before each tool call; refused =>
  *                                { block: true }
- *   llm_output         observe   record what the model call actually spent
- *   after_tool_call    observe   record the tool call (0 units by default in
- *                                tokens mode)
+ *   llm_output         observe   record what the model call actually spent,
+ *                                settling the reservation the turn's preflight
+ *                                made, with the provider and model OpenClaw
+ *                                names on the event as metadata
+ *   after_tool_call    observe   record the tool call and settle the
+ *                                reservation its preflight made (0 units by
+ *                                default in tokens mode)
  *   session_end        observe   forget the session
  *
  * The ceiling is opened on the first preflight for a task_ref and is then the
@@ -100,10 +104,32 @@ type Logger = { info: (msg: string) => void; warn: (msg: string) => void; error:
  * Everything the hooks share. Kept off the OpenClaw api object so it can be
  * driven by a fake api in tests.
  */
+/** How many preflight reservations the plugin remembers at once. Each entry
+ *  is two short strings; past the cap the oldest is forgotten and its
+ *  reservation settles the 0.1.0 way (FIFO, or the server's TTL). */
+const HELD_CAP = 10_000
+
 export class Ceiling {
   private readonly tasks = new Map<string, TaskState>()
   /** child sessionKey -> the sessionKey whose task_ref it draws from */
   private readonly parentOf = new Map<string, string>()
+  /**
+   * The preflight's idempotency key -> the reservation it made. The hook that
+   * settles a call rebuilds the same key (the run's agent_run, or the tool
+   * call's run and id) and hands the reservation back on its record, so the
+   * record closes THAT reservation whole. Until this existed a tool call in
+   * tokens mode recorded nothing at all, so the reservation its preflight took
+   * was held until the server's sweeper reclaimed it an hour later.
+   */
+  private readonly held = new Map<string, string>()
+  /**
+   * True once any preflight in this process came back with a reservation_id.
+   * A server that returns one also accepts units 0 on a record (migration
+   * 015); one that does not refuses 0 with a 422. So this is what decides
+   * whether a model call with no usage and no reservation of its own can be
+   * recorded as usage_missing at 0, rather than skipped as 0.1.0 did.
+   */
+  private serverSettles = false
   private counter = 0
 
   constructor(
@@ -179,7 +205,17 @@ export class Ceiling {
       return `AgentBill could not be reached (${why}), and this plugin is set to refuse rather than guess. Set failMode to "open" to let calls run while it is down.`
     }
 
-    if (d.approved) return null
+    if (d.approved) {
+      if (d.reservationId) {
+        this.serverSettles = true
+        if (this.held.size >= HELD_CAP) {
+          const oldest = this.held.keys().next().value
+          if (oldest !== undefined) this.held.delete(oldest)
+        }
+        this.held.set(idempotencyKey, d.reservationId)
+      }
+      return null
+    }
 
     // Our own billing refusing is not the operator's ceiling refusing. The SDK
     // rule since 0.4.0 / 0.6.0: never let an AgentBill quota state stop the
@@ -199,26 +235,79 @@ export class Ceiling {
 
   // ---- settlement ----------------------------------------------------------
 
-  async settleModelCall(sessionKey: string, usage: { total?: number; input?: number; output?: number } | undefined, runId: string | undefined, customerId: string | undefined): Promise<void> {
+  /** The reservation the preflight under this key made, once: a second
+   *  settle for the same key (a second llm_output in one run) gets none and
+   *  records the 0.1.0 way, or as usage_missing when it has no usage (see
+   *  recordQuietly). */
+  private takeHeld(key: string): string | undefined {
+    const id = this.held.get(key)
+    if (id !== undefined) this.held.delete(key)
+    return id
+  }
+
+  async settleModelCall(
+    sessionKey: string,
+    usage: { total?: number; input?: number; output?: number } | undefined,
+    runId: string | undefined,
+    customerId: string | undefined,
+    // What the host's llm_output event names the call with. OpenClaw's own
+    // type (PluginHookLlmOutputEvent, 2026.9.4) declares provider and model
+    // as required strings; each is still passed only when it is a non-empty
+    // string, so an event without them adds nothing rather than "undefined".
+    call: { provider?: unknown; model?: unknown } = {},
+  ): Promise<void> {
     const t = this.taskFor(sessionKey)
-    const units = this.cfg.units === 'calls' ? 1 : usageUnits(usage)
-    if (units > 0) {
+    const read = readUsage(usage)
+    const tokens = this.cfg.units === 'tokens'
+    const units = tokens ? read.units : 1
+    if (tokens && units > 0) {
       // Running average feeds the next estimate. Only real samples move it.
       t.avgUnits = t.samples === 0 ? units : (t.avgUnits * t.samples + units) / (t.samples + 1)
       t.samples += 1
     }
-    await this.recordQuietly(t, units, `${runId ?? 'run'}:llm:${++this.counter}`, customerId, { kind: 'model_call' })
+    const metadata: Record<string, unknown> = { kind: 'model_call' }
+    if (typeof call.provider === 'string' && call.provider) metadata.provider = call.provider
+    if (typeof call.model === 'string' && call.model) metadata.model = call.model
+    await this.recordQuietly(t, units, `${runId ?? 'run'}:llm:${++this.counter}`, customerId, metadata, {
+      reservationId: this.takeHeld(`${runId ?? 'run'}:agent_run`),
+      // No usage from the host is not a call that cost 0. The server charges
+      // it at least the reservation it settles (this turn's, or without one
+      // the task_ref's oldest open reservation) and counts it on the job.
+      usageMissing: tokens && read.missing,
+    })
   }
 
   async settleToolCall(sessionKey: string, toolName: string, runId: string | undefined, toolCallId: string | undefined, customerId: string | undefined): Promise<void> {
     const t = this.taskFor(sessionKey)
-    await this.recordQuietly(t, this.cfg.toolCallUnits, `${runId ?? 'run'}:tool:${toolCallId ?? ++this.counter}`, customerId, { kind: 'tool_call', tool: toolName })
+    // The same key before_tool_call consulted with, so the reservation it took
+    // is the one this record closes.
+    const reservationId = this.takeHeld(`${runId ?? 'run'}:tool:${toolCallId ?? toolName}`)
+    await this.recordQuietly(t, this.cfg.toolCallUnits, `${runId ?? 'run'}:tool:${toolCallId ?? ++this.counter}`, customerId, { kind: 'tool_call', tool: toolName }, { reservationId })
   }
 
-  private async recordQuietly(t: TaskState, units: number, key: string, customerId: string | undefined, metadata: Record<string, unknown>): Promise<void> {
-    if (units < 1) return
+  private async recordQuietly(
+    t: TaskState,
+    units: number,
+    key: string,
+    customerId: string | undefined,
+    metadata: Record<string, unknown>,
+    settle: { reservationId?: string; usageMissing?: boolean } = {},
+  ): Promise<void> {
+    // A model call with no usage and no reservation of its own left (a
+    // second llm_output in one run) is still a call that ran, so it is
+    // recorded as usage_missing at 0 and the server charges it at least the
+    // task_ref's oldest open reservation. Only against a server that has
+    // returned a reservation_id, since that is the server that accepts 0.
+    const missingOnly = settle.usageMissing === true && !settle.reservationId && this.serverSettles
+    // Otherwise nothing to spend and nothing named to release: the 0.1.0
+    // behaviour, and the only safe one against a server that refuses units 0.
+    if (units < 1 && !settle.reservationId && !missingOnly) return
     try {
-      await this.client.record({ agentId: this.cfg.agentId, taskRef: t.taskRef, units, idempotencyKey: `${t.taskRef}:${key}`, customerId, metadata })
+      await this.client.record({
+        agentId: this.cfg.agentId, taskRef: t.taskRef, units, idempotencyKey: `${t.taskRef}:${key}`, customerId, metadata,
+        reservationId: settle.reservationId,
+        usageMissing: settle.reservationId || missingOnly ? settle.usageMissing : undefined,
+      })
     } catch (err) {
       // A failed record leaves the reservation open until the server sweeps it.
       // The ceiling still holds; the console is briefly behind.
@@ -227,11 +316,17 @@ export class Ceiling {
   }
 }
 
-function usageUnits(usage: { total?: number; input?: number; output?: number } | undefined): number {
-  if (!usage) return 0
-  if (typeof usage.total === 'number' && usage.total > 0) return Math.round(usage.total)
-  const sum = (usage.input ?? 0) + (usage.output ?? 0)
-  return sum > 0 ? Math.round(sum) : 0
+/**
+ * The token count a host usage object carries, and whether it carried one at
+ * all. A reported 0 is a real 0; no usage object, or one with no number in
+ * it, is "missing" and must not be read as a call that cost nothing.
+ */
+function readUsage(usage: { total?: number; input?: number; output?: number } | undefined): { units: number; missing: boolean } {
+  const n = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  if (!usage || (!n(usage.total) && !n(usage.input) && !n(usage.output))) return { units: 0, missing: true }
+  if (n(usage.total) && usage.total > 0) return { units: Math.round(usage.total), missing: false }
+  const sum = (n(usage.input) ? usage.input : 0) + (n(usage.output) ? usage.output : 0)
+  return { units: sum > 0 ? Math.round(sum) : 0, missing: false }
 }
 
 /** Register the hooks on an OpenClaw plugin api. Exported so a test can drive it with a fake api. */
@@ -302,7 +397,7 @@ export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | '
 
   api.on('llm_output', async (event, ctx) => {
     const key = ctx.sessionKey ?? event.sessionId
-    await c.settleModelCall(key, event.usage, event.runId, customerOf(ctx.senderId, ctx.channelId))
+    await c.settleModelCall(key, event.usage, event.runId ?? ctx.runId, customerOf(ctx.senderId, ctx.channelId), { provider: event.provider, model: event.model })
   })
 
   api.on('after_tool_call', async (event, ctx) => {

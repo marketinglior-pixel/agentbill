@@ -6,8 +6,11 @@ import { inlineScript } from '../lib/csp.js'
 // run times their own cost per call is what one unattended job could cost; a
 // ceiling in units, at one unit per call, is where preflight would start
 // answering approved: false. Every dollar on this card is the visitor's number
-// multiplied by the visitor's number. AgentBill measures no dollars anywhere,
-// and the card says so inside its own frame, so a screenshot carries it.
+// multiplied by the visitor's number. AgentBill counts units, not dollars,
+// and the card says so inside its own frame, so a screenshot carries it. The
+// one dollar figure the API serves, list_price_usd_estimate on a job read, is
+// an estimate at public list price on calls wrap() measured (src/lib/prices.ts),
+// never a measurement and never a conversion of units you define.
 //
 // Why "1 unit = 1 call": it is the product's own default, not a mapping this
 // card invents. preflight reserves `estimated_units ?? 1` (src/routes/preflight.ts)

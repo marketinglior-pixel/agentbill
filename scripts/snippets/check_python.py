@@ -144,7 +144,18 @@ CANNED = {
                 "customer_remaining_units": 999, "task_used_units": 12, "task_remaining_units": 488, "task_exceeded": False},
     '/budget': {"customer_id": "default", "limit": 1000, "used": 1, "remaining": 999, "is_blocked": False},
     '/tasks': {"task_ref": "job-142", "agent_id": "researcher", "ceiling_units": 500, "used_units": 12,
-               "reserved_units": 0, "remaining_units": 488, "exceeded": False},
+               "reserved_units": 0, "remaining_units": 488, "exceeded": False, "unit": "unit", "usage_missing_calls": 0,
+               "breakdown": {"calls": 1, "units": 12, "unattributed_units": 0, "list_price_usd_estimate": 0.0000036,
+                             "priced_calls": 1, "unpriced_calls": 0, "price_versions": ["litellm-ci"],
+                             "list_price_label": "An estimate at public list price. List price, your invoice may differ.",
+                             "by_model": [{"provider": "openai", "model": "gpt-4o-mini", "calls": 1, "units": 12,
+                                           "tokens": {"input": 8, "cache_read": 0, "cache_write": 0, "cache_write_1h": 0, "output": 4, "reasoning": 0},
+                                           "usage_missing_calls": 0, "list_price_usd_estimate": 0.0000036,
+                                           "priced_calls": 1, "unpriced_calls": 0, "unpriced_reasons": []}],
+                             "by_step": [{"step": None, "calls": 1, "units": 12,
+                                          "tokens": {"input": 8, "cache_read": 0, "cache_write": 0, "cache_write_1h": 0, "output": 4, "reasoning": 0},
+                                          "usage_missing_calls": 0, "list_price_usd_estimate": 0.0000036,
+                                          "priced_calls": 1, "unpriced_calls": 0, "unpriced_reasons": []}]}},
     '/step': {"recorded": True, "anomaly": False, "baseline_units": None, "deviation_pct": None},
     '/checkpoint': {"approved": True, "reason": None, "units_so_far": 1, "remaining_units": 999},
 }
@@ -181,6 +192,127 @@ def stub_network():
     socket.socket.connect = no_socket
     socket.socket.connect_ex = no_socket
     socket.create_connection = no_socket
+
+def install_provider_stubs():
+    """Stand-ins for the model SDKs a sample may import: openai, anthropic and
+    google-genai. The harness installs none of them and must never reach one,
+    so a sample that calls a model gets a client shaped like the real one (the
+    same constructor, the methods wrap() measures, and a response carrying the
+    usage the real API reports), and runs. That proves the agentbill half of
+    the sample: wrap()'s signature and what it reads off the response. The
+    provider half is not under test here. Installed only where the real
+    package is absent, which is every run of this harness."""
+    from types import SimpleNamespace as NS
+
+    def usage_chat():
+        return NS(prompt_tokens=8, completion_tokens=4, total_tokens=12,
+                  prompt_tokens_details=NS(cached_tokens=0), completion_tokens_details=NS(reasoning_tokens=0))
+
+    def chat_reply(kw):
+        return NS(id="chatcmpl-ci", model=kw.get("model"), service_tier="default", usage=usage_chat(),
+                  choices=[NS(index=0, message=NS(role="assistant", content="stub answer"))])
+
+    def chat_chunks(kw):
+        yield NS(id="chatcmpl-ci", model=kw.get("model"), usage=None, choices=[NS(index=0, delta=NS(content="stub"))])
+        if (kw.get("stream_options") or {}).get("include_usage"):
+            yield NS(id="chatcmpl-ci", model=kw.get("model"), usage=usage_chat(), choices=[])
+
+    def responses_reply(kw):
+        return NS(id="resp_ci", model=kw.get("model"), output_text="stub answer",
+                  usage=NS(input_tokens=8, output_tokens=4, input_tokens_details=NS(cached_tokens=0),
+                           output_tokens_details=NS(reasoning_tokens=0)))
+
+    try:
+        import openai  # noqa: F401
+    except ImportError:
+        m = types.ModuleType("openai")
+
+        class OpenAI:
+            def __init__(self, *a, **k):
+                self.base_url = "https://api.openai.com/v1/"
+                self.chat = NS(completions=NS(create=lambda **kw: chat_chunks(kw) if kw.get("stream") else chat_reply(kw)))
+                self.responses = NS(create=lambda **kw: responses_reply(kw))
+
+        class AsyncOpenAI:
+            def __init__(self, *a, **k):
+                self.base_url = "https://api.openai.com/v1/"
+
+                async def create(**kw):
+                    if kw.get("stream"):
+                        async def gen():
+                            for c in chat_chunks(kw):
+                                yield c
+                        return gen()
+                    return chat_reply(kw)
+                self.chat = NS(completions=NS(create=create))
+
+        for c in (OpenAI, AsyncOpenAI):
+            c.__module__ = "openai"
+        m.OpenAI, m.AsyncOpenAI = OpenAI, AsyncOpenAI
+        sys.modules["openai"] = m
+
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        m = types.ModuleType("anthropic")
+
+        def message(kw):
+            return NS(id="msg_ci", model=kw.get("model"), type="message", role="assistant",
+                      content=[NS(type="text", text="stub answer")],
+                      usage=NS(input_tokens=8, output_tokens=4, cache_read_input_tokens=0, cache_creation_input_tokens=0))
+
+        class Anthropic:
+            def __init__(self, *a, **k):
+                self.base_url = "https://api.anthropic.com"
+                self.messages = NS(create=lambda **kw: message(kw))
+
+        class AsyncAnthropic:
+            def __init__(self, *a, **k):
+                self.base_url = "https://api.anthropic.com"
+
+                async def create(**kw):
+                    return message(kw)
+                self.messages = NS(create=create)
+
+        for c in (Anthropic, AsyncAnthropic):
+            c.__module__ = "anthropic"
+        m.Anthropic, m.AsyncAnthropic = Anthropic, AsyncAnthropic
+        sys.modules["anthropic"] = m
+
+    try:
+        from google import genai  # noqa: F401
+    except ImportError:
+        google = sys.modules.get("google") or types.ModuleType("google")
+        google.__path__ = getattr(google, "__path__", [])
+        g = types.ModuleType("google.genai")
+
+        def gen_reply(model):
+            return NS(response_id="gemini-ci", model_version=str(model).replace("models/", ""), text="stub answer",
+                      usage_metadata=NS(prompt_token_count=8, candidates_token_count=4, thoughts_token_count=0,
+                                        total_token_count=12))
+
+        class _Models:
+            def generate_content(self, *, model, contents, config=None):
+                return gen_reply(model)
+
+            def generate_content_stream(self, *, model, contents, config=None):
+                yield gen_reply(model)
+
+        class _AsyncModels:
+            async def generate_content(self, *, model, contents, config=None):
+                return gen_reply(model)
+
+        class Client:
+            def __init__(self, *a, **k):
+                self.models = _Models()
+                self.aio = NS(models=_AsyncModels())
+
+        for c in (_Models, _AsyncModels, Client):
+            c.__module__ = "google.genai"
+        g.Client = Client
+        google.genai = g
+        sys.modules["google"] = google
+        sys.modules["google.genai"] = g
 
 def free_names(tree):
     """Names loaded but never bound in the block (a fragment of a larger page)."""
@@ -234,6 +366,7 @@ def execute(s, tree):
 # reaches a socket: the network is stubbed on the next line.
 os.environ.setdefault("AGENTBILL_API_KEY", "agb_ci_not_a_real_key")
 stub_network()
+install_provider_stubs()
 for s in inventory:
     if s['kind'] != 'python':
         continue

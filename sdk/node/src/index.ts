@@ -23,8 +23,13 @@ const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://agentbill.dev'
 // Public exceptions
 // ---------------------------------------------------------------------------
 
+/** That customer's balance is spent. Thrown by preflight() and meter(). A
+ *  client made with wrap() returns a Refusal with reason 'budget_exhausted'
+ *  instead. */
 export class BudgetExhaustedError extends Error {
   readonly customerId: string
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(customerId: string, message?: string) {
     super(message ?? `Customer '${customerId}' has no remaining budget.`)
     this.name = 'BudgetExhaustedError'
@@ -39,10 +44,14 @@ export class AgentBillError extends Error {
   }
 }
 
-/** This single call asked for more than its own per-request ceiling. */
+/** This single call asked for more than its own per-request ceiling. Thrown
+ *  by preflight(); a client made with wrap() returns a Refusal with reason
+ *  'ceiling_exceeded' instead. */
 export class CeilingExceededError extends Error {
   readonly estimatedUnits?: number
   readonly ceiling?: number
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(estimatedUnits?: number, ceiling?: number, message?: string) {
     super(message ?? `Refused (ceiling_exceeded): estimated ${estimatedUnits} units exceeds the per-request ceiling of ${ceiling}.`)
     this.name = 'CeilingExceededError'
@@ -52,12 +61,16 @@ export class CeilingExceededError extends Error {
 }
 
 /** The cross-call ceiling for this task is spent: preflight refused this call before it ran.
- *  Nothing of yours was stopped; your code decides what the job does next. */
+ *  Nothing of yours was stopped; your code decides what the job does next.
+ *  Thrown by preflight(). A client made with wrap() does not throw it: the
+ *  measured call returns a Refusal with reason 'task_ceiling_exceeded'. */
 export class TaskCeilingExceededError extends Error {
   readonly taskRef: string
   readonly taskCeiling?: number
   readonly taskUsedUnits?: number
   readonly taskRemainingUnits?: number
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number) {
     super(
       `Refused (task_ceiling_exceeded): task '${taskRef}' is at ${taskUsedUnits}/${taskCeiling} units and ` +
@@ -68,6 +81,36 @@ export class TaskCeilingExceededError extends Error {
     this.taskCeiling = taskCeiling
     this.taskUsedUnits = taskUsedUnits
     this.taskRemainingUnits = taskRemainingUnits
+  }
+}
+
+/**
+ * AgentBill's own free tier is spent. preflight() never throws this: it returns
+ * `approved: false, reason: 'free_tier_exceeded'` with `upgradeUrl`, so our
+ * billing state cannot crash your agent. A client made with wrap() does not
+ * throw it either: the measured call returns a Refusal with that reason and
+ * upgradeUrl, and is not sent (onQuota: 'refuse', the default), because once
+ * the quota is spent no ceiling can be checked. wrap(client, { onQuota:
+ * 'send' }) sends the call unchecked instead. Kept for code that imports it.
+ */
+export class FreeTierExceededError extends Error {
+  readonly upgradeUrl?: string
+  constructor(upgradeUrl?: string, message?: string) {
+    super(message ?? 'Free tier limit reached. Upgrade to continue.')
+    this.name = 'FreeTierExceededError'
+    this.upgradeUrl = upgradeUrl
+  }
+}
+
+/** A paid plan's monthly quota is spent. preflight() returns it (approved:
+ *  false, upgradeUrl), and a wrap() client returns a Refusal, as for
+ *  FreeTierExceededError. Kept for code that imports it. */
+export class PlanLimitExceededError extends Error {
+  readonly upgradeUrl?: string
+  constructor(upgradeUrl?: string, message?: string) {
+    super(message ?? 'Monthly plan quota reached. Upgrade to continue.')
+    this.name = 'PlanLimitExceededError'
+    this.upgradeUrl = upgradeUrl
   }
 }
 
@@ -139,8 +182,12 @@ function resolveCustomerId<TArgs extends Record<string, unknown>>(
 function resolveUnits<TResult>(units: UnitsResolver<TResult>, result: TResult): number {
   if (typeof units === 'function') {
     const resolved = units(result)
-    if (!Number.isInteger(resolved) || resolved < 1) {
-      throw new AgentBillError(`units function must return a positive integer, got ${resolved}`)
+    // 0 is allowed and means "record nothing" (meter skips it below), which is
+    // what the outcome-based example in meter's own doc comment does. Until
+    // 0.5.0 this threw on 0, so that example crashed the call it wrapped; the
+    // Python SDK has always accepted 0.
+    if (!Number.isInteger(resolved) || resolved < 0) {
+      throw new AgentBillError(`units function must return a non-negative integer, got ${resolved}`)
     }
     return resolved
   }
@@ -232,6 +279,12 @@ export interface PreflightOptions {
    * Same key, same decision, one reservation.
    */
   idempotencyKey?: string
+  /**
+   * What the job's numbers count: 'unit' (yours, the default) or 'token'.
+   * Needs taskRef. Read when this call opens the job and checked on a job
+   * that exists: a different unit is a 422, thrown as AgentBillError.
+   */
+  unit?: 'unit' | 'token'
 }
 
 export interface PreflightResult {
@@ -247,6 +300,41 @@ export interface PreflightResult {
    * stop being held. ISO 8601, absent when nothing was reserved.
    */
   reservationExpiresAt?: string
+  /**
+   * The handle of the reservation this preflight made. Pass it to record()
+   * as reservationId (or call result.record(), which does) and the record
+   * settles THIS reservation whole: units is what was spent, and the unused
+   * rest is released at once instead of being held until it expires. Absent
+   * when nothing was reserved, or against a server that predates it.
+   */
+  reservationId?: string
+}
+
+/** What result.record() takes: the call's own facts. The agent, customer,
+ *  task and reservation come from the preflight that made the result. */
+export interface SettleOptions {
+  /** What the call actually used. 0 is allowed. Default: 1 */
+  units?: number
+  /** false releases the reservation without billing. */
+  success?: boolean
+  idempotencyKey?: string
+  metadata?: Record<string, unknown>
+  /** The provider reported no usage. Charged at least this preflight's
+   *  reservation, never read as 0. */
+  usageMissing?: boolean
+}
+
+/** What preflight() returns: the result, plus record() bound to this call. */
+export interface Preflight extends PreflightResult {
+  /**
+   * Record what this call used against this preflight's own reservation.
+   * Not an enumerable property: JSON.stringify, spread and deep equality see
+   * the same data they always did.
+   */
+  record(options?: SettleOptions): Promise<Record<string, unknown>>
+  /** The preflight answer as the server sent it. Not enumerable, for the
+   *  same reason as record. wrap() reads it to build a Refusal. */
+  readonly answer: Record<string, unknown>
 }
 
 /**
@@ -259,7 +347,7 @@ export interface PreflightResult {
  * refused it (`free_tier_exceeded`, `plan_limit_exceeded`), because our quota
  * must never crash your agent.
  */
-export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
+export async function preflight(options: PreflightOptions): Promise<Preflight> {
   const body: Record<string, unknown> = { agent_id: options.agentId }
   if (options.customerId) body.customer_id = options.customerId
   if (options.estimatedUnits != null) body.estimated_units = options.estimatedUnits
@@ -267,6 +355,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (options.taskRef) body.task_ref = options.taskRef
   if (options.taskCeiling != null) body.task_ceiling = options.taskCeiling
   if (options.idempotencyKey) body.idempotency_key = options.idempotencyKey
+  if (options.unit) body.unit = options.unit
 
   const res = await apiFetch('/preflight', { method: 'POST', body: JSON.stringify(body) })
   const data = await res.json() as Record<string, any>
@@ -280,23 +369,31 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     throw new AgentBillError(String(data.message ?? 'preflight_in_progress, retry in a moment'))
   }
   if (!res.ok) {
-    throw new AgentBillError(`AgentBill /preflight returned ${res.status}`)
+    // The server's own sentence when it sent one: a 422 task_unit_mismatch
+    // says which unit the job is counted in and what to send instead.
+    const why = typeof data?.message === 'string' ? `: ${data.error ?? ''} ${data.message}`.replace(/: +/, ': ') : ''
+    throw new AgentBillError(`AgentBill /preflight returned ${res.status}${why}`)
   }
 
   if (!data.approved) {
+    // Each thrown error carries the answer as the server sent it (.answer),
+    // which is how wrap() turns the same refusal into a returned Refusal.
+    let refused: TaskCeilingExceededError | BudgetExhaustedError | CeilingExceededError | null = null
     if (data.reason === 'task_ceiling_exceeded') {
-      throw new TaskCeilingExceededError(
+      refused = new TaskCeilingExceededError(
         data.task_ref ?? options.taskRef ?? '',
         data.task_ceiling,
         data.task_used_units,
         data.task_remaining_units
       )
+    } else if (data.reason === 'budget_exhausted') {
+      refused = new BudgetExhaustedError(options.customerId ?? 'default')
+    } else if (data.reason === 'ceiling_exceeded') {
+      refused = new CeilingExceededError(data.estimated_units, options.ceiling)
     }
-    if (data.reason === 'budget_exhausted') {
-      throw new BudgetExhaustedError(options.customerId ?? 'default')
-    }
-    if (data.reason === 'ceiling_exceeded') {
-      throw new CeilingExceededError(data.estimated_units, options.ceiling)
+    if (refused) {
+      refused.answer = data
+      throw refused
     }
     // free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw.
     //
@@ -310,7 +407,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     // degrade, alert, or send a human to upgrade, and keep running.
   }
 
-  return {
+  const result: PreflightResult = {
     approved: Boolean(data.approved),
     reason: data.reason ?? null,
     estimatedUnits: data.estimated_units ?? null,
@@ -319,30 +416,64 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     taskRemainingUnits: data.task_remaining_units,
     upgradeUrl: data.upgrade_url,
     reservationExpiresAt: data.reservation_expires_at,
+    reservationId: data.reservation_id,
   }
+  Object.defineProperty(result, 'record', {
+    enumerable: false,
+    value: (settle: SettleOptions = {}) => record({
+      ...settle,
+      agentId: options.agentId,
+      customerId: options.customerId,
+      taskRef: options.taskRef,
+      reservationId: result.reservationId,
+    }),
+  })
+  Object.defineProperty(result, 'answer', { enumerable: false, value: data })
+  return result as Preflight
 }
 
 export interface RecordOptions {
   agentId: string
+  /** What the call used. 0 is allowed: a call that cost nothing records 0. Default: 1 */
   units?: number
   customerId?: string
   /** false releases the preflight reservation without billing. */
   success?: boolean
   taskRef?: string
   metadata?: Record<string, unknown>
+  /**
+   * Same key, one event: a retried record is ignored as a duplicate. When
+   * absent a fresh random key is sent, which is what every earlier version did.
+   */
+  idempotencyKey?: string
+  /**
+   * PreflightResult.reservationId. Settles that reservation whole; without it
+   * the record closes the oldest reservations of this customer and taskRef by
+   * `units` only, as before.
+   */
+  reservationId?: string
+  /**
+   * The provider reported no usage for this call. Not read as 0: the server
+   * charges at least the reservation the record settles (the one
+   * reservationId names or, without it, the oldest open one of this customer
+   * and taskRef; with none open, units as sent) and counts the call on the job.
+   */
+  usageMissing?: boolean
 }
 
-/** Record what actually happened. Idempotency key is generated per call. */
+/** Record what actually happened. */
 export async function record(options: RecordOptions): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {
     customer_id: options.customerId ?? 'default',
     event_type: options.agentId,
     units: options.units ?? 1,
     success: options.success ?? true,
-    idempotency_key: `${options.agentId}_${randomHex()}`,
+    idempotency_key: options.idempotencyKey ?? `${options.agentId}_${randomHex()}`,
   }
   if (options.taskRef) body.task_ref = options.taskRef
   if (options.metadata) body.metadata = options.metadata
+  if (options.reservationId) body.reservation_id = options.reservationId
+  if (options.usageMissing) body.usage_missing = true
 
   const res = await apiFetch('/events', { method: 'POST', body: JSON.stringify(body) })
   if (!res.ok) {
@@ -360,6 +491,16 @@ export interface TaskStatus {
   reservedUnits: number
   remainingUnits: number
   exceeded: boolean
+  /** What the numbers count: 'unit' (yours) or 'token'. getTask always sets it. */
+  unit?: 'unit' | 'token'
+  /** Calls recorded with usageMissing, charged at least the reservation they
+   *  settled (units as sent when none was open). getTask always sets it. */
+  usageMissingCalls?: number
+  /** The job's recorded calls by model and by step, with tokens and an
+   *  estimate at public list price (list price, your invoice may differ), as
+   *  GET /tasks/:task_ref returns it, snake_case keys included. Absent from a
+   *  server that predates it. */
+  breakdown?: Record<string, unknown>
 }
 
 /** Live burn-down of one job's budget. */
@@ -377,6 +518,9 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
     reservedUnits: data.reserved_units,
     remainingUnits: data.remaining_units,
     exceeded: Boolean(data.exceeded),
+    unit: data.unit === 'token' ? 'token' : 'unit',
+    usageMissingCalls: typeof data.usage_missing_calls === 'number' ? data.usage_missing_calls : 0,
+    ...(data.breakdown && typeof data.breakdown === 'object' ? { breakdown: data.breakdown } : {}),
   }
 }
 
@@ -447,3 +591,10 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
     return result
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public: wrap(), automatic metering for a model client. See ./wrap.ts.
+// ---------------------------------------------------------------------------
+
+export { wrap, DEFAULT_ESTIMATE, Refusal, isRefusal } from './wrap.js'
+export type { WrapOptions, WrapProvider, Wrapped, Metered, RefusalReason } from './wrap.js'

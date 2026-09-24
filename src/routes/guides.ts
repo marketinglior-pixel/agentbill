@@ -194,7 +194,13 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   refused it</b> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
   <span class="inline">upgrade_url</span> set. Our billing running out must never crash your agent,
-  so those two come back as a value you can act on rather than an exception you did not plan for.</p>
+  so those two come back as a value you can act on rather than an exception you did not plan for.
+  A client made with <a href="/docs#wrap">wrap()</a> raises for no refusal at all: every one, the
+  quota included, is returned as a typed <span class="inline">Refusal</span> (Python
+  <span class="inline">isinstance(reply, Refusal)</span>, Node
+  <span class="inline">isRefusal(reply)</span>), because once the quota is spent no ceiling can be
+  checked, and <span class="inline">on_quota="send"</span> sends the call unchecked instead.
+  <span class="inline">preflight()</span> on the plain client is unchanged.</p>
 
   <h2>Getting back to the three-step screen</h2>
   <p>The link to it disappears from the console once the account has had a refusal, because it is a
@@ -223,11 +229,13 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   instrument is invisible to it. Consulted <i>before</i> each call runs.</p>
 
   <h2>What a unit is</h2>
-  <p>A unit is an integer you define. AgentBill counts units; it never converts them to money.
-  The common convention is <b>1 unit = 1 cent</b>, so a $5 ceiling for the job is
+  <p>A unit is an integer you define. AgentBill counts units; it never converts the ones you
+  define into money. The common convention is <b>1 unit = 1 cent</b>, so a $5 ceiling for the job is
   <span class="inline">task_ceiling=500</span> and a call you expect to cost 12 cents is
   <span class="inline">estimated_units=12</span>. Tokens, requests or tool calls work just as well,
-  as long as every call under the same task uses the same unit.</p>
+  as long as every call under the same task uses the same unit. For model calls,
+  <a href="/docs#wrap">wrap()</a> records the tokens your provider reported for you, in a job
+  counted in tokens.</p>
 
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>

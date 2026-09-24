@@ -1,10 +1,38 @@
 import functools
+import weakref
 import requests
 from .meter import BudgetExhaustedError, AgentBillError, AuthenticationError, _raise_if_unauthorized
 from dataclasses import dataclass
 from typing import Optional
 
 BASE_URL = "https://agentbill.dev"
+
+# What result.record() needs from the preflight that made a PreflightResult:
+# the client and the agent, customer and task it was made with. Kept here,
+# keyed by id(result), and NOT on the result. On the instance it lived in
+# __dict__, so the client and its api_key travelled with the result:
+# pickle.dumps(result) carried the key (multiprocessing return values,
+# pickle-based caches), copy.deepcopy kept it, and json.dumps(vars(result)),
+# a common way to log a result, raised on the client object. The entry is
+# removed when the result is garbage collected, so an id is never reused while
+# its entry is still here. A copy or an unpickled result has no entry: record
+# on it with client.record(..., reservation_id=result.reservation_id).
+_BINDINGS: dict = {}
+
+
+def _bind(result: "PreflightResult", call: tuple) -> None:
+    key = id(result)
+    _BINDINGS[key] = call
+    weakref.finalize(result, _BINDINGS.pop, key, None)
+
+
+def _answer_of(result: "PreflightResult") -> Optional[dict]:
+    """The preflight answer as the server sent it, for a result preflight()
+    returned in this process; None for a copy. Kept in the same table as the
+    call, and for the same reason: not on the result. wrap() reads it to build
+    a Refusal that carries the raw answer."""
+    bound = _BINDINGS.get(id(result))
+    return bound[4] if bound is not None and len(bound) > 4 else None
 
 @dataclass
 class PreflightResult:
@@ -18,6 +46,49 @@ class PreflightResult:
     # Settle before this or the sweeper reclaims the reservation and the units
     # stop being held. ISO 8601, or None when nothing was reserved.
     reservation_expires_at: Optional[str] = None
+    # The handle of the reservation this preflight made. Hand it back to
+    # record() (result.record(...) does it for you) and the record settles
+    # THIS reservation whole: the actual moves the job's used units and the
+    # unused rest is released at once, instead of being held until the
+    # reservation expires. None when nothing was reserved, or when the server
+    # predates reservation_id; record() then settles the way it always has.
+    reservation_id: Optional[str] = None
+
+    def record(
+        self,
+        units: int = 1,
+        success: bool = True,
+        idempotency_key: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        usage_missing: bool = False,
+    ) -> dict:
+        """Record what this call actually used, against this preflight's own reservation.
+
+        Carries the agent_id, customer_id, task_ref and reservation_id this
+        preflight was made with, so the record settles exactly the reservation
+        it opened: `units` is what the job spent, and whatever the reservation
+        held beyond that is released now. See AgentBillClient.record for the
+        other arguments.
+        """
+        bound = _BINDINGS.get(id(self))
+        if bound is None:
+            raise AgentBillError(
+                "This PreflightResult was not returned by AgentBillClient.preflight() in this process "
+                "(a copy or an unpickled result carries no client), so it has no call to record "
+                "against. Use client.record(..., reservation_id=result.reservation_id)."
+            )
+        client, agent_id, customer_id, task_ref = bound[:4]
+        return client.record(
+            agent_id,
+            units=units,
+            customer_id=customer_id,
+            success=success,
+            task_ref=task_ref,
+            idempotency_key=idempotency_key,
+            reservation_id=self.reservation_id,
+            metadata=metadata,
+            usage_missing=usage_missing,
+        )
 
 
 @dataclass
@@ -29,6 +100,15 @@ class TaskStatus:
     reserved_units: int
     remaining_units: int
     exceeded: bool
+    # What the numbers count: "unit" (yours) or "token". Fixed when the job opens.
+    unit: str = "unit"
+    # Calls recorded with usage_missing=True, charged at least the reservation
+    # they settled (at the units sent when none was open).
+    usage_missing_calls: int = 0
+    # The job's recorded calls by model and by step, with tokens and an
+    # estimate at public list price (list price, your invoice may differ), as
+    # GET /tasks/<task_ref> returns it. None from a server that predates it.
+    breakdown: Optional[dict] = None
 
 @dataclass
 class StepResult:
@@ -45,7 +125,13 @@ class CheckpointResult:
     remaining_units: Optional[int]
 
 class CeilingExceededError(Exception):
-    pass
+    """This one call's estimate exceeds the per-call ceiling set on the client.
+    Raised by preflight(). A client made with wrap() returns it as a Refusal
+    with reason "ceiling_exceeded" instead."""
+    def __init__(self, message: str = "", answer: Optional[dict] = None):
+        # The preflight answer as the server sent it, when preflight() raised this.
+        self.answer = answer
+        super().__init__(message)
 
 
 class PreflightInProgressError(Exception):
@@ -62,29 +148,32 @@ class PreflightInProgressError(Exception):
         )
 
 class FreeTierExceededError(Exception):
-    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
-    and `except` clauses do not break on upgrade.
+    """Not raised by preflight() as of 0.6.0, which returns
+    `approved=False, reason="free_tier_exceeded"` with `.upgrade_url` set:
+    check `result.approved` there. Running out of AgentBill's free tier is our
+    billing state, not your spend rule, and preflight() must not be able to
+    crash your agent over it.
 
-    Running out of AgentBill's free tier is our billing state, not your spend
-    rule, and it must not be able to crash your agent. preflight() now returns
-    `approved=False, reason="free_tier_exceeded"` with `.upgrade_url` set.
-    Check `result.approved` instead of catching this.
+    A client made with wrap() does not raise it either: a measured call returns
+    a Refusal with reason "free_tier_exceeded" and upgrade_url, and the model
+    call is not sent (on_quota="refuse", the default), because once the quota
+    is spent no ceiling can be checked. wrap(..., on_quota="send") sends the
+    call unchecked instead.
     """
-    def __init__(self, upgrade_url: Optional[str] = None):
+    def __init__(self, upgrade_url: Optional[str] = None, message: Optional[str] = None):
         self.upgrade_url = upgrade_url
-        super().__init__("Free tier limit reached. Upgrade to continue.")
+        super().__init__(message or "Free tier limit reached. Upgrade to continue.")
 
 class PlanLimitExceededError(Exception):
-    """No longer raised by preflight() as of 0.6.0. Kept so existing imports
-    and `except` clauses do not break on upgrade. See FreeTierExceededError.
-
-    preflight() now returns `approved=False, reason="plan_limit_exceeded"`
-    with `.upgrade_url` set.
+    """Not raised by preflight() as of 0.6.0, which returns
+    `approved=False, reason="plan_limit_exceeded"` with `.upgrade_url` set.
+    A client made with wrap() returns a Refusal, as for FreeTierExceededError.
     """
-    def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None):
+    def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None,
+                 message: Optional[str] = None):
         self.plan = plan
         self.upgrade_url = upgrade_url
-        super().__init__(f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
+        super().__init__(message or f"Monthly quota for plan '{plan}' reached. Upgrade to continue.")
 
 class TaskCeilingExceededError(Exception):
     """The cross-call ceiling for this task is spent: preflight refused this
@@ -98,13 +187,19 @@ class TaskCeilingExceededError(Exception):
             log.info(f"task {e.task_ref} hit its ceiling "
                      f"({e.task_used_units}/{e.task_ceiling})")
             return partial_result
+
+    A client made with wrap() does not raise it: the measured call returns a
+    Refusal with reason "task_ceiling_exceeded" instead (see agentbill.wrap).
     """
     def __init__(self, task_ref: str, task_ceiling: Optional[int],
-                 task_used_units: Optional[int], task_remaining_units: Optional[int]):
+                 task_used_units: Optional[int], task_remaining_units: Optional[int],
+                 answer: Optional[dict] = None):
         self.task_ref = task_ref
         self.task_ceiling = task_ceiling
         self.task_used_units = task_used_units
         self.task_remaining_units = task_remaining_units
+        # The preflight answer as the server sent it, when preflight() raised this.
+        self.answer = answer
         super().__init__(
             f"Refused (task_ceiling_exceeded): task {task_ref!r} is at "
             f"{task_used_units}/{task_ceiling} units and {task_remaining_units} remaining "
@@ -157,6 +252,7 @@ class AgentBillClient:
         task_ref: Optional[str] = None,
         task_ceiling: Optional[int] = None,
         idempotency_key: Optional[str] = None,
+        unit: Optional[str] = None,
     ) -> PreflightResult:
         """Check every budget BEFORE the call runs.
 
@@ -171,6 +267,14 @@ class AgentBillClient:
         reserves a second time, so the mechanism meant to prevent waste is the
         one consuming the budget. Same key, same decision, one reservation.
         Raises PreflightInProgressError if the original is still being decided.
+
+        unit says what the job's numbers count, "unit" (yours, the default) or
+        "token". It needs task_ref. It is read when this call opens the job and
+        checked on a job that exists: a different unit is a 422, raised here as
+        an HTTPError, never a relabel.
+
+        The result carries reservation_id. Settle with result.record(units=...)
+        and the reservation this call made is closed whole.
         """
         payload = {"agent_id": agent_id}
         if estimated_units is not None:
@@ -185,6 +289,8 @@ class AgentBillClient:
             payload["task_ceiling"] = task_ceiling
         if idempotency_key is not None:
             payload["idempotency_key"] = idempotency_key
+        if unit is not None:
+            payload["unit"] = unit
 
         resp = requests.post(
             f"{self.base_url}/preflight",
@@ -196,6 +302,10 @@ class AgentBillClient:
             data = resp.json()
             if data.get("error") == "task_ceiling_required":
                 raise TaskCeilingRequiredError(data.get("message", "task_ceiling required for a new task_ref"))
+            if data.get("error") == "task_unit_mismatch":
+                # Still an HTTPError, as documented, but carrying the server's
+                # sentence: which unit the job is counted in and what to send.
+                raise requests.HTTPError(f"422 task_unit_mismatch: {data.get('message', '')}", response=resp)
         if resp.status_code == 409:
             raise PreflightInProgressError(idempotency_key or "")
         _raise_for_status(resp)
@@ -210,7 +320,13 @@ class AgentBillClient:
             task_ref=data.get("task_ref"),
             task_remaining_units=data.get("task_remaining_units"),
             reservation_expires_at=data.get("reservation_expires_at"),
+            reservation_id=data.get("reservation_id"),
         )
+        # Not a dataclass field and not an attribute, on purpose: asdict(),
+        # repr(), vars(), pickle and deepcopy of the result stay what they
+        # were, and the client (which holds the API key) ends up in none of
+        # them. See _BINDINGS.
+        _bind(result, (self, agent_id, customer_id, task_ref, data))
 
         # One rule, and it is the same in both SDKs as of 0.6.0 / 0.4.0:
         # raise when YOUR spend rule refused the call, return a result when
@@ -223,20 +339,25 @@ class AgentBillClient:
         # "no proxy in your request path" is supposed to mean. They come back
         # as approved=False with .upgrade_url set, so you can degrade, alert,
         # or route a human to upgrade, and keep running.
+        #
+        # Each raised error carries the answer as the server sent it (.answer),
+        # which is how wrap() turns the same refusal into a returned Refusal.
         if not result.approved:
             if result.reason == "ceiling_exceeded":
                 raise CeilingExceededError(
                     f"Refused (ceiling_exceeded): estimated {estimated_units} units exceeds "
-                    f"the per-request ceiling of {self.ceiling}."
+                    f"the per-request ceiling of {self.ceiling}.", answer=data,
                 )
             if result.reason == "budget_exhausted":
-                raise BudgetExhaustedError(customer_id or "default", "Refused (budget_exhausted): this customer's balance is spent.")
+                raise BudgetExhaustedError(customer_id or "default", "Refused (budget_exhausted): this customer's balance is spent.",
+                                           answer=data)
             if result.reason == "task_ceiling_exceeded":
                 raise TaskCeilingExceededError(
                     task_ref=data.get("task_ref") or task_ref or "",
                     task_ceiling=data.get("task_ceiling"),
                     task_used_units=data.get("task_used_units"),
                     task_remaining_units=data.get("task_remaining_units"),
+                    answer=data,
                 )
 
         return result
@@ -248,16 +369,48 @@ class AgentBillClient:
         customer_id: Optional[str] = None,
         success: bool = True,
         task_ref: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        reservation_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        usage_missing: bool = False,
     ) -> dict:
+        """Record what a call actually used, or release its reservation.
+
+        units may be 0: a call that ran and cost nothing records 0.
+
+        idempotency_key makes a retried record safe: same key, one event. When
+        it is None a fresh random key is sent, which is what every version
+        before this one always did.
+
+        reservation_id (from PreflightResult.reservation_id) settles that
+        reservation whole: units is what was spent, and the unused rest of the
+        reservation is released now instead of being held until it expires.
+        Without it the record closes the oldest reservations of this customer
+        and task_ref by `units` only, as before.
+
+        usage_missing=True says the provider reported no usage for this call.
+        It is not read as 0: the server charges at least the reservation the
+        record settles (the one reservation_id names or, without it, the
+        oldest open one of this customer and task_ref; with none open, units
+        as sent) and counts the call on the job as usage_missing_calls.
+
+        metadata is stored on the event and never counted.
+        """
         payload = {
             "customer_id": customer_id or "default",
             "event_type": agent_id,
-            "idempotency_key": f"{agent_id}-{__import__('uuid').uuid4()}",
+            "idempotency_key": idempotency_key if idempotency_key is not None else f"{agent_id}-{__import__('uuid').uuid4()}",
             "units": units,
             "success": success,
         }
         if task_ref is not None:
             payload["task_ref"] = task_ref
+        if reservation_id is not None:
+            payload["reservation_id"] = reservation_id
+        if metadata is not None:
+            payload["metadata"] = metadata
+        if usage_missing:
+            payload["usage_missing"] = True
         resp = requests.post(
             f"{self.base_url}/events",
             json=payload,
@@ -284,6 +437,9 @@ class AgentBillClient:
             reserved_units=data["reserved_units"],
             remaining_units=data["remaining_units"],
             exceeded=data["exceeded"],
+            unit=data.get("unit", "unit"),
+            usage_missing_calls=data.get("usage_missing_calls", 0),
+            breakdown=data.get("breakdown"),
         )
 
     def checkpoint(
@@ -371,18 +527,22 @@ class AgentBillClient:
                         customer_id=customer_id,
                         success=True,
                         task_ref=task_ref,
+                        reservation_id=check.reservation_id,
                     )
                     return result
                 except Exception:
                     # success=False releases the preflight reservation without
-                    # billing: units must equal what preflight reserved, or the
-                    # reservation leaks and eats the budget forever.
+                    # billing. With reservation_id the server releases that
+                    # reservation whole; against a server that predates it,
+                    # units must equal what preflight reserved, or the
+                    # remainder stays held until the reservation expires.
                     self.record(
                         agent_id=agent_id,
                         units=reserved,
                         customer_id=customer_id,
                         success=False,
                         task_ref=task_ref,
+                        reservation_id=check.reservation_id,
                     )
                     raise
             return wrapper

@@ -195,10 +195,10 @@ except TaskCeilingExceededError as refused:
   <h2>Core Concepts</h2>
 
   <h3>Preflight</h3>
-  <p>Consulted before your provider call goes out. If the units already used plus this call's estimate would cross the ceiling, preflight answers <code class="inline">approved: false</code> and the SDK raises. It answers on units you define; it does not read your provider bill and cannot know what the refused call would have cost.</p>
+  <p>Consulted before your provider call goes out. If the units already used plus this call's estimate would cross the ceiling, preflight answers <code class="inline">approved: false</code> and the SDK raises. It answers on the units your code sends or, under <a href="#wrap">wrap()</a>, on tokens; it does not read your provider bill and cannot know what the refused call would have cost.</p>
 
   <h3>Record</h3>
-  <p>Logs actual usage after a successful run. Idempotent per <code class="inline">idempotency_key</code>: /events dedupes on it. Both SDKs generate a fresh key for each call, so calling record() again on a retry is a second event; to dedupe a retried job, pass your own key to the endpoint.</p>
+  <p>Logs actual usage after a successful run. Idempotent per <code class="inline">idempotency_key</code>: /events dedupes on it. Both SDKs send a fresh key for each call unless you pass <code class="inline">idempotency_key</code>, so a retried record() without one is a second event: pass the same key on the retry. <a href="#wrap">wrap()</a> passes the provider's response id.</p>
 
   <h3>Per-task ceiling</h3>
   <p>One job, one ceiling, held across every call and every tool that passes the same
@@ -294,9 +294,12 @@ WHERE account_id = :account
   <p>Each reservation is a row with a TTL, returned to you as
   <span class="inline">reservation_expires_at</span> on every approved preflight. Default is 60
   minutes, set <span class="inline">RESERVATION_TTL_MINUTES</span> to change it. If
-  <span class="inline">record()</span> never arrives, a sweeper reclaims the units. Settling closes
-  reservation rows FIFO and decrements by what those rows actually held, not by what you passed, so
-  a late settle after a sweep cannot release the same units twice.</p>
+  <span class="inline">record()</span> never arrives, a sweeper reclaims the units. Every approved
+  preflight also returns <span class="inline">reservation_id</span>: a record over HTTP that passes it
+  back closes that reservation whole and releases what it held beyond the units recorded. Without it,
+  settling closes reservation rows FIFO by the units passed. Both decrement by what the closed rows
+  actually held, not by what you passed, so a late settle after a sweep cannot release the same units
+  twice.</p>
 
   <p>Note which way this fails. An abandoned reservation makes your ceiling <em>tighter</em>, never
   looser. The gate does not open by accident.
@@ -304,15 +307,195 @@ WHERE account_id = :account
 
   <h3>What the reservation is not</h3>
 
-  <p>It is not a measurement. AgentBill never sees your provider, your GPU or your tool call. The
-  number reserved is the <span class="inline">estimated_units</span> you passed, and
-  <span class="inline">record()</span> settles with the number you pass. Units are an integer you
+  <p>It is not a measurement. The number reserved is an estimate made before the call: the
+  <span class="inline">estimated_units</span> you passed or, under <a href="#wrap">wrap()</a>, the
+  job's running average in tokens. <span class="inline">record()</span> settles with what the call
+  used: the number you pass or, under <span class="inline">wrap()</span>, the token count your
+  provider reported on the response your process received. AgentBill's server never calls your
+  provider and holds no credential for it, and it never sees your GPU or your tool calls: those
+  count only if your code records them. In a job counted in units, a unit is an integer you
   define.</p>
 
   <p>What you get is ordering and arithmetic that hold under concurrent load: the ceiling is
-  consulted before the work starts, and the total across every call sharing a
-  <span class="inline">task_ref</span> cannot exceed it. What you do not get is an opinion about
-  what a call was worth. That number is yours.</p>
+  consulted before the work starts, and what is reserved across every call sharing a
+  <span class="inline">task_ref</span> cannot exceed it. A call that used more than it reserved
+  still records what it used, so a job can land past its ceiling by that call, and the record
+  says so with <span class="inline">task_exceeded</span>. What you do not get is an opinion about
+  what a call was worth. That number is yours, or your provider's.</p>
+
+  <h2 id="wrap">Automatic metering with wrap()</h2>
+
+  <p>Wrap your model client once, and every call it makes through the methods below is measured
+  from the usage your provider already returned on the response: before the call it asks the job
+  whether it still has room, after it records the tokens. You pass no estimate and record no
+  number. The call still goes from your process straight to your provider: no proxy, no base URL
+  to change, and AgentBill never sees your prompt, the answer or your provider account. What it
+  receives is the provider's name, the model, the token counts, how long the call took and the
+  step you named.</p>
+
+  <h3 id="wrap-python">Python</h3>
+  <div class="code"><pre>pip install -U agentbill-sdk openai</pre></div>
+  <div class="code"><pre>
+from openai import OpenAI
+from agentbill import wrap, Refusal
+
+<span class="comment"># Reads AGENTBILL_API_KEY; OpenAI() reads OPENAI_API_KEY. The job is counted</span>
+<span class="comment"># in tokens, and task_ceiling opens it on the call that creates it.</span>
+llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher",
+           task_ceiling=50_000)
+
+questions = ["What is a job ceiling?", "Name one use for it.", "And one limit."]
+for q in questions:
+    reply = llm.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
+        messages=[{"role": "user", "content": q}],
+    )
+    if isinstance(reply, Refusal):
+        <span class="comment"># The call that would have passed the ceiling was not sent. Nothing</span>
+        <span class="comment"># is raised: reply.reason, reply.used, reply.ceiling, reply.remaining.</span>
+        print(reply)
+        break
+    print(reply.choices[0].message.content)
+  </pre></div>
+
+  <p>The same job across providers, one step each. <span class="inline">wrap()</span> on a
+  wrapped client gives another view of it with a different step, sharing the job's running
+  average:</p>
+  <div class="code"><pre>
+from anthropic import Anthropic
+from google import genai
+from agentbill import wrap
+
+claude = wrap(Anthropic(), task_ref="tokens-1", agent_id="writer", step="draft")
+gemini = wrap(genai.Client(), task_ref="tokens-1", agent_id="checker", step="check")
+
+draft = claude.messages.create(model="claude-sonnet-4-5", max_tokens=500,
+                               messages=[{"role": "user", "content": "One line on job ceilings."}])
+check = gemini.models.generate_content(model="gemini-2.5-flash",
+                                       contents="Is this clear? " + draft.content[0].text)
+print(check.text)
+  </pre></div>
+
+  <h3 id="wrap-node">Node</h3>
+  <div class="code"><pre>npm install agentbill openai</pre></div>
+  <div class="code"><pre>
+import OpenAI from 'openai'
+import { wrap, isRefusal } from 'agentbill'
+
+<span class="comment">// Reads AGENTBILL_API_KEY; new OpenAI() reads OPENAI_API_KEY.</span>
+const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', taskCeiling: 50_000 })
+
+const stream = await llm.chat.completions.create({
+  model: 'gpt-4o-mini', max_tokens: 300, stream: true,
+  messages: [{ role: 'user', content: 'What is a job ceiling?' }],
+})
+if (isRefusal(stream)) {
+  <span class="comment">// The call was not sent, and nothing is thrown: stream.reason, stream.used,</span>
+  <span class="comment">// stream.ceiling, stream.remaining. A refused stream iterates to nothing.</span>
+  console.log(String(stream))
+} else {
+  for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+}
+  </pre></div>
+
+  <h3 id="wrap-what">What is measured, and what is not</h3>
+  <table>
+    <tr><th>Provider</th><th>Measured methods</th><th>Usage read from the response</th></tr>
+    <tr><td>OpenAI</td><td>chat.completions.create, responses.create</td><td>input (cache reads and cache writes apart), output, reasoning. A streamed Chat Completions call gets <span class="inline">stream_options.include_usage</span> turned on, and the usage-only chunk that adds is kept out of your loop. One you set yourself is left as you set it.</td></tr>
+    <tr><td>Anthropic</td><td>messages.create</td><td>input, cache reads, cache writes (five-minute and one-hour apart), output.</td></tr>
+    <tr><td>Gemini (google-genai)</td><td>models.generate_content, models.generate_content_stream; in Python also aio.models</td><td>prompt (cached apart), candidates plus thoughts as output: Gemini reports thinking outside candidates. With automatic function calling (a Python function or a CallableTool in <span class="inline">tools</span>) one call sends a model request per round and returns only the last round's usage, so each round is measured as its own call, with its own preflight and record.</td></tr>
+  </table>
+
+  <ul>
+    <li><strong>Only wrapped calls are measured.</strong> A call through a client you did not wrap,
+    or through a method not in the table (a stream helper, a raw-response call), is not counted.
+    A tool call, a GPU run or a vector search counts only if your code records it with the same
+    <span class="inline">task_ref</span>.</li>
+    <li><strong>The estimate.</strong> Before the first measured call of the job in your process,
+    preflight reserves <span class="inline">default_estimate</span> (2,000 tokens unless you set
+    it); after, the job's running average per call, and never more than the average prompt plus
+    the call's own <span class="inline">max_tokens</span> when it sets one. The prompt is not
+    counted before the call, and no request is added. The record then charges what the provider reported, so one call can pass the
+    ceiling when the estimate was low: at most that one call for each caller running at the same
+    moment, and the next preflight is refused. That bound holds while preflight checks the ceiling;
+    see the quota below for the one state where it does not.</li>
+    <li><strong>Missing usage is recorded as missing, never as 0.</strong> The call is charged at
+    least what it reserved, and counted in <span class="inline">usage_missing_calls</span>.</li>
+    <li><strong>The job is counted in tokens.</strong> Open it with
+    <span class="inline">task_ceiling</span> on <span class="inline">wrap()</span>, or with
+    <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a> and
+    <span class="inline">"unit": "token"</span>. A job opened in units answers
+    <span class="inline">422 task_unit_mismatch</span>, and the call is not sent. A customer limit
+    set with <a href="#put-budget">PUT /budget</a> counts whatever that customer's calls send, so
+    under <span class="inline">wrap()</span> it counts tokens.</li>
+    <li><strong>A refusal is returned, and your code decides.</strong> The measured call's value
+    is a <span class="inline">Refusal</span> (Python: <span class="inline">isinstance(reply, Refusal)</span>,
+    Node: <span class="inline">isRefusal(reply)</span>) with <span class="inline">approved</span>
+    false, <span class="inline">reason</span>, <span class="inline">task_ref</span>,
+    <span class="inline">asked</span>, <span class="inline">used</span>,
+    <span class="inline">ceiling</span>, <span class="inline">remaining</span> and
+    <span class="inline">answer</span>, the preflight answer whole. It is not shaped like a provider
+    response: no <span class="inline">choices</span>, <span class="inline">content</span>,
+    <span class="inline">candidates</span> or <span class="inline">usage</span>. A refused streaming
+    call returns the same <span class="inline">Refusal</span>, which iterates to nothing; the one
+    stream that can be refused after it started, a Gemini automatic-function-calling stream whose
+    later round is refused, ends after the earlier round's chunks and sets its
+    <span class="inline">refusal</span>. Nothing is raised for a refusal. An exception out of a
+    wrapped call is a failure: the provider's own error, or from AgentBill a network error, a 401
+    or a 5xx. A provider error releases the call's reservation. A record that fails after the
+    provider answered never loses the answer. <span class="inline">preflight()</span> and
+    <span class="inline">record()</span> on the plain client are not changed by this:
+    <span class="inline">preflight()</span> still raises
+    <span class="inline">TaskCeilingExceededError</span> on a ceiling refusal and returns on the
+    quota.</li>
+    <li><strong>Each measured call is one preflight</strong>, so it uses one preflight of your
+    account's monthly quota. Once that quota is spent, preflight answers before it looks at the job
+    and no ceiling can be checked. So by default the wrapped call returns a
+    <span class="inline">Refusal</span> with reason
+    <span class="inline">free_tier_exceeded</span> or
+    <span class="inline">plan_limit_exceeded</span> and the upgrade link, and is not sent. With
+    <span class="inline">on_quota="send"</span> (Node: <span class="inline">onQuota: 'send'</span>)
+    it is sent unchecked and recorded, with a warning once per job, and nothing bounds the job
+    until the quota resets or you upgrade.</li>
+    <li>A client pointed at another host (Azure, a proxy, an OpenAI-compatible server) is
+    recorded as <span class="inline">openai-compatible</span> and gets no list price. Its records
+    are keyed by a random key, not the response id, because such a server's ids need not be
+    unique. In Node the
+    wrapped create returns a plain Promise, without the SDK's <span class="inline">withResponse()</span>.</li>
+  </ul>
+
+  <h3 id="wrap-breakdown">What the job cost, by model and by step</h3>
+  <p><span class="inline">GET /tasks/:task_ref</span> carries a <span class="inline">breakdown</span>
+  beside the job's numbers (the SDKs' <span class="inline">get_task</span> and
+  <span class="inline">getTask</span> return it as it is):</p>
+  <div class="code"><pre>
+{
+  "calls": 4, "units": 4100, "unattributed_units": 0,
+  "list_price_usd_estimate": 0.00066,
+  "priced_calls": 3, "unpriced_calls": 1,
+  "price_versions": ["litellm-ccee9e7-2026-09-23"],
+  "by_model": [
+    { "provider": "openai", "model": "gpt-4o-mini-2024-07-18", "calls": 3, "units": 2900,
+      "tokens": { "input": 2400, "cache_read": 0, "cache_write": 0, "cache_write_1h": 0, "output": 500, "reasoning": 0 },
+      "list_price_usd_estimate": 0.00066, "unpriced_calls": 0, "unpriced_reasons": [] },
+    { "provider": "openai", "model": "my-finetune", "calls": 1, "units": 1200,
+      "list_price_usd_estimate": null, "unpriced_calls": 1,
+      "unpriced_reasons": ["no list price for my-finetune"] }
+  ],
+  "by_step": [ { "step": "draft", "calls": 4, "units": 4100, "list_price_usd_estimate": 0.00066,
+                "unpriced_calls": 1 } ]
+}
+  </pre></div>
+  <p><span class="inline">list_price_usd_estimate</span> is an estimate at public list price, from
+  a dated snapshot of the LiteLLM price table that <span class="inline">price_versions</span>
+  names, priced per token type, with the long-context and service-tier rates where the table has
+  them. List price, your invoice may differ: contract discounts, batch and regional pricing, and
+  server-side tool fees are not in it. A call with no list price says why in
+  <span class="inline">unpriced_reasons</span> and is left out of the estimate; it is never counted
+  as $0, and a row where nothing is priced shows <span class="inline">null</span>. The ceiling
+  itself is in tokens. <span class="inline">unattributed_units</span> is what the job spent
+  through records made before events carried the job's name.</p>
 
   <h2>API Reference</h2>
 
@@ -337,6 +520,7 @@ WHERE account_id = :account
   "estimated_units": 12,
   "remaining_units": null,
   "reservation_expires_at": "2026-09-11T12:00:00.000Z",
+  "reservation_id": "3f1c2b7a-8d4e-4b1a-9c2d-5e6f7a8b9c0d",
   "task_ref": "job-142",
   "task_ceiling": 500,
   "task_remaining_units": 488
@@ -371,15 +555,24 @@ WHERE account_id = :account
   <span class="inline">budget_exhausted</span>) and <strong>return the result when the refusal is
   AgentBill's own quota</strong> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
-  <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.</p>
+  <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.
+  Under <a href="#wrap">wrap()</a> nothing is raised for a refusal: every one, the quota included,
+  comes back as a returned <span class="inline">Refusal</span>, because once the quota is spent no
+  ceiling can be checked; <span class="inline">on_quota="send"</span> sends the call unchecked
+  instead. <span class="inline">preflight()</span> itself is unchanged.</p>
 
   <h3>record()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td>agent_id</td><td>string</td><td>The same attribution label you passed to preflight.</td></tr>
-    <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1.</td></tr>
+    <tr><td>units</td><td>int <span class="tag">optional</span></td><td>Units consumed by this run. Default: 1. 0 is allowed: a call that ran and cost nothing.</td></tr>
     <tr><td>customer_id</td><td>string <span class="tag">optional</span></td><td>Your internal customer ID. Defaults to "default". A customer starts with no limit; set one with <a href="#put-budget">PUT /budget</a>.</td></tr>
     <tr><td>task_ref</td><td>string <span class="tag">optional</span></td><td>Settles against that task's ceiling. Pass the same one you preflighted with, or the units stay reserved until the reservation expires.</td></tr>
+    <tr><td>success</td><td>bool <span class="tag">optional</span></td><td>false releases the preflight reservation without billing. Default: true.</td></tr>
+    <tr><td>reservation_id</td><td>string <span class="tag">optional</span></td><td>The one preflight returned. That reservation closes whole: units is what was spent, and the rest it held is released now. Without it, the record closes the oldest reservations of this customer and task FIFO by units. result.record(...) passes it for you.</td></tr>
+    <tr><td>idempotency_key</td><td>string <span class="tag">optional</span></td><td>Same key, one event. A fresh one is sent when you leave it out.</td></tr>
+    <tr><td>metadata</td><td>object <span class="tag">optional</span></td><td>Stored on the event, never counted. provider, model and tokens in the shape <a href="#wrap">wrap()</a> writes are priced at list price for the job's <a href="#wrap-breakdown">breakdown</a>.</td></tr>
+    <tr><td>usage_missing</td><td>bool <span class="tag">optional</span></td><td>The provider reported no usage. Not read as 0: the call is charged at least the reservation it settles, and counted in usage_missing_calls.</td></tr>
   </table>
 
   <h3 id="put-task-ceiling">PUT /tasks/:task_ref/ceiling</h3>
