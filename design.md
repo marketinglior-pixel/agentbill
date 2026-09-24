@@ -194,8 +194,8 @@ stay dark.
   grid and the two-column FAQ; nothing of its product, palette or claims, and
   none of its social-proof slot (ours holds a public incident instead). Built
   from the approved Figma file `uMcr4L26RQYChYmpykVGRQ` after Lior's FIGMA GO.
-  Order, and nothing else: hero (announcement pill, the h1 `HOME_H1`, the
-  locked sub, the primary to `/register` and a secondary pill to `#estimate`,
+  Order, and nothing else: hero (announcement pill, the h1 `HEADLINE`
+  (trialled as `HOME_H1`, folded into `HEADLINE` 2026-09-24), the locked sub, the primary to `/register` and a secondary pill to `#estimate`,
   the trust line, then the agent's-log frame rendered from `RUN` and labelled
   sample), the statement (month and org caps conceded, then the job ceiling's
   scope, with a sample figure of both states), the estimator (the visitor's
@@ -581,20 +581,37 @@ of that reasoning.
 ## The share card
 
 `/og.png` is a page like any other, rendered by `scripts/og/build.mts` from the
-same sources as the pages it stands in for: tokens from `theme.ts`, the mark
-from `mark.ts`, `HEADLINE` and `INSTALL_PY` from `site.ts`, and one refusal row
-from `demoConsole()` composed by the console's own `decisionLine()`. Run
-`npm run build:og` after any of those change and commit `src/lib/og-image.ts`.
-The build refuses a card whose fonts fell back or whose content ran past the
-frame.
+same sources as the pages it stands in for, on the canvas system every page
+uses: `TOKENS_CANVAS`, `ROLES` and `BASE` from `theme.ts`, the kit's tag and
+chips from `kit.ts`, the mark from `mark.ts`, `HEADLINE` and `INSTALL_PY` from
+`site.ts`, and the homepage fold's frame cut to two rows from the same `RUN`
+(`ui/playground.ts`), labelled sample in its own bar. White ground, ink type,
+the warm-grey panel; the signal only on the refused row and its
+`approved: false` chip. Under the frame, the fold's own words: "Your code
+decides what happens next." Run `npm run build:og` after any of those change
+and commit `src/lib/og-image.ts`. The build refuses a card whose fonts fell
+back, whose content ran past the frame or its own column, or whose headline
+is not `HEADLINE` in at most two lines.
 
-It is the one surface that carries `--grad-vignette`: achromatic, and allowed
-because a card is looked at rather than used. No product page may use it.
+One card for every page. `OgCard` in `site.ts` keeps a per-section field so
+section cards can exist later; until a route serves them nothing references
+them (see the comment in `head()`).
+
+**The URL carries the card's hash.** Chat apps (WhatsApp, Slack, X) cache a
+card by URL, so every surface names it through `OG_IMAGE` (`ui/og.ts`):
+`/og.png?v=<OG_VERSION>`, where `OG_VERSION` is the first 12 hex of the PNG's
+sha256, written by the build beside the bytes. That URL is served immutable;
+the bare `/og.png` (old shares, ads) and a stale `?v=` get the current card for
+a day. The harness's `[og]` gates hold the hash to the served bytes, every
+emitted URL to the hash, and the card's recorded headline (`OG_HEADLINE`) to
+`HEADLINE`, the h1 and the `<title>`.
 
 The previous card (2026-08-27, drawn in PIL) carried a retired headline, a
 retired dollar claim, the 8px dot and a typewriter face for eleven days after
-the head was swept, because a grep cannot see a PNG. **A copy sweep opens the
-image.**
+the head was swept, because a grep cannot see a PNG. It happened again on
+2026-09-24: the dark card kept "A ceiling on this job, not on the month" after
+`/` moved to canvas and a new h1, and a WhatsApp preview showed it. **A copy
+sweep opens the image.**
 
 ## Closing a row
 

@@ -1447,13 +1447,73 @@ ok('[fold] the product frame follows the h1 in the hero and reaches the playgrou
      && frVis8.includes('approved: false') && frVis8.includes(REFUSAL8.name) && /\bsample\b/i.test(frVis8)
      && !hero8.includes('<video') && !/<img\b/.test(frame8),
    frame8 ? frVis8.slice(0, 200) : 'no product frame in the hero')
-// The h1 is locked the way the sub is, 2026-09-23: Lior's decision 1 kept this
-// line for the experiment, and a gate is what keeps an edit from being the
-// thing that ends it. Typed here on purpose, unlike the numbers: the point is
-// that the words do not move, and HOME_H1 is the thing that would move them.
+// The h1 is locked the way the sub is. 2026-09-23: Lior's decision 1 kept this
+// line for the experiment on `/`; 2026-09-24 the experiment was decided and the
+// line became HEADLINE for the whole site (HOME_H1 folded in and deleted).
+// Typed here on purpose, unlike the numbers: the point is that the words do
+// not move, and HEADLINE is the thing that would move them.
 const LOCKED_H1_8 = 'Give the job you leave running overnight its own ceiling'
 const h1Text8 = ((hero8.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) ?? [])[1] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 ok('[fold] the h1 is the locked line, byte for byte', h1Text8 === LOCKED_H1_8, `h1 reads: ${h1Text8}`)
+// ---------------------------------------------------------------- the share card
+// 2026-09-24: a WhatsApp preview of agentbill.dev showed "A ceiling on this
+// job, not on the month" on the dark card, next to the new description. Two
+// failures, one gate each. The card was never rebuilt when `/` took a new h1
+// (a grep cannot see a PNG, so the card now records the headline it rendered,
+// OG_HEADLINE), and even a rebuilt card would not have reached a chat that had
+// seen the old one, because every head named a bare /og.png and chat apps
+// cache by URL (it is now /og.png?v=<hash of the bytes>).
+const { OG_HEADLINE, OG_VERSION, OG_PNG } = await import('../../dist/lib/og-image.js')
+const { OG_IMAGE } = await import('../../dist/ui/og.js')
+const { HEADLINE: HEADLINE_OG } = await import('../../dist/ui/site.js')
+const titleOg = ((fold8.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? '')
+ok('[og] the card was built from HEADLINE, and the h1 and <title> of / are the same constant',
+   OG_HEADLINE === HEADLINE_OG && h1Text8 === HEADLINE_OG && titleOg === `AgentBill · ${HEADLINE_OG}`,
+   `card "${OG_HEADLINE}", HEADLINE "${HEADLINE_OG}", h1 "${h1Text8}", title "${titleOg}"`)
+const { createHash: hashOg } = await import('node:crypto')
+const sha12Og = (b) => hashOg('sha256').update(b).digest('hex').slice(0, 12)
+const pngDimOg = (b) => b.length > 24 ? `${b.readUInt32BE(16)}x${b.readUInt32BE(20)}` : 'none'
+const verOg = await fetch(`${API}/og.png?v=${OG_VERSION}`)
+const verBytesOg = Buffer.from(await verOg.arrayBuffer())
+ok('[og] /og.png?v=<OG_VERSION> serves the 1200x630 PNG whose sha256 is that version, immutable',
+   verOg.status === 200 && verOg.headers.get('content-type') === 'image/png' && sha12Og(verBytesOg) === OG_VERSION
+     && sha12Og(OG_PNG) === OG_VERSION && pngDimOg(verBytesOg) === '1200x630'
+     && verOg.headers.get('cache-control') === 'public, max-age=31536000, immutable',
+   `${verOg.status} ${verOg.headers.get('content-type')} sha ${sha12Og(verBytesOg)} vs v=${OG_VERSION}, ${pngDimOg(verBytesOg)}, cache "${verOg.headers.get('cache-control')}"`)
+// The bare path is what old shares and ads carry, and a stale ?v= is what a
+// page cached before a rebuild names. Both get the current card, and neither
+// may be told it is immutable: it has no version to keep.
+const bareOg = await fetch(`${API}/og.png`)
+const bareBytesOg = Buffer.from(await bareOg.arrayBuffer())
+const staleOg = await fetch(`${API}/og.png?v=000000000000`)
+await staleOg.arrayBuffer()
+ok('[og] bare /og.png and a stale ?v= serve the same card for a day, never immutable',
+   bareOg.status === 200 && bareOg.headers.get('content-type') === 'image/png' && sha12Og(bareBytesOg) === OG_VERSION
+     && bareOg.headers.get('cache-control') === 'public, max-age=86400'
+     && staleOg.status === 200 && staleOg.headers.get('cache-control') === 'public, max-age=86400',
+   `bare ${bareOg.status} "${bareOg.headers.get('cache-control')}", stale ${staleOg.status} "${staleOg.headers.get('cache-control')}"`)
+// Every place a head can name the card: og:image, twitter:image, the WebPage
+// node's primaryImageOfPage and the SoftwareApplication node's image. Read on
+// every sitemap page, a noindex page and the 404, because head() builds them
+// all and a page-local head is how /docs once shipped og tags with no image.
+const mapOg = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const pathsOg = [...mapOg.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => new URL(m[1]).pathname).concat(['/recover', '/no-such-page-og'])
+const badOg = []
+let urlsOg = 0
+for (const p of pathsOg) {
+  // Accept names HTML because the 404 answers JSON to anything else.
+  const h = await fetch(`${API}${p}`, { headers: { accept: 'text/html' } }).then((r) => r.text())
+  const named = [
+    ...[...h.matchAll(/<meta (?:property|name)="(?:og:image|twitter:image)" content="([^"]*)"/g)].map((m) => m[1]),
+    ...[...h.matchAll(/"(?:image|url)":"([^"]*og\.png[^"]*)"/g)].map((m) => m[1]),
+  ]
+  const cardRefs = (h.match(/og\.png/g) ?? []).length
+  urlsOg += named.length
+  if (named.length < 2 || named.some((u) => u !== OG_IMAGE) || cardRefs !== named.length) badOg.push(`${p}: ${named.length} named, ${cardRefs} og.png refs, ${[...new Set(named)].join(' ')}`)
+}
+ok(`[og] every card URL a head emits is ${OG_IMAGE.replace(/^https:\/\/[^/]+/, '')}, on every sitemap page, a noindex page and the 404`,
+   pathsOg.length > 10 && badOg.length === 0 && OG_IMAGE.endsWith(`/og.png?v=${OG_VERSION}`),
+   `${pathsOg.length} pages, ${urlsOg} URLs; ${badOg.slice(0, 4).join('; ')}`)
 // The concept before the name, on the hero and not in <head>. The rule (see
 // above): the reader meets the thing before our endpoint's name. The h1 names
 // the concept, the sub is the first place preflight appears, and the pill
