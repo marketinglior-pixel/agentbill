@@ -12,7 +12,6 @@ import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT, unitWord } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
-import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import {
   STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
   LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
@@ -1477,7 +1476,12 @@ ${MARK_CSS}
   /* The column head says CEILING; the label stays for a screen reader and
      comes back on a phone, where the rows are cards with no column heads. */
   .bset label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .bset .cv-field { width: 10ch; min-height: var(--h-sm); padding: 4px 10px; font-size: var(--fs-micro); border-radius: var(--r-row); }
+  /* 15ch, not 10: the padding and border come out of a border-box width, and
+     Chrome's spinner takes a slice of what is left on hover, so 10ch showed
+     five digits of a 500,000 ceiling. Measured 2026-09-24 at 12px Geist Mono:
+     108px wide, 86px of content, 7.2px a digit. The max is INT4_MAX, ten
+     digits: they fit at rest, and nine fit beside the spinner. */
+  .bset .cv-field { width: 15ch; min-height: var(--h-sm); padding: 4px 10px; font-size: var(--fs-micro); border-radius: var(--r-row); }
   .bset .btn-ghost { min-height: var(--h-sm); padding: 5px 14px; line-height: 20px; font-size: var(--fs-micro); }
   /* Under sample data the form's button is a link (#75), so it needs the box
      a button gets for free, at the L height the button beside these fields has. */
@@ -2317,7 +2321,7 @@ function historyBlock(p: Page): string {
   return `<div class="hist">
       <p class="lbl cv-label">Suggested ceilings</p>
       ${rows}
-      <p class="fine">Pick a figure and it goes in the ceiling field with that agent's label, still editable. Each row is the p50, p90 and max <code>used_units</code> of one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, so every figure is one real job's total. At most ${num(HISTORY_AGENTS)} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion. Finished means the job has spent units and holds no reservation: <code>used_units</code> above 0 and <code>reserved_units</code> 0. No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${num(RESERVATION_TTL_MINUTES)} minutes and a sweep releases it. A job refused at its ceiling counts at what it spent. Jobs with the placeholder label <code>${esc(CONSOLE_AGENT)}</code> are left out.</p>
+      <p class="fine">A pick fills the ceiling field with that agent's label; ${p.demo ? 'sample data, so nothing here is saved' : 'nothing is saved until you press Set ceiling'}. Each figure is the p50, p90 or max of that agent's last ${num(HISTORY_JOBS)} finished jobs: one real job's total. <a href="/docs#ceiling-suggestion">How the suggestion is computed</a>.</p>
     </div>`
 }
 
