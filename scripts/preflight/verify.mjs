@@ -2845,13 +2845,32 @@ if (nodeSdk) {
   }
   const refW = `wrap-node-${runW}`
   const llmW = nodeSdk.wrap(fakeOpenAI, { taskRef: refW, agentId: 'node-e2e', step: 'plan', taskCeiling: 5_000, defaultEstimate: 1_000 })
-  let refusedAt = null, refusedErr = null
+  // 2026-09-24 (Lior): a refusal is a value the wrapped call returns, never
+  // an exception; exceptions are for failures. So the loop breaks on a
+  // returned Refusal, and anything thrown is a red.
+  let refusedAt = null, refusalW = null, threwW = null
   for (let i = 1; i <= 8; i++) {
-    try { await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }] }) }
-    catch (e) { refusedAt = i; refusedErr = e; break }
+    try {
+      const r = await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }] })
+      if (nodeSdk.isRefusal(r)) { refusedAt = i; refusalW = r; break }
+    } catch (e) { threwW = e; break }
   }
-  ok('[wrap] node: the 5th call is refused with TaskCeilingExceededError, and the fake provider was sent 4 calls, not 5',
-     refusedAt === 5 && refusedErr instanceof nodeSdk.TaskCeilingExceededError && sentW === 4, `refusedAt=${refusedAt} sent=${sentW} ${refusedErr?.message}`)
+  ok('[wrap] node: the 5th call comes back as a Refusal (task_ceiling_exceeded, 4,800/5,000, asked 1,200, approved false, no choices, nothing thrown), and the fake provider was sent 4 calls, not 5',
+     refusedAt === 5 && threwW === null && refusalW instanceof nodeSdk.Refusal && refusalW.approved === false && refusalW.reason === 'task_ceiling_exceeded' &&
+     refusalW.used === 4_800 && refusalW.ceiling === 5_000 && refusalW.remaining === 200 && refusalW.asked === 1_200 && refusalW.taskRef === refW &&
+     refusalW.answer?.reason === 'task_ceiling_exceeded' && !('choices' in refusalW) && sentW === 4,
+     `refusedAt=${refusedAt} sent=${sentW} threw=${threwW?.name}: ${threwW?.message} ${refusalW}`)
+  // A throw here is a FAIL with the error named, never a crash of this script:
+  // planted (wrap throwing again) on 2026-09-24 it ended the run at this line
+  // and hid every red after it.
+  let refusedStreamW = null, refusedChunksW = 0, streamThrewW = null
+  try {
+    refusedStreamW = await llmW.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'go' }], stream: true })
+    for await (const _c of refusedStreamW) refusedChunksW++
+  } catch (e) { streamThrewW = e }
+  ok('[wrap] node: a streamed call on the same refused job is the Refusal itself, iterates to nothing, and the fake was still sent 4',
+     streamThrewW === null && nodeSdk.isRefusal(refusedStreamW) && refusedChunksW === 0 && sentW === 4,
+     `threw=${streamThrewW?.name}: ${streamThrewW?.message} isRefusal=${nodeSdk.isRefusal(refusedStreamW)} chunks=${refusedChunksW} sent=${sentW}`)
   const tW = await callW('GET', `/tasks/${refW}`)
   ok('[wrap] node: the job is a tokens job with 4,800 used and nothing left reserved',
      tW.body?.unit === 'token' && tW.body?.used_units === 4_800 && tW.body?.reserved_units === 0 && tW.body?.ceiling_units === 5_000, JSON.stringify(tW.body && { ...tW.body, breakdown: undefined }))
@@ -2918,13 +2937,13 @@ if (nodeSdk) {
   const taskQ = async () => (await sql`SELECT used_units, reserved_units, ceiling_units FROM task_budgets WHERE account_id = ${ACCT_Q} AND task_ref = ${refQ}`)[0]
   try {
     const sentQ0 = sentW
-    let spentQ = null
-    try { await nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { spentQ = e }
+    let spentQ = null, threwQ = null
+    try { spentQ = await nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] }) } catch (e) { threwQ = e }
     const tQ = await taskQ()
-    ok('[wrap] node: with the monthly quota spent (1,000 of 1,000 on free) the call throws FreeTierExceededError with the upgrade link, is not sent, and the job is untouched',
-       openQ.status === 200 && typeof nodeSdk.FreeTierExceededError === 'function' && spentQ instanceof nodeSdk.FreeTierExceededError && /pricing/.test(spentQ.upgradeUrl ?? '') && sentW === sentQ0 &&
-       tQ?.usedUnits === 0 && tQ?.reservedUnits === 0,
-       `put ${openQ.status} ${spentQ?.name}: ${spentQ?.message} sent ${sentW - sentQ0} ${JSON.stringify(tQ)}`)
+    ok('[wrap] node: with the monthly quota spent (1,000 of 1,000 on free) the call comes back as a Refusal (free_tier_exceeded) with the upgrade link, nothing thrown, is not sent, and the job is untouched',
+       openQ.status === 200 && threwQ === null && nodeSdk.isRefusal(spentQ) && spentQ.reason === 'free_tier_exceeded' && /pricing/.test(spentQ.upgradeUrl ?? '') &&
+       spentQ.answer?.plan === 'free' && sentW === sentQ0 && tQ?.usedUnits === 0 && tQ?.reservedUnits === 0,
+       `put ${openQ.status} threw=${threwQ?.name}: ${threwQ?.message} got ${spentQ} sent ${sentW - sentQ0} ${JSON.stringify(tQ)}`)
     const llmQ = nodeSdk.wrap(fakeOpenAI, { taskRef: refQ, agentId: 'node-e2e', onQuota: 'send' })
     for (let i = 0; i < 5; i++) await llmQ.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
     await settle(50)
@@ -3035,8 +3054,13 @@ try { pyOut = JSON.parse((pyRun?.stdout ?? '').trim().split('\n').pop()) } catch
 ok('[wrap] python: the e2e script ran (run.sh sets WRAP_PYTHON to a venv with requests and httpx)',
    pyRun?.status === 0 && pyOut !== null, PYW ? `status ${pyRun?.status} ${(pyRun?.stderr ?? '').slice(-400)}` : 'WRAP_PYTHON is not set')
 if (pyOut) {
-  ok('[wrap] python: the 4th Anthropic call is refused and the fake was sent 3',
-     pyOut.sync?.sent === 3 && pyOut.sync?.refused?.at_call === 4 && pyOut.sync?.refused?.used === 3_900, JSON.stringify(pyOut.sync))
+  const refP = pyOut.sync?.refused
+  ok('[wrap] python: the 4th Anthropic call comes back as a Refusal (task_ceiling_exceeded, 3,900/4,000, asked 1,300, falsy, no content, nothing raised), and the fake was sent 3',
+     pyOut.sync?.sent === 3 && pyOut.sync?.raised == null && refP?.at_call === 4 && refP?.type === 'Refusal' && refP?.reason === 'task_ceiling_exceeded' &&
+     refP?.used === 3_900 && refP?.ceiling === 4_000 && refP?.remaining === 100 && refP?.asked === 1_300 && refP?.falsy === true && refP?.has_content === false &&
+     refP?.answer_reason === 'task_ceiling_exceeded', JSON.stringify(pyOut.sync))
+  ok('[wrap] python: a streamed call on the same refused job is the Refusal itself, iterates to nothing, and the fake was still sent 3',
+     pyOut.sync?.stream?.type === 'Refusal' && pyOut.sync?.stream?.items === 0 && pyOut.sync?.stream?.sent === 3, JSON.stringify(pyOut.sync?.stream))
   const tPy = await callW('GET', `/tasks/wrap-py-${runW}`)
   const evPy = await sql`SELECT idempotency_key, units, list_price_usd::text AS usd FROM events WHERE task_ref = ${`wrap-py-${runW}`} ORDER BY created_at`
   ok('[wrap] python: 3 records of 1,300 tokens, keyed by the message id, each $0.00738 at list price, nothing left reserved',
@@ -3051,8 +3075,9 @@ if (pyOut) {
      JSON.stringify(pyOut.async_stream?.texts) === '["he","llo"]' && pyOut.async_stream?.include_usage === true && tPyS.body?.used_units === 69 && tPyS.body?.reserved_units === 0,
      JSON.stringify({ out: pyOut.async_stream, task: tPyS.body && { ...tPyS.body, breakdown: undefined } }))
   const eventsQP = await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${ACCT_QP}`
-  ok('[wrap] python: with the monthly quota spent, wrap() raises FreeTierExceededError with the upgrade link, the fake was sent nothing, and nothing was recorded',
-     pyOut.quota?.raised === 'FreeTierExceededError' && /pricing/.test(pyOut.quota?.upgrade_url ?? '') && pyOut.quota?.sent === 0 && eventsQP[0]?.n === 0,
+  ok('[wrap] python: with the monthly quota spent, wrap() returns a Refusal (free_tier_exceeded) with the upgrade link, raises nothing, the fake was sent nothing, and nothing was recorded',
+     pyOut.quota?.returned === 'Refusal' && pyOut.quota?.reason === 'free_tier_exceeded' && pyOut.quota?.raised == null &&
+     /pricing/.test(pyOut.quota?.upgrade_url ?? '') && pyOut.quota?.sent === 0 && eventsQP[0]?.n === 0,
      JSON.stringify({ quota: pyOut.quota, events: eventsQP }))
   const tPyB = await callW('GET', `/tasks/wrap-py-break-${runW}`)
   ok('[wrap] python: a for loop that breaks, with no close() and no with-block, is recorded as usage missing and holds nothing',

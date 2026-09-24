@@ -25,6 +25,15 @@ def _bind(result: "PreflightResult", call: tuple) -> None:
     _BINDINGS[key] = call
     weakref.finalize(result, _BINDINGS.pop, key, None)
 
+
+def _answer_of(result: "PreflightResult") -> Optional[dict]:
+    """The preflight answer as the server sent it, for a result preflight()
+    returned in this process; None for a copy. Kept in the same table as the
+    call, and for the same reason: not on the result. wrap() reads it to build
+    a Refusal that carries the raw answer."""
+    bound = _BINDINGS.get(id(result))
+    return bound[4] if bound is not None and len(bound) > 4 else None
+
 @dataclass
 class PreflightResult:
     approved: bool
@@ -68,7 +77,7 @@ class PreflightResult:
                 "(a copy or an unpickled result carries no client), so it has no call to record "
                 "against. Use client.record(..., reservation_id=result.reservation_id)."
             )
-        client, agent_id, customer_id, task_ref = bound
+        client, agent_id, customer_id, task_ref = bound[:4]
         return client.record(
             agent_id,
             units=units,
@@ -116,7 +125,13 @@ class CheckpointResult:
     remaining_units: Optional[int]
 
 class CeilingExceededError(Exception):
-    pass
+    """This one call's estimate exceeds the per-call ceiling set on the client.
+    Raised by preflight(). A client made with wrap() returns it as a Refusal
+    with reason "ceiling_exceeded" instead."""
+    def __init__(self, message: str = "", answer: Optional[dict] = None):
+        # The preflight answer as the server sent it, when preflight() raised this.
+        self.answer = answer
+        super().__init__(message)
 
 
 class PreflightInProgressError(Exception):
@@ -139,10 +154,11 @@ class FreeTierExceededError(Exception):
     billing state, not your spend rule, and preflight() must not be able to
     crash your agent over it.
 
-    Raised by a client made with wrap() (on_quota="raise", the default) before
-    the model call is sent: once the quota is spent no ceiling can be checked,
-    and wrap() exists to check one. wrap(..., on_quota="send") sends the call
-    unchecked instead.
+    A client made with wrap() does not raise it either: a measured call returns
+    a Refusal with reason "free_tier_exceeded" and upgrade_url, and the model
+    call is not sent (on_quota="refuse", the default), because once the quota
+    is spent no ceiling can be checked. wrap(..., on_quota="send") sends the
+    call unchecked instead.
     """
     def __init__(self, upgrade_url: Optional[str] = None, message: Optional[str] = None):
         self.upgrade_url = upgrade_url
@@ -151,7 +167,7 @@ class FreeTierExceededError(Exception):
 class PlanLimitExceededError(Exception):
     """Not raised by preflight() as of 0.6.0, which returns
     `approved=False, reason="plan_limit_exceeded"` with `.upgrade_url` set.
-    Raised by a client made with wrap(), as FreeTierExceededError is: see there.
+    A client made with wrap() returns a Refusal, as for FreeTierExceededError.
     """
     def __init__(self, plan: Optional[str] = None, upgrade_url: Optional[str] = None,
                  message: Optional[str] = None):
@@ -171,13 +187,19 @@ class TaskCeilingExceededError(Exception):
             log.info(f"task {e.task_ref} hit its ceiling "
                      f"({e.task_used_units}/{e.task_ceiling})")
             return partial_result
+
+    A client made with wrap() does not raise it: the measured call returns a
+    Refusal with reason "task_ceiling_exceeded" instead (see agentbill.wrap).
     """
     def __init__(self, task_ref: str, task_ceiling: Optional[int],
-                 task_used_units: Optional[int], task_remaining_units: Optional[int]):
+                 task_used_units: Optional[int], task_remaining_units: Optional[int],
+                 answer: Optional[dict] = None):
         self.task_ref = task_ref
         self.task_ceiling = task_ceiling
         self.task_used_units = task_used_units
         self.task_remaining_units = task_remaining_units
+        # The preflight answer as the server sent it, when preflight() raised this.
+        self.answer = answer
         super().__init__(
             f"Refused (task_ceiling_exceeded): task {task_ref!r} is at "
             f"{task_used_units}/{task_ceiling} units and {task_remaining_units} remaining "
@@ -304,7 +326,7 @@ class AgentBillClient:
         # repr(), vars(), pickle and deepcopy of the result stay what they
         # were, and the client (which holds the API key) ends up in none of
         # them. See _BINDINGS.
-        _bind(result, (self, agent_id, customer_id, task_ref))
+        _bind(result, (self, agent_id, customer_id, task_ref, data))
 
         # One rule, and it is the same in both SDKs as of 0.6.0 / 0.4.0:
         # raise when YOUR spend rule refused the call, return a result when
@@ -317,20 +339,25 @@ class AgentBillClient:
         # "no proxy in your request path" is supposed to mean. They come back
         # as approved=False with .upgrade_url set, so you can degrade, alert,
         # or route a human to upgrade, and keep running.
+        #
+        # Each raised error carries the answer as the server sent it (.answer),
+        # which is how wrap() turns the same refusal into a returned Refusal.
         if not result.approved:
             if result.reason == "ceiling_exceeded":
                 raise CeilingExceededError(
                     f"Refused (ceiling_exceeded): estimated {estimated_units} units exceeds "
-                    f"the per-request ceiling of {self.ceiling}."
+                    f"the per-request ceiling of {self.ceiling}.", answer=data,
                 )
             if result.reason == "budget_exhausted":
-                raise BudgetExhaustedError(customer_id or "default", "Refused (budget_exhausted): this customer's balance is spent.")
+                raise BudgetExhaustedError(customer_id or "default", "Refused (budget_exhausted): this customer's balance is spent.",
+                                           answer=data)
             if result.reason == "task_ceiling_exceeded":
                 raise TaskCeilingExceededError(
                     task_ref=data.get("task_ref") or task_ref or "",
                     task_ceiling=data.get("task_ceiling"),
                     task_used_units=data.get("task_used_units"),
                     task_remaining_units=data.get("task_remaining_units"),
+                    answer=data,
                 )
 
         return result

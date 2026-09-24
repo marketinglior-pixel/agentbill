@@ -103,24 +103,24 @@ Automatic metering for a model client. Every call through `chat.completions.crea
 
 ```typescript
 import Anthropic from '@anthropic-ai/sdk'
-import { wrap, TaskCeilingExceededError } from 'agentbill'
+import { wrap, isRefusal } from 'agentbill'
 
 // Reads AGENTBILL_API_KEY. The job is counted in tokens; taskCeiling opens it.
 const llm = wrap(new Anthropic(), { taskRef: 'tokens-1', agentId: 'writer', step: 'draft', taskCeiling: 50_000 })
 
-try {
-  const msg = await llm.messages.create({
-    model: 'claude-sonnet-4-5', max_tokens: 400,
-    messages: [{ role: 'user', content: 'One line on job ceilings.' }],
-  })
+const msg = await llm.messages.create({
+  model: 'claude-sonnet-4-5', max_tokens: 400,
+  messages: [{ role: 'user', content: 'One line on job ceilings.' }],
+})
+if (isRefusal(msg)) {
+  // The call was not sent, and nothing is thrown: msg.reason, msg.used, msg.ceiling, msg.remaining.
+  console.log(String(msg))
+} else {
   console.log(msg.content[0].type === 'text' ? msg.content[0].text : '')
-} catch (e) {
-  if (!(e instanceof TaskCeilingExceededError)) throw e
-  console.log(e.message) // the call was not sent
 }
 ```
 
-The estimate is the job's running average per call in this process (`defaultEstimate`, 2,000, before the first), never more than the average prompt plus the call's own `max_tokens`. A refusal throws before the provider call is sent. After it, the record carries the provider's response id as `idempotencyKey`, the preflight's `reservationId`, and metadata (provider, model, tokens by type, `duration_ms`, `step`), never the prompt or the answer. Missing usage is recorded as missing, never as 0. OpenAI's `cache_write_tokens` are recorded as `cache_write`. With Gemini's automatic function calling (a `CallableTool` in `tools`) each round the SDK sends is its own measured call, because the response carries only the last round's usage. A client on another host is recorded as `openai-compatible` (or `anthropic-compatible`), unpriced, and keyed by a random key, since such a server's ids need not be unique. Each measured call is one preflight, so it uses one preflight of your account's monthly quota; once that quota is spent no ceiling can be checked, so by default the wrapped call throws `FreeTierExceededError` or `PlanLimitExceededError` (with `upgradeUrl`) and is not sent, and `onQuota: 'send'` sends it unchecked, with a warning once per job, and nothing bounds the job until the quota resets or you upgrade. A streamed call is recorded when its loop ends; a Chat Completions stream gets `stream_options.include_usage` when you did not set it, and the usage-only chunk that adds stays out of your loop. Only wrapped calls are measured. The wrapped `create` returns a plain Promise, without the SDK's `withResponse()`. `getTask('tokens-1')` returns the job's `breakdown` by model and by step, with `list_price_usd_estimate`, an estimate at public list price: list price, your invoice may differ.
+The estimate is the job's running average per call in this process (`defaultEstimate`, 2,000, before the job's opening call), never more than the average prompt plus the call's own `max_tokens`. A refusal is returned before the provider call is sent, as a `Refusal` (`approved: false`, `reason`, `taskRef`, `asked`, `used`, `ceiling`, `remaining`, `upgradeUrl` on a quota refusal, and `answer`, the preflight answer whole), never thrown; `isRefusal(x)` is the check, and the wrapped client is typed `Wrapped<T>` so each measured method resolves to `T | Refusal`. It is not shaped like a provider response: no `choices`, `content`, `candidates` or `usage`. A refused streaming call resolves to the same `Refusal`, which iterates to nothing; a Gemini automatic-function-calling stream refused on a later round ends after the earlier round's chunks and sets its `refusal`. A rejection out of a wrapped call is a failure (the provider's own error, or `AgentBillError` for a network error, a 401 or a 5xx). `preflight()` and `record()` are not changed by this: `preflight()` still throws `TaskCeilingExceededError` on a ceiling refusal and returns on the quota. After it, the record carries the provider's response id as `idempotencyKey`, the preflight's `reservationId`, and metadata (provider, model, tokens by type, `duration_ms`, `step`), never the prompt or the answer. Missing usage is recorded as missing, never as 0. OpenAI's `cache_write_tokens` are recorded as `cache_write`. With Gemini's automatic function calling (a `CallableTool` in `tools`) each round the SDK sends is its own measured call, because the response carries only the last round's usage. A client on another host is recorded as `openai-compatible` (or `anthropic-compatible`), unpriced, and keyed by a random key, since such a server's ids need not be unique. Each measured call is one preflight, so it uses one preflight of your account's monthly quota; once that quota is spent no ceiling can be checked, so by default (`onQuota: 'refuse'`) the wrapped call resolves to a `Refusal` with reason `free_tier_exceeded` or `plan_limit_exceeded` and `upgradeUrl`, and is not sent, and `onQuota: 'send'` sends it unchecked, with a warning once per job, and nothing bounds the job until the quota resets or you upgrade. A streamed call is recorded when its loop ends; a Chat Completions stream gets `stream_options.include_usage` when you did not set it, and the usage-only chunk that adds stays out of your loop. Only wrapped calls are measured. The wrapped `create` returns a plain Promise, without the SDK's `withResponse()`. `getTask('tokens-1')` returns the job's `breakdown` by model and by step, with `list_price_usd_estimate`, an estimate at public list price: list price, your invoice may differ.
 
 ### `meter(fn, options)`
 

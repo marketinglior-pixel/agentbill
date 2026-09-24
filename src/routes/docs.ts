@@ -323,25 +323,26 @@ WHERE account_id = :account
   <div class="code"><pre>pip install -U agentbill-sdk openai</pre></div>
   <div class="code"><pre>
 from openai import OpenAI
-from agentbill import wrap, TaskCeilingExceededError
+from agentbill import wrap, Refusal
 
 <span class="comment"># Reads AGENTBILL_API_KEY; OpenAI() reads OPENAI_API_KEY. The job is counted</span>
-<span class="comment"># in tokens, and task_ceiling opens it on its first call.</span>
+<span class="comment"># in tokens, and task_ceiling opens it on the call that creates it.</span>
 llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher",
            task_ceiling=50_000)
 
 questions = ["What is a job ceiling?", "Name one use for it.", "And one limit."]
-try:
-    for q in questions:
-        reply = llm.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=300,
-            messages=[{"role": "user", "content": q}],
-        )
-        print(reply.choices[0].message.content)
-except TaskCeilingExceededError as refused:
-    <span class="comment"># The call that would have passed the ceiling was not sent.</span>
-    print(refused)
+for q in questions:
+    reply = llm.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
+        messages=[{"role": "user", "content": q}],
+    )
+    if isinstance(reply, Refusal):
+        <span class="comment"># The call that would have passed the ceiling was not sent. Nothing</span>
+        <span class="comment"># is raised: reply.reason, reply.used, reply.ceiling, reply.remaining.</span>
+        print(reply)
+        break
+    print(reply.choices[0].message.content)
   </pre></div>
 
   <p>The same job across providers, one step each. <span class="inline">wrap()</span> on a
@@ -366,20 +367,21 @@ print(check.text)
   <div class="code"><pre>npm install agentbill openai</pre></div>
   <div class="code"><pre>
 import OpenAI from 'openai'
-import { wrap, TaskCeilingExceededError } from 'agentbill'
+import { wrap, isRefusal } from 'agentbill'
 
 <span class="comment">// Reads AGENTBILL_API_KEY; new OpenAI() reads OPENAI_API_KEY.</span>
 const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', taskCeiling: 50_000 })
 
-try {
-  const stream = await llm.chat.completions.create({
-    model: 'gpt-4o-mini', max_tokens: 300, stream: true,
-    messages: [{ role: 'user', content: 'What is a job ceiling?' }],
-  })
+const stream = await llm.chat.completions.create({
+  model: 'gpt-4o-mini', max_tokens: 300, stream: true,
+  messages: [{ role: 'user', content: 'What is a job ceiling?' }],
+})
+if (isRefusal(stream)) {
+  <span class="comment">// The call was not sent, and nothing is thrown: stream.reason, stream.used,</span>
+  <span class="comment">// stream.ceiling, stream.remaining. A refused stream iterates to nothing.</span>
+  console.log(String(stream))
+} else {
   for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
-} catch (e) {
-  if (!(e instanceof TaskCeilingExceededError)) throw e
-  console.log(e.message) <span class="comment">// the call was not sent</span>
 }
   </pre></div>
 
@@ -413,13 +415,32 @@ try {
     <span class="inline">422 task_unit_mismatch</span>, and the call is not sent. A customer limit
     set with <a href="#put-budget">PUT /budget</a> counts whatever that customer's calls send, so
     under <span class="inline">wrap()</span> it counts tokens.</li>
-    <li><strong>A refusal is raised, and your code decides.</strong> A provider error releases the
-    call's reservation. A record that fails after the provider answered never loses the answer.</li>
+    <li><strong>A refusal is returned, and your code decides.</strong> The measured call's value
+    is a <span class="inline">Refusal</span> (Python: <span class="inline">isinstance(reply, Refusal)</span>,
+    Node: <span class="inline">isRefusal(reply)</span>) with <span class="inline">approved</span>
+    false, <span class="inline">reason</span>, <span class="inline">task_ref</span>,
+    <span class="inline">asked</span>, <span class="inline">used</span>,
+    <span class="inline">ceiling</span>, <span class="inline">remaining</span> and
+    <span class="inline">answer</span>, the preflight answer whole. It is not shaped like a provider
+    response: no <span class="inline">choices</span>, <span class="inline">content</span>,
+    <span class="inline">candidates</span> or <span class="inline">usage</span>. A refused streaming
+    call returns the same <span class="inline">Refusal</span>, which iterates to nothing; the one
+    stream that can be refused after it started, a Gemini automatic-function-calling stream whose
+    later round is refused, ends after the earlier round's chunks and sets its
+    <span class="inline">refusal</span>. Nothing is raised for a refusal. An exception out of a
+    wrapped call is a failure: the provider's own error, or from AgentBill a network error, a 401
+    or a 5xx. A provider error releases the call's reservation. A record that fails after the
+    provider answered never loses the answer. <span class="inline">preflight()</span> and
+    <span class="inline">record()</span> on the plain client are not changed by this:
+    <span class="inline">preflight()</span> still raises
+    <span class="inline">TaskCeilingExceededError</span> on a ceiling refusal and returns on the
+    quota.</li>
     <li><strong>Each measured call is one preflight</strong>, so it uses one preflight of your
     account's monthly quota. Once that quota is spent, preflight answers before it looks at the job
-    and no ceiling can be checked. So by default the wrapped call raises
-    <span class="inline">FreeTierExceededError</span> or
-    <span class="inline">PlanLimitExceededError</span> with the upgrade link, and is not sent. With
+    and no ceiling can be checked. So by default the wrapped call returns a
+    <span class="inline">Refusal</span> with reason
+    <span class="inline">free_tier_exceeded</span> or
+    <span class="inline">plan_limit_exceeded</span> and the upgrade link, and is not sent. With
     <span class="inline">on_quota="send"</span> (Node: <span class="inline">onQuota: 'send'</span>)
     it is sent unchecked and recorded, with a warning once per job, and nothing bounds the job
     until the quota resets or you upgrade.</li>
@@ -523,9 +544,10 @@ try {
   AgentBill's own quota</strong> (<span class="inline">free_tier_exceeded</span>,
   <span class="inline">plan_limit_exceeded</span>), with
   <span class="inline">upgrade_url</span> set. Our quota running out must never crash your agent.
-  <a href="#wrap">wrap()</a> is the exception, because once the quota is spent no ceiling can be
-  checked: a wrapped call raises by default, and <span class="inline">on_quota="send"</span>
-  sends it unchecked instead.</p>
+  Under <a href="#wrap">wrap()</a> nothing is raised for a refusal: every one, the quota included,
+  comes back as a returned <span class="inline">Refusal</span>, because once the quota is spent no
+  ceiling can be checked; <span class="inline">on_quota="send"</span> sends the call unchecked
+  instead. <span class="inline">preflight()</span> itself is unchanged.</p>
 
   <h3>record()</h3>
   <table>

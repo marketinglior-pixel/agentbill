@@ -18,7 +18,8 @@ import { PLAN_ORDER, PLAN_PRICES, PLAN_LIMITS } from '../integrations/polar.js'
 // keeps being mistaken for. Both are load-bearing; do not trim them for length.
 //
 // Voice rule, and it is the one most easily lost in an edit: preflight ANSWERS
-// and the SDK RAISES. It does not stop, kill or block a run. Nothing here is in
+// and the SDK RAISES (or, under wrap(), RETURNS a Refusal). It does not stop,
+// kill or block a run. Nothing here is in
 // our process and nothing here can end it. The one place the word "blocked"
 // may appear is inside a quoted SDK message, because that string is what the
 // caller actually sees.
@@ -47,7 +48,8 @@ const SUMMARY =
   'against a ceiling identified by a task_ref you choose: the integer units you pass or, when ' +
   "the SDK's wrap() is around your OpenAI, Anthropic or Gemini client, the job's running average " +
   'in tokens. When the reservation would cross that ceiling it refuses, answering approved: false ' +
-  'or raising a typed error, after which your own code decides what happens next. Every process, ' +
+  '(the plain SDK client raises a typed error; a wrapped client returns a typed Refusal), after ' +
+  'which your own code decides what happens next. Every process, ' +
   'machine, provider and agent that passes the same task_ref draws on the same ceiling. After the ' +
   'call, record settles what it used: your number or, through wrap(), the token counts your ' +
   'provider reported on the response, which the server prices as an estimate at public list ' +
@@ -88,7 +90,7 @@ const NOT_A = `## What AgentBill is not
   job down by model and by step (calls, tokens, a list-price estimate), and GET /decisions stores
   spend decisions, not conversations.
 - **Not a process supervisor.** Nothing here can terminate a run. preflight answers and the SDK
-  raises; the except or catch block is what ends the job.`
+  raises, or under wrap() returns a Refusal; the except, catch or if block is what ends the job.`
 
 const REFUSALS = `## The refusal contract
 
@@ -105,9 +107,12 @@ is an error status.
 | free_tier_exceeded (plan is free) | returned, with .upgrade_url | returned, with .upgradeUrl |
 | plan_limit_exceeded (any paid plan) | returned, with .upgrade_url | returned, with .upgradeUrl |
 
-Under wrap() the quota is the exception: once it is spent no ceiling can be checked, so by default a
-wrapped call raises FreeTierExceededError or PlanLimitExceededError (both SDKs) and is not sent;
-on_quota="send" (Node: onQuota: 'send') sends it unchecked instead.
+Under wrap() nothing in that table is raised: a measured call returns a Refusal for every reason,
+the quota included (once it is spent no ceiling can be checked, and on_quota="send", Node
+onQuota: 'send', sends the call unchecked instead). Branch on it: Python isinstance(r, Refusal),
+Node isRefusal(r). Exceptions out of a wrapped call are failures only (network, 401, 5xx, the
+provider's own error). preflight() and record() on the plain client are not changed by this:
+preflight() still raises TaskCeilingExceededError on a ceiling refusal and returns on the quota.
 
 Two shapes that are errors rather than refusals: a task_ref preflight has never seen, arriving
 without a task_ceiling, is 422 task_ceiling_required (Python raises TaskCeilingRequiredError, Node
@@ -281,23 +286,34 @@ preflight on the job in tokens before it, record with the usage your provider re
 
 \`\`\`python
 from openai import OpenAI
-from agentbill import wrap, TaskCeilingExceededError
+from agentbill import wrap, Refusal
 
 # Reads AGENTBILL_API_KEY. task_ceiling opens the job, counted in tokens.
 llm = wrap(OpenAI(), task_ref="tokens-1", agent_id="researcher", task_ceiling=50_000)
-try:
-    reply = llm.chat.completions.create(model="gpt-4o-mini", max_tokens=300,
-                                        messages=[{"role": "user", "content": "Hello"}])
-except TaskCeilingExceededError as refused:
-    print(refused)   # the call that would have passed the ceiling was not sent
+reply = llm.chat.completions.create(model="gpt-4o-mini", max_tokens=300,
+                                    messages=[{"role": "user", "content": "Hello"}])
+if isinstance(reply, Refusal):
+    print(reply)   # the call that would have passed the ceiling was not sent; nothing raised
+else:
+    print(reply.choices[0].message.content)
 \`\`\`
 
 \`\`\`typescript
 import OpenAI from 'openai'
-import { wrap } from 'agentbill'
+import { wrap, isRefusal } from 'agentbill'
 
 const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', taskCeiling: 50_000 })
+const reply = await llm.chat.completions.create({ model: 'gpt-4o-mini', max_tokens: 300, messages: [{ role: 'user', content: 'Hello' }] })
+if (isRefusal(reply)) console.log(String(reply))   // the call was not sent; nothing thrown
 \`\`\`
+
+A refusal is a value, not an exception: the measured call returns a Refusal (approved False,
+reason, task_ref, asked, used, ceiling, remaining, upgrade_url on a quota refusal, and answer, the
+preflight answer whole). It has no choices, content, candidates or usage, and bool() of it is False.
+A refused streaming call returns the same Refusal, and iterating it yields nothing. The one stream
+that can be refused after it started, a Gemini automatic-function-calling stream whose later round
+is refused, ends after the earlier round's chunks and sets its .refusal. Exceptions out of a wrapped
+call are failures: the provider's own error, or from AgentBill a network error, a 401 or a 5xx.
 
 - Measured: OpenAI chat.completions.create and responses.create, Anthropic messages.create, and
   google-genai generate_content and generate_content_stream (Python also aio.models), sync, async
@@ -309,7 +325,8 @@ const llm = wrap(new OpenAI(), { taskRef: 'tokens-1', agentId: 'researcher', tas
   and metadata carries provider, model, the tokens by type, duration_ms and step. Missing usage is
   recorded as missing, never as 0.
 - Each measured call is one preflight, so it uses one preflight of the account's monthly quota.
-- A refusal raises TaskCeilingExceededError before the provider call is sent. Your code decides.
+- A refusal is returned as a Refusal before the provider call is sent, never raised. Your code
+  decides. preflight() on the plain client still raises TaskCeilingExceededError.
 - GET /tasks/:task_ref then breaks the job down by model and by step, with tokens and an estimate
   at public list price. List price, your invoice may differ.
 
@@ -709,7 +726,7 @@ review = agentbill.wrap(llm, step="review")      # another step, the same job an
 \`\`\`
 
 Python: wrap(client, *, task_ref, agent_id, step=None, customer_id=None, task_ceiling=None,
-default_estimate=None, agentbill_client=None, provider=None, on_quota="raise"). Node: wrap(client,
+default_estimate=None, agentbill_client=None, provider=None, on_quota="refuse"). Node: wrap(client,
 { taskRef, agentId, step, customerId, taskCeiling, defaultEstimate, provider, onQuota }). The key comes from AGENTBILL_API_KEY in
 both unless Python is given agentbill_client. The wrapped client is the original with the measured
 methods replaced: every other attribute is the original's, and the original object is untouched and
@@ -747,11 +764,15 @@ recorded with usage_missing, never as 0. A provider error releases the reservati
 never loses the answer. A client pointed at another host is recorded as "<provider>-compatible" and is
 not priced.
 
-Each measured call is one preflight, so it uses one preflight of the account's monthly quota. Once
-that quota is spent, preflight answers before it looks at the job and no ceiling can be checked. By
-default (on_quota="raise") the wrapped call raises FreeTierExceededError or PlanLimitExceededError with
-upgrade_url and is not sent. With on_quota="send" it is sent unchecked and recorded, with a warning
-once per job, and nothing bounds the job until the quota resets or the plan is upgraded.
+A refusal is returned, never raised (both SDKs): the measured call's value is a Refusal, checked with
+isinstance(reply, Refusal) in Python and isRefusal(reply) in Node, and the provider call was not
+sent. Each measured call is one preflight, so it uses one preflight of the account's monthly quota.
+Once that quota is spent, preflight answers before it looks at the job and no ceiling can be
+checked. By default (on_quota="refuse") the wrapped call returns a Refusal with reason
+free_tier_exceeded or plan_limit_exceeded and upgrade_url, and is not sent. With on_quota="send" it
+is sent unchecked and recorded, with a warning once per job, and nothing bounds the job until the
+quota resets or the plan is upgraded. preflight() on the plain client is not changed: it still
+raises TaskCeilingExceededError on a ceiling refusal and returns on the quota.
 
 ## Two things that are not the task ceiling
 

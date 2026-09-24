@@ -10,7 +10,7 @@ from .client import (
     PreflightResult,
     TaskStatus,
 )
-from .wrap import wrap
+from .wrap import wrap, Refusal
 
 __all__ = [
     "meter",
@@ -27,4 +27,5 @@ __all__ = [
     "PreflightResult",
     "TaskStatus",
     "wrap",
+    "Refusal",
 ]

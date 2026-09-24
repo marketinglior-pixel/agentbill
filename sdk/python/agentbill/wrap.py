@@ -14,9 +14,13 @@ provider. Around the methods listed below, and only those, wrap() adds two
 calls to AgentBill:
 
   before  POST /preflight on the job, in tokens (the job's unit is "token"),
-          with an estimate this module works out (see _Average). A refusal
-          raises TaskCeilingExceededError BEFORE the provider call is sent: the
-          wrapped call does not go out, and your code decides what happens next.
+          with an estimate this module works out (see _Average). A refusal is
+          RETURNED, as a Refusal, BEFORE the provider call is sent: the wrapped
+          call does not go out, and your code decides what happens next (see
+          Refusal). Nothing is raised for a refusal; an exception out of a
+          measured call is a failure: the provider's own error, or from
+          AgentBill a network error, a 401 (AuthenticationError), a 5xx
+          (AgentBillError), a 422 task_unit_mismatch (requests.HTTPError).
   after   POST /events with the usage the provider reported on the response
           your process received: input, cache reads, cache writes, output
           (reasoning included, and counted separately where the provider says
@@ -50,12 +54,16 @@ stays held until it expires, which keeps the ceiling tighter, not looser.
 
 AgentBill's own quota (free_tier_exceeded, plan_limit_exceeded): once it is
 spent, preflight answers before it looks at the job, so no ceiling can be
-checked. By default (on_quota="raise") wrap() raises FreeTierExceededError or
-PlanLimitExceededError, with upgrade_url, and the call is not sent: a ceiling
-that silently stopped being checked is the failure a ceiling exists to
-prevent. With on_quota="send" the call is sent unchecked and recorded, with a
+checked. By default (on_quota="refuse") the measured call returns a Refusal
+with that reason and upgrade_url, and the call is not sent: a ceiling that
+silently stopped being checked is the failure a ceiling exists to prevent.
+With on_quota="send" the call is sent unchecked and recorded, with a
 RuntimeWarning once per job, and nothing bounds the job until the quota resets
-or the plan is upgraded. preflight() itself never raises on the quota.
+or the plan is upgraded.
+
+The plain client is not changed by any of this: AgentBillClient.preflight()
+still raises TaskCeilingExceededError, CeilingExceededError and
+BudgetExhaustedError, and returns approved=False on the quota.
 """
 from __future__ import annotations
 
@@ -68,14 +76,117 @@ import threading
 import time
 import uuid
 import warnings
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, Optional, Tuple, TypeVar
 from urllib.parse import urlparse
 
-from .client import BASE_URL, AgentBillClient, FreeTierExceededError, PlanLimitExceededError
+from .client import (BASE_URL, AgentBillClient, CeilingExceededError,
+                     TaskCeilingExceededError, _answer_of)
+from .meter import BudgetExhaustedError
 
 T = TypeVar("T")
 
-__all__ = ["wrap"]
+__all__ = ["wrap", "Refusal"]
+
+
+# ---------------------------------------------------------------- the refusal
+
+@dataclass(frozen=True)
+class Refusal:
+    """What a measured call returns, instead of the provider's response, when
+    preflight refused it. The provider call was not sent and nothing was
+    recorded. A refusal is an expected state of a job with a ceiling, not a
+    failure, so it is returned, and your code decides: stop, skip, or replan.
+
+        reply = llm.chat.completions.create(model="gpt-4o-mini", messages=msgs)
+        if isinstance(reply, Refusal):
+            log.info("job %s: %s", reply.task_ref, reply)
+            return partial_result
+
+    It is not shaped like a provider response and cannot be mistaken for one:
+    bool(refusal) is False, and it has no choices, content, candidates, text
+    or usage. For a streaming call the same object is returned; iterating it
+    (for, async for) yields nothing, and it is a no-op context manager, so a
+    loop written for the provider's stream runs zero times and the check is
+    the same isinstance after it. There is no other stream shape for a call
+    refused before anything was sent. One stream, and only one, can be
+    refused after it started: a Gemini automatic-function-calling stream whose
+    later round is refused ends after the earlier round's chunks, and the
+    stream's .refusal is set (None on every other stream wrap() returns).
+
+    approved     always False
+    reason       task_ceiling_exceeded (the job's ceiling), ceiling_exceeded
+                 (the per-call ceiling set on the AgentBillClient),
+                 budget_exhausted (that customer's balance),
+                 free_tier_exceeded or plan_limit_exceeded (this account's
+                 monthly preflight quota, so the ceiling was not checked)
+    task_ref     the job
+    asked        the estimate this call asked preflight to reserve, in tokens
+    used         the job's used tokens (task_ceiling_exceeded), else None
+    ceiling      the job's ceiling, or on ceiling_exceeded the per-call one
+    remaining    what is left: of the job, or of the customer's balance
+    upgrade_url  set on a quota refusal
+    answer       the preflight answer as the server sent it, whole
+    str(refusal) one sentence naming the reason and the numbers
+    """
+    reason: str
+    task_ref: Optional[str] = None
+    asked: Optional[int] = None
+    used: Optional[int] = None
+    ceiling: Optional[int] = None
+    remaining: Optional[int] = None
+    upgrade_url: Optional[str] = None
+    answer: Dict[str, Any] = field(default_factory=dict)
+    approved: bool = field(default=False, init=False)
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __str__(self) -> str:
+        r = self.reason
+        if r == "task_ceiling_exceeded":
+            return (f"Refused (task_ceiling_exceeded): job {self.task_ref!r} is at {self.used}/{self.ceiling} tokens "
+                    f"and {self.remaining} remaining is not enough for the {self.asked} this call asked for. "
+                    f"The call was not sent.")
+        if r == "ceiling_exceeded":
+            return (f"Refused (ceiling_exceeded): this call asked for {self.asked} tokens, over the per-call ceiling "
+                    f"of {self.ceiling}. The call was not sent.")
+        if r == "budget_exhausted":
+            return (f"Refused (budget_exhausted): this customer's balance is spent ({self.remaining} remaining), so "
+                    f"job {self.task_ref!r} cannot continue on it. The call was not sent.")
+        return (f"Refused ({r}): this account's monthly preflight quota is spent, so the ceiling of job "
+                f"{self.task_ref!r} cannot be checked, and the call was not sent. Upgrade: {self.upgrade_url} "
+                f"(or wrap(..., on_quota=\"send\") to send calls unchecked).")
+
+    # A refused streaming call: nothing to iterate, nothing to close.
+    def __iter__(self) -> Iterator[Any]:
+        return iter(())
+
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        return
+        yield  # pragma: no cover - makes this an async generator that yields nothing
+
+    def __enter__(self) -> "Refusal":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    async def __aenter__(self) -> "Refusal":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+class _Refused(Exception):
+    """Carries a Refusal out of a measured per-round Gemini method, through
+    the provider SDK's own automatic-function-calling loop, to the public
+    method's wrapper, which returns it. Never leaves this module."""
+
+    def __init__(self, refusal: Refusal):
+        self.refusal = refusal
+        super().__init__(str(refusal))
 
 # The largest estimate POST /preflight accepts (INT4, see src/lib/ids.ts).
 _INT4_MAX = 2_147_483_647
@@ -435,7 +546,11 @@ def _idempotency_key(response_id: Any, agent_id: str, endpoint: str) -> str:
     return _random_key(agent_id)
 
 
-_ON_QUOTA = ("raise", "send")
+_ON_QUOTA = ("refuse", "send")
+
+# The three refusals preflight() raises for. wrap() catches exactly these and
+# returns them as a Refusal; every other exception is a failure and passes.
+_REFUSALS = (TaskCeilingExceededError, CeilingExceededError, BudgetExhaustedError)
 
 
 class _Meter:
@@ -468,24 +583,23 @@ class _Meter:
     #    them in a thread, so both paths send exactly the same requests)
 
     def preflight(self, kind: str, kwargs: Dict[str, Any]):
+        """The PreflightResult when approved (or sent unchecked), else a Refusal."""
         estimate = self.average.estimate(self.default_estimate, _max_tokens(kind, kwargs))
-        result = self.ab.preflight(self.agent_id, estimated_units=estimate, customer_id=self.customer_id,
-                                   task_ref=self.task_ref, task_ceiling=self.task_ceiling, unit="token")
+        try:
+            result = self.ab.preflight(self.agent_id, estimated_units=estimate, customer_id=self.customer_id,
+                                       task_ref=self.task_ref, task_ceiling=self.task_ceiling, unit="token")
+        except _REFUSALS as refused:
+            # Your spend rule refused the call: preflight() raises, and here
+            # the same refusal is a value. Nothing was reserved.
+            return self._refusal(refused, estimate)
         if result.approved:
             return result
-        # Only AgentBill's own quota comes back unraised (your spend rules
-        # raise inside preflight()). The server answers it before it looks at
-        # the job, so this call's ceiling was not checked and nothing was
-        # reserved.
-        if self.on_quota == "raise":
-            error = FreeTierExceededError if result.reason == "free_tier_exceeded" else PlanLimitExceededError
-            message = (
-                f"Refused ({result.reason}): this account's monthly preflight quota is spent, so the ceiling of "
-                f"job {self.task_ref!r} cannot be checked, and the call was not sent. Upgrade: {result.upgrade_url} "
-                f"(or wrap(..., on_quota=\"send\") to send calls unchecked).")
-            if error is FreeTierExceededError:
-                raise FreeTierExceededError(result.upgrade_url, message)
-            raise PlanLimitExceededError(None, result.upgrade_url, message)
+        # Only AgentBill's own quota comes back unraised. The server answers
+        # it before it looks at the job, so this call's ceiling was not
+        # checked and nothing was reserved.
+        if self.on_quota == "refuse":
+            return Refusal(reason=str(result.reason), task_ref=self.task_ref, asked=estimate,
+                           upgrade_url=result.upgrade_url, answer=_answer_of(result) or {})
         # on_quota="send": sent unchecked. Once per job, and the job is in the
         # message, so Python's once-per-text warning filter shows it for each.
         key = f"quota:{self.task_ref}"
@@ -499,6 +613,21 @@ class _Meter:
                 f"recorded, and nothing bounds the job until the quota resets or you upgrade: {result.upgrade_url}",
                 RuntimeWarning, stacklevel=4)
         return result
+
+    def _refusal(self, e: Exception, estimate: int) -> Refusal:
+        answer = getattr(e, "answer", None)
+        answer = answer if isinstance(answer, dict) else {}
+        asked = answer.get("estimated_units")
+        asked = asked if isinstance(asked, int) and not isinstance(asked, bool) else estimate
+        if isinstance(e, TaskCeilingExceededError):
+            return Refusal(reason="task_ceiling_exceeded", task_ref=e.task_ref or self.task_ref, asked=asked,
+                           used=e.task_used_units, ceiling=e.task_ceiling, remaining=e.task_remaining_units,
+                           answer=answer)
+        if isinstance(e, CeilingExceededError):
+            return Refusal(reason="ceiling_exceeded", task_ref=self.task_ref, asked=asked,
+                           ceiling=answer.get("ceiling", self.ab.ceiling), answer=answer)
+        return Refusal(reason="budget_exhausted", task_ref=self.task_ref, asked=asked,
+                       remaining=answer.get("remaining_units"), answer=answer)
 
     def release(self, pre: Any) -> None:
         if not pre.approved:
@@ -554,12 +683,22 @@ class _Meter:
 
     # -- the wrapped method
 
-    def method(self, fn: Callable, kind: str, owner: Any, whole_loop: bool = False) -> Callable:
+    def method(self, fn: Callable, kind: str, owner: Any, whole_loop: bool = False, signal: bool = False) -> Callable:
         """fn measured as one model request. whole_loop: fn is a public Gemini
         method measured as a whole because the per-round method behind it was
-        not found, so a call that would loop over rounds is refused here."""
+        not found, so a call that would loop over rounds is refused here.
+        signal: fn is the per-round method the provider SDK's own loop calls,
+        so a refusal cannot be returned through that loop; it is raised as
+        _Refused and the public method's wrapper (see _Wrapped) returns it."""
         is_async = _is_async(fn, owner)
         meter = self
+
+        def refused(pre: Any) -> bool:
+            if not isinstance(pre, Refusal):
+                return False
+            if signal:
+                raise _Refused(pre)
+            return True
 
         def prepare(kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool, bool]:
             if whole_loop and _would_loop(kwargs.get("config")):
@@ -587,6 +726,8 @@ class _Meter:
             def wrapped(*args: Any, **kwargs: Any) -> Any:
                 kwargs, streamed, swallow = prepare(kwargs)
                 pre = meter.preflight(shape, kwargs)
+                if refused(pre):
+                    return pre
                 started = time.monotonic()
                 try:
                     resp = fn(*args, **kwargs)
@@ -602,6 +743,8 @@ class _Meter:
             async def wrapped(*args: Any, **kwargs: Any) -> Any:
                 kwargs, streamed, swallow = prepare(kwargs)
                 pre = await asyncio.to_thread(meter.preflight, shape, kwargs)
+                if refused(pre):
+                    return pre
                 started = time.monotonic()
                 try:
                     resp = await fn(*args, **kwargs)
@@ -654,6 +797,11 @@ def _is_async(fn: Callable, owner: Any) -> bool:
 # ---------------------------------------------------------------- streams
 
 class _StreamBase:
+    # Every stream wrap() returns has .refusal. It is None here, always: a
+    # stream this class wraps was approved before it was sent. Only a Gemini
+    # automatic-function-calling stream (_RoundsStream) can be refused later.
+    refusal: Optional[Refusal] = None
+
     def __init__(self, inner: Any, meter: _Meter, pre: Any, facts: _StreamFacts, requested_model: Any,
                  started: float, sent: bool):
         self._inner, self._meter, self._pre, self._facts = inner, meter, pre, facts
@@ -825,6 +973,95 @@ class _AsyncStream(_StreamBase):
             await self._finish()
 
 
+class _RoundsStream:
+    """A Gemini automatic-function-calling stream (the SDK's own generator,
+    running over measured per-round methods), primed by one read so a refusal
+    of the FIRST round is returned as the Refusal itself, before anything was
+    sent. A refusal of a LATER round arrives mid-stream, as _Refused out of
+    the generator: the stream ends there, after the earlier round's chunks,
+    and .refusal is set. The earlier rounds are recorded."""
+
+    def __init__(self, gen: Iterator[Any], head: Tuple[Any, ...]):
+        self._gen, self._head = gen, list(head)
+        self.refusal: Optional[Refusal] = None
+
+    @classmethod
+    def prime(cls, gen: Iterator[Any]) -> Any:
+        try:
+            first = next(gen)
+        except _Refused as r:
+            return r.refusal
+        except StopIteration:
+            return cls(gen, ())
+        return cls(gen, (first,))
+
+    def __iter__(self) -> "_RoundsStream":
+        return self
+
+    def __next__(self) -> Any:
+        if self._head:
+            return self._head.pop(0)
+        try:
+            return next(self._gen)
+        except _Refused as r:
+            self.refusal = r.refusal
+            raise StopIteration
+
+    def close(self) -> None:
+        close = getattr(self._gen, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> "_RoundsStream":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+
+class _AsyncRoundsStream:
+    """The async twin of _RoundsStream."""
+
+    def __init__(self, agen: AsyncIterator[Any], head: Tuple[Any, ...]):
+        self._agen, self._head = agen, list(head)
+        self.refusal: Optional[Refusal] = None
+
+    @classmethod
+    async def prime(cls, agen: AsyncIterator[Any]) -> Any:
+        try:
+            first = await agen.__anext__()
+        except _Refused as r:
+            return r.refusal
+        except StopAsyncIteration:
+            return cls(agen, ())
+        return cls(agen, (first,))
+
+    def __aiter__(self) -> "_AsyncRoundsStream":
+        return self
+
+    async def __anext__(self) -> Any:
+        if self._head:
+            return self._head.pop(0)
+        try:
+            return await self._agen.__anext__()
+        except _Refused as r:
+            self.refusal = r.refusal
+            raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        close = getattr(self._agen, "aclose", None)
+        if callable(close):
+            await close()
+
+    close = aclose
+
+    async def __aenter__(self) -> "_AsyncRoundsStream":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
+
+
 # ---------------------------------------------------------------- the proxy
 
 class _Wrapped:
@@ -849,19 +1086,39 @@ class _Wrapped:
             if inspect.isfunction(public) and callable(getattr(target, _GEMINI_ROUNDS[name], None)):
                 # The public method, run with this wrapped resource as self:
                 # each round it sends goes through self._generate_content*,
-                # which this proxy measures (see _GEMINI_ROUNDS). Calling it
-                # returns what it always does (a response, a coroutine, a
-                # generator or an async generator).
+                # which this proxy measures (see _GEMINI_ROUNDS) and which
+                # raises _Refused on a refusal, since the SDK's own loop sits
+                # between it and the caller. Caught here and returned. A
+                # stream is primed by one read (see _RoundsStream) so a
+                # first-round refusal is the Refusal itself.
                 resource = self
+                streamed = name == "generate_content_stream"
 
-                def rounds(*args: Any, **kwargs: Any) -> Any:
-                    return public(resource, *args, **kwargs)
+                # Primed through iter()/__aiter__(), never next() on the object:
+                # when the SDK hands back the measured round's own stream
+                # (automatic function calling off), that is what records it.
+                if _is_async(public, target):
+                    async def rounds(*args: Any, **kwargs: Any) -> Any:
+                        try:
+                            out = await public(resource, *args, **kwargs)
+                            return await _AsyncRoundsStream.prime(out.__aiter__()) if streamed else out
+                        except _Refused as r:
+                            return r.refusal
+                else:
+                    def rounds(*args: Any, **kwargs: Any) -> Any:
+                        try:
+                            out = public(resource, *args, **kwargs)
+                            return _RoundsStream.prime(iter(out)) if streamed else out
+                        except _Refused as r:
+                            return r.refusal
                 rounds.__name__, rounds.__doc__ = name, getattr(public, "__doc__", None)
                 rounds.__wrapped__ = attr  # type: ignore[attr-defined]
                 return rounds
             return meter.method(attr, methods[path], owner=target, whole_loop=True)
         if path in methods:
-            return meter.method(attr, methods[path], owner=target)
+            # The per-round methods (a leading underscore) are called by the
+            # SDK's own loop, never by the caller: their refusal is a signal.
+            return meter.method(attr, methods[path], owner=target, signal=name.startswith("_"))
         if len(path) == 1 and name in _COPIES[meter.provider] and callable(attr):
             def copy(*args: Any, **kwargs: Any) -> Any:
                 return _Wrapped(attr(*args, **kwargs), meter)
@@ -953,15 +1210,18 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
         client cannot tell.
     on_quota: what a measured call does once this account's monthly preflight
         quota is spent (each measured call is one preflight), when no ceiling
-        can be checked. "raise", the default: FreeTierExceededError or
-        PlanLimitExceededError, with upgrade_url, and the call is not sent.
-        "send": the call is sent unchecked and recorded, with a RuntimeWarning
-        once per job, and nothing bounds the job until the quota resets.
+        can be checked. "refuse", the default: the call returns a Refusal with
+        reason free_tier_exceeded or plan_limit_exceeded and upgrade_url, and
+        is not sent. "send": the call is sent unchecked and recorded, with a
+        RuntimeWarning once per job, and nothing bounds the job until the
+        quota resets.
 
     Returns the client, wrapped. The original is untouched and unmeasured.
+    Each measured method returns what it always did, or a Refusal (see
+    Refusal): check isinstance(reply, Refusal) before reading the response.
     """
     if on_quota is not None and on_quota not in _ON_QUOTA:
-        raise ValueError('on_quota is "raise" or "send".')
+        raise ValueError('on_quota is "refuse" or "send".')
     if isinstance(client, _Wrapped):
         target = object.__getattribute__(client, "_agentbill_target")
         base: _Meter = object.__getattribute__(client, "_agentbill_meter")
@@ -988,6 +1248,6 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
                                            base_url=os.environ.get("AGENTBILL_BASE_URL") or BASE_URL)
     meter = _Meter(ab=agentbill_client, provider=kind, endpoint=_endpoint(client, kind), task_ref=task_ref,
                    agent_id=agent_id, customer_id=customer_id, step=step, task_ceiling=task_ceiling,
-                   default_estimate=default_estimate or DEFAULT_ESTIMATE, on_quota=on_quota or "raise",
+                   default_estimate=default_estimate or DEFAULT_ESTIMATE, on_quota=on_quota or "refuse",
                    averages={}, lock=threading.Lock(), warned={})
     return _Wrapped(client, meter)  # type: ignore[return-value]

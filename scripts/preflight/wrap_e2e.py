@@ -15,14 +15,17 @@ by the first call. Every call uses 700 input + 100 cache read + 200 cache
 write + 300 output = 1,300 tokens, with max_tokens 400 and default_estimate
 1,000, so the estimates are 400 (min(1000, 0 + 400)), then 1,300 (the mean,
 under 1,000 + 400), and the fourth call (3,900 + 1,300 > 4,000) is refused
-before the fake is called: three calls sent.
+before the fake is called: three calls sent. The refusal is RETURNED as a
+Refusal, nothing is raised (2026-09-24), and a streamed call on the same job
+is the Refusal too, iterating to nothing.
 
 Scenario B, async OpenAI stream on a second job: include_usage is turned on
 for the caller, the usage-only chunk is hidden, and the call is recorded.
 
 Scenario C, the account's own monthly quota spent (the key in
 AGENTBILL_QUOTA_KEY belongs to an account verify.mjs planted at 1,000 of
-1,000): wrap() raises FreeTierExceededError and the fake is sent nothing.
+1,000): wrap() returns a Refusal (free_tier_exceeded) and the fake is sent
+nothing.
 
 Scenario D, a sync stream whose for loop breaks, with no close() and no
 with-block: it is recorded (usage missing) and nothing stays reserved.
@@ -40,7 +43,7 @@ import sys
 from types import SimpleNamespace as NS
 
 import agentbill
-from agentbill import AgentBillClient, FreeTierExceededError, TaskCeilingExceededError
+from agentbill import AgentBillClient, Refusal
 
 suffix = sys.argv[1] if len(sys.argv) > 1 else "x"
 out = {}
@@ -67,13 +70,23 @@ ant = FakeAnthropic()
 llm = agentbill.wrap(ant, task_ref=f"wrap-py-{suffix}", agent_id="py-e2e", step="draft",
                      task_ceiling=4000, default_estimate=1000)
 refused = None
+raised = None
 for i in range(10):
     try:
-        llm.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[{"role": "user", "content": "x"}])
-    except TaskCeilingExceededError as e:
-        refused = {"at_call": i + 1, "remaining": e.task_remaining_units, "used": e.task_used_units}
+        r = llm.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[{"role": "user", "content": "x"}])
+    except Exception as e:  # noqa: BLE001 - anything raised here is the finding
+        raised = f"{type(e).__name__}: {e}"
         break
-out["sync"] = {"sent": ant.sent, "refused": refused}
+    if isinstance(r, Refusal):
+        refused = {"at_call": i + 1, "type": type(r).__name__, "reason": r.reason, "used": r.used, "ceiling": r.ceiling,
+                   "remaining": r.remaining, "asked": r.asked, "falsy": not r, "has_content": hasattr(r, "content"),
+                   "answer_reason": r.answer.get("reason")}
+        break
+stream = None
+if raised is None:
+    s = llm.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[], stream=True)
+    stream = {"type": type(s).__name__, "items": len(list(s)), "sent": ant.sent}
+out["sync"] = {"sent": ant.sent, "refused": refused, "raised": raised, "stream": stream}
 
 
 class AsyncStream:
@@ -128,10 +141,11 @@ if quota_key:
     qc = AgentBillClient(api_key=quota_key, base_url=os.environ["AGENTBILL_BASE_URL"])
     ql = agentbill.wrap(qa, task_ref=f"wrap-py-quota-{suffix}", agent_id="py-e2e", agentbill_client=qc)
     try:
-        ql.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[])
-        out["quota"] = {"raised": None, "sent": qa.sent}
-    except FreeTierExceededError as e:
-        out["quota"] = {"raised": type(e).__name__, "upgrade_url": e.upgrade_url, "sent": qa.sent}
+        r = ql.messages.create(model="claude-sonnet-4-5", max_tokens=400, messages=[])
+        out["quota"] = {"returned": type(r).__name__, "reason": getattr(r, "reason", None),
+                        "upgrade_url": getattr(r, "upgrade_url", None), "raised": None, "sent": qa.sent}
+    except Exception as e:  # noqa: BLE001 - anything raised here is the finding
+        out["quota"] = {"returned": None, "raised": f"{type(e).__name__}: {e}", "sent": qa.sent}
 
 
 # ---- D: a for loop that breaks

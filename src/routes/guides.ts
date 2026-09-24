@@ -189,9 +189,12 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   <span class="inline">plan_limit_exceeded</span>), with
   <span class="inline">upgrade_url</span> set. Our billing running out must never crash your agent,
   so those two come back as a value you can act on rather than an exception you did not plan for.
-  A client made with <a href="/docs#wrap">wrap()</a> is the exception: once the quota is spent no
-  ceiling can be checked, so a wrapped call raises by default, and
-  <span class="inline">on_quota="send"</span> sends it unchecked instead.</p>
+  A client made with <a href="/docs#wrap">wrap()</a> raises for no refusal at all: every one, the
+  quota included, is returned as a typed <span class="inline">Refusal</span> (Python
+  <span class="inline">isinstance(reply, Refusal)</span>, Node
+  <span class="inline">isRefusal(reply)</span>), because once the quota is spent no ceiling can be
+  checked, and <span class="inline">on_quota="send"</span> sends the call unchecked instead.
+  <span class="inline">preflight()</span> on the plain client is unchanged.</p>
 
   <h2>Getting back to the three-step screen</h2>
   <p>The link to it disappears from the console once the account has had a refusal, because it is a

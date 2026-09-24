@@ -16,8 +16,8 @@ import pytest
 import requests
 
 import agentbill.client as client_module
-from agentbill import (AgentBillClient, FreeTierExceededError, PlanLimitExceededError,
-                       TaskCeilingExceededError, wrap)
+from agentbill import (AgentBillClient, AuthenticationError, BudgetExhaustedError, CeilingExceededError,
+                       Refusal, TaskCeilingExceededError, wrap)
 from agentbill.wrap import DEFAULT_ESTIMATE
 
 FAKE_KEY = "agb_" + uuid.uuid4().hex
@@ -50,14 +50,14 @@ class _Resp:
 def server(monkeypatch):
     """Answers /preflight with state['preflight'] and /events with RECORDED (or
     state['events_status']); keeps every request as (endpoint, body)."""
-    state = {"preflight": APPROVED, "events_status": 200, "sent": []}
+    state = {"preflight": APPROVED, "preflight_status": 200, "events_status": 200, "sent": []}
 
     def fake_post(url, json=None, headers=None, timeout=None):
         path = url.rsplit("/", 1)[-1]
         state["sent"].append((path, json))
         if path == "preflight":
             answer = state["preflight"]
-            return _Resp(200, answer() if callable(answer) else answer)
+            return _Resp(state["preflight_status"], answer() if callable(answer) else answer)
         if "events_body" in state:        # a callable of the request body
             return _Resp(200, state["events_body"](json))
         return _Resp(state["events_status"], RECORDED if state["events_status"] == 200 else {"error": "boom"})
@@ -272,15 +272,103 @@ def test_openai_chat_preflights_in_tokens_then_records_the_reported_usage(server
     assert "hi" not in json.dumps(server["sent"]) and "three uses" not in json.dumps(server["sent"])
 
 
-def test_a_refusal_raises_before_the_provider_call_is_sent(server):
+def test_a_refusal_is_returned_before_the_provider_call_is_sent(server):
     server["preflight"] = REFUSED
     oa = FakeOpenAI()
     llm = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB)
-    with pytest.raises(TaskCeilingExceededError) as refused:
-        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    r = llm.chat.completions.create(model="gpt-4o-mini", messages=[])   # nothing raised
+    assert isinstance(r, Refusal) and r.approved is False and not r
+    assert r.reason == "task_ceiling_exceeded" and r.task_ref == "job-7"
+    assert (r.used, r.ceiling, r.remaining, r.asked) == (990, 1000, 10, 2000)
+    assert r.answer == REFUSED                              # the server's answer, whole
     assert oa.sent == []                                    # the wrapped call did not go out
     assert server["events"]() == []                         # and nothing was recorded
-    assert refused.value.task_remaining_units == 10
+    assert "990/1000" in str(r) and "not sent" in str(r)
+    # Not a provider response, and nothing on it pretends to be one.
+    for name in ("choices", "content", "candidates", "text", "usage", "message", "output", "id"):
+        assert not hasattr(r, name), name
+    # The plain client is not changed: preflight() still raises.
+    with pytest.raises(TaskCeilingExceededError) as raised:
+        AB.preflight("researcher", estimated_units=2000, task_ref="job-7")
+    assert raised.value.answer == REFUSED and raised.value.task_remaining_units == 10
+
+
+def test_the_per_call_ceiling_and_a_spent_customer_balance_are_refusals_too(server):
+    ab = AgentBillClient(api_key=FAKE_KEY, base_url="https://agentbill.test", ceiling=500)
+    oa = FakeOpenAI()
+    llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=ab)
+    server["preflight"] = {"approved": False, "reason": "ceiling_exceeded", "estimated_units": 2000, "ceiling": 500,
+                           "remaining_units": None}
+    r = llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert isinstance(r, Refusal) and r.reason == "ceiling_exceeded"
+    assert (r.asked, r.ceiling, r.used, r.remaining) == (2000, 500, None, None)
+    assert "per-call ceiling of 500" in str(r)
+    server["preflight"] = {"approved": False, "reason": "budget_exhausted", "estimated_units": 2000, "remaining_units": 0}
+    r = llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert isinstance(r, Refusal) and r.reason == "budget_exhausted" and r.remaining == 0 and r.ceiling is None
+    assert oa.sent == [] and server["events"]() == []
+    with pytest.raises(BudgetExhaustedError):               # preflight() itself: unchanged
+        ab.preflight("r", estimated_units=1, task_ref="job-7")
+    server["preflight"] = {"approved": False, "reason": "ceiling_exceeded", "estimated_units": 2000, "ceiling": 500}
+    with pytest.raises(CeilingExceededError):
+        ab.preflight("r", estimated_units=2000, task_ref="job-7")
+
+
+def test_a_refused_stream_is_the_refusal_and_iterates_to_nothing(server):
+    server["preflight"] = REFUSED
+    oa = FakeOpenAI(chunks=[_chunk("never")])
+    llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=AB)
+    s = llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)
+    assert isinstance(s, Refusal)
+    assert list(s) == []                                    # a loop written for the stream runs zero times
+    with s as inside:                                       # and a with-block is a no-op
+        assert inside is s and [c for c in inside] == []
+    assert oa.sent == [] and server["events"]() == []
+    # The same on a Gemini stream (a generator that would have sent nothing yet)
+    g = FakeGenAI(chunks=[gemini_response()])
+    gs = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB).models.generate_content_stream(
+        model="gemini-2.5-flash", contents="x")
+    assert isinstance(gs, Refusal) and list(gs) == [] and g.sent == []
+    # An approved stream carries .refusal, and it is None.
+    server["preflight"] = APPROVED
+    ok = llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)
+    assert not isinstance(ok, Refusal) and ok.refusal is None
+
+
+def test_a_refused_async_stream_iterates_to_nothing(server):
+    server["preflight"] = REFUSED
+    oa = FakeAsyncOpenAI(chunks=[_chunk("never")])
+    llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=AB)
+
+    async def go():
+        s = await llm.chat.completions.create(model="gpt-4o-mini", messages=[], stream=True)
+        assert isinstance(s, Refusal)
+        async with s as inside:
+            return [c async for c in inside]
+
+    assert run(go()) == [] and oa.sent == []
+
+
+def test_real_failures_still_raise(server):
+    # A refusal is a value; a failure is an exception, the same ones preflight() raises.
+    oa = FakeOpenAI()
+    llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=AB)
+    server["preflight_status"], server["preflight"] = 401, {"error": "unauthorized", "message": "Invalid API key."}
+    with pytest.raises(AuthenticationError):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    server["preflight_status"], server["preflight"] = 500, {"error": "boom"}
+    with pytest.raises(requests.HTTPError):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+
+    def down():
+        raise requests.ConnectionError("connection refused")
+    server["preflight_status"], server["preflight"] = 200, down
+    with pytest.raises(requests.ConnectionError):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    server["preflight_status"], server["preflight"] = 422, {"error": "task_unit_mismatch", "message": "job-7 is counted in unit"}
+    with pytest.raises(requests.HTTPError, match="task_unit_mismatch"):
+        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert oa.sent == [] and server["events"]() == []
 
 
 def test_missing_usage_is_recorded_as_missing_never_as_zero(server):
@@ -311,22 +399,25 @@ def test_a_failed_record_never_loses_the_answer(server):
     assert reply.id == "chatcmpl-abc123"
 
 
-def test_a_spent_quota_raises_by_default_and_the_call_is_not_sent(server):
+def test_a_spent_quota_is_refused_by_default_and_the_call_is_not_sent(server):
     # Once the account's monthly quota is spent, preflight answers before it
     # looks at the job: no ceiling is checked. Sending anyway would turn the
-    # ceiling off without a word, so the default raises.
+    # ceiling off without a word, so the default refuses, and preflight()
+    # itself still returns approved=False rather than raising.
     server["preflight"] = QUOTA
     oa = FakeOpenAI()
     llm = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB)
-    with pytest.raises(FreeTierExceededError) as spent:
-        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    spent = llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert isinstance(spent, Refusal) and spent.reason == "free_tier_exceeded" and not spent
     assert oa.sent == [] and server["events"]() == []
-    assert spent.value.upgrade_url == QUOTA["upgrade_url"]
-    assert "job-7" in str(spent.value) and "not sent" in str(spent.value) and 'on_quota="send"' in str(spent.value)
+    assert spent.upgrade_url == QUOTA["upgrade_url"] and spent.answer == QUOTA and spent.task_ref == "job-7"
+    assert (spent.used, spent.ceiling, spent.remaining) == (None, None, None)   # the job was not looked at
+    assert "'job-7'" in str(spent) and "not sent" in str(spent) and 'on_quota="send"' in str(spent)
     server["preflight"] = {**QUOTA, "reason": "plan_limit_exceeded", "plan": "starter"}
-    with pytest.raises(PlanLimitExceededError):
-        llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    plan = llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert isinstance(plan, Refusal) and plan.reason == "plan_limit_exceeded" and plan.answer["plan"] == "starter"
     assert oa.sent == []
+    assert AB.preflight("researcher", estimated_units=1, task_ref="job-7").approved is False
 
 
 def test_on_quota_send_sends_unchecked_and_warns_once_per_job(server):
@@ -346,9 +437,11 @@ def test_on_quota_send_sends_unchecked_and_warns_once_per_job(server):
     assert all("reservation_id" not in ev for ev in server["events"]())   # nothing was reserved
 
 
-def test_on_quota_takes_raise_or_send():
-    with pytest.raises(ValueError, match="on_quota"):
-        wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", agentbill_client=AB, on_quota="ignore")
+def test_on_quota_takes_refuse_or_send():
+    for bad in ("ignore", "raise"):                         # "raise" was the name before refusals were values
+        with pytest.raises(ValueError, match="on_quota"):
+            wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", agentbill_client=AB, on_quota=bad)
+    wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", agentbill_client=AB, on_quota="refuse")
 
 
 # ---------------------------------------------------------------- the estimate
@@ -532,12 +625,12 @@ def test_async_anthropic_and_gemini(server):
     assert units == [1500, 1020, 14]
 
 
-def test_async_refusal_is_raised_before_the_call(server):
+def test_async_refusal_is_returned_before_the_call(server):
     server["preflight"] = REFUSED
     oa = FakeAsyncOpenAI()
     llm = wrap(oa, task_ref="job-7", agent_id="r", agentbill_client=AB)
-    with pytest.raises(TaskCeilingExceededError):
-        run(llm.chat.completions.create(model="gpt-4o-mini", messages=[]))
+    r = run(llm.chat.completions.create(model="gpt-4o-mini", messages=[]))
+    assert isinstance(r, Refusal) and r.reason == "task_ceiling_exceeded" and r.remaining == 10
     assert oa.sent == []
 
 
@@ -796,15 +889,61 @@ def test_each_round_of_automatic_function_calling_is_a_measured_call(server):
     assert [e["units"] for e in server["events"]()] == [1050, 1150, 1250]
 
 
-def test_a_refusal_on_a_later_round_raises_with_the_earlier_rounds_recorded(server):
+def test_a_refusal_on_a_later_round_is_returned_with_the_earlier_rounds_recorded(server):
     answers = iter([APPROVED, REFUSED])
     server["preflight"] = lambda: next(answers)
     g = _looping_client(3)
     llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
-    with pytest.raises(TaskCeilingExceededError):
-        llm.models.generate_content(model="gemini-2.5-flash", contents="use the tool")
+    r = llm.models.generate_content(model="gemini-2.5-flash", contents="use the tool")   # nothing raised
+    assert isinstance(r, Refusal) and r.reason == "task_ceiling_exceeded"
     assert len(g.models.sent) == 1                          # round 2 was not sent
     assert [e["idempotency_key"] for e in server["events"]()] == ["gem-round-0"]
+    # The same through the async resource.
+    answers = iter([APPROVED, REFUSED])
+    r = run(llm.aio.models.generate_content(model="gemini-2.5-flash", contents="use the tool"))
+    assert isinstance(r, Refusal) and len(g.aio.models.sent) == 1
+
+
+def test_a_rounds_stream_refused_on_its_first_round_is_the_refusal(server):
+    server["preflight"] = REFUSED
+    g = _looping_client(3)
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
+    s = llm.models.generate_content_stream(model="gemini-2.5-flash", contents="x")
+    assert isinstance(s, Refusal) and list(s) == [] and g.models.sent == []
+
+    async def go():
+        s = await llm.aio.models.generate_content_stream(model="gemini-2.5-flash", contents="x")
+        assert isinstance(s, Refusal)
+        return [c async for c in s]
+
+    assert run(go()) == [] and g.aio.models.sent == [] and server["events"]() == []
+
+
+def test_a_rounds_stream_refused_on_a_later_round_ends_and_exposes_the_refusal(server):
+    # The one stream that can be refused after it started: the SDK's own loop
+    # asks for another round mid-stream. The caller saw round 0, the stream
+    # ends, .refusal says why, and round 0 is recorded.
+    answers = iter([APPROVED, REFUSED])
+    server["preflight"] = lambda: next(answers)
+    g = _looping_client(3)
+    llm = wrap(g, task_ref="job-7", agent_id="r", agentbill_client=AB, provider="gemini")
+    s = llm.models.generate_content_stream(model="gemini-2.5-flash", contents="x")
+    assert not isinstance(s, Refusal) and s.refusal is None
+    assert [c.response_id for c in s] == ["gem-round-0"]
+    assert isinstance(s.refusal, Refusal) and s.refusal.reason == "task_ceiling_exceeded"
+    assert len(g.models.sent) == 1
+    assert [e["idempotency_key"] for e in server["events"]()] == ["gem-round-0"]
+
+    answers = iter([APPROVED, REFUSED])
+
+    async def go():
+        s = await llm.aio.models.generate_content_stream(model="gemini-2.5-flash", contents="x")
+        assert s.refusal is None
+        ids = [c.response_id async for c in s]
+        return ids, s.refusal
+
+    ids, refusal = run(go())
+    assert ids == ["gem-round-0"] and isinstance(refusal, Refusal) and len(g.aio.models.sent) == 1
 
 
 def test_each_round_is_measured_streamed_and_async_too(server):

@@ -23,8 +23,13 @@ const BASE_URL = process.env.AGENTBILL_BASE_URL ?? 'https://agentbill.dev'
 // Public exceptions
 // ---------------------------------------------------------------------------
 
+/** That customer's balance is spent. Thrown by preflight() and meter(). A
+ *  client made with wrap() returns a Refusal with reason 'budget_exhausted'
+ *  instead. */
 export class BudgetExhaustedError extends Error {
   readonly customerId: string
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(customerId: string, message?: string) {
     super(message ?? `Customer '${customerId}' has no remaining budget.`)
     this.name = 'BudgetExhaustedError'
@@ -39,10 +44,14 @@ export class AgentBillError extends Error {
   }
 }
 
-/** This single call asked for more than its own per-request ceiling. */
+/** This single call asked for more than its own per-request ceiling. Thrown
+ *  by preflight(); a client made with wrap() returns a Refusal with reason
+ *  'ceiling_exceeded' instead. */
 export class CeilingExceededError extends Error {
   readonly estimatedUnits?: number
   readonly ceiling?: number
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(estimatedUnits?: number, ceiling?: number, message?: string) {
     super(message ?? `Refused (ceiling_exceeded): estimated ${estimatedUnits} units exceeds the per-request ceiling of ${ceiling}.`)
     this.name = 'CeilingExceededError'
@@ -52,12 +61,16 @@ export class CeilingExceededError extends Error {
 }
 
 /** The cross-call ceiling for this task is spent: preflight refused this call before it ran.
- *  Nothing of yours was stopped; your code decides what the job does next. */
+ *  Nothing of yours was stopped; your code decides what the job does next.
+ *  Thrown by preflight(). A client made with wrap() does not throw it: the
+ *  measured call returns a Refusal with reason 'task_ceiling_exceeded'. */
 export class TaskCeilingExceededError extends Error {
   readonly taskRef: string
   readonly taskCeiling?: number
   readonly taskUsedUnits?: number
   readonly taskRemainingUnits?: number
+  /** The preflight answer as the server sent it, set when preflight() throws. */
+  answer?: Record<string, unknown>
   constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number) {
     super(
       `Refused (task_ceiling_exceeded): task '${taskRef}' is at ${taskUsedUnits}/${taskCeiling} units and ` +
@@ -74,9 +87,11 @@ export class TaskCeilingExceededError extends Error {
 /**
  * AgentBill's own free tier is spent. preflight() never throws this: it returns
  * `approved: false, reason: 'free_tier_exceeded'` with `upgradeUrl`, so our
- * billing state cannot crash your agent. A client made with wrap() throws it
- * (onQuota: 'raise', the default) before the model call is sent: once the quota
- * is spent no ceiling can be checked, and wrap() exists to check one.
+ * billing state cannot crash your agent. A client made with wrap() does not
+ * throw it either: the measured call returns a Refusal with that reason and
+ * upgradeUrl, and is not sent (onQuota: 'refuse', the default), because once
+ * the quota is spent no ceiling can be checked. wrap(client, { onQuota:
+ * 'send' }) sends the call unchecked instead. Kept for code that imports it.
  */
 export class FreeTierExceededError extends Error {
   readonly upgradeUrl?: string
@@ -87,8 +102,9 @@ export class FreeTierExceededError extends Error {
   }
 }
 
-/** A paid plan's monthly quota is spent. Thrown by a wrap() client, as
- *  FreeTierExceededError is; preflight() returns it instead. */
+/** A paid plan's monthly quota is spent. preflight() returns it (approved:
+ *  false, upgradeUrl), and a wrap() client returns a Refusal, as for
+ *  FreeTierExceededError. Kept for code that imports it. */
 export class PlanLimitExceededError extends Error {
   readonly upgradeUrl?: string
   constructor(upgradeUrl?: string, message?: string) {
@@ -316,6 +332,9 @@ export interface Preflight extends PreflightResult {
    * the same data they always did.
    */
   record(options?: SettleOptions): Promise<Record<string, unknown>>
+  /** The preflight answer as the server sent it. Not enumerable, for the
+   *  same reason as record. wrap() reads it to build a Refusal. */
+  readonly answer: Record<string, unknown>
 }
 
 /**
@@ -357,19 +376,24 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
   }
 
   if (!data.approved) {
+    // Each thrown error carries the answer as the server sent it (.answer),
+    // which is how wrap() turns the same refusal into a returned Refusal.
+    let refused: TaskCeilingExceededError | BudgetExhaustedError | CeilingExceededError | null = null
     if (data.reason === 'task_ceiling_exceeded') {
-      throw new TaskCeilingExceededError(
+      refused = new TaskCeilingExceededError(
         data.task_ref ?? options.taskRef ?? '',
         data.task_ceiling,
         data.task_used_units,
         data.task_remaining_units
       )
+    } else if (data.reason === 'budget_exhausted') {
+      refused = new BudgetExhaustedError(options.customerId ?? 'default')
+    } else if (data.reason === 'ceiling_exceeded') {
+      refused = new CeilingExceededError(data.estimated_units, options.ceiling)
     }
-    if (data.reason === 'budget_exhausted') {
-      throw new BudgetExhaustedError(options.customerId ?? 'default')
-    }
-    if (data.reason === 'ceiling_exceeded') {
-      throw new CeilingExceededError(data.estimated_units, options.ceiling)
+    if (refused) {
+      refused.answer = data
+      throw refused
     }
     // free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw.
     //
@@ -404,6 +428,7 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
       reservationId: result.reservationId,
     }),
   })
+  Object.defineProperty(result, 'answer', { enumerable: false, value: data })
   return result as Preflight
 }
 
@@ -571,5 +596,5 @@ export function meter<TArgs extends Record<string, unknown>, TResult>(
 // Public: wrap(), automatic metering for a model client. See ./wrap.ts.
 // ---------------------------------------------------------------------------
 
-export { wrap, DEFAULT_ESTIMATE } from './wrap.js'
-export type { WrapOptions, WrapProvider } from './wrap.js'
+export { wrap, DEFAULT_ESTIMATE, Refusal, isRefusal } from './wrap.js'
+export type { WrapOptions, WrapProvider, Wrapped, Metered, RefusalReason } from './wrap.js'

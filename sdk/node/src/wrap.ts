@@ -13,9 +13,13 @@
  * to AgentBill:
  *
  *   before  POST /preflight on the job, in tokens (the job's unit is "token"),
- *           with an estimate worked out here (see Average). A refusal throws
- *           TaskCeilingExceededError BEFORE the provider call is sent: the
- *           wrapped call does not go out, and your code decides what happens next.
+ *           with an estimate worked out here (see Average). A refusal is
+ *           RETURNED, as a Refusal, BEFORE the provider call is sent: the
+ *           wrapped call does not go out, and your code decides what happens
+ *           next (see Refusal and isRefusal). Nothing is thrown for a refusal;
+ *           a rejection out of a measured call is a failure: the provider's
+ *           own error, or from AgentBill a network error, a 401, a 5xx, a 422
+ *           task_unit_mismatch (AgentBillError).
  *   after   POST /events with the usage the provider reported on the response
  *           this process received, the reservationId preflight returned, so the
  *           record settles that reservation whole, and an idempotencyKey (see
@@ -40,18 +44,141 @@
  * is returned, and a process warning says the record failed.
  *
  * AgentBill's own quota: once it is spent, preflight answers before it looks at
- * the job, so no ceiling can be checked. By default (onQuota: 'raise') the
- * wrapped call throws FreeTierExceededError or PlanLimitExceededError, with
- * upgradeUrl, and is not sent. With onQuota: 'send' it is sent unchecked and
- * recorded, with a warning once per job, and nothing bounds the job until the
- * quota resets or the plan is upgraded. preflight() itself never throws on it.
+ * the job, so no ceiling can be checked. By default (onQuota: 'refuse') the
+ * measured call returns a Refusal with reason free_tier_exceeded or
+ * plan_limit_exceeded and upgradeUrl, and is not sent. With onQuota: 'send' it
+ * is sent unchecked and recorded, with a warning once per job, and nothing
+ * bounds the job until the quota resets or the plan is upgraded.
+ *
+ * The plain client is not changed by any of this: preflight() still throws
+ * TaskCeilingExceededError, CeilingExceededError and BudgetExhaustedError, and
+ * returns approved: false on the quota.
  *
  * The wrapped create returns a plain Promise, so the provider SDK's
  * APIPromise helpers (.withResponse(), .asResponse()) are not on it; call the
  * unwrapped client for those, and that call is not measured.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { preflight, record, FreeTierExceededError, PlanLimitExceededError, type Preflight } from './index.js'
+import {
+  preflight, record, BudgetExhaustedError, CeilingExceededError, TaskCeilingExceededError, type Preflight,
+} from './index.js'
+
+// ------------------------------------------------------------- the refusal
+
+export type RefusalReason =
+  | 'task_ceiling_exceeded' | 'ceiling_exceeded' | 'budget_exhausted' | 'free_tier_exceeded' | 'plan_limit_exceeded'
+
+const REFUSAL = Symbol.for('agentbill.refusal')
+
+/**
+ * What a measured call resolves to, instead of the provider's response, when
+ * preflight refused it. The provider call was not sent and nothing was
+ * recorded. A refusal is an expected state of a job with a ceiling, not a
+ * failure, so it is returned, and your code decides: stop, skip, or replan.
+ *
+ *   const reply = await llm.chat.completions.create({ model, messages })
+ *   if (isRefusal(reply)) { log.info(`job ${reply.taskRef}: ${reply}`); return partial }
+ *
+ * It is not shaped like a provider response and cannot be mistaken for one:
+ * approved is false, and it has no choices, content, candidates, text or
+ * usage. For a streaming call the same object is returned; iterating it (for
+ * await, for of) yields nothing, so a loop written for the provider's stream
+ * runs zero times and the check is the same isRefusal after it. There is no
+ * other stream shape for a call refused before anything was sent. One stream,
+ * and only one, can be refused after it started: a Gemini automatic-function-
+ * calling stream whose later round is refused ends after the earlier round's
+ * chunks, and the stream's .refusal is set (null on every other stream wrap()
+ * returns).
+ *
+ *   approved    always false
+ *   reason      task_ceiling_exceeded (the job's ceiling), ceiling_exceeded
+ *               (a per-call ceiling), budget_exhausted (that customer's
+ *               balance), free_tier_exceeded or plan_limit_exceeded (this
+ *               account's monthly preflight quota: the ceiling was not checked)
+ *   taskRef     the job
+ *   asked       the estimate this call asked preflight to reserve, in tokens
+ *   used        the job's used tokens (task_ceiling_exceeded), else undefined
+ *   ceiling     the job's ceiling, or on ceiling_exceeded the per-call one
+ *   remaining   what is left: of the job, or of the customer's balance
+ *   upgradeUrl  set on a quota refusal
+ *   answer      the preflight answer as the server sent it, whole
+ *   toString()  one sentence naming the reason and the numbers
+ */
+export class Refusal {
+  readonly approved: false = false
+  readonly reason: RefusalReason | string
+  readonly taskRef?: string
+  readonly asked?: number
+  readonly used?: number
+  readonly ceiling?: number
+  readonly remaining?: number
+  readonly upgradeUrl?: string
+  readonly answer: Record<string, unknown>
+
+  constructor(f: { reason: string; taskRef?: string; asked?: number; used?: number; ceiling?: number; remaining?: number; upgradeUrl?: string; answer?: Record<string, unknown> }) {
+    this.reason = f.reason
+    this.taskRef = f.taskRef
+    this.asked = f.asked
+    this.used = f.used
+    this.ceiling = f.ceiling
+    this.remaining = f.remaining
+    this.upgradeUrl = f.upgradeUrl
+    this.answer = f.answer ?? {}
+    // The brand isRefusal() tests: survives a second copy of this package.
+    Object.defineProperty(this, REFUSAL, { value: true, enumerable: false })
+  }
+
+  toString(): string {
+    const job = `'${this.taskRef}'`
+    switch (this.reason) {
+      case 'task_ceiling_exceeded':
+        return `Refused (task_ceiling_exceeded): job ${job} is at ${this.used}/${this.ceiling} tokens and ${this.remaining} remaining is not enough for the ${this.asked} this call asked for. The call was not sent.`
+      case 'ceiling_exceeded':
+        return `Refused (ceiling_exceeded): this call asked for ${this.asked} tokens, over the per-call ceiling of ${this.ceiling}. The call was not sent.`
+      case 'budget_exhausted':
+        return `Refused (budget_exhausted): this customer's balance is spent (${this.remaining} remaining), so job ${job} cannot continue on it. The call was not sent.`
+      default:
+        return `Refused (${this.reason}): this account's monthly preflight quota is spent, so the ceiling of job ${job} cannot be checked, and the call was not sent. Upgrade: ${this.upgradeUrl} (or wrap(client, { onQuota: 'send' }) to send calls unchecked).`
+    }
+  }
+
+  // A refused streaming call: nothing to iterate.
+  *[Symbol.iterator](): Iterator<never> {}
+  async *[Symbol.asyncIterator](): AsyncIterator<never> {}
+}
+
+/** Whether a measured call's result is a Refusal rather than the provider's response. */
+export function isRefusal(x: unknown): x is Refusal {
+  return typeof x === 'object' && x !== null && (x as any)[REFUSAL] === true
+}
+
+/** Carries a Refusal out of a measured per-round Gemini method, through the
+ *  provider SDK's own automatic-function-calling loop, to the public method's
+ *  wrapper, which returns it. Never leaves this module. */
+class RefusedSignal extends Error {
+  constructor(readonly refusal: Refusal) {
+    super(String(refusal))
+    this.name = 'AgentBillRefusedSignal'
+  }
+}
+
+// ------------------------------------------------------------- the types
+
+type Settled<R> = R extends PromiseLike<infer V> ? V : R
+/** A measured method as wrap() returns it: the same arguments, and a Promise
+ *  of what it returned before or a Refusal. An overloaded method (openai's
+ *  create, streamed and not) collapses to its last overload, the union;
+ *  narrow with isRefusal first, then as you would the union. */
+export type Metered<F> = F extends (...a: infer A) => infer R ? (...a: A) => Promise<Settled<R> | Refusal> : F
+type MeteredAt<T, K extends string> =
+  K extends `${infer H}.${infer Rest}`
+    ? H extends keyof T ? Omit<T, H> & { [P in H]: MeteredAt<T[H], Rest> } : T
+    : K extends keyof T ? Omit<T, K> & { [P in K]: Metered<T[K]> } : T
+/** The client, with each measured method typed as Metered. Any other property
+ *  keeps its type. A client typed any stays any. */
+export type Wrapped<T> = 0 extends 1 & T ? T
+  : MeteredAt<MeteredAt<MeteredAt<MeteredAt<MeteredAt<T,
+      'chat.completions.create'>, 'responses.create'>, 'messages.create'>, 'models.generateContent'>, 'models.generateContentStream'>
 
 export type WrapProvider = 'openai' | 'anthropic' | 'gemini'
 
@@ -77,12 +204,12 @@ export interface WrapOptions {
   /**
    * What a measured call does once this account's monthly preflight quota is
    * spent (each measured call is one preflight), when no ceiling can be
-   * checked. 'raise', the default: throws FreeTierExceededError or
-   * PlanLimitExceededError, with upgradeUrl, and the call is not sent. 'send':
-   * the call is sent unchecked and recorded, with a warning once per job, and
-   * nothing bounds the job until the quota resets.
+   * checked. 'refuse', the default: the call resolves to a Refusal with reason
+   * free_tier_exceeded or plan_limit_exceeded and upgradeUrl, and is not sent.
+   * 'send': the call is sent unchecked and recorded, with a warning once per
+   * job, and nothing bounds the job until the quota resets.
    */
-  onQuota?: 'raise' | 'send'
+  onQuota?: 'refuse' | 'send'
 }
 
 const INT4_MAX = 2_147_483_647
@@ -335,7 +462,7 @@ interface Meter {
   step?: string
   taskCeiling?: number
   defaultEstimate: number
-  onQuota: 'raise' | 'send'
+  onQuota: 'refuse' | 'send'
   averages: Map<string, Average>
   /** The jobs already warned that their calls are sent unchecked. */
   warned: Set<string>
@@ -349,20 +476,48 @@ function averageOf(m: Meter): Average {
   return a
 }
 
-async function preflightFor(m: Meter, kind: Kind, body: any): Promise<Preflight> {
-  const pf = await preflight({
-    agentId: m.agentId, customerId: m.customerId, taskRef: m.taskRef, taskCeiling: m.taskCeiling, unit: 'token',
-    estimatedUnits: averageOf(m).estimate(m.defaultEstimate, maxTokens(kind, body)),
-  })
+/** The Refusal for an error preflight() threw for your spend rule, or null
+ *  when the error is a failure (network, 401, 5xx, ...) and must pass. */
+function refusalOf(e: unknown, m: Meter, asked: number): Refusal | null {
+  const raw = (e as { answer?: unknown })?.answer
+  const answer = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const num = (v: unknown) => (typeof v === 'number' ? v : undefined)
+  const askedFor = num(answer.estimated_units) ?? asked
+  if (e instanceof TaskCeilingExceededError) {
+    return new Refusal({ reason: 'task_ceiling_exceeded', taskRef: e.taskRef || m.taskRef, asked: askedFor,
+      used: e.taskUsedUnits, ceiling: e.taskCeiling, remaining: e.taskRemainingUnits, answer })
+  }
+  if (e instanceof CeilingExceededError) {
+    return new Refusal({ reason: 'ceiling_exceeded', taskRef: m.taskRef, asked: askedFor, ceiling: num(answer.ceiling) ?? e.ceiling, answer })
+  }
+  if (e instanceof BudgetExhaustedError) {
+    return new Refusal({ reason: 'budget_exhausted', taskRef: m.taskRef, asked: askedFor, remaining: num(answer.remaining_units), answer })
+  }
+  return null
+}
+
+/** The Preflight when approved (or sent unchecked), else a Refusal. */
+async function preflightFor(m: Meter, kind: Kind, body: any): Promise<Preflight | Refusal> {
+  const asked = averageOf(m).estimate(m.defaultEstimate, maxTokens(kind, body))
+  let pf: Preflight
+  try {
+    pf = await preflight({
+      agentId: m.agentId, customerId: m.customerId, taskRef: m.taskRef, taskCeiling: m.taskCeiling, unit: 'token',
+      estimatedUnits: asked,
+    })
+  } catch (e) {
+    // Your spend rule refused the call: preflight() throws, and here the same
+    // refusal is a value. Nothing was reserved. A failure passes through.
+    const refusal = refusalOf(e, m, asked)
+    if (refusal) return refusal
+    throw e
+  }
   if (pf.approved) return pf
-  // Only AgentBill's own quota comes back unthrown; your spend rules throw. The
-  // server answers it before it looks at the job, so this call's ceiling was
-  // not checked and nothing was reserved.
-  if (m.onQuota === 'raise') {
-    const message = `Refused (${pf.reason}): this account's monthly preflight quota is spent, so the ceiling of job '${m.taskRef}' cannot be checked, and the call was not sent. Upgrade: ${pf.upgradeUrl} (or wrap(client, { onQuota: 'send' }) to send calls unchecked).`
-    throw pf.reason === 'free_tier_exceeded'
-      ? new FreeTierExceededError(pf.upgradeUrl, message)
-      : new PlanLimitExceededError(pf.upgradeUrl, message)
+  // Only AgentBill's own quota comes back unthrown. The server answers it
+  // before it looks at the job, so this call's ceiling was not checked and
+  // nothing was reserved.
+  if (m.onQuota === 'refuse') {
+    return new Refusal({ reason: String(pf.reason), taskRef: m.taskRef, asked, upgradeUrl: pf.upgradeUrl, answer: pf.answer ?? {} })
   }
   if (!m.warned.has(m.taskRef)) {
     m.warned.add(m.taskRef)
@@ -436,6 +591,10 @@ function observed(inner: any, m: Meter, pf: Preflight, sf: StreamFacts, requeste
   return new Proxy(inner, {
     get(target, prop) {
       if (prop === Symbol.asyncIterator) return () => iterate()
+      // Every stream wrap() returns has .refusal. Null here, always: this
+      // stream was approved before it was sent. Only a Gemini automatic-
+      // function-calling stream (RoundsStream) can be refused later.
+      if (prop === 'refusal') return null
       const v = Reflect.get(target, prop, target)
       return typeof v === 'function' ? v.bind(target) : v
     },
@@ -456,8 +615,11 @@ function wouldLoop(body: any): boolean {
 /** fn measured as one model request. wholeLoop: fn is a public Gemini method
  *  measured as a whole because the per-round method behind it was not found,
  *  so a call that would loop over rounds is refused here, before anything is
- *  sent or preflighted. */
-function measured(fn: (...a: any[]) => any, kind: Kind, m: Meter, wholeLoop = false) {
+ *  sent or preflighted. signal: fn is the per-round method the provider SDK's
+ *  own loop calls, so a refusal cannot be returned through that loop; it is
+ *  thrown as RefusedSignal and the public method's wrapper (unsignalled)
+ *  returns it. */
+function measured(fn: (...a: any[]) => any, kind: Kind, m: Meter, wholeLoop = false, signal = false) {
   const shape: Kind = kind === 'gemini_stream' ? 'gemini' : kind
   return async (body: any, ...rest: any[]) => {
     if (wholeLoop && wouldLoop(body)) {
@@ -480,6 +642,10 @@ function measured(fn: (...a: any[]) => any, kind: Kind, m: Meter, wholeLoop = fa
       }
     }
     const pf = await preflightFor(m, shape, sent)
+    if (isRefusal(pf)) {
+      if (signal) throw new RefusedSignal(pf)
+      return pf
+    }
     const started = performance.now()
     let res: any
     try {
@@ -532,7 +698,9 @@ function geminiRounds(models: any, m: Meter): any | null {
         // Plain state the original carries, never its methods (the public ones
         // are bound to the original and would bypass the measured rounds).
         for (const k of Object.keys(models)) if (typeof models[k] !== 'function') r[k] = models[k]
-        for (const [internal, kind] of Object.values(GEMINI_ROUNDS)) r[internal] = measured(models[internal].bind(models), kind, m)
+        // A refusal of a round is a signal here (the SDK's loop is between
+        // it and the caller); unsignalled() on the public method returns it.
+        for (const [internal, kind] of Object.values(GEMINI_ROUNDS)) r[internal] = measured(models[internal].bind(models), kind, m, false, true)
         rounds = r
       }
     }
@@ -542,6 +710,63 @@ function geminiRounds(models: any, m: Meter): any | null {
   if (!perMeter) { perMeter = new WeakMap(); roundsFor.set(models, perMeter) }
   perMeter.set(m, rounds)
   return rounds
+}
+
+/** A Gemini automatic-function-calling stream (the SDK's own generator,
+ *  running over measured per-round methods), primed by one read so a refusal
+ *  of the FIRST round is returned as the Refusal itself, before anything was
+ *  sent. A refusal of a LATER round arrives mid-stream, as RefusedSignal out of
+ *  the generator: the stream ends there, after the earlier round's chunks, and
+ *  .refusal is set. The earlier rounds are recorded. */
+class RoundsStream {
+  refusal: Refusal | null = null
+  constructor(private readonly it: AsyncIterator<any>, private readonly head: any[]) {}
+  async *[Symbol.asyncIterator]() {
+    try {
+      while (this.head.length) yield this.head.shift()
+      for (;;) {
+        let n: IteratorResult<any>
+        try { n = await this.it.next() } catch (e) {
+          if (e instanceof RefusedSignal) { this.refusal = e.refusal; return }
+          throw e
+        }
+        if (n.done) return
+        yield n.value
+      }
+    } finally {
+      // A loop that stopped early lets go of the SDK's generator here, so its
+      // own finally (the record of the round in flight) runs. A no-op once it
+      // has finished.
+      await this.it.return?.()
+    }
+  }
+}
+
+/** Primed through [Symbol.asyncIterator](), never next() on the object: when
+ *  the SDK hands back the measured round's own stream (automatic function
+ *  calling off), that is what records it. */
+async function primeRounds(out: any): Promise<RoundsStream | Refusal> {
+  const it: AsyncIterator<any> = out[Symbol.asyncIterator]()
+  let first: IteratorResult<any>
+  try { first = await it.next() } catch (e) {
+    if (e instanceof RefusedSignal) return e.refusal
+    throw e
+  }
+  return new RoundsStream(it, first.done ? [] : [first.value])
+}
+
+/** The public Gemini method over measured rounds: a RefusedSignal out of it
+ *  is the refusal, returned. */
+function unsignalled(fn: (...a: any[]) => any, streamed: boolean) {
+  return async (...a: any[]) => {
+    try {
+      const out = await fn(...a)
+      return streamed ? await primeRounds(out) : out
+    } catch (e) {
+      if (e instanceof RefusedSignal) return e.refusal
+      throw e
+    }
+  }
 }
 
 // ------------------------------------------------------------- the proxy
@@ -560,7 +785,7 @@ function proxy<T extends object>(target: T, m: Meter, path: string[]): T {
       if (typeof value === 'function') {
         if (m.provider === 'gemini' && methods[name] && GEMINI_ROUNDS[prop]) {
           const rounds = geminiRounds(t, m)
-          return rounds ? rounds[prop] : measured(value.bind(t), methods[name], m, true)
+          return rounds ? unsignalled(rounds[prop], prop === 'generateContentStream') : measured(value.bind(t), methods[name], m, true)
         }
         if (methods[name]) return measured(value.bind(t), methods[name], m)
         if (p.length === 1 && COPIES[m.provider].includes(prop)) return (...a: any[]) => proxy(value.apply(t, a), m, [])
@@ -609,19 +834,21 @@ function endpointOf(client: any, provider: WrapProvider): string {
 
 /**
  * Meter every call a model client makes through its create methods, in tokens.
- * Returns the client, wrapped; the original is untouched and unmeasured.
- * wrap() on a wrapped client returns another view of it with the options you
- * pass changed (step, most often), sharing the job's running average.
+ * Returns the client, wrapped (typed Wrapped<T>: each measured method resolves
+ * to what it always did, or a Refusal; check isRefusal(reply) before reading
+ * the response). The original is untouched and unmeasured. wrap() on a
+ * wrapped client returns another view of it with the options you pass changed
+ * (step, most often), sharing the job's running average.
  */
-export function wrap<T extends object>(client: T, options: WrapOptions = {}): T {
+export function wrap<T extends object>(client: T, options: WrapOptions = {}): Wrapped<T> {
   const inner = (client as any)?.[WRAPPED] as { target: T; meter: Meter } | undefined
-  if (options.onQuota !== undefined && options.onQuota !== 'raise' && options.onQuota !== 'send') {
-    throw new TypeError("onQuota is 'raise' or 'send'.")
+  if (options.onQuota !== undefined && options.onQuota !== 'refuse' && options.onQuota !== 'send') {
+    throw new TypeError("onQuota is 'refuse' or 'send'.")
   }
   if (inner) {
     if (options.provider) throw new TypeError('A wrapped client keeps its provider; wrap the original to change it.')
     const changed = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined))
-    return proxy(inner.target, { ...inner.meter, ...changed }, [])
+    return proxy(inner.target, { ...inner.meter, ...changed }, []) as unknown as Wrapped<T>
   }
   if (!options.taskRef || !options.agentId) {
     throw new TypeError('wrap() needs taskRef and agentId: the job to count against, and the label.')
@@ -636,7 +863,7 @@ export function wrap<T extends object>(client: T, options: WrapOptions = {}): T 
   return proxy(client, {
     provider, endpoint: endpointOf(client, provider), taskRef: options.taskRef, agentId: options.agentId,
     customerId: options.customerId, step: options.step, taskCeiling: options.taskCeiling,
-    defaultEstimate: options.defaultEstimate ?? DEFAULT_ESTIMATE, onQuota: options.onQuota ?? 'raise',
+    defaultEstimate: options.defaultEstimate ?? DEFAULT_ESTIMATE, onQuota: options.onQuota ?? 'refuse',
     averages: new Map(), warned: new Set(),
-  }, [])
+  }, []) as unknown as Wrapped<T>
 }

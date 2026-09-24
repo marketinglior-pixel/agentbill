@@ -148,13 +148,74 @@ test('openai chat: preflight in tokens, then the reported usage, keyed by the re
   assert.equal(JSON.stringify(sent).includes('"hi"'), false)
 })
 
-test('a refusal throws before the provider call is sent', async () => {
+test('a refusal is returned before the provider call is sent', async () => {
   reset({ '/preflight': REFUSED })
   const oa = new FakeOpenAI()
   const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'researcher' })
-  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), sdk.TaskCeilingExceededError)
+  const r = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })   // nothing thrown
+  assert.ok(sdk.isRefusal(r) && r instanceof sdk.Refusal)
+  assert.equal(r.approved, false)
+  assert.equal(r.reason, 'task_ceiling_exceeded'); assert.equal(r.taskRef, 'job-7')
+  assert.deepEqual([r.used, r.ceiling, r.remaining, r.asked], [990, 1000, 10, 2000])
+  assert.deepEqual(r.answer, REFUSED)                          // the server's answer, whole
+  assert.ok(/990\/1000/.test(String(r)) && /not sent/.test(String(r)))
   assert.equal(oa.sent.length, 0)
   assert.equal(events().length, 0)
+  // Not a provider response, and nothing on it pretends to be one.
+  for (const k of ['choices', 'content', 'candidates', 'text', 'usage', 'message', 'output', 'id']) assert.equal(k in r, false, k)
+  assert.equal(sdk.isRefusal(chatCompletion()), false); assert.equal(sdk.isRefusal(null), false)
+  // The plain client is not changed: preflight() still throws, with the answer on it.
+  await assert.rejects(sdk.preflight({ agentId: 'researcher', estimatedUnits: 2000, taskRef: 'job-7' }),
+    (e) => e instanceof sdk.TaskCeilingExceededError && e.taskRemainingUnits === 10 && e.answer.task_used_units === 990)
+})
+
+test('a spent customer balance and a per-call ceiling are refusals too', async () => {
+  reset({ '/preflight': { approved: false, reason: 'budget_exhausted', estimated_units: 2000, remaining_units: 0 } })
+  const oa = new FakeOpenAI()
+  const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r', customerId: 'acme' })
+  const r = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  assert.ok(sdk.isRefusal(r)); assert.equal(r.reason, 'budget_exhausted'); assert.equal(r.remaining, 0); assert.equal(r.ceiling, undefined)
+  assert.ok(/balance is spent/.test(String(r)))
+  reset({ '/preflight': { approved: false, reason: 'ceiling_exceeded', estimated_units: 2000, ceiling: 500, remaining_units: null } })
+  const c = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  assert.ok(sdk.isRefusal(c)); assert.equal(c.reason, 'ceiling_exceeded'); assert.equal(c.ceiling, 500); assert.equal(c.asked, 2000)
+  assert.equal(oa.sent.length, 0); assert.equal(events().length, 0)
+  await assert.rejects(sdk.preflight({ agentId: 'r', estimatedUnits: 2000, ceiling: 500 }), sdk.CeilingExceededError)   // preflight(): unchanged
+})
+
+test('a refused stream is the refusal, and iterates to nothing', async () => {
+  reset({ '/preflight': REFUSED })
+  const oa = new FakeOpenAI({ chunks: [chunk('never')] })
+  const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })
+  const s = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [], stream: true })
+  assert.ok(sdk.isRefusal(s))
+  const seen = []
+  for await (const c of s) seen.push(c)                        // a loop written for the stream runs zero times
+  assert.deepEqual(seen, []); assert.deepEqual([...s], [])
+  assert.equal(oa.sent.length, 0); assert.equal(events().length, 0)
+  // The same on a Gemini stream.
+  const g = new FakeGoogleGenAI({ chunks: [geminiResponse()] })
+  const gs = await sdk.wrap(g, { taskRef: 'job-7', agentId: 'r' }).models.generateContentStream({ model: 'gemini-2.5-flash', contents: 'x' })
+  assert.ok(sdk.isRefusal(gs)); assert.equal(g.sent.length, 0)
+  // An approved stream carries .refusal, and it is null.
+  reset()
+  const ok = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [], stream: true })
+  assert.equal(sdk.isRefusal(ok), false); assert.equal(ok.refusal, null)
+})
+
+test('real failures still reject', async () => {
+  // A refusal is a value; a failure is an error, the same AgentBillError preflight() throws.
+  const oa = new FakeOpenAI()
+  const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })
+  reset({ '/preflight': { error: 'unauthorized', message: 'Invalid API key.' } }, { '/preflight': 401 })
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) => e instanceof sdk.AgentBillError && /401/.test(e.message))
+  reset({ '/preflight': { error: 'boom' } }, { '/preflight': 500 })
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) => e instanceof sdk.AgentBillError && /500/.test(e.message))
+  reset({ '/preflight': { error: 'task_unit_mismatch', message: 'job-7 is counted in unit' } }, { '/preflight': 422 })
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) => e instanceof sdk.AgentBillError && /task_unit_mismatch/.test(e.message))
+  reset({ '/preflight': () => { throw new Error('connection refused') } })
+  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) => !sdk.isRefusal(e))
+  assert.equal(oa.sent.length, 0); assert.equal(events().length, 0)
 })
 
 test('missing usage is recorded as missing, never as 0', async () => {
@@ -185,20 +246,26 @@ test('a failed record never loses the answer', async () => {
   assert.ok(warnings.some((w) => /could not record/.test(w)), warnings.join(' | '))
 })
 
-test('a spent quota throws by default, and the call is not sent', async () => {
+test('a spent quota is refused by default, and the call is not sent', async () => {
   // Once the account's monthly quota is spent, preflight answers before it
   // looks at the job: no ceiling is checked. Sending anyway would turn the
-  // ceiling off without a word, so the default throws.
+  // ceiling off without a word, so the default refuses, and preflight()
+  // itself still returns approved: false rather than throwing.
   reset({ '/preflight': QUOTA })
   const oa = new FakeOpenAI()
   const llm = sdk.wrap(oa, { taskRef: 'job-7', agentId: 'r' })
-  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), (e) =>
-    e instanceof sdk.FreeTierExceededError && e.upgradeUrl === QUOTA.upgrade_url &&
-    /job 'job-7'/.test(e.message) && /not sent/.test(e.message) && /onQuota: 'send'/.test(e.message))
+  const spent = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  assert.ok(sdk.isRefusal(spent)); assert.equal(spent.reason, 'free_tier_exceeded'); assert.equal(spent.approved, false)
+  assert.equal(spent.upgradeUrl, QUOTA.upgrade_url); assert.deepEqual(spent.answer, QUOTA); assert.equal(spent.taskRef, 'job-7')
+  assert.deepEqual([spent.used, spent.ceiling, spent.remaining], [undefined, undefined, undefined])   // the job was not looked at
+  assert.ok(/job 'job-7'/.test(String(spent)) && /not sent/.test(String(spent)) && /onQuota: 'send'/.test(String(spent)))
   reset({ '/preflight': { ...QUOTA, reason: 'plan_limit_exceeded', plan: 'starter' } })
-  await assert.rejects(llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] }), sdk.PlanLimitExceededError)
+  const plan = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  assert.ok(sdk.isRefusal(plan)); assert.equal(plan.reason, 'plan_limit_exceeded'); assert.equal(plan.answer.plan, 'starter')
   assert.equal(oa.sent.length, 0)
   assert.equal(events().length, 0)
+  const pf = await sdk.preflight({ agentId: 'r', estimatedUnits: 1, taskRef: 'job-7' })
+  assert.equal(pf.approved, false); assert.equal(JSON.stringify(pf).includes('answer'), false)   // answer is there, not enumerable
 })
 
 test("onQuota 'send' sends unchecked, and warns once per job", async () => {
@@ -216,8 +283,11 @@ test("onQuota 'send' sends unchecked, and warns once per job", async () => {
   assert.ok(events().every((e) => !('reservation_id' in e)))   // nothing was reserved
 })
 
-test("onQuota is 'raise' or 'send'", () => {
-  assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r', onQuota: 'ignore' }), /onQuota/)
+test("onQuota is 'refuse' or 'send'", () => {
+  for (const bad of ['ignore', 'raise']) {                    // 'raise' was the name before refusals were values
+    assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r', onQuota: bad }), /onQuota/)
+  }
+  sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r', onQuota: 'refuse' })
 })
 
 // ------------------------------------------------------------- the estimate
@@ -502,13 +572,43 @@ test('gemini: each round is measured when streamed too', async () => {
   assert.equal(preflights().length, 2)
 })
 
-test('gemini: a refusal on a later round throws, with the earlier rounds recorded', async () => {
+test('gemini: a refusal on a later round is returned, with the earlier rounds recorded', async () => {
   let n = 0
   reset({ '/preflight': () => (n++ === 0 ? APPROVED : REFUSED) })
   const g = loopingGenAI(3)
   const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
-  await assert.rejects(llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x' }), sdk.TaskCeilingExceededError)
+  const r = await llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x' })   // nothing thrown
+  assert.ok(sdk.isRefusal(r)); assert.equal(r.reason, 'task_ceiling_exceeded')
   assert.equal(g.apiClient.sent.length, 1)                    // round 2 was not sent
+  assert.deepEqual(events().map((e) => e.idempotency_key), ['gem-round-0'])
+})
+
+test('gemini: a rounds stream refused on its first round is the refusal', async () => {
+  reset({ '/preflight': REFUSED })
+  const g = loopingGenAI(3)
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
+  const s = await llm.models.generateContentStream({ model: 'gemini-2.5-flash', contents: 'x' })
+  assert.ok(sdk.isRefusal(s))
+  const seen = []
+  for await (const c of s) seen.push(c)
+  assert.deepEqual(seen, []); assert.equal(g.apiClient.sent.length, 0); assert.equal(events().length, 0)
+})
+
+test('gemini: a rounds stream refused on a later round ends, and exposes the refusal', async () => {
+  // The one stream that can be refused after it started: the SDK's own loop
+  // asks for another round mid-stream. The caller saw round 0, the stream
+  // ends, .refusal says why, and round 0 is recorded.
+  let n = 0
+  reset({ '/preflight': () => (n++ === 0 ? APPROVED : REFUSED) })
+  const g = loopingGenAI(3)
+  const llm = sdk.wrap(g, { taskRef: 'job-7', agentId: 'r', provider: 'gemini' })
+  const s = await llm.models.generateContentStream({ model: 'gemini-2.5-flash', contents: 'x' })
+  assert.equal(sdk.isRefusal(s), false); assert.equal(s.refusal, null)
+  const ids = []
+  for await (const c of s) ids.push(c.responseId)
+  assert.deepEqual(ids, ['gem-round-0'])
+  assert.ok(sdk.isRefusal(s.refusal)); assert.equal(s.refusal.reason, 'task_ceiling_exceeded')
+  assert.equal(g.apiClient.sent.length, 1)
   assert.deepEqual(events().map((e) => e.idempotency_key), ['gem-round-0'])
 })
 
