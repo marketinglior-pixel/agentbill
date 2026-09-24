@@ -1,7 +1,7 @@
 {
   "id": "agentbill",
   "name": "AgentBill",
-  "description": "One spend ceiling per session. Every model turn and tool call consults it before it runs; when the ceiling is spent the call is refused and the session says so.",
+  "description": "A spend budget per session, in tokens or calls. Model turns and tool calls past it are refused, and the session says so.",
   "categories": ["security"],
   "activation": {
     "onStartup": true
