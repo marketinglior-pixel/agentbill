@@ -1,7 +1,7 @@
 {
   "name": "@agentbill/openclaw",
-  "version": "0.2.0",
-  "description": "One spend ceiling per OpenClaw session, consulted before every model turn and tool call. Bound to the task, not to a calendar window.",
+  "version": "0.2.1",
+  "description": "A spend budget per OpenClaw session, in tokens or calls. Model turns and tool calls past the limit are refused, nothing refills it on a clock, and a console shows each session's usage.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
