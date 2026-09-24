@@ -93,11 +93,11 @@ Record what actually happened.
 
 The result of `preflight()` has the same method, `result.record({ units, success?, idempotencyKey?, metadata?, usageMissing? })`, which carries `agentId`, `customerId`, `taskRef` and `reservationId` from the preflight that made it.
 
-> **Added after 0.4.2.** `reservationId`, `result.record()`, `unit`, and `record`'s `idempotencyKey`, `reservationId` and `usageMissing` are in this repository's SDK and not in 0.4.2 or earlier. They also need an AgentBill API that returns `reservation_id`; against one that does not, `reservationId` is absent and records settle as before.
+> **Since 0.5.0.** `reservationId`, `result.record()`, `unit`, and `record`'s `idempotencyKey`, `reservationId` and `usageMissing` are in 0.5.0 and later, not in 0.4.1 or earlier. They also need an AgentBill API that returns `reservation_id`; against one that does not, `reservationId` is absent and records settle as before.
 
 ### `wrap(client, options)`
 
-> **Added after 0.4.2.** `wrap()` is in this repository's SDK and not in 0.4.2 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
+> **Since 0.5.0.** `wrap()` is in 0.5.0 and later, not in 0.4.1 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
 
 Automatic metering for a model client. Every call through `chat.completions.create` and `responses.create` (openai), `messages.create` (@anthropic-ai/sdk) or `models.generateContent` and `generateContentStream` (@google/genai), streamed or not, is measured from the usage the provider returned: a preflight on the job in tokens before the call, a record of the reported tokens after it.
 

@@ -1,6 +1,6 @@
 {
   "name": "agentbill",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "One spend ceiling per agent job, consulted before the call goes out. Bound to a task_ref, not to a calendar month.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

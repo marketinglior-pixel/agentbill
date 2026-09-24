@@ -236,13 +236,13 @@ Settle every run, including the ones that fail. `record(..., success=False)` rel
 
 **A reservation bigger than the call.** A record that does not name its reservation settles the oldest reservations of that customer and `task_ref` by the units you pass, and no more: reserve 70,000 and record 8,000, and the other 62,000 stay held until the reservation expires. Every approved check carries `check.reservation_id`. Settle with `check.record(units=actual)`, which carries the agent, customer, `task_ref` and reservation for you, or pass `reservation_id=check.reservation_id` to `client.record(...)`: that reservation closes whole, the actual is what the job spent, and the rest is released at once. `gate` does it for you. Settling the same reservation twice releases it once.
 
-> **Added after 0.6.5.** `reservation_id`, `PreflightResult.record()`, and `record()`'s `idempotency_key`, `reservation_id`, `metadata` and `usage_missing` arguments are in this repository's SDK and not in 0.6.5 or earlier. They also need an AgentBill API that returns `reservation_id` on preflight; against one that does not, `check.reservation_id` is `None` and records settle as before.
+> **Since 0.7.0.** `reservation_id`, `PreflightResult.record()`, and `record()`'s `idempotency_key`, `reservation_id`, `metadata` and `usage_missing` arguments are in 0.7.0 and later, not in 0.6.5 or earlier. They also need an AgentBill API that returns `reservation_id` on preflight; against one that does not, `check.reservation_id` is `None` and records settle as before.
 
 ---
 
 ## Automatic metering with `wrap()`
 
-> **Added after 0.6.5.** `wrap()` is in this repository's SDK and not in 0.6.5 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
+> **Since 0.7.0.** `wrap()` is in 0.7.0 and later, not in 0.6.5 or earlier. It needs an AgentBill API that returns `reservation_id` and accepts `unit: "token"`.
 
 Wrap your model client once. Every call it makes through `chat.completions.create` and `responses.create` (OpenAI), `messages.create` (Anthropic) or `models.generate_content` and `generate_content_stream` (google-genai, `aio` included), sync or async, streamed or not, is measured from the usage the provider returned: a preflight on the job in tokens before the call, a record of the reported tokens after it. You pass no estimate and record no number.
 
