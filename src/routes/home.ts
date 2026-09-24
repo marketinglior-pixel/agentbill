@@ -1,4 +1,4 @@
-import { HOME_H1, INSTALL_PY, ORIGIN } from '../ui/site.js'
+import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
@@ -197,15 +197,15 @@ const QUESTIONS: ReadonlyArray<readonly [q: string, a: string]> = [
 export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
-      title: `AgentBill · ${HOME_H1}`,
-      description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next. Free tier, no card.`,
+      title: `AgentBill · ${HEADLINE}`,
+      description: `${HEADLINE}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next. Free tier, no card.`,
       path: '/',
       // Canvas is head()'s default for every page since 2026-09-23 (Lior's
       // instruction to carry this page's design to every screen, the console
       // included). Named here anyway: this page is the system's reference.
       theme: 'canvas',
       og: {
-        description: `${HOME_H1}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next.`,
+        description: `${HEADLINE}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next.`,
       },
       // The product entity lives in ui/ld.ts and is emitted identically here
       // and on /pricing under one @id.
@@ -485,7 +485,7 @@ ${siteNav('/')}
 
   <header class="hero wrap">
     <p class="pill"><span class="pill-tag">For builders</span>who run agents unattended</p>
-    <h1>${HOME_H1}</h1>
+    <h1>${HEADLINE}</h1>
     <p class="sub">AgentBill is a per-task spending ceiling for autonomous
     <span class="nb">AI agents.</span> Before the next
     model call, preflight returns <span class="mono-in">approved: false</span> when this

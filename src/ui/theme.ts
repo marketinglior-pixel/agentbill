@@ -1,4 +1,5 @@
 import { ORIGIN, abs, byPath } from './site.js'
+import { OG_IMAGE } from './og.js'
 import { policy } from '../lib/csp.js'
 // The single source of truth for the site's design tokens and page shell.
 //
@@ -626,7 +627,7 @@ function webPageLd(
     inLanguage: lang === 'he' ? 'he-IL' : 'en-US',
     isPartOf: { '@id': `${ORIGIN}/#website` },
     ...(meta?.updated ? { dateModified: meta.updated } : {}),
-    primaryImageOfPage: { '@type': 'ImageObject', url: `${ORIGIN}/og.png`, width: 1200, height: 630 },
+    primaryImageOfPage: { '@type': 'ImageObject', url: OG_IMAGE, width: 1200, height: 630 },
     ...(mainEntity ? { mainEntity: { '@id': mainEntity } } : {}),
     ...(breadcrumb ? { breadcrumb: { '@id': `${href}#breadcrumb` } } : {}),
   }
@@ -658,8 +659,9 @@ export function head({ title, description, path, canonical, css = '', extraHead 
   // at /og/<section>.png, and those routes were never built, so every share of
   // /docs, /pricing, /register and /blog carried a broken image for a day. The
   // registry keeps the per-section `og` field so cards can exist later; until a
-  // route serves them, nothing may reference them.
-  const card = `${ORIGIN}/og.png`
+  // route serves them, nothing may reference them. Versioned by the PNG's own
+  // hash (ui/og.ts), because chat apps cache a card by URL.
+  const card = OG_IMAGE
   const ogTitle = og?.title ?? title
   const ogDesc = og?.description ?? description ?? ''
   const blocks = hidden ? [] : [

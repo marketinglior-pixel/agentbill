@@ -42,7 +42,7 @@ import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
 import { startConversionDigest } from './lib/conversion-digest.js'
-import { OG_PNG } from './lib/og-image.js'
+import { OG_PNG, OG_VERSION } from './lib/og-image.js'
 import { FAVICON_ICO, APPLE_TOUCH_PNG } from './lib/icons.js'
 import { FAVICON_SVG } from './ui/mark.js'
 import { FOUNDER_JPG } from './lib/photo.js'
@@ -323,9 +323,17 @@ app.get('/hero-poster.jpg', publicRoute(), async (_, reply) => {
   return reply.type('image/jpeg').header('Cache-Control', HERO_CACHE).send(HERO_POSTER_JPG)
 })
 
-// Open Graph card for link previews and ads (1200x630, embedded at build time)
-app.get('/og.png', publicRoute(), async (_, reply) => {
-  reply.type('image/png').header('Cache-Control', 'public, max-age=86400')
+// Open Graph card for link previews and ads (1200x630, embedded at build time).
+//
+// Every head names it as /og.png?v=<OG_VERSION>, a hash of these bytes (see
+// ui/og.ts), so a chat app that cached the old card by URL fetches the new one.
+// That exact URL can never serve different bytes, so it is immutable for a
+// year. Anything else, the bare /og.png an old share or an ad still carries
+// and a stale ?v= from a page cached before a rebuild, gets the current card
+// on the old one-day policy: it has no version to promise, so it must not.
+app.get('/og.png', publicRoute(), async (request, reply) => {
+  const v = (request.query as { v?: unknown } | undefined)?.v
+  reply.type('image/png').header('Cache-Control', v === OG_VERSION ? 'public, max-age=31536000, immutable' : 'public, max-age=86400')
   return reply.send(OG_PNG)
 })
 

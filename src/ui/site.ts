@@ -13,64 +13,46 @@
 
 export const ORIGIN = 'https://agentbill.dev'
 
-/** The one sentence the site leads with. The homepage <title>, its h1 and the
- *  share card all render from here, so the head, the body and the PNG cannot
- *  disagree about it again: until 2026-09-07 the PNG carried a headline the
- *  other two had retired, because a grep cannot see an image.
+/** The one sentence the site leads with. The homepage <title>, its h1, the
+ *  share card, /pricing's description and /register's share description all
+ *  render from here, so the head, the body and the PNG cannot disagree about
+ *  it again: until 2026-09-07 the PNG carried a headline the other two had
+ *  retired, because a grep cannot see an image. It happened a second time on
+ *  2026-09-24, the other way round: `/` led with a second constant (HOME_H1)
+ *  while the PNG kept this one, and a WhatsApp preview of agentbill.dev showed
+ *  "A ceiling on this job, not on the month" on the old dark card beside the
+ *  new description. A gate in the harness ([og]) now compares the headline the
+ *  card was built from with this constant, the h1 and the <title>.
  *
- *  Changed 2026-09-10, and this one reverses the 2026-09-07 change on purpose.
- *  That change retired "A spend ceiling bound to the task, not the month" for
- *  naming a category rather than a mechanism, and replaced it with
- *  "One ceiling per task_ref. Not per project, not per calendar month".
- *  Two pieces of evidence turned it back:
+ *  Decided 2026-09-24: the canvas homepage and this line, trialled on `/` from
+ *  2026-09-23 as HOME_H1, are kept, live on every screen as of e6c9acc. HOME_H1
+ *  was folded into this constant the same day and deleted, as its own comment
+ *  asked, and og.png was rebuilt from it.
  *
- *  1. The founder cold-visited the homepage on 2026-09-09 and could not say
- *     what the product did. task_ref is our own field name; a first-time
- *     reader does not have one yet, so the h1 spent its one sentence on a
- *     word that means nothing until after integration.
- *  2. A sweep of nine live folds in this niche the same day: eight of nine
- *     name an audience or an outcome in the h1. Ours was the only one naming
- *     a data structure, and the only one with code above the fold.
+ *  Why this line replaced "A ceiling on this job, not on the month", recorded
+ *  so the next change is a decision and not a rediscovery: the old line named
+ *  the mechanism's contrast (job versus month) rather than the reader. The
+ *  2026-09-23 value pack's brief was outcome-first for builders who leave
+ *  agents running unattended, and this line names that reader and the outcome
+ *  in words they own. The contrast did not leave the site: it is the homepage's
+ *  statement panel. Two pack options were rejected in review before this one
+ *  was chosen: "Don't let one agent job run away overnight" promised that we
+ *  end the run, and "A ceiling on this job, shared across every call" claimed
+ *  every call when only the calls that ask preflight share it.
  *
- *  The 09-07 objection still stands on its own terms, and this line IS one
- *  any budget tool could sign. That is accepted knowingly. The differentiator
- *  moved down the page, to where a reader who has decided to keep reading can
- *  receive it; the h1's job is to earn that scroll, which the mechanism line
- *  measurably did not.
+ *  Earlier history, short: 2026-09-07 retired "A spend ceiling bound to the
+ *  task, not the month" for naming a category, and its replacement ("One
+ *  ceiling per task_ref...") was turned back on 2026-09-10 because a first-time
+ *  reader has no task_ref yet and eight of nine live folds in this niche name
+ *  an audience or an outcome in the h1.
  *
  *  It is deliberately plain text with no markup. The <title> and the PNG
  *  cannot carry a span, and a second hand-kept copy of the headline is exactly
  *  the drift this constant exists to prevent.
  *
- *  The 09-07 note recorded a known cost, the title running past the ~60
- *  characters a search result shows. This line removes it: with the
- *  "AgentBill · " prefix the title is 51 characters and no longer truncates. */
-export const HEADLINE = 'A ceiling on this job, not on the month'
-
-/** The h1 and <title> of `/`, from 2026-09-23. The rest of the site keeps
- *  HEADLINE: /pricing's description, /register's share description and the
- *  share card still render from it, and this change is an experiment on `/`
- *  that Lior may keep or revert after the paid-feeds read.
- *
- *  Why a second constant and not an edit to HEADLINE: HEADLINE reaches three
- *  pages and a PNG, and the ticket that asked for this line (the 2026-09-23
- *  value pack, T0/T1) scoped it to the homepage. When the experiment is
- *  decided, either this constant is folded into HEADLINE (and og.png rebuilt)
- *  or it is deleted and home.ts goes back to HEADLINE.
- *
- *  What HEADLINE's line was retired from `/` for, recorded here so the next
- *  change is a decision and not a rediscovery: it names the mechanism's
- *  contrast (job versus month) rather than the reader. The pack's brief was
- *  outcome-first for builders who leave agents running unattended, and the
- *  line below names that reader and the outcome in words they own. Two pack
- *  options were rejected in review before this one was chosen: "Don't let one
- *  agent job run away overnight" promised that we end the run, and "A ceiling
- *  on this job, shared across every call" claimed every call when only the
- *  calls that ask preflight share it.
- *
- *  Known cost: with the "AgentBill · " prefix the <title> is 68 characters, so
- *  a search result that cuts near 60 loses the last word. */
-export const HOME_H1 = 'Give the job you leave running overnight its own ceiling'
+ *  Known cost: with the "AgentBill · " prefix the homepage <title> is 68
+ *  characters, so a search result that cuts near 60 loses the last word. */
+export const HEADLINE = 'Give the job you leave running overnight its own ceiling'
 
 /** The install line beside the primary action, and on the share card. */
 export const INSTALL_PY = 'pip install agentbill-sdk'

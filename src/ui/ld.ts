@@ -1,4 +1,5 @@
 import { ORIGIN } from './site.js'
+import { OG_IMAGE } from './og.js'
 import { SDK_VERSIONS } from '../lib/llms.js'
 import { PLAN_ORDER, PLAN_PRICES, PLAN_LIMITS } from '../integrations/polar.js'
 
@@ -53,7 +54,7 @@ export function softwareLd(): unknown {
     operatingSystem: 'Any',
     url: ORIGIN,
     description: DESCRIPTION,
-    image: `${ORIGIN}/og.png`,
+    image: OG_IMAGE,
     provider: { '@id': `${ORIGIN}/#organization` },
     publisher: { '@id': `${ORIGIN}/#organization` },
     isAccessibleForFree: true,
