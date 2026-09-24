@@ -6,6 +6,8 @@ import { byPath, ORIGIN } from '../ui/site.js'
 import { softwareLd, sourceLd } from '../ui/ld.js'
 import { CONTENT_CSS } from '../ui/content.js'
 import { HISTORY_JOBS, HISTORY_AGENTS } from '../lib/ceiling-suggest.js'
+import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
+import { CONSOLE_AGENT } from '../lib/task-ceiling.js'
 
 // /docs carried no page-level structured data at all, while every guide under
 // it emitted a TechArticle. It is the second-highest priority page in the
@@ -238,12 +240,23 @@ except TaskCeilingExceededError as e:
   for attribution and carries no budget of its own; two different agents that share a
   <span class="inline">task_ref</span> share one ceiling. The job is what costs money, not the agent.</p>
 
+  <h3 id="ceiling-suggestion">How the suggestion is computed</h3>
+
   <p>Not sure what a job needs? The task budgets view suggests a ceiling from your own history.
   For at most ${HISTORY_AGENTS} agents, those whose latest finished jobs are the most recent, it
-  shows the p50, p90 and max <span class="inline">used_units</span> of each one's last ${HISTORY_JOBS}
-  finished jobs, where finished means the job has spent units and holds no reservation. Pick one and
+  shows the p50, p90 and max <span class="inline">used_units</span> of each one's ${HISTORY_JOBS}
+  most recently updated finished jobs, so every figure is one real job's total. Pick one and
   it goes in the ceiling field with that agent's label, still editable, and nothing is saved until
   you press Set ceiling. Any other agent, including one with no finished job, gets no suggestion.</p>
+
+  <p>Finished means the job has spent units and holds no reservation:
+  <span class="inline">used_units</span> above 0 and <span class="inline">reserved_units</span> 0.
+  No event marks a job as done, so a job resting between two calls counts, and a call still in
+  flight keeps its job out until it records, or, if it never does, until its reservation expires
+  after ${RESERVATION_TTL_MINUTES} minutes and a sweep releases it. A job refused at its ceiling
+  counts at what it spent. Jobs with the placeholder label
+  <span class="inline">${CONSOLE_AGENT}</span>, the one a job carries until an approved call names
+  an agent, are left out.</p>
 
   <h3>Per-request ceiling</h3>
   <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>

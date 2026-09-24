@@ -3787,13 +3787,26 @@ ok('[suggest] ?demo=1 shows the suggestion from the labelled sample rows, a clic
    `${demoS.status} researcher ${figsS(demoResS)} "${demoResS?.label}", enricher ${figsS(demoEnrS)}, rows ${rowsOfS(demoBlockS).map((r) => r.agent).join(' | ') || 'none'}, POST form ${/method="POST"/i.test(demoS.html)}`)
 
 // The words say what the code computes. The footer and the fine print name
-// the same N, the same test for finished and the same held-out time as the
-// constants the server runs on, /docs says it in one paragraph, and no served
-// surface keeps the old review's sentence, which named GET /tasks?agent_id=
-// (created_at order, every job) as what the percentile was taken over.
+// the same N as the constant the server runs on, and /docs holds every fact
+// the fine print used to carry (2026-09-24, when it was cut from a paragraph
+// to two lines): finished defined by column, the reservation that holds a job
+// out and its TTL from RESERVATION_TTL_MINUTES, a refused job counted at what
+// it spent, the console label left out, and how many agents get a row. The
+// fine print is two lines at the 86ch measure (229 characters against a
+// 798px paragraph, measured in a browser at 1440 on 2026-09-24), links to
+// that paragraph by an anchor that must exist, and no
+// served surface keeps the old review's sentence, which named
+// GET /tasks?agent_id= (created_at order, every job) as what the percentile
+// was taken over.
 const footS = shownS((pageS.html.match(/<div class="foot">[\s\S]*?<\/div>/) ?? [''])[0])
-const fineS = shownS((blockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0])
-const docsS = shownS(await fetch(`${API}/docs`).then((r) => r.text()))
+const fineRawS = (blockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0]
+const fineS = shownS(fineRawS)
+const demoFineS = shownS((demoBlockS.match(/<p class="fine">[\s\S]*?<\/p>/) ?? [''])[0])
+const docsRawS = await fetch(`${API}/docs`).then((r) => r.text())
+const docsS = shownS(docsRawS)
+// What left the page. None of it may be on the fine print any more, and all
+// of it must be in /docs, or a fact was dropped rather than moved.
+const MOVED_S = /Finished means|reservation expires|a sweep releases|refused at its ceiling|placeholder label|At most \d+ agents|gets no suggestion/
 const OLD_S = /percentile of the used_units that GET \/tasks\?agent_id=|GET \/tasks\?agent_id= returns/i
 const sitemapS = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
 const pathsS = [...new Set([...sitemapS.matchAll(/<loc>https?:\/\/[^/<]+(\/[^<]*)<\/loc>/g)].map((m) => m[1]))]
@@ -3806,30 +3819,34 @@ for (const [name, h] of [['tasks', pageS.html], ['tasks+pick', pickedS.html], ['
   const hit = shownS(h).match(OLD_S)
   if (hit) oldSaidS.push(`${name}: "${hit[0]}"`)
 }
-ok('[suggest] the footer, the fine print and /docs say what the code computes: one job\'s used_units, the last N finished jobs of one agent, finished defined, the time an open reservation holds a job out, and how many agents get a row',
+ok('[suggest] the fine print is two lines, the click and the figures, and links to the /docs paragraph that holds every fact that left it: finished defined by column, the reservation that holds a job out and its TTL, a refused job counted at what it spent, the console label left out, and how many agents get a row',
    footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
-     && fineS.includes(`Each row is the p50, p90 and max used_units of one agent's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
-     && fineS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
-     && fineS.includes(`a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ${TTL_S} minutes and a sweep releases it.`)
-     && fineS.includes('Jobs with the placeholder label console are left out.')
-     && fineS.includes(`At most ${AGENTS_S} agents get a row: those whose latest finished jobs are the most recent. Any other agent gets no suggestion.`)
-     && docsS.includes(`For at most ${AGENTS_S} agents, those whose latest finished jobs are the most recent, it shows the p50, p90 and max used_units of each one's last ${JOBS_S} finished jobs, where finished means the job has spent units and holds no reservation.`)
+     && fineS === `A pick fills the ceiling field with that agent's label; nothing is saved until you press Set ceiling. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total. How the suggestion is computed.`
+     && demoFineS === `A pick fills the ceiling field with that agent's label; sample data, so nothing here is saved. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total. How the suggestion is computed.`
+     && !MOVED_S.test(fineS) && !MOVED_S.test(demoFineS)
+     && fineRawS.includes('<a href="/docs#ceiling-suggestion">How the suggestion is computed</a>')
+     && /<h3 id="ceiling-suggestion">/.test(docsRawS)
+     && docsS.includes(`For at most ${AGENTS_S} agents, those whose latest finished jobs are the most recent, it shows the p50, p90 and max used_units of each one's ${JOBS_S} most recently updated finished jobs, so every figure is one real job's total.`)
      && docsS.includes('Any other agent, including one with no finished job, gets no suggestion.')
+     && docsS.includes('Finished means the job has spent units and holds no reservation: used_units above 0 and reserved_units 0.')
+     && docsS.includes('No event marks a job as done, so a job resting between two calls counts, and a call still in flight keeps its job out until it records, or, if it never does, until its reservation expires after ' + TTL_S + ' minutes and a sweep releases it.')
+     && docsS.includes('A job refused at its ceiling counts at what it spent.')
+     && docsS.includes('Jobs with the placeholder label console, the one a job carries until an approved call names an agent, are left out.')
      && !/for each agent, the p50/i.test(docsS)
      && pathsS.length >= 10 && oldSaidS.length === 0,
-   oldSaidS.join('; ') || `foot: ${footS.slice(-260)} | fine: ${fineS.slice(0, 160)}`)
+   oldSaidS.join('; ') || `foot: ${footS.slice(-200)} | fine (${fineS.length}): ${fineS} | demo fine: ${demoFineS.slice(0, 160)} | docs anchor ${/<h3 id="ceiling-suggestion">/.test(docsRawS)}, moved on page ${MOVED_S.test(fineS)}`)
 
 // Units only, and the house words. Everything this change prints, read as
 // served: the suggestion on the real and the sample view, both lines under
 // the form, the sample's button, the footer sentence and the /docs paragraph.
 // No money word of any kind, and none of the house's banned words.
-const docsParaS = (docsS.match(/Not sure what a job needs\?[^]*?gets no suggestion\./) ?? [''])[0]
+const docsParaS = (docsS.match(/How the suggestion is computed Not sure what a job needs\?[^]*?names an agent, are left out\./) ?? [''])[0]
 const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html), pickLineS(host2PickS.html),
   (demoS.html.match(/<a class="btn" href="\/register">[^<]*<\/a>/) ?? [''])[0], (footS.match(/A suggested ceiling is[^]*$/) ?? [''])[0]].map(shownS).join(' ') + ' ' + docsParaS
 const moneyS = newCopyS.match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
 const bannedS = newCopyS.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
 ok('[suggest] everything the suggestion prints is in units: no money word, and none of the banned house words',
-   newCopyS.length > 1500 && docsParaS.length > 200 && moneyS.length === 0 && bannedS.length === 0,
+   newCopyS.length > 1500 && docsParaS.length > 900 && moneyS.length === 0 && bannedS.length === 0,
    [...moneyS, ...bannedS].join(', ') || `${newCopyS.length} chars, docs paragraph ${docsParaS.length}`)
 await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
 
