@@ -1,5 +1,6 @@
 import { BP } from './theme.js'
 import { mark, MARK_CSS } from './mark.js'
+import { KIT_CSS } from './kit.js'
 // The site header and footer, defined once.
 //
 // Before this file there were five different header treatments across the
@@ -8,8 +9,13 @@ import { mark, MARK_CSS } from './mark.js'
 // links and the logo was not even a link. A visitor who landed there from
 // search or an ad had one small inline text link as their only way out.
 //
-// Both parts read `--shell` for their content width, so a 720px docs page and
-// a 960px marketing page share the markup without sharing a measurement.
+// Both parts read `--chrome-w` for their width (2026-09-23; they read the
+// page's `--shell` until then), so the bar is the same bar on every page and
+// the column under it keeps its own measure.
+//
+// CHROME_CSS carries the component kit (src/ui/kit.ts) at its head, so every
+// page with the nav has the canvas buttons, chips, tags, frames and fields
+// without importing a second stylesheet.
 //
 // The nav is three sections: wordmark left, the destinations centred, and the
 // account pair right (Console, then the one primary action). Under 720px the
@@ -42,8 +48,8 @@ const LINKS: ReadonlyArray<readonly [href: string, label: string]> = [
   [GITHUB, 'GitHub'],
 ]
 
-/** Header + footer CSS. Include once per page, after theme BASE. */
-export const CHROME_CSS = `
+/** Header + footer CSS, and the component kit. Include once per page, after theme BASE. */
+export const CHROME_CSS = `${KIT_CSS}
     /* Close an unequal row.
        A two-column row whose short side stops well above its tall side reads as
        an unfinished column, not as a finished row, unless something draws its
@@ -59,18 +65,22 @@ export const CHROME_CSS = `
 
   /* --banner-height is the nav's rendered height. Anything else that sticks
      docks at top: var(--banner-height) so it sits beneath the nav instead of
-     painting over it during scroll. Change .nav-inner's height and this together. */
-  :root { --shell: 960px; --banner-height: 60px; }
+     painting over it during scroll. Change .nav-inner's height and this together.
+     --chrome-w is the nav's and the footer's width, 2026-09-23: they read the
+     page's --shell until then, so the same nav was 720 wide on /terms, 960 on
+     the 404, 1072 on / and 1080 on /docs. One bar now, at the homepage's width,
+     whatever the column under it. --shell stays the page's content width. */
+  :root { --shell: 960px; --banner-height: 60px; --chrome-w: 1072px; }
 
   /* --nav-bg, not a literal. This was the one colour on the site that lived
      outside theme.ts, so the nav stayed near-black on a paper page while every
      other surface followed the token block. */
   .site-nav { position: sticky; top: 0; z-index: 10; background: var(--nav-bg);
               backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
-  .nav-inner { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; height: var(--banner-height);
+  .nav-inner { max-width: var(--chrome-w); margin: 0 auto; padding-inline: var(--s5); height: var(--banner-height);
                display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
   .logo { justify-self: start; display: flex; align-items: center; gap: 9px; font-family: var(--mono);
-          font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; white-space: nowrap; }
+          font-weight: 700; font-size: var(--fs-body); color: var(--text); text-decoration: none; white-space: nowrap; }
   /* The mark is a mark. It used to glow, which is the shadow-glow tell and
      implied a live status that nothing on the page measured. It was also an
      8px circle, which said nothing; it is now the drawing in src/ui/mark.ts,
@@ -80,57 +90,37 @@ ${MARK_CSS}
 
   .nav-center { justify-self: center; display: flex; gap: 28px; }
   .nav-center a { display: inline-flex; align-items: center; height: var(--banner-height); color: var(--muted);
-                  text-decoration: none; font-size: 14px; font-weight: 500; white-space: nowrap;
+                  text-decoration: none; font-size: var(--fs-small); font-weight: 500; white-space: nowrap;
                   border-bottom: 2px solid transparent; transition: color .15s; }
   .nav-center a:hover { color: var(--text); }
-  /* The current page is a bar flush with the hairline, not a colour shift alone. */
-  /* Tried at the dim end of the brand hue, to stop the active bar and the primary
-     CTA both shouting inside one 44px strip. Rendered and looked: a 2px rule at
-     that value on the page ground is invisible, so wayfinding fell back to the
-     text colour alone, which is weaker than what was there. Reverted. Separating
-     those two marks needs a mid step in the ramp, which is its own pass. */
+  /* The current page is a bar flush with the hairline, not a colour shift alone.
+     On canvas --green is the ink, so the bar is the ink. */
   .nav-center a[aria-current="page"] { color: var(--text); border-bottom-color: var(--green); }
 
   .nav-right { justify-self: end; display: flex; align-items: center; gap: 18px; }
-  .nav-right .console { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
+  .nav-right .console { color: var(--muted); text-decoration: none; font-size: var(--fs-small); font-weight: 500;
                         white-space: nowrap; padding: 11px 0; transition: color .15s; }
   .nav-right .console:hover { color: var(--text); }
-  /* BASE colours every <a> green; the filled button keeps its ink in every state. */
+  /* BASE colours every <a> with --green; the filled button keeps its ink in every state. */
   .nav-right a.btn, .nav-right a.btn:hover, .nav-right a.btn:visited { color: var(--green-ink); }
   .nav-right .btn .short { display: none; }
 
-  .btn { display: inline-block; background: var(--green); color: var(--green-ink); padding: 11px 18px;
-         border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;
-         white-space: nowrap; transition: filter .15s, transform .12s; }
-  /* One hover effect, not a lift plus a glow. A coloured halo on a dark ground
-     is the shadow-glow tell, and two simultaneous effects is the other one. */
-  .btn:hover { filter: brightness(1.06); }
-  .btn:active { transform: translateY(1px); }
-  /* The site's secondary action, paired with .btn at the same height: one
-     pixel less padding pays for the border. Defined once here; pages used to
-     each carry their own. */
-  .btn-ghost { display: inline-block; color: var(--muted); border: 1px solid var(--border-strong);
-               padding: 10px 17px; border-radius: 8px; text-decoration: none; font-weight: 600;
-               font-size: 14px; white-space: nowrap; transition: border-color .15s, color .15s, transform .12s; }
-  .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
-  .btn-ghost:active { transform: translateY(1px); }
-
-  /* The mobile menu. A native disclosure: the summary is a ghost chip, the
-     list drops beneath the bar on the panel frame. It closes on a second tap,
+  /* The mobile menu. A native disclosure: the summary is an outlined pill, the
+     list drops beneath the bar on a white card. It closes on a second tap,
      not on an outside click; that is the price of shipping it without a
      script, and it is paid knowingly. */
   .nav-menu { display: none; position: relative; }
-  .nav-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 44px;
-                      padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--muted);
-                      font-size: 14px; font-weight: 600; white-space: nowrap; transition: color .15s, border-color .15s; }
+  .nav-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: var(--h-lg);
+                      padding: 0 14px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--muted);
+                      font-size: var(--fs-small); font-weight: 600; white-space: nowrap; transition: color .15s, border-color .15s; }
   .nav-menu summary::-webkit-details-marker { display: none; }
   .nav-menu summary:hover { color: var(--text); border-color: var(--dim); }
   .nav-menu[open] summary { color: var(--text); border-color: var(--text); }
   .nav-menu ul { list-style: none; position: absolute; right: 0; top: calc(100% + 8px); min-width: 200px;
-                 background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 6px;
+                 background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r-field); padding: 6px;
                  box-shadow: var(--edge), var(--lift); z-index: 11; }
-  .nav-menu li a { display: block; padding: 12px 14px; color: var(--muted); text-decoration: none; font-size: 15px;
-                   border-radius: 8px; white-space: nowrap; }
+  .nav-menu li a { display: block; padding: 12px 14px; color: var(--muted); text-decoration: none; font-size: var(--fs-body);
+                   border-radius: var(--r-row); white-space: nowrap; }
   .nav-menu li a:hover { color: var(--text); background: var(--surface2); }
   .nav-menu li a[aria-current="page"] { color: var(--text); }
 
@@ -140,7 +130,7 @@ ${MARK_CSS}
      account there isn't one of. An empty social row is worse than none. */
   .site-foot { border-top: 1px solid var(--border); padding-block: var(--s7) var(--s7);
                margin-top: var(--s9); }
-  .foot-inner { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); }
+  .foot-inner { max-width: var(--chrome-w); margin: 0 auto; padding-inline: var(--gutter); }
   .foot-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
                gap: var(--s6) var(--s5); margin-bottom: var(--s7); }
   .foot-col .foot-h { font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500;
@@ -175,33 +165,32 @@ ${MARK_CSS}
     .nav-right { gap: 10px; }
     .nav-right .btn { display: none; }
     .nav-menu { display: block; }
+    /* 15px has no rung on the scale; it is the wordmark's own step between
+       the desktop 16 and the 320px 14, and it is the one literal left here. */
     .logo { font-size: 15px; gap: 7px; }
     .sticky-cta { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
                   background: var(--surface); border-top: 1px solid var(--border);
                   padding: var(--s3) var(--gutter);
                   padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom)); }
-    .sticky-cta .btn { display: block; text-align: center; }
+    /* The bar's button is the fold's one action on a phone, so it is L: 44. */
+    .sticky-cta .btn { display: flex; width: 100%; min-height: var(--h-lg); padding-block: 12px; }
     /* So the bar never covers the footer's last row. */
     body:has(.sticky-cta) { padding-bottom: 76px; }
     /* The rule above was written about the NAV's button and never extended to
        the in-page one, so every page on the docs shell ended with a left-aligned
-       green pill and a full-width green bar about 160px apart, same words, same
+       pill and a full-width bar about 160px apart, same words, same
        href. The closing button stands down where the bar is present; the sticky
        bar is the primary on a phone. Keyed off the bar itself rather than the
        breakpoint, so a page that opts out of the bar keeps its own closing CTA. */
     body:has(.sticky-cta) .end .btn { display: none; }
     body:has(.sticky-cta) .end { margin-top: 0; }
   }
-  /* At 320px the wordmark, the Menu chip and the button want more than the
-     272px between the gutters. The button's label shortens and the wordmark
-     steps down. The mark itself stays: a brand that disappears on a phone is
-     not a brand, and it is the only identity the nav carries. The 14px it
-     costs is bought back by the shorter label. */
-  @media (max-width: 400px) {
-    .nav-right .btn { padding: 11px 12px; }
-    .nav-right .btn .long { display: none; }
-    .nav-right .btn .short { display: inline; }
-    .logo { font-size: 14px; gap: 6px; }
+  /* At 320px the wordmark and the Menu chip want more than the 288px between
+     the gutters. The wordmark steps down. The mark itself stays: a brand that
+     disappears on a phone is not a brand, and it is the only identity the nav
+     carries. */
+  @media (max-width: ${BP.xs}px) {
+    .logo { font-size: var(--fs-small); gap: 6px; }
     .mark { width: 15px; height: 15px; }
   }`
 

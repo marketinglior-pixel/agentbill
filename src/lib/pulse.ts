@@ -14,6 +14,8 @@ export type SourceSlice = {
   pageViews: number
   ctaClicks: number
   tryClicks: number
+  /** Presses of the hero's "Estimate a run", 2026-09-23. */
+  estimateClicks: number
   registerViews: number
   runs: number
   /** The same three, over the last 7 days, so a surface published this week reads on its own. */
@@ -29,6 +31,8 @@ export type PulseWeek = {
   pageViews: number
   ctaClicks: number
   tryClicks: number
+  estimateClicks: number
+  estimateUses: number
   registerViews: number
   runs: number
 }
@@ -38,6 +42,9 @@ export type SitePulse = {
   pageViews: number
   ctaClicks: number
   tryClicks: number
+  /** Page views that pressed "Estimate a run", and that typed into the estimator, 2026-09-23. */
+  estimateClicks: number
+  estimateUses: number
   registerViews: number
   views: number
   runs: number
@@ -62,7 +69,10 @@ export type SitePulse = {
 // table: homepage views that clicked through, /register loads, account rows.
 // Where the numbers fall off is where the visit ended. tryClicks sits beside
 // ctaClicks: well ahead of it, the demo has earned a higher place; neither
-// moving, the fold is the problem and not the depth.
+// moving, the fold is the problem and not the depth. The try link was retired
+// with the 2026-09-23 redesign, so tryClicks decays to its history from then;
+// estimateClicks (the hero's second pill) and estimateUses (the first
+// keystroke into the calculator) read beside ctaClicks the same way.
 //
 // pageViews and the 7-day figures, 2026-09-22. The funnel now starts at the
 // landing rather than at the first click, in our own rows, because the pixel
@@ -77,6 +87,8 @@ export async function getSitePulse(): Promise<SitePulse> {
         count(DISTINCT view_id) FILTER (WHERE event = 'page_view')                       AS page_views,
         count(DISTINCT view_id) FILTER (WHERE event = 'cta_click')                       AS cta_clicks,
         count(DISTINCT view_id) FILTER (WHERE event = 'try_click')                       AS try_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'estimate_click')                  AS estimate_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'estimate_use')                    AS estimate_uses,
         count(DISTINCT view_id) FILTER (WHERE event = 'register_view')                   AS register_views,
         count(DISTINCT view_id) FILTER (WHERE event = 'playground_run')                  AS views,
         count(*)                FILTER (WHERE event = 'playground_run')                  AS runs,
@@ -86,6 +98,8 @@ export async function getSitePulse(): Promise<SitePulse> {
         count(DISTINCT view_id) FILTER (WHERE event = 'page_view'     AND created_at > now() - interval '7 days') AS page_views_7,
         count(DISTINCT view_id) FILTER (WHERE event = 'cta_click'     AND created_at > now() - interval '7 days') AS cta_clicks_7,
         count(DISTINCT view_id) FILTER (WHERE event = 'try_click'     AND created_at > now() - interval '7 days') AS try_clicks_7,
+        count(DISTINCT view_id) FILTER (WHERE event = 'estimate_click' AND created_at > now() - interval '7 days') AS estimate_clicks_7,
+        count(DISTINCT view_id) FILTER (WHERE event = 'estimate_use'  AND created_at > now() - interval '7 days') AS estimate_uses_7,
         count(DISTINCT view_id) FILTER (WHERE event = 'register_view' AND created_at > now() - interval '7 days') AS register_views_7,
         count(*)                FILTER (WHERE event = 'playground_run' AND created_at > now() - interval '7 days') AS runs_7
       FROM site_pulse
@@ -101,6 +115,7 @@ export async function getSitePulse(): Promise<SitePulse> {
         count(DISTINCT view_id) FILTER (WHERE event = 'page_view')      AS page_views,
         count(DISTINCT view_id) FILTER (WHERE event = 'cta_click')      AS cta_clicks,
         count(DISTINCT view_id) FILTER (WHERE event = 'try_click')      AS try_clicks,
+        count(DISTINCT view_id) FILTER (WHERE event = 'estimate_click') AS estimate_clicks,
         count(DISTINCT view_id) FILTER (WHERE event = 'register_view')  AS register_views,
         count(*)                FILTER (WHERE event = 'playground_run') AS runs,
         count(DISTINCT view_id) FILTER (WHERE event = 'page_view'     AND created_at > now() - interval '7 days') AS page_views_7,
@@ -119,6 +134,8 @@ export async function getSitePulse(): Promise<SitePulse> {
       pageViews: Number(row?.pageViews ?? 0),
       ctaClicks: Number(row?.ctaClicks ?? 0),
       tryClicks: Number(row?.tryClicks ?? 0),
+      estimateClicks: Number(row?.estimateClicks ?? 0),
+      estimateUses: Number(row?.estimateUses ?? 0),
       registerViews: Number(row?.registerViews ?? 0),
       views: Number(row?.views ?? 0),
       runs: Number(row?.runs ?? 0),
@@ -130,6 +147,7 @@ export async function getSitePulse(): Promise<SitePulse> {
         pageViews: Number(r.pageViews ?? 0),
         ctaClicks: Number(r.ctaClicks ?? 0),
         tryClicks: Number(r.tryClicks ?? 0),
+        estimateClicks: Number(r.estimateClicks ?? 0),
         registerViews: Number(r.registerViews ?? 0),
         runs: Number(r.runs ?? 0),
         pageViews7: Number(r.pageViews7 ?? 0),
@@ -142,6 +160,8 @@ export async function getSitePulse(): Promise<SitePulse> {
         pageViews: Number(row?.pageViews7 ?? 0),
         ctaClicks: Number(row?.ctaClicks7 ?? 0),
         tryClicks: Number(row?.tryClicks7 ?? 0),
+        estimateClicks: Number(row?.estimateClicks7 ?? 0),
+        estimateUses: Number(row?.estimateUses7 ?? 0),
         registerViews: Number(row?.registerViews7 ?? 0),
         runs: Number(row?.runs7 ?? 0),
       },
@@ -149,7 +169,7 @@ export async function getSitePulse(): Promise<SitePulse> {
   } catch {
     // The table is additive and the page predates it. A missing table must not
     // take down the account list, which is what admin is actually for.
-    return { pageViews: 0, ctaClicks: 0, tryClicks: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null, sources: [],
-             week: { pageViews: 0, ctaClicks: 0, tryClicks: 0, registerViews: 0, runs: 0 } }
+    return { pageViews: 0, ctaClicks: 0, tryClicks: 0, estimateClicks: 0, estimateUses: 0, registerViews: 0, views: 0, runs: 0, blocked: 0, movedSlider: 0, since: null, sources: [],
+             week: { pageViews: 0, ctaClicks: 0, tryClicks: 0, estimateClicks: 0, estimateUses: 0, registerViews: 0, runs: 0 } }
   }
 }

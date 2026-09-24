@@ -598,13 +598,23 @@ as an overrun rather than as a save.
 ### GET /tasks and GET /tasks/:task_ref
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
-remaining_units, exceeded, unit ("unit" or "token"), usage_missing_calls, created_at, updated_at. The list accepts agent_id and limit (default 50,
-max 200). The single-task read also carries breakdown: calls, units and tokens by type, by_model and
+remaining_units, exceeded, unit ("unit" or "token"), usage_missing_calls, created_at, updated_at. The list accepts agent_id, limit (default 50,
+max 200) and sort: created (the default, newest job first) or used (most used_units first, ties
+newest first). The single-task read also carries breakdown: calls, units and tokens by type, by_model and
 by_step, list_price_usd_estimate (the sum of the priced calls, null when none is priced, never 0),
 priced_calls and unpriced_calls with unpriced_reasons ("no list price for <model>"),
 price_versions, list_price_label ("list price, your invoice may differ"), and unattributed_units
 for spend recorded before events carried the job's name. An unknown ref is 404 task_not_found; a task exists from the console or from
 PUT /tasks/:task_ref/ceiling, or from a first preflight that passed its task_ref with a task_ceiling.
+
+### GET /usage
+
+The units the account recorded over a window, split by the event_type each record carried,
+heaviest first: by=event_type (required), days (1 to 90, default 30, today included) and limit
+(default 50, max 200). Returns by, days, since, total_units, total_events, group_count and groups,
+each with event_type, units, events and share (a fraction of total_units). It counts the units the
+caller's code reported and nothing else. record() in both SDKs sends agent_id as event_type, so for
+those calls it is a split by agent; meter() and a direct POST /events carry the caller's event name.
 
 ### PUT /tasks/:task_ref/ceiling
 

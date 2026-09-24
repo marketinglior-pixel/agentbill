@@ -47,6 +47,31 @@ export const ORIGIN = 'https://agentbill.dev'
  *  "AgentBill · " prefix the title is 51 characters and no longer truncates. */
 export const HEADLINE = 'A ceiling on this job, not on the month'
 
+/** The h1 and <title> of `/`, from 2026-09-23. The rest of the site keeps
+ *  HEADLINE: /pricing's description, /register's share description and the
+ *  share card still render from it, and this change is an experiment on `/`
+ *  that Lior may keep or revert after the paid-feeds read.
+ *
+ *  Why a second constant and not an edit to HEADLINE: HEADLINE reaches three
+ *  pages and a PNG, and the ticket that asked for this line (the 2026-09-23
+ *  value pack, T0/T1) scoped it to the homepage. When the experiment is
+ *  decided, either this constant is folded into HEADLINE (and og.png rebuilt)
+ *  or it is deleted and home.ts goes back to HEADLINE.
+ *
+ *  What HEADLINE's line was retired from `/` for, recorded here so the next
+ *  change is a decision and not a rediscovery: it names the mechanism's
+ *  contrast (job versus month) rather than the reader. The pack's brief was
+ *  outcome-first for builders who leave agents running unattended, and the
+ *  line below names that reader and the outcome in words they own. Two pack
+ *  options were rejected in review before this one was chosen: "Don't let one
+ *  agent job run away overnight" promised that we end the run, and "A ceiling
+ *  on this job, shared across every call" claimed every call when only the
+ *  calls that ask preflight share it.
+ *
+ *  Known cost: with the "AgentBill · " prefix the <title> is 68 characters, so
+ *  a search result that cuts near 60 loses the last word. */
+export const HOME_H1 = 'Give the job you leave running overnight its own ceiling'
+
 /** The install line beside the primary action, and on the share card. */
 export const INSTALL_PY = 'pip install agentbill-sdk'
 
@@ -105,7 +130,7 @@ const BLOG = ['Blog', '/blog'] as const
 const INTEGRATIONS = ['Integrations', '/integrations'] as const
 
 export const PAGES: readonly PageMeta[] = [
-  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-12', priority: 1.0, changefreq: 'weekly' },
+  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-23', priority: 1.0, changefreq: 'weekly' },
   { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-09', priority: 0.8, changefreq: 'monthly' },
   { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-12', priority: 0.8, changefreq: 'monthly' },
   // noindex and NOT disallowed, for the same reason as /app and /thanks: a real

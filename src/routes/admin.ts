@@ -7,6 +7,7 @@ import type { SitePulse } from '../lib/pulse.js'
 import { publicRoute } from '../middleware/auth.js'
 import { head, BP } from '../ui/theme.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
+import { KIT_CSS, tag } from '../ui/kit.js'
 
 const WARN_AT = 800
 const SESSION_COOKIE = 'agentbill_admin'
@@ -111,97 +112,77 @@ function checkAuth(request: { headers: { authorization?: string; cookie?: string
 // anything for it to mean.
 // ---------------------------------------------------------------------------
 
-const CSS = `${MARK_CSS}
-  nav.top { height: var(--banner-height); border-bottom: 1px solid var(--border);
-            display: flex; align-items: center; justify-content: space-between;
+// Canvas since 2026-09-23, with the console: the kit's frame, tiles, table,
+// tags and chips, and the same colour law re-cast. A figure that is merely
+// non-zero is not a colour (it used to be the green --held, which is the ink
+// on canvas); a hot account and the playground's refusal count are the amber
+// "approaching" state; a free account out of calls is the signal. A paid plan
+// is a plain state, so it is a tag.
+const CSS = `${KIT_CSS}${MARK_CSS}
+  nav.top { position: sticky; top: 0; z-index: 10; height: 60px; background: var(--nav-bg); backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;
             padding-inline: var(--gutter); gap: var(--s4); }
   nav.top .logo { display: flex; align-items: center; gap: 9px; font-family: var(--mono);
-                  font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; }
-  nav.top .who { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+                  font-weight: 700; font-size: var(--fs-body); color: var(--text); text-decoration: none; }
+  nav.top .who { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: var(--track-chip); text-transform: uppercase;
+                 color: var(--muted); border: 1px solid var(--chip-line); border-radius: var(--r-pill); padding: 3px 10px; }
 
   .wrap { max-width: 1400px; margin: 0 auto; padding-inline: var(--gutter);
-          padding-block: var(--s6) var(--s8); }
-  h1 { font-size: var(--fs-h1-app); color: var(--white); margin-bottom: var(--s1); }
-  h2 { font-size: var(--fs-h3); color: var(--white); margin: var(--s7) 0 var(--s3); }
-  .sub { font-size: var(--fs-small); color: var(--muted); max-width: 78ch; line-height: 1.6; }
+          padding-block: var(--s7) var(--s8); }
+  h1 { font-size: var(--fs-h1-app); letter-spacing: -0.02em; line-height: 1.15; margin-bottom: var(--s2); }
+  h2 { font-size: var(--fs-h3); letter-spacing: -0.01em; line-height: 1.3; margin: var(--s7) 0 var(--s3); }
+  .sub { font-size: var(--fs-small); color: var(--muted); max-width: 86ch; line-height: 1.6; }
   .sub + .stats { margin-top: var(--s5); }
+  .sub code, td code { font-family: var(--mono); font-size: .92em; color: var(--text); }
 
-  /* auto-fit, because a flex row of five fixed cards is why this page needed a
+  /* The tiles: white cards on the panel's grey, panel in panel. auto-fit,
+     because a flex row of five fixed cards is why this page needed a
      horizontal scrollbar on anything narrower than a laptop. */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-           gap: var(--s3); margin-block: var(--s3) var(--s5); }
-  .stat { background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--r-frame); padding: var(--s4) var(--s5);
-          box-shadow: var(--edge), var(--lift); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: var(--s3);
+           margin-block: var(--s3) var(--s5); background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s4); }
+  /* Label, figure, week: three rows, the label's taking the slack, so every
+     figure in a row of tiles sits on one line however its label wraps, and a
+     tile with no week line keeps that line's height. */
+  .stat { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner);
+          padding: var(--s4) 20px; display: grid; grid-template-rows: 1fr auto minmax(1.45em, auto); gap: 6px; }
   .stat-label { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim);
-                text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px;
-                line-height: 1.4; }
-  .stat-value { font-family: var(--display); font-size: 26px; font-weight: 700;
+                text-transform: uppercase; letter-spacing: var(--track-label); line-height: 1.45; }
+  .stat-value { font-family: var(--display); font-size: var(--fs-figure); font-weight: 500; line-height: 1.1;
                 color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .stat-value.held { color: var(--green); }
-  .stat-value.near { color: var(--amber); }
+  .stat-value.near { color: var(--near-ink); }
 
-  /* Scroll the table, never hide columns. Hiding data on a dashboard so the
-     layout looks tidy is the page lying to its only reader. Recipe copied from
-     .tw in app.ts. */
-  .tw { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-frame);
-        background: var(--surface); }
-  table { width: 100%; border-collapse: collapse; font-size: var(--fs-small);
-          font-variant-numeric: tabular-nums; }
-  th { text-align: left; padding: 11px 14px; color: var(--dim); font-weight: 500;
-       font-family: var(--mono); border-bottom: 1px solid var(--border);
-       text-transform: uppercase; letter-spacing: .08em; font-size: var(--fs-chip);
-       white-space: nowrap; }
-  td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft);
-       vertical-align: middle; color: var(--muted); white-space: nowrap; }
-  tbody tr:last-child td { border-bottom: 0; }
-  /* Ordered after the row background so it wins on equal specificity. The old
-     rule needed !important only because it came first. */
-  tbody tr:hover td { background: var(--surface2); }
+  /* The frame for a table. Scroll the table, never hide columns: hiding data
+     on a dashboard so the layout looks tidy is the page lying to its only
+     reader. */
+  .cv-panel { margin-bottom: var(--s3); }
+  .cv-table td { color: var(--muted); white-space: nowrap; }
+  .cv-table td.mono { font-family: var(--mono); color: var(--text); }
   tbody tr.near-row td { background: var(--near-bg); }
 
-  .chip { display: inline-block; font-family: var(--mono); font-size: var(--fs-chip);
-          letter-spacing: .08em; text-transform: uppercase; padding: 3px 9px;
-          border-radius: var(--r-chip); border: 1px solid; }
-  .chip.flow { color: var(--muted); border-color: var(--border2); background: var(--surface3); }
-  .chip.held { color: var(--green); border-color: var(--held-line); background: var(--held-bg); }
-  .chip.near { color: var(--amber); border-color: var(--near-line); background: var(--near-bg); }
-
+  /* The calls bar: the free tier's calls against its limit. */
   .track { display: inline-block; vertical-align: middle; width: 84px; height: 6px;
-           background: var(--surface3); border-radius: var(--r-pill); overflow: hidden;
+           background: var(--meter-track); border-radius: var(--r-pill); overflow: hidden;
            margin-right: var(--s2); }
-  .track i { display: block; height: 100%; background: var(--flow); }
+  .track i { display: block; height: 100%; background: var(--meter-fill); border-radius: var(--r-pill); }
   .track i.near { background: var(--amber); }
-  .track i.fail { background: var(--red); }
+  .track i.fail { background: var(--signal); }
 
   .mono { font-family: var(--mono); color: var(--text); }
   .muted { color: var(--dim); }
-  .none { color: var(--dim); font-style: italic; }
-  a { color: var(--green); }
+  .none { color: var(--dim); }
+  a { color: var(--text); }
 
-  .login { max-width: 380px; margin: 72px auto; background: var(--surface);
-           border: 1px solid var(--border); border-radius: var(--r-frame);
-           padding: var(--s6); box-shadow: var(--edge), var(--lift); }
-  .login label { display: block; font-family: var(--mono); font-size: var(--fs-chip);
-                 letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
-                 margin-bottom: var(--s2); }
-  .login input { width: 100%; min-height: 44px; background: var(--bg);
-                 border: 1px solid var(--border-strong); border-radius: var(--r-control);
-                 padding: 11px 13px; color: var(--text); font-family: var(--mono);
-                 font-size: var(--fs-body); margin-bottom: var(--s4);
-                 outline: 2px solid transparent; outline-offset: 2px; }
-  .login input:focus-visible { outline-color: var(--green); border-color: var(--border-strong); }
-  .login button { width: 100%; min-height: 44px; background: var(--green);
-                  color: var(--green-ink); border: 0; border-radius: var(--r-control);
-                  font-family: var(--sans); font-size: var(--fs-small); font-weight: 700;
-                  cursor: pointer; }
-  .login button:hover { filter: brightness(1.06); }
-  .login button:active { transform: translateY(1px); }
-  .err { color: var(--red); font-size: var(--fs-small); margin-bottom: var(--s3); }
+  .login { max-width: 440px; margin: var(--s8) auto; }
+  .login .cv-card { padding: var(--s6); display: grid; gap: var(--s3); }
+  .login form { display: grid; gap: var(--s2); margin-top: var(--s2); }
+  .login form .btn { width: 100%; margin-top: var(--s3); }
+  .err { margin: 0; }
 
-  @media (max-width: ${'${BP.md}'}px) {
+  @media (max-width: ${BP.md}px) {
     .wrap { padding-block: var(--s5) var(--s7); }
-    nav.top { padding-inline: var(--s4); }
+    .stats { padding: var(--s3); border-radius: var(--r-card-sm); }
+    .login { margin: var(--s6) var(--gutter); }
+    .login .cv-card { padding: var(--s5) var(--s4); }
   }
 `
 
@@ -231,16 +212,16 @@ function loginPage(error = '') {
   return `${SHELL('Admin')}
 <body>
 ${topBar('admin')}
-  <div class="login">
+  <div class="login cv-panel"><div class="cv-card">
     <h1>Admin</h1>
     <p class="sub">Owner access only.</p>
-    ${error ? `<p class="err">${error}</p>` : ''}
+    ${error ? `<p class="err cv-err">${error}</p>` : ''}
     <form method="POST" action="/admin/login">
-      <label for="admin-secret">Admin secret</label>
-      <input id="admin-secret" type="password" name="secret" autocomplete="current-password" autofocus />
-      <button type="submit">Sign in</button>
+      <label class="cv-flabel" for="admin-secret">Admin secret</label>
+      <input id="admin-secret" class="cv-field m" type="password" name="secret" autocomplete="current-password" autofocus />
+      <button class="btn btn-lg" type="submit">Sign in</button>
     </form>
-  </div>
+  </div></div>
 </body>
 </html>`
 }
@@ -276,13 +257,13 @@ function adminPage(accounts: AccountSignals[], pulse: SitePulse) {
     const isFull = calls >= FREE_TIER_LIMIT && a.plan === 'free'
     const barClass = isFull ? 'fail' : isWarn ? 'near' : ''
     const callBadge = isWarn
-      ? `<span class="chip near">${calls} / ${FREE_TIER_LIMIT}</span>`
+      ? `<span class="chip-near">${calls} / ${FREE_TIER_LIMIT}</span>`
       : `${calls}`
 
     return `<tr class="${hotRow ? 'near-row' : ''}" title="${esc(a.name)}">
-      <td>${hotRow ? `<span class="chip near">${score}</span>` : `<span class="muted">${score}</span>`}</td>
+      <td>${hotRow ? `<span class="chip-near">${score}</span>` : `<span class="muted">${score}</span>`}</td>
       <td class="mono">${a.email ? esc(a.email) : '<span class="none">no email</span>'}</td>
-      <td><span class="chip ${a.plan === 'free' ? 'flow' : 'held'}">${esc(a.plan)}</span></td>
+      <td>${tag(esc(a.plan))}</td>
       <td>
         <span class="track"><i class="${barClass}" style="width:${pct}%"></i></span>
         ${callBadge}
@@ -316,8 +297,18 @@ ${topBar('signed in')}
       <div class="stat-label">Last 7 days: ${pulse.week.ctaClicks}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Homepage: page views that clicked Try it</div>
-      <div class="stat-value ${pulse.tryClicks > 0 ? 'held' : ''}">${pulse.tryClicks}</div>
+      <div class="stat-label">Homepage: page views that pressed Estimate a run</div>
+      <div class="stat-value ${pulse.estimateClicks > 0 ? 'held' : ''}">${pulse.estimateClicks}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.estimateClicks}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Estimator: page views that typed into it</div>
+      <div class="stat-value ${pulse.estimateUses > 0 ? 'held' : ''}">${pulse.estimateUses}</div>
+      <div class="stat-label">Last 7 days: ${pulse.week.estimateUses}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Homepage: page views that clicked Try it (link retired 2026-09-23)</div>
+      <div class="stat-value">${pulse.tryClicks}</div>
       <div class="stat-label">Last 7 days: ${pulse.week.tryClicks}</div>
     </div>
     <div class="stat">
@@ -347,14 +338,15 @@ ${topBar('signed in')}
     A view is one page load, not one person: the token is minted per load and never stored, so
     the same visitor returning counts twice. It is not a signup. A row carries a channel only when
     the link we published put one there (see the table below); organic traffic and the paid campaign
-    both arrive untagged, so the totals above are every source at once. The four funnel tiles are
+    both arrive untagged, so the totals above are every source at once. The funnel tiles are
     first-party rows as well, so a page load or a
     click through that no pixel saw still counts here, and a /register load with no account row
     after it is the form losing someone. The page-load tile starts on 2026-09-22 and is empty
     before that; it is not a pixel PageView and will not match one, since the pixel is a script
-    desktop browsers block. Read Try it beside the click-through: if Try it runs well
-    ahead, the demo has earned a higher place on the page; if neither moves, the fold is the
-    problem, not the depth.
+    desktop browsers block. Read Estimate a run beside the click-through: if it runs well
+    ahead, visitors want the arithmetic before the key; if neither moves, the fold is the
+    problem, not the depth. The estimator tile counts that someone typed, never what they typed.
+    Try it was the hero's link to the demo until 2026-09-23 and only holds history now.
     ${pulse.since
       ? `First row ${new Date(pulse.since).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
       : 'No rows yet. Either nobody has run it, or it has not been deployed since the event shipped.'}
@@ -366,13 +358,14 @@ ${topBar('signed in')}
        nothing published has been opened. This is the expected reading before the first directory
        listing goes out, and it is <b>not</b> the same as no traffic: an untagged visit is counted in
        the tiles above and simply cannot say where it came from.</p>`
-    : `<table>
+    : `<div class="cv-panel"><div class="cv-card cv-scroll"><table class="cv-table is-ruled">
     <thead>
       <tr>
         <th>Source</th>
         <th>Page loads (30d / 7d)</th>
         <th>Clicked through (30d / 7d)</th>
         <th>Try it</th>
+        <th>Estimate a run</th>
         <th>/register loads (30d / 7d)</th>
         <th>Playground runs</th>
         <th>First</th>
@@ -385,13 +378,14 @@ ${topBar('signed in')}
         <td class="${row.pageViews > 0 ? 'held' : ''}">${row.pageViews} <span class="muted">/ ${row.pageViews7}</span></td>
         <td class="${row.ctaClicks > 0 ? 'held' : ''}">${row.ctaClicks} <span class="muted">/ ${row.ctaClicks7}</span></td>
         <td>${row.tryClicks}</td>
+        <td>${row.estimateClicks}</td>
         <td class="${row.registerViews > 0 ? 'held' : ''}">${row.registerViews} <span class="muted">/ ${row.registerViews7}</span></td>
         <td>${row.runs}</td>
         <td>${row.first.slice(0, 16).replace('T', ' ')}</td>
         <td>${row.last.slice(0, 16).replace('T', ' ')}</td>
       </tr>`).join('')}
     </tbody>
-  </table>
+  </table></div></div>
   <p class="sub">
     These rows do not sum to the tiles above and are not meant to. Only a visit that arrived on a
     link carrying <code>?src=</code> is counted here; a visitor who strips the parameter is recorded
@@ -424,8 +418,8 @@ ${topBar('signed in')}
     </div>
   </div>
 
-  <div class="tw">
-  <table>
+  <div class="cv-panel"><div class="cv-card cv-scroll">
+  <table class="cv-table is-ruled">
     <thead>
       <tr>
         <th>Score</th>
@@ -444,7 +438,7 @@ ${topBar('signed in')}
       ${rows || '<tr><td colspan="10" class="none">No accounts yet.</td></tr>'}
     </tbody>
   </table>
-  </div>
+  </div></div>
   </div>
 </body>
 </html>`

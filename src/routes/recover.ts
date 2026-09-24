@@ -5,6 +5,7 @@ import { sql } from '../db/index.js'
 import { publicRoute } from '../middleware/auth.js'
 import { sameOrigin } from './app.js'
 import { docsShell } from '../ui/docs.js'
+import { BP } from '../ui/theme.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent, clearRecoveryMark } from '../lib/register-limiter.js'
 import { ORIGIN } from '../ui/site.js'
@@ -178,34 +179,63 @@ export async function sendRecoveryLink(log: FastifyBaseLogger, email: string, ac
 // Pages
 // ---------------------------------------------------------------------------
 
-function page(title: string, body: string): string {
+/**
+ * `band` is for a message and nothing else: the link was sent, refused, or is
+ * spent. Those render in the kit's closing band (.cv-close), the one /thanks
+ * uses, so every done or dead end on the site looks the same. The form, the
+ * two choices and the key page are pages with work on them and stay in the
+ * column.
+ */
+function page(title: string, body: string, band = false): string {
   return docsShell({
     path: '/recover',
     title: `${title} · AgentBill`,
     description: 'Get back into your AgentBill account if you no longer have your API key.',
     current: '',
     rail: false,
+    // No sticky signup bar on a phone. Whoever is here has an account and has
+    // lost its key; on the key page the bar sat over the "your console" line.
+    // The nav keeps its button on a desktop, as it does on /terms.
+    sticky: false,
     css: `
-    .rec { max-width: 46ch; }
-    .rec form { display: grid; gap: var(--s2); margin-block: var(--s4); }
-    .rec label { font-weight: 600; color: var(--text); }
-    .rec input { min-height: 44px; background: var(--bg); color: var(--text);
-                 border: 1px solid var(--border-strong); border-radius: var(--r-control);
-                 padding: 0 14px; font-family: var(--sans); font-size: var(--fs-body); }
-    .rec input::placeholder { color: var(--dim); }
-    .rec input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-    .rec .btn, .rec .btn-ghost { min-height: 44px; border-radius: var(--r-control); padding: 0 22px;
-                 font-family: var(--sans); font-size: var(--fs-body); font-weight: 700; cursor: pointer;
-                 justify-self: start; }
-    .rec .btn { background: var(--green); color: var(--green-ink); border: 0; }
-    .rec .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border-strong); }
-    .rec .choice { border-top: 1px solid var(--border-soft); padding-top: var(--s4); margin-top: var(--s4); }
-    .rec .keyout { font-family: var(--mono); font-size: var(--fs-small); color: var(--code-ink);
-                   background: var(--surface2); border: 1px solid var(--border-soft);
-                   border-radius: var(--r-frame); padding: 14px 18px; overflow-wrap: anywhere; }
+    /* Canvas, 2026-09-23. The form sits on the warm-grey panel with white
+       fields, the recipe /register and the homepage's estimator use; the two
+       choices a recovery link offers are two white cards on that panel, side
+       by side, the lesser one (replace) on the outlined pill. A key and the
+       line that sets it are on the kit's plate (.cv-plate), the shape the key
+       screen on /register gives the same two values; no Copy here, because
+       this page ships no script. A message (sent, refused, spent) is the
+       kit's closing band at the column's full width. Every value is a token,
+       every control the kit's. */
+    /* 880 so the two choice cards sit side by side; the prose keeps its own
+       measure (54ch from the docs shell, the lede 52ch). */
+    .rec { max-width: 880px; }
+    .rec.cv-close { max-width: none; }
+    .rec .lede { max-width: 52ch; }
+    .rec-form { display: grid; gap: 0; max-width: 520px; margin-block: var(--s5) var(--s4);
+                background: var(--panel-bg); border-radius: var(--r-card); padding: var(--s5); }
+    .rec-form .btn { justify-self: start; margin-top: var(--s4); }
+    .rec .choices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4);
+                    margin-top: var(--s6); }
+    /* A column, so each card's button sits on the card's floor and the two
+       line up whatever the paragraph above them runs to. */
+    .rec .choice { padding: var(--s5); display: flex; flex-direction: column; gap: var(--s3); }
+    .rec .choice h2 { font-size: var(--fs-h3); letter-spacing: -0.01em; margin: 0; }
+    .rec .choice p { font-size: var(--fs-small); margin: 0; }
+    .rec .choice form { margin-top: auto; padding-top: var(--s2); }
+    /* Code in a sentence: the docs' inline chip, for the bare code the key
+       page writes (AGENTBILL_API_KEY, the client call, the header). */
+    .rec p code { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
+                  font-size: .875em; color: var(--text); overflow-wrap: anywhere; }
+    .rec .cv-plate { max-width: 640px; margin-block: var(--s4) var(--s5); }
     .rec .fine { color: var(--dim); font-size: var(--fs-small); }
+    @media (max-width: ${BP.md}px) {
+      .rec-form { padding: var(--s4); }
+      .rec .choices { grid-template-columns: minmax(0, 1fr); }
+      .rec .choice { padding: 20px var(--s4); }
+    }
 `,
-    body: `<div class="rec">
+    body: `<div class="rec${band ? ' cv-close' : ''}">
 ${body}
 </div>`,
   })
@@ -240,16 +270,16 @@ export async function recoverRoute(app: FastifyInstance) {
      and expires in ${TTL_MINUTES} minutes.</p>
   <p class="fine">Nothing has changed on your account yet, and the mail carries no key.
      Not arrived in a few minutes? Check spam, then write to
-     <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`))
+     <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`, true))
     }
     return secure(reply).send(page('Recover access', `
   <h1>Get back into your account.</h1>
   <p class="lede">Your API key is shown once when you register, and it is also how you open the
      console. If you no longer have it, put in the address you registered with.</p>
-  <form method="POST" action="/recover">
-    <label for="email">Email</label>
-    <input id="email" name="email" type="email" placeholder="you@company.com" required autocomplete="email" autofocus />
-    <button class="btn" type="submit">Send me a link</button>
+  <form class="rec-form" method="POST" action="/recover">
+    <label class="cv-flabel" for="email">Email</label>
+    <input class="cv-field" id="email" name="email" type="email" placeholder="you@company.com" required autocomplete="email" autofocus />
+    <button class="btn btn-lg" type="submit">Send me a link</button>
   </form>
   <p class="fine">The link works once and expires in ${TTL_MINUTES} minutes. It carries no key.</p>`))
   })
@@ -260,7 +290,7 @@ export async function recoverRoute(app: FastifyInstance) {
       return secure(reply).code(429).send(page('Too many attempts', `
   <h1>Too many attempts.</h1>
   <p class="lede">This address has asked for too many recovery links in the last hour.
-     Try again later, or write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`))
+     Try again later, or write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`, true))
     }
 
     const parsed = RequestBody.safeParse(request.body)
@@ -313,14 +343,15 @@ export async function recoverRoute(app: FastifyInstance) {
   app.get('/recover/:token', publicRoute(), async (request, reply) => {
     const token = (request.params as { token: string }).token
     if (!TOKEN_RE.test(token) || !(await tokenIsLive(token))) {
-      return secure(reply).code(410).send(page('Link expired', deadLink))
+      return secure(reply).code(410).send(page('Link expired', deadLink, true))
     }
 
     return secure(reply).send(page('Recover access', `
   <h1>You are back in.</h1>
   <p class="lede">This link is good for one of the two things below, then it stops working.</p>
 
-  <div class="choice">
+  <div class="cv-panel choices">
+  <div class="cv-card choice">
     <h2>Lost your copy of the key</h2>
     <p>Nothing has leaked, you just do not have it any more. Whatever is already deployed
        keeps running on it.</p>
@@ -330,7 +361,7 @@ export async function recoverRoute(app: FastifyInstance) {
     </form>
   </div>
 
-  <div class="choice">
+  <div class="cv-card choice">
     <h2>The key may have leaked</h2>
     <p>The account gets a new key and the old one stops working straight away. Any agent still
        calling with the old key is refused until you deploy the new one.</p>
@@ -338,6 +369,7 @@ export async function recoverRoute(app: FastifyInstance) {
       <input type="hidden" name="action" value="replace" />
       <button class="btn-ghost" type="submit">Replace my key</button>
     </form>
+  </div>
   </div>`))
   })
 
@@ -347,11 +379,11 @@ export async function recoverRoute(app: FastifyInstance) {
     const token = (request.params as { token: string }).token
     const action = (request.body as Record<string, unknown>)?.action
     if (!TOKEN_RE.test(token) || (action !== 'reveal' && action !== 'replace')) {
-      return secure(reply).code(410).send(page('Link expired', deadLink))
+      return secure(reply).code(410).send(page('Link expired', deadLink, true))
     }
 
     const accountId = await consumeToken(token)
-    if (!accountId) return secure(reply).code(410).send(page('Link expired', deadLink))
+    if (!accountId) return secure(reply).code(410).send(page('Link expired', deadLink, true))
 
     if (action === 'reveal') {
       // Every key still good, because an account may hold more than one and the
@@ -421,11 +453,11 @@ function keyPage(keys: { apiKey: string; label: string | null }[], note: string)
   <h1>Here is your key.</h1>
   <p class="lede">Copy it now. This page will not show it again, and the link you used is spent.
      ${note}</p>
-  ${keys.map((k) => `<p class="keyout">${k.apiKey}</p>`).join('\n  ')}
+  ${keys.map((k) => `<p class="cv-plate"><span>${k.apiKey}</span></p>`).join('\n  ')}
   <p>Nothing here needs it pasted back in: your code is what sends it, with every call. In Python or
      Node that means <code>AGENTBILL_API_KEY</code>, set in the terminal your code runs in, and this
      line does it with the key already in place:</p>
-  ${keys.map((k) => `<p class="keyout">export AGENTBILL_API_KEY=${k.apiKey}</p>`).join('\n  ')}
+  ${keys.map((k) => `<p class="cv-plate"><span>export AGENTBILL_API_KEY=${k.apiKey}</span></p>`).join('\n  ')}
   <p>No terminal? Pass the key to <code>AgentBillClient(api_key=...)</code>, or send it as an
      <code>Authorization: Bearer</code> header from whatever makes the call. The same value opens
      <a href="/app">your console</a>, which asks for it once and then does not show it.</p>

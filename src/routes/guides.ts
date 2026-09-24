@@ -3,6 +3,7 @@ import { docsShell } from '../ui/docs.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
+import { CONTENT_CSS } from '../ui/content.js'
 
 // /docs/langchain-billing and /docs/openai-agent-spend-ceiling lived here until
 // 2026-09-23. They are 301s now, to the LangChain and OpenAI Agents SDK pages in
@@ -13,6 +14,10 @@ import { KEY_CTA } from '../ui/chrome.js'
 // The guide copy below is untouched. Two frame-level things changed inside the
 // bodies: the closing CTA is the site's .btn instead of a white .cta of its
 // own, and its label is short enough to stay on one line at 320px.
+//
+// On canvas (2026-09-23) the body takes CONTENT_CSS, the content pages' one
+// recipe: the related list at the foot is white rows in a warm-grey panel, and
+// the closing button is L, the page's one action.
 function page(path: string, title: string, description: string, body: string) {
   const meta = byPath.get(path)
   return docsShell({
@@ -45,6 +50,7 @@ function page(path: string, title: string, description: string, body: string) {
       isPartOf: { '@id': 'https://agentbill.dev/#website' },
     },
     mainEntity: `https://agentbill.dev${path}#techarticle`,
+    css: CONTENT_CSS,
     body: `${body}
   <div class="also">
     <p>Related guides</p>
@@ -203,7 +209,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   all, <a href="/recover">/recover</a> shows the filled-in export line again to whoever can read the
   email the account was registered with.</p>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })
@@ -413,7 +419,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
   reserved units is <span class="inline">409 ceiling_below_committed</span> with the smallest value
   that would be accepted; nothing in flight is rewritten.</p>
 
-  <p class="end"><a class="btn" href="/register">${KEY_CTA}</a></p>
+  <p class="end"><a class="btn btn-lg" href="/register">${KEY_CTA}</a></p>
 `
     ))
   })
@@ -459,16 +465,14 @@ client.preflight(
 result = run_agent()
 
 <span class="comment"># Settle, or the units stay held until the reservation expires</span>
-client.record(agent_id="researcher", task_ref="job-142", units=12)
-      </pre></div>
+client.record(agent_id="researcher", task_ref="job-142", units=12)</pre></div>
 
       <p>Every later call in the same run passes <span class="inline">task_ref</span> and nothing
       else about the budget. It does not need to know the ceiling, or what the calls before it
       spent.</p>
       <div class="code"><pre>
 <span class="comment"># A different agent, a different tool, the same run and the same ceiling.</span>
-client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
-      </pre></div>
+client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)</pre></div>
 
       <h2>Use the @gate decorator (shortest path)</h2>
       <p>The <span class="inline">@client.gate()</span> decorator does the preflight before the body
@@ -480,8 +484,7 @@ client.preflight(agent_id="writer", task_ref="job-142", estimated_units=40)
              task_ceiling=500, estimated_units=12)
 def run_agent(task: str) -> str:
     <span class="comment"># preflight runs before this body, record runs after it</span>
-    return do_the_work(task)
-      </pre></div>
+    return do_the_work(task)</pre></div>
 
       <h2>Handle the refusal</h2>
       <p>The exception carries the numbers, so the handler can say what happened without a second
@@ -492,8 +495,7 @@ from agentbill import TaskCeilingExceededError
 try:
     result = run_agent("analyze this")
 except TaskCeilingExceededError as e:
-    return {"error": f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units"}
-      </pre></div>
+    return {"error": f"run {e.task_ref} hit its ceiling of {e.task_ceiling} units"}</pre></div>
 
       <h2>What a per-request ceiling is, and is not</h2>
       <p>There is a second, narrower ceiling: <span class="inline">ceiling</span> on the client
@@ -502,8 +504,7 @@ except TaskCeilingExceededError as e:
       own it lets through a loop of two hundred individually reasonable calls.</p>
       <div class="code"><pre>
 <span class="comment"># No single call may cost more than 50 units. The run still needs a task_ceiling.</span>
-client = AgentBillClient(api_key="agb_your_key", ceiling=50)
-      </pre></div>
+client = AgentBillClient(api_key="agb_your_key", ceiling=50)</pre></div>
 
       <p>And note what is <em>not</em> on this list. <span class="inline">agent_id</span> is a label
       the console groups tasks and refusals by; it carries no budget of its own. Ceilings are bound
@@ -520,10 +521,9 @@ await preflight({ agentId: 'researcher', taskRef: 'job-142',
 
 const result = await runAgent()
 
-await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
-      </pre></div>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></div>
 
-      <p class="end"><a href="/register" class="btn">${KEY_CTA}</a></p>
+      <p class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></p>
       `
     ))
   })

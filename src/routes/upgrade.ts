@@ -5,9 +5,8 @@ import { isUuid } from '../lib/ids.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
 import { ORIGIN, HEADLINE } from '../ui/site.js'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
-import { PANEL_CSS } from '../ui/panels.js'
 import { publicRoute } from '../middleware/auth.js'
 import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
@@ -75,53 +74,82 @@ export async function upgradeRoute(app: FastifyInstance) {
       extraHead: pixelSnippet(),
       scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
-      css: `${CHROME_CSS}${PANEL_CSS}${TIERS_CSS}
+      css: `${CHROME_CSS}${TIERS_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, pricing page
-     * design-system: design.md · designed-as-app · nav: N1b shared · footer: Ft2 shared
+     * design-system: design.md, "The canvas system" · designed-as-app · nav: N1b shared · footer: Ft2 shared
      * enrichment: none, the four tier cards (ui/tiers.ts, shared with /) are the product surface */
 
-    :root { --shell: 1080px; }
-    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: 24px; padding-block: 56px 88px; }
+    /* Canvas, 2026-09-23, on Lior's instruction to put every screen in the
+       homepage's design language. The page reads as the homepage's pricing
+       section grown into a page: a centred head, the same four cards, the
+       questions layout for what every plan includes, and the key box as a
+       frame (a white card on the warm-grey panel) instead of a bordered strip.
+       --shell is the nav's width, so the column starts on the wordmark's edge;
+       it was 1080 against the nav's 1072, 4px off on each side. */
+    :root { --shell: var(--chrome-w); }
+    .wrap { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter); padding-block: 56px var(--s9); }
 
-    /* A two-sentence headline on a secondary page is not a hero: it steps down
-       a rung rather than inheriting the display clamp's hero maximum. */
-    h1 { font-size: var(--fs-h1-sub); color: var(--white); max-width: 30ch; overflow-wrap: anywhere; min-width: 0; }
-    .sub { color: var(--muted); font-size: var(--fs-lede); margin-top: 16px; max-width: 58ch; line-height: 1.6; }
+    /* The head, centred the way the homepage sets a section head, and set
+       left on a phone the way the homepage's phone frames do. A two-sentence
+       headline on a secondary page is not a hero: it takes the page rung
+       (--fs-h1-sub), not the display clamp. */
+    .pr-head { text-align: center; display: grid; justify-items: center; }
+    h1 { font-size: var(--fs-h1-sub); color: var(--white); letter-spacing: -0.03em; line-height: 1.02;
+         max-width: 22ch; overflow-wrap: anywhere; min-width: 0; }
+    .sub { color: var(--muted); font-size: var(--fs-lede); margin-top: var(--s5); max-width: 58ch; line-height: 1.55;
+           text-wrap: pretty; }
 
-    .lead { margin-top: var(--s5); }
+    /* What every plan includes, in the homepage's questions layout: the head
+       in a narrow left column, the list on hairlines to its right. Two
+       columns of plain text, not a card per tier repeating "everything in the
+       tier before". */
+    /* The one sentence under the cards, centred under them as on /. */
+    .wrap > .tiers-note { margin-inline: auto; text-align: center; }
 
-    /* What every plan includes. Two columns of plain text on hairlines, not
-       a card per tier repeating "everything in the tier before". */
-    h2 { color: var(--white); margin: 64px 0 18px; }
-    .incl { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 40px; max-width: 72ch; }
-    .incl li { padding: 12px 0; border-bottom: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-small);
-               line-height: 1.6; }
-    .incl li b { color: var(--text); font-weight: 600; }
+    .incl-sec { padding-top: var(--s9); display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+                gap: var(--s6); align-items: start; }
+    h2 { color: var(--white); letter-spacing: -0.02em; line-height: 1.1; }
+    .incl { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 var(--s6); }
+    .incl li { padding: 18px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-small);
+               line-height: 1.55; }
+    .incl li b { color: var(--text); font-weight: 500; }
 
-    /* Already have a key: the same frame as every other product panel. */
-    /* No width cap. At 640px in a 1080 shell this left about 390px of empty
-       ground to its right, and it is the last object on the page, so the final
-       impression was a truncated card floating in black. The panel is a label
-       bar, an input and a button, which is a shape that has no short side at
-       full width: the input grows and the button stays right-aligned. */
-    .havekey { margin-top: 48px; }
-    .hk-row { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 18px; align-items: center; }
-    .hk-row input { flex: 1; min-width: 200px; min-height: 44px; background: var(--bg); color: var(--text);
-                    border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 14px;
-                    font-family: var(--mono); font-size: 13.5px; outline: 2px solid transparent; outline-offset: 1px;
-                    transition: border-color .15s; }
-    .hk-row input::placeholder { color: var(--dim); }
-    .hk-row input:focus-visible { outline-color: var(--green); }
-    .hk-row button { min-height: 44px; }
-    .hk-row button.btn-ghost { font-family: var(--sans); cursor: pointer; background: transparent; }
-    .msg-slot { min-height: 1lh; padding: 0 18px 12px; }
-    .msg { font-size: 12.5px; color: var(--green); display: none; }
+    /* Already have a key: the frame, a white card on the warm-grey panel,
+       with the question in its bar. Full width, because it is the last object
+       on the page and a short card floating beside empty ground read as a
+       truncated one (at 640 in the old shell it left about 390px of it). The field
+       is the kit's, mono because a key is an id; the button is the light
+       fill at the field's own 44, since the fold's one ink fill is the Free
+       card above. */
+    .havekey { margin-top: var(--s9); }
+    .havekey .cv-bar-t b { color: var(--text); font-weight: 500; }
+    .hk-aside { font-size: var(--fs-small); color: var(--dim); text-align: right; }
+    .hk-row { display: flex; flex-wrap: wrap; gap: var(--s3); padding: 20px; align-items: center; }
+    .hk-row .cv-field { flex: 1; min-width: 200px; width: auto; font-size: var(--fs-small); }
+    /* The answer to the button, under the row. It reserves no height: the
+       button is above it, so nothing the reader is aiming at moves, and an
+       empty reserved line was a blank band inside the card. */
+    .msg-slot { padding-inline: 20px; }
+    .msg { font-size: var(--fs-small); line-height: 1.5; color: var(--green); display: none; margin-top: -6px; padding-bottom: 18px; }
 
-    .note { margin-top: 36px; font-size: var(--fs-small); color: var(--dim); line-height: 1.6; max-width: 60ch; }
+    .note { margin-top: var(--s5); font-size: var(--fs-small); color: var(--muted); line-height: 1.6; max-width: 60ch; }
+    .note a { color: var(--text); text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+    .note a:hover { text-decoration-color: currentColor; }
 
-    @media (max-width: 720px) {
-      .wrap { padding-block: 40px 64px; }
+    @media (max-width: ${BP.lg}px) {
+      .incl-sec { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+    }
+    @media (max-width: ${BP.md}px) {
+      .wrap { padding-block: var(--s6) var(--s8); }
+      .pr-head { text-align: left; justify-items: start; }
+      .wrap > .tiers-note { margin-inline: 0; text-align: left; }
+      .sub { font-size: var(--fs-body); margin-top: 14px; }
+      .incl-sec, .havekey { padding-top: 0; margin-top: var(--s8); }
       .incl { grid-template-columns: minmax(0, 1fr); }
+      .hk-aside { display: none; }
+      .hk-row { padding: 14px 12px; }
+      .hk-row .btn-alt { flex: 1 1 100%; }
+      .msg-slot { padding-inline: 12px; }
     }
 `,
     })}
@@ -130,34 +158,40 @@ ${siteNav('/pricing', { sticky: false })}
 <main>
   <div class="wrap">
 
-    <h1>One ceiling per task. Priced by preflight calls.</h1>
-    <p class="sub">Every call sharing a task_ref consults the same ceiling before it runs, in units you
-    define. Your provider's cap is bound to a project or an organization over a calendar month; this one
-    is bound to the job. The plans differ only in how many preflight calls a month they include.</p>
+    <header class="pr-head">
+      <h1>One ceiling per task. Priced by preflight calls.</h1>
+      <p class="sub">Every call sharing a task_ref consults the same ceiling before it runs, in units you
+      define. Your provider's cap is bound to a project or an organization over a calendar month; this one
+      is bound to the job. The plans differ only in how many preflight calls a month they include.</p>
+    </header>
 
     ${tierCards(cta)}
     <p class="tiers-note">${SAME_FEATURES}</p>
 
-    <h2>Every plan includes</h2>
-    <ul class="incl row-close">
-      <li><b>Preflight budget checks.</b> The ceiling is consulted before the call goes out, not after the bill.</li>
-      <li><b>Per-task hard ceilings.</b> One budget across every call that passes the same task_ref, reserved atomically.</li>
-      <li><b>Per-agent attribution.</b> Every task and every refusal carries the agent that asked.</li>
-      <li><b>Key security.</b> Revoke, rotate, expiry and rate limiting on every API key.</li>
-      <li><b>New-address alert.</b> An email when a key is used from an address it has not been seen from.</li>
-      <li><b>Idempotent usage records.</b> Safe to call from retried or parallel workflows.</li>
-      <li><b>Units you define.</b> We count an integer you choose; we never read your provider bill.</li>
-      <li><b>The console.</b> Live task budgets, every refusal with the literal response, key health.</li>
-    </ul>
+    <section class="incl-sec">
+      <h2>Every plan includes</h2>
+      <ul class="incl row-close">
+        <li><b>Preflight budget checks.</b> The ceiling is consulted before the call goes out, not after the bill.</li>
+        <li><b>Per-task hard ceilings.</b> One budget across every call that passes the same task_ref, reserved atomically.</li>
+        <li><b>Per-agent attribution.</b> Every task and every refusal carries the agent that asked.</li>
+        <li><b>Key security.</b> Revoke, rotate, expiry and rate limiting on every API key.</li>
+        <li><b>New-address alert.</b> An email when a key is used from an address it has not been seen from.</li>
+        <li><b>Idempotent usage records.</b> Safe to call from retried or parallel workflows.</li>
+        <li><b>Units you define.</b> We count an integer you choose; we never read your provider bill.</li>
+        <li><b>The console.</b> Live task budgets, every refusal with the literal response, key health.</li>
+      </ul>
+    </section>
 
     ${accountId ? '' : `
-    <div class="panel havekey">
-      <div class="panel-h"><span>Already have an API key?</span><span>unlock checkout for your account</span></div>
-      <div class="hk-row">
-        <input id="keyin" type="password" placeholder="agb_..." autocomplete="off" spellcheck="false" aria-label="API key" />
-        <button id="keybtn" type="button" class="btn-ghost">Unlock checkout</button>
+    <div class="cv-panel havekey">
+      <div class="cv-card">
+        <div class="cv-bar"><span class="cv-bar-t"><b>Already have an API key?</b></span><span class="hk-aside">unlock checkout for your account</span></div>
+        <div class="hk-row">
+          <input id="keyin" class="cv-field m" type="password" placeholder="agb_..." autocomplete="off" spellcheck="false" aria-label="API key" />
+          <button id="keybtn" type="button" class="btn-alt">Unlock checkout</button>
+        </div>
+        <div class="msg-slot"><span class="msg" id="keymsg" aria-live="polite"></span></div>
       </div>
-      <div class="msg-slot"><span class="msg" id="keymsg" aria-live="polite"></span></div>
     </div>
 ${UPGRADE_JS}`}
     <!-- The line that used to open this note said "One runaway retry loop costs more than a

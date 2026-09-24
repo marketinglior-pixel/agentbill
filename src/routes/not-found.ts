@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { head } from '../ui/theme.js'
+import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { brotliCompressSync, gzipSync, constants as Z } from 'node:zlib'
 import type { FastifyReply, FastifyRequest } from 'fastify'
@@ -24,15 +24,28 @@ const DESTINATIONS: ReadonlyArray<readonly [label: string, href: string]> = [
   ['Get an API key', '/register'],
 ]
 
+/* Canvas, 2026-09-23. The homepage's close, the warm-grey band at --r-card
+   with its words centred, holding the four ways on. The code is the section
+   kicker in the mono label voice; the four destinations stay four equal
+   outlined pills, because the sentence above them says they are equal. The
+   column is the nav's width, so the band's edges sit on the wordmark's. */
 const CSS = `${CHROME_CSS}
-    .nf { max-width: var(--shell); margin: 0 auto; padding-inline: 24px;
-          padding-block: 96px 120px; }
-    .nf-code { font-family: var(--mono); font-size: var(--fs-micro); letter-spacing: .18em;
-               text-transform: uppercase; color: var(--dim); margin-bottom: 14px; }
-    .nf h1 { color: var(--white); max-width: 18ch; margin-bottom: 16px; }
-    .nf p { color: var(--muted); font-size: var(--fs-lede); max-width: 52ch;
-            margin-bottom: 36px; }
-    .nf-go { display: flex; flex-wrap: wrap; gap: 12px; }
+    :root { --shell: var(--chrome-w); }
+    .nf { max-width: var(--shell); margin: 0 auto; padding-inline: var(--gutter);
+          padding-block: var(--s8) var(--s9); }
+    .nf-band { background: var(--panel-bg); border-radius: var(--r-card); padding: 96px var(--s7);
+               display: grid; justify-items: center; text-align: center; }
+    .nf-band .eyebrow { margin-bottom: var(--s4); }
+    .nf h1 { font-size: var(--fs-h1-sub); color: var(--white); letter-spacing: -0.03em; line-height: 1.02;
+             max-width: 18ch; margin-bottom: var(--s4); }
+    .nf p { color: var(--muted); font-size: var(--fs-lede); line-height: 1.55; max-width: 52ch;
+            margin-bottom: var(--s6); text-wrap: pretty; }
+    .nf-go { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s3); }
+    @media (max-width: ${BP.md}px) {
+      .nf { padding-block: var(--s5) var(--s8); }
+      .nf-band { padding: var(--s7) 20px; }
+      .nf p { font-size: var(--fs-body); }
+    }
 `
 
 export function notFoundPage(): string {
@@ -47,12 +60,14 @@ export function notFoundPage(): string {
 <body>
 ${siteNav()}
   <main class="nf">
-    <div class="nf-code">404</div>
+    <div class="nf-band">
+    <div class="nf-code eyebrow">404</div>
     <h1>That page is not here.</h1>
     <p>Nothing is served at that address. It may have moved, or the link that
        brought you here may be old. These are the four places worth going.</p>
     <div class="nf-go">
       ${DESTINATIONS.map(([label, href]) => `<a class="btn-ghost" href="${href}">${label}</a>`).join('\n      ')}
+    </div>
     </div>
   </main>
 ${siteFooter()}

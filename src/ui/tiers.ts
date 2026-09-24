@@ -34,24 +34,26 @@ export const SAME_FEATURES =
   'Every plan has every feature. The tiers differ in how many preflight calls a month they include, and in who answers when you write in.'
 
 export const TIERS_CSS = `
-    /* Four cards on the panel frame. One primary per fold: the tier a stranger
-       can act on now (Free) carries the green fill, the three they cannot buy
-       without an account carry the outlined chip. Team is marked by weight and
-       a chip, which design.md allows, and never by a second fill. */
+    /* Four cards, canvas since 2026-09-23 (the homepage's pricing, which was
+       a page-local override on / until every page took the same cards). Each
+       card is a warm-grey panel; the recommended one is white with an ink
+       border and a chip, and never a second fill. One primary per fold: the
+       tier a stranger can act on now (Free) carries the ink fill, the three
+       they cannot buy without an account carry the outlined pill. */
     .tiers-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s4);
                   margin-top: var(--s6); }
     .tier-card { min-width: 0; display: flex; flex-direction: column; gap: var(--s3);
-                 background: var(--surface); border: 1px solid var(--border); border-top-color: var(--border2);
-                 border-radius: var(--r-frame); box-shadow: var(--edge), var(--lift); padding: var(--s5); }
-    .tier-card.rec { border-color: var(--border-strong); border-top-color: var(--border-strong); }
+                 background: var(--panel-bg); border: 1px solid transparent;
+                 border-radius: var(--r-card); box-shadow: var(--edge), var(--lift); padding: var(--s5); }
+    .tier-card.rec { background: var(--card-bg); border: 1.5px solid var(--text); }
     .tier-top { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); min-height: 22px; }
     .tier-name { font-family: var(--mono); font-size: var(--fs-label); letter-spacing: .14em;
                  text-transform: uppercase; color: var(--muted); }
     .tier-card.rec .tier-name { color: var(--text); font-weight: 700; }
-    .tier-tag { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em; text-transform: uppercase;
-                color: var(--green); border: 1px solid var(--held-line); background: var(--held-bg);
-                border-radius: var(--r-chip); padding: 2px 8px; white-space: nowrap; }
-    .tier-price { font-family: var(--display); font-size: var(--fs-h2); font-weight: 800; letter-spacing: -0.02em;
+    .tier-tag { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: var(--track-label); text-transform: uppercase;
+                color: var(--text); border: 1px solid var(--chip-line); background: var(--chip-bg);
+                border-radius: var(--r-pill); padding: 2px 8px; white-space: nowrap; }
+    .tier-price { font-family: var(--display); font-size: var(--fs-h2); font-weight: 500; letter-spacing: -0.02em;
                   line-height: 1; color: var(--white); font-variant-numeric: tabular-nums; }
     .tier-price .per { font-family: var(--sans); font-size: var(--fs-small); font-weight: 500; letter-spacing: 0;
                        color: var(--dim); margin-left: 4px; }

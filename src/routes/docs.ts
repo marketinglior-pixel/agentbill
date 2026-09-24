@@ -4,6 +4,8 @@ import { publicRoute } from '../middleware/auth.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { byPath, ORIGIN } from '../ui/site.js'
 import { softwareLd, sourceLd } from '../ui/ld.js'
+import { CONTENT_CSS } from '../ui/content.js'
+import { HISTORY_JOBS, HISTORY_AGENTS } from '../lib/ceiling-suggest.js'
 
 // /docs carried no page-level structured data at all, while every guide under
 // it emitted a TechArticle. It is the second-highest priority page in the
@@ -93,6 +95,16 @@ export async function docsRoute(app: FastifyInstance) {
       og: { description: 'Add a per-task spend ceiling to your AI agent. Preflight before the call, record after. Python and Node SDKs.' },
       jsonLd: [docsArticleLd, quickStartLd, softwareLd(), ...sourceLd()],
       mainEntity: `${ORIGIN}/docs#techarticle`,
+      // The body's canvas pieces (the plate for the run's printed output and
+      // the two response bodies, parameter tables as cards, the Guides rows)
+      // are CONTENT_CSS. The one page-local rule: the quick start's closing
+      // line, which says "that is the whole integration", is a callout, the
+      // homepage's note-that-belongs-to-the-page, so it reads as the end of
+      // the sequence rather than as one more paragraph of it.
+      css: `${CONTENT_CSS}
+  p.closer { background: var(--callout-bg); border: 1px solid var(--callout-line);
+             border-radius: var(--r-inner); padding: var(--s4) 20px; margin-block: var(--s5); }
+`,
       body: `
   <h1>Documentation</h1>
   <p class="lede">Everything you need to add preflight billing to your agents.</p>
@@ -152,16 +164,14 @@ try:
             units=1,
         )
 except TaskCeilingExceededError as refused:
-    print(refused)
-  </pre></div>
+    print(refused)</pre></div>
 
   <p>Three lines approve and count down, and the fourth is the answer this page exists for:</p>
-  <div class="code"><pre>
-<span class="out-dim">approved: True units left: 2</span>
-<span class="out-dim">approved: True units left: 1</span>
-<span class="out-dim">approved: True units left: 0</span>
-<span class="out-dim">Refused (task_ceiling_exceeded): task 'job-1' is at 3/3 units and 0 remaining is not enough for this call.</span>
-  </pre></div>
+  <pre class="cv-code ct-out">
+<span class="out-ok">approved: True units left: 2</span>
+<span class="out-ok">approved: True units left: 1</span>
+<span class="out-ok">approved: True units left: 0</span>
+<span class="out-no">Refused (task_ceiling_exceeded): task 'job-1' is at 3/3 units and 0 remaining is not enough for this call.</span></pre>
 
   <p>Nothing of ours reached into the run. The SDK raised, your code caught it, and what happens next
   is yours. The refusal is also written down: the console's
@@ -222,12 +232,18 @@ try:
     <span class="comment"># A different agent, same job: 300 + 250 &gt; 500, refused before it runs.</span>
     client.preflight(agent_id="writer", task_ref="job-142", estimated_units=250)
 except TaskCeilingExceededError as e:
-    print(f"task {e.task_ref} hit its ceiling")
-  </pre></div>
+    print(f"task {e.task_ref} hit its ceiling")</pre></div>
 
   <p>Note which identifier is doing the work there. <span class="inline">agent_id</span> is a label
   for attribution and carries no budget of its own; two different agents that share a
   <span class="inline">task_ref</span> share one ceiling. The job is what costs money, not the agent.</p>
+
+  <p>Not sure what a job needs? The task budgets view suggests a ceiling from your own history.
+  For at most ${HISTORY_AGENTS} agents, those whose latest finished jobs are the most recent, it
+  shows the p50, p90 and max <span class="inline">used_units</span> of each one's last ${HISTORY_JOBS}
+  finished jobs, where finished means the job has spent units and holds no reservation. Pick one and
+  it goes in the ceiling field with that agent's label, still editable, and nothing is saved until
+  you press Set ceiling. Any other agent, including one with no finished job, gets no suggestion.</p>
 
   <h3>Per-request ceiling</h3>
   <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>
@@ -240,8 +256,7 @@ client.preflight(
     agent_id="researcher",
     customer_id="user_123",
     estimated_units=50,  <span class="comment"># 50 &gt; 20: raises CeilingExceededError, nothing runs</span>
-)
-  </pre></div>
+)</pre></div>
 
   <h2 id="reservation">The reservation</h2>
 
@@ -254,8 +269,7 @@ SET reserved_units = reserved_units + :units
 WHERE account_id = :account
   AND customer_ref = :customer
   AND (limit_units IS NULL
-       OR used_units + reserved_units + :units &lt;= limit_units)
-  </pre></div>
+       OR used_units + reserved_units + :units &lt;= limit_units)</pre></div>
 
   <p>Zero rows back means the budget is gone, and nothing was taken. The task ceiling reserves the
   same way against <span class="inline">task_budgets</span>, scoped to your
@@ -499,7 +513,7 @@ if (isRefusal(stream)) {
   <p>Every identifier above (agent_id, customer_id, task_ref, and idempotency_key) is 1 to 128 characters and may not contain control characters. A value that breaks either rule is a 422 with <span class="inline">validation_error</span>, never a 500.</p>
 
   <p>Returns, for a call on a job that has a ceiling:</p>
-  <div class="code"><pre>
+  <pre class="cv-code ct-out">
 {
   "approved": true,
   "reason": null,
@@ -510,8 +524,7 @@ if (isRefusal(stream)) {
   "task_ref": "job-142",
   "task_ceiling": 500,
   "task_remaining_units": 488
-}
-  </pre></div>
+}</pre>
 
   <p><strong>Two scopes, two names.</strong> <span class="inline">remaining_units</span> is the
   customer's balance, and it is <span class="inline">null</span> while the customer has no limit,
@@ -524,9 +537,9 @@ if (isRefusal(stream)) {
   its next preflight is refused.</p>
 
   <p>When refused:</p>
-  <div class="code"><pre>
+  <pre class="cv-code ct-out">
 {
-  "approved": false,
+  <span class="no">"approved": false</span>,
 <span class="comment"># plan_limit_exceeded on a paid plan. budget_exhausted and the</span>
 <span class="comment"># ceiling refusals carry no upgrade_url.</span>
   "reason": "free_tier_exceeded",
@@ -534,8 +547,7 @@ if (isRefusal(stream)) {
   "monthly_calls": 1000,
   "plan_limit": 1000,
   "upgrade_url": "https://agentbill.dev/pricing?account_id=acc_..."
-}
-  </pre></div>
+}</pre>
 
   <p>That is the raw HTTP shape. Both SDKs then apply one rule to it, and it is the same rule in
   Python and Node: they <strong>raise when your own spend rule refused the call</strong>
@@ -576,8 +588,7 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
   -d '{"ceiling_units":500,"agent_id":"researcher"}'
 
 <span class="comment"># {"task_ref":"job-142","agent_id":"researcher","ceiling_units":500,"used_units":0,</span>
-<span class="comment">#  "reserved_units":0,"remaining_units":500,"exceeded":false,...,"task_created":true}</span>
-  </pre></div>
+<span class="comment">#  "reserved_units":0,"remaining_units":500,"exceeded":false,...,"task_created":true}</span></pre></div>
 
   <p><span class="inline">ceiling_units</span> is a positive integer and is required.
   <span class="inline">agent_id</span> is optional and is read only when this call opens the job; an
@@ -588,6 +599,53 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
   <span class="inline">minimum_ceiling_units</span>, the smallest value that would be accepted.
   Nothing is clamped and nothing in flight is rewritten: each reservation settles through
   <span class="inline">record()</span> or expires, and the next preflight reads the new ceiling.</p>
+
+  <h3 id="get-tasks">GET /tasks</h3>
+  <p>Lists this account's jobs, each with the fields <span class="inline">GET /tasks/:task_ref</span>
+  returns: <span class="inline">ceiling_units</span>, <span class="inline">used_units</span>,
+  <span class="inline">reserved_units</span>, <span class="inline">remaining_units</span>,
+  <span class="inline">exceeded</span>, <span class="inline">created_at</span> and
+  <span class="inline">updated_at</span>.</p>
+  <table>
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td>agent_id</td><td>string <span class="tag">optional</span></td><td>Only the jobs that carry this agent label.</td></tr>
+    <tr><td>limit</td><td>int <span class="tag">optional</span></td><td>1 to 200. Default: 50.</td></tr>
+    <tr><td>sort</td><td>string <span class="tag">optional</span></td><td><span class="inline">created</span> (the default): newest job first. <span class="inline">used</span>: the most <span class="inline">used_units</span> first, ties newest first, in the units your code reported. Any other value is a 422.</td></tr>
+  </table>
+
+  <div class="code"><pre>
+curl "https://agentbill.dev/tasks?sort=used&amp;limit=5" \\
+  -H "Authorization: Bearer agb_your_key"
+  </pre></div>
+
+  <h3 id="get-usage">GET /usage</h3>
+  <p>The units your code recorded over a window, split by the <span class="inline">event_type</span>
+  each record carried, heaviest first. It counts the units your code reported and nothing else.
+  <span class="inline">record()</span> in both SDKs sends its <span class="inline">agent_id</span> as
+  the <span class="inline">event_type</span>, so for those calls this is a split by agent;
+  <span class="inline">meter()</span> and a direct <span class="inline">POST /events</span> carry the
+  event name your code passed. The console's activity view shows the same split.</p>
+  <table>
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td>by</td><td>string</td><td>Required. <span class="inline">event_type</span>, the one split there is.</td></tr>
+    <tr><td>days</td><td>int <span class="tag">optional</span></td><td>1 to 90 calendar days, today included. Default: 30.</td></tr>
+    <tr><td>limit</td><td>int <span class="tag">optional</span></td><td>1 to 200 groups. Default: 50. The totals always cover the whole window.</td></tr>
+  </table>
+
+  <div class="code"><pre>
+curl "https://agentbill.dev/usage?by=event_type&amp;days=7" \\
+  -H "Authorization: Bearer agb_your_key"
+
+<span class="comment"># {"by":"event_type","days":7,"since":"2026-09-17",</span>
+<span class="comment">#  "total_units":1200,"total_events":41,"group_count":3,"groups":[</span>
+<span class="comment">#   {"event_type":"crawler","units":600,"events":12,"share":0.5},</span>
+<span class="comment">#   {"event_type":"researcher","units":360,"events":9,"share":0.3},</span>
+<span class="comment">#   {"event_type":"summarizer","units":240,"events":20,"share":0.2}]}</span>
+  </pre></div>
+
+  <p><span class="inline">share</span> is a fraction of <span class="inline">total_units</span>, to four
+  places. <span class="inline">group_count</span> is how many event_types the window holds, so a
+  response with fewer groups than that was cut by <span class="inline">limit</span>.</p>
 
   <h3 id="put-budget">PUT /budget</h3>
   <p>Sets one customer's ceiling, and creates that customer if it has never been seen. The per-request
@@ -600,8 +658,7 @@ curl -X PUT https://agentbill.dev/budget \\
   -d '{"customer_id":"user_123","limit_units":5000}'
 
 <span class="comment"># {"customer_id":"user_123","customer_created":false,"limit":5000,</span>
-<span class="comment">#  "used":1200,"reserved":40,"remaining":3760,"is_blocked":false}</span>
-  </pre></div>
+<span class="comment">#  "used":1200,"reserved":40,"remaining":3760,"is_blocked":false}</span></pre></div>
 
   <p><span class="inline">limit_units</span> is required and may be <span class="inline">null</span>,
   which means no limit. It is never optional: a body that left it out would have to mean "change
@@ -636,26 +693,29 @@ await preflight({ agentId: 'researcher', taskRef: 'job-142', estimatedUnits: 12 
 <span class="comment">// ... your LLM or tool call ...</span>
 
 <span class="comment">// After the call: record what it actually cost</span>
-await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })
-  </pre></div>
+await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></div>
 
   <h2>What it does NOT do</h2>
   <p>AgentBill does not replace your payment processor: it does not move money, hold a card or charge your end customers, and it is not positioned between you and one that does. Multi-step workflows with state machines or reversal logic are out of scope.</p>
 
   <h2>Guides</h2>
-  <p><a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a></p>
-  <p><a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a></p>
-  <p><a href="/docs/first-run">Every setup failure, and its fix</a></p>
+  <div class="ct-links">
+    <a href="/docs/task-budgets">Task budgets, a hard cost ceiling per agent job</a>
+    <a href="/docs/limit-cost-per-agent-run">How to cap what one agent run can spend</a>
+    <a href="/docs/first-run">Every setup failure, and its fix</a>
+  </div>
 
   <h2>Integrations</h2>
-  <p><a href="/integrations">Everything AgentBill publishes, and where to install it</a></p>
-  <p><a href="/integrations/openclaw">OpenClaw, one ceiling per session, as a ClawHub plugin</a></p>
-  <p><a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a></p>
-  <p><a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a></p>
-  <p><a href="/integrations/crewai">CrewAI, one ceiling per crew run in model-call hooks</a></p>
-  <p><a href="/integrations/mcp">MCP server, a ceiling the agent can consult</a></p>
+  <div class="ct-links">
+    <a href="/integrations">Everything AgentBill publishes, and where to install it</a>
+    <a href="/integrations/openclaw">OpenClaw, one ceiling per session, as a ClawHub plugin</a>
+    <a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a>
+    <a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a>
+    <a href="/integrations/crewai">CrewAI, one ceiling per crew run in model-call hooks</a>
+    <a href="/integrations/mcp">MCP server, a ceiling the agent can consult</a>
+  </div>
 
-  <div class="end"><a href="/register" class="btn">${KEY_CTA}</a></div>
+  <div class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></div>
 `,
     }))
   })

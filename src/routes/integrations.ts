@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { docsShell } from '../ui/docs.js'
+import { CONTENT_CSS } from '../ui/content.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath, ORIGIN } from '../ui/site.js'
 import { KEY_CTA } from '../ui/chrome.js'
@@ -91,7 +92,7 @@ function page(path: string, title: string, description: string, body: string, op
     description,
     path,
     rail: opts.rail,
-    css: `${INTEGRATIONS_CSS}${opts.css ?? ''}`,
+    css: `${CONTENT_CSS}${INTEGRATIONS_CSS}${opts.css ?? ''}`,
     // The same TechArticle the guides emit, with dates from the registry, which
     // is also what the sitemap's lastmod reads.
     jsonLd: {

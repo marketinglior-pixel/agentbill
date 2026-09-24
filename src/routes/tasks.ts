@@ -22,6 +22,11 @@ const CeilingBody = z.object({
 const ListQuery = z.object({
   agent_id: zId().optional(),
   limit: z.coerce.number().int().positive().max(200).default(50),
+  // created (the default, and the only order before 2026-09-23): newest job
+  // first. used: most used_units first, ties newest first, which answers
+  // "which job used the most" in the units the code reported. The default is
+  // unchanged, so a client that never sends sort sees exactly what it saw.
+  sort: z.enum(['created', 'used']).default('created'),
 })
 
 function serialize(t: {
@@ -66,24 +71,17 @@ export async function tasksRoute(app: FastifyInstance) {
     if (!parse.success) {
       return reply.code(422).send({ error: 'validation_error', details: parse.error.issues })
     }
-    const { agent_id, limit } = parse.data
+    const { agent_id, limit, sort } = parse.data
     const accountId = (request as any).accountId
 
-    const rows = agent_id
-      ? await sql`
-          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
-          FROM task_budgets
-          WHERE account_id = ${accountId} AND agent_id = ${agent_id}
-          ORDER BY created_at DESC
-          LIMIT ${limit}
-        `
-      : await sql`
-          SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
-          FROM task_budgets
-          WHERE account_id = ${accountId}
-          ORDER BY created_at DESC
-          LIMIT ${limit}
-        `
+    const rows = await sql`
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
+      FROM task_budgets
+      WHERE account_id = ${accountId}
+        ${agent_id ? sql`AND agent_id = ${agent_id}` : sql``}
+      ORDER BY ${sort === 'used' ? sql`used_units DESC, created_at DESC` : sql`created_at DESC`}
+      LIMIT ${limit}
+    `
 
     return reply.send({ tasks: rows.map((r) => serialize(r as any)) })
   })
