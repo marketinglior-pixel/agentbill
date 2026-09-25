@@ -43,6 +43,7 @@ import { securityRoute } from './routes/security.js'
 import { oauthRoute } from './routes/oauth.js'
 import { mcpRoute } from './routes/mcp.js'
 import { startOAuthPruner } from './lib/mcp-oauth.js'
+import { startRetention } from './lib/retention.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
@@ -484,6 +485,9 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
   startConversionDigest()
   startReservationSweeper()
   startOAuthPruner(app.log)
+  // Data retention (src/lib/retention.ts): RETENTION_MODE off (the default),
+  // report or enforce. Off starts nothing.
+  startRetention()
 })
 
 // Drain on shutdown so fire-and-forget writes dispatched just before a deploy

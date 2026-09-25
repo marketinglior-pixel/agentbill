@@ -17,6 +17,9 @@
 //   [recover]    /recover finds every account an address owns, the one a
 //                sign-in made with accounts.email NULL included, with the same
 //                answer for any address and the same token rules.
+//   [retention]  the retention job (src/lib/retention.ts) is off by default;
+//                report counts and deletes nothing; enforce removes exactly
+//                the rows past their period and nothing live or excluded.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
@@ -31,7 +34,7 @@ import { createServer } from 'node:http'
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates], ['recover', recoverGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates], ['recover', recoverGates], ['retention', retentionGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -707,4 +710,140 @@ async function recoverGates({ API, sql, ok, bootS, stopS, portS, outbox }) {
        rp.status === 303 && rp.headers.get('location') === '/recover?sent=1' && new Set(rows.map((r) => r.accountId)).size === 2, `${rp.status} ${rows.length}`)
   } finally { await stopS(prod) }
   await wipe()
+}
+
+// ------------------------------------------------------------------ retention
+async function retentionGates({ API, sql, ok, bootS, stopS, portS, serverLog }) {
+  const { retentionMode, runRetention, retentionCounts, RETENTION } = await import('../../dist/lib/retention.js')
+  const R = '00000000-0000-0000-0000-00000000022a'
+  // The live key's probe comes from a network it already has (the 89-day
+  // origin planted below), so the probe itself adds no origin row.
+  const NET = { 'fly-client-ip': '203.0.113.10' }
+  const ago = (days) => sql`NOW() - ${`${days} days`}::interval`
+  const keys = { live: shaped('ret-live'), revOld: shaped('ret-rev-old'), revNew: shaped('ret-rev-new'), expOld: shaped('ret-exp-old') }
+
+  ok('[retention] off by default: no RETENTION_MODE, an empty one and any other word all mean off; report and enforce are the only others',
+     retentionMode({}) === 'off' && retentionMode({ RETENTION_MODE: '' }) === 'off' && retentionMode({ RETENTION_MODE: 'yes' }) === 'off'
+       && retentionMode({ RETENTION_MODE: 'report' }) === 'report' && retentionMode({ RETENTION_MODE: ' Enforce ' }) === 'enforce')
+  let mainLog = ''
+  try { mainLog = readFileSync(serverLog, 'utf8') } catch {}
+  ok('[retention] and the harness server, started without it, never started the job (no [retention] line in its log)', mainLog.length > 0 && !mainLog.includes('[retention]'))
+  const zero = await retentionCounts()
+  ok('[retention] before anything is planted, no row anywhere in this database is past its period (so every count below is only what this section planted)',
+     Object.values(zero).every((v) => v === 0) && Object.keys(zero).length === RETENTION.length, JSON.stringify(zero))
+
+  // ---- plant both sides of every period, and rows in every excluded table
+  await sql`DELETE FROM accounts WHERE id = ${R}`
+  await sql`DELETE FROM polar_webhook_deliveries WHERE webhook_id = 'msg_bc_retention_old'`
+  await sql`INSERT INTO accounts (id, plan) VALUES (${R}, 'free')`
+  await insertKeyRow(sql, R, keys.live, 'ret-live')
+  await insertKeyRow(sql, R, keys.revOld, 'ret-rev-old', { revokedAt: ago(91) })
+  await insertKeyRow(sql, R, keys.revNew, 'ret-rev-new', { revokedAt: ago(89) })
+  await insertKeyRow(sql, R, keys.expOld, 'ret-exp-old', { expiresAt: ago(91) })
+  const kid = async (k) => (await sql`SELECT id FROM developer_api_keys WHERE key_hash = ${createHash('sha256').update(k).digest('hex')}`)[0].id
+  const [live, revOld] = [await kid(keys.live), await kid(keys.revOld)]
+  await sql`INSERT INTO api_key_ip_origins (api_key_id, origin, last_ip, first_seen_at) VALUES
+    (${live}, '203.0.113.9', '203.0.113.9', ${ago(91)}), (${live}, '203.0.113.10', '203.0.113.10', ${ago(89)}), (${revOld}, '203.0.113.11', '203.0.113.11', ${ago(200)})`
+  const [cust] = await sql`INSERT INTO customers (account_id, customer_ref) VALUES (${R}, 'ret-cust') RETURNING id`
+  await sql`INSERT INTO preflight_decisions (account_id, reason, snapshot, created_at) VALUES
+    (${R}, 'ret-old', '{}'::json, ${ago(181)}), (${R}, 'ret-new', '{}'::json, ${ago(179)})`
+  await sql`INSERT INTO preflight_requests (account_id, idempotency_key, created_at) VALUES (${R}, 'ret-old', ${ago(31)}), (${R}, 'ret-new', ${ago(29)})`
+  await sql`INSERT INTO reservations (account_id, customer_id, units, expires_at, released_at, created_at) VALUES
+    (${R}, ${cust.id}, 5, ${ago(31)}, ${ago(31)}, ${ago(31)}), (${R}, ${cust.id}, 5, ${ago(29)}, ${ago(29)}, ${ago(29)}), (${R}, ${cust.id}, 7, NOW() + INTERVAL '1 hour', NULL, ${ago(400)})`
+  await sql`INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata, created_at, list_price_usd) VALUES
+    (${R}, ${cust.id}, 'ret', 3, 'ret-ev-old', '{"model":"gpt-4o-mini","note":"old"}'::jsonb, ${ago(401)}, 0.0012),
+    (${R}, ${cust.id}, 'ret', 3, 'ret-ev-new', '{"model":"gpt-4o-mini","note":"new"}'::jsonb, ${ago(399)}, 0.0012)`
+  await sql`INSERT INTO step_costs (account_id, agent_id, step_name, units, created_at) VALUES (${R}, 'ret', 'old', 1, ${ago(401)}), (${R}, 'ret', 'new', 1, ${ago(399)})`
+  const th = () => randomBytes(32).toString('hex')
+  await sql`INSERT INTO account_recovery_tokens (account_id, token_hash, created_at, expires_at) VALUES
+    (${R}, ${th()}, ${ago(31)}, ${ago(31)}), (${R}, ${th()}, ${ago(29)}, ${ago(29)})`
+  await sql`INSERT INTO email_sign_in_tokens (email, token_hash, created_at, expires_at) VALUES
+    ('ret-old@example.invalid', ${th()}, ${ago(31)}, ${ago(31)}), ('ret-new@example.invalid', ${th()}, ${ago(29)}, ${ago(29)})`
+  await sql`INSERT INTO site_pulse (event, view_id, created_at) VALUES ('ret-old', 'ret-bc-old', ${ago(181)}), ('ret-new', 'ret-bc-new', ${ago(179)})`
+  // Excluded: none of these may be touched, however old.
+  await sql`INSERT INTO polar_webhook_deliveries (webhook_id, event_type, received_at) VALUES ('msg_bc_retention_old', 'order.paid', ${ago(2000)})`
+  await sql`INSERT INTO account_quota_alerts (account_id, threshold, billing_period_start, monthly_calls, created_at) VALUES (${R}, 75, (NOW() - INTERVAL '3 years')::date, 750, ${ago(1100)})`
+  await sql`INSERT INTO customer_usage_alerts (account_id, customer_ref, used_units, created_at) VALUES (${R}, 'ret-cust', 900, ${ago(1100)})`
+  await sql`UPDATE accounts SET plan = 'builder', polar_customer_id = 'cus_ret', polar_subscription_id = 'sub_ret', billing_period_start = (NOW() - INTERVAL '3 years')::date WHERE id = ${R}`
+
+  const want = { revoked_expired_keys: 2, key_network_first_address: 1, decision_snapshots: 1, preflight_replays: 1, closed_reservations: 1,
+                 event_metadata: 1, step_records: 1, recovery_tokens: 1, sign_in_links: 1, page_events: 1 }
+  const snapshot = async () => ({
+    keys: (await sql`SELECT count(*)::int AS n FROM developer_api_keys WHERE account_id = ${R}`)[0].n,
+    origins: (await sql`SELECT count(*)::int AS n FROM api_key_ip_origins o JOIN developer_api_keys k ON k.id = o.api_key_id WHERE k.account_id = ${R}`)[0].n,
+    lastIps: (await sql`SELECT count(*)::int AS n FROM api_key_ip_origins o JOIN developer_api_keys k ON k.id = o.api_key_id WHERE k.account_id = ${R} AND o.last_ip IS NOT NULL`)[0].n,
+    decisions: (await sql`SELECT count(*)::int AS n FROM preflight_decisions WHERE account_id = ${R}`)[0].n,
+    replays: (await sql`SELECT count(*)::int AS n FROM preflight_requests WHERE account_id = ${R}`)[0].n,
+    reservations: (await sql`SELECT count(*)::int AS n FROM reservations WHERE account_id = ${R}`)[0].n,
+    events: (await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${R}`)[0].n,
+    metadata: (await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${R} AND metadata IS NOT NULL`)[0].n,
+    steps: (await sql`SELECT count(*)::int AS n FROM step_costs WHERE account_id = ${R}`)[0].n,
+    recovery: (await sql`SELECT count(*)::int AS n FROM account_recovery_tokens WHERE account_id = ${R}`)[0].n,
+    signin: (await sql`SELECT count(*)::int AS n FROM email_sign_in_tokens WHERE email LIKE 'ret-%@example.invalid'`)[0].n,
+    pulse: (await sql`SELECT count(*)::int AS n FROM site_pulse WHERE view_id LIKE 'ret-bc-%'`)[0].n,
+    excluded: JSON.stringify([
+      (await sql`SELECT count(*)::int AS n FROM polar_webhook_deliveries WHERE webhook_id = 'msg_bc_retention_old'`)[0].n,
+      (await sql`SELECT count(*)::int AS n FROM account_quota_alerts WHERE account_id = ${R}`)[0].n,
+      (await sql`SELECT count(*)::int AS n FROM customer_usage_alerts WHERE account_id = ${R}`)[0].n,
+      (await sql`SELECT plan, polar_customer_id, polar_subscription_id, billing_period_start::text FROM accounts WHERE id = ${R}`)[0],
+    ]),
+  })
+  const planted = await snapshot()
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+  // ---- the numbers command Lior runs first
+  const cli = spawnSync(process.execPath, [new URL('../../dist/retention-report.js', import.meta.url).pathname], { encoding: 'utf8', timeout: 30_000,
+    env: { PATH: process.env.PATH, DATABASE_URL: process.env.DATABASE_URL, DATABASE_SSL: 'disable', RETENTION_MODE: 'enforce' } })
+  let cliCounts = null
+  try { cliCounts = JSON.parse((cli.stdout ?? '').trim().split('\n').pop()).counts } catch {}
+  ok('[retention] node dist/retention-report.js prints, per category, exactly the planted rows past their period, and deletes nothing even with RETENTION_MODE=enforce in its environment',
+     cli.status === 0 && same(cliCounts, want) && same(await snapshot(), planted), `${cli.status} ${JSON.stringify(cliCounts)} ${(cli.stderr ?? '').slice(-300)}`)
+
+  // ---- report mode, on the production path
+  const LONG = 'batchc-production-session-secret-0123456789'
+  const prodEnv = { NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG, RETENTION_FIRST_RUN_MS: '200' }
+  const pass = async (mode) => {
+    const b = await bootS({ ...prodEnv, RETENTION_MODE: mode }, portS)
+    let line = null
+    for (let i = 0; i < 60 && !line; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+      line = (b.out().match(/\[retention\] (report \(nothing deleted\): would remove|enforce: removed) (\{.*\})/) ?? [])
+      line = line.length ? { what: line[1], counts: JSON.parse(line[2]) } : null
+    }
+    const stillServes = await fetch(`http://localhost:${portS}/keys`, { headers: { Authorization: `Bearer ${keys.live}`, ...NET } }).then((r) => r.status)
+    await stopS(b)
+    return { line, stillServes, out: b.out() }
+  }
+  const rep = await pass('report')
+  ok('[retention] production, RETENTION_MODE=report: one log line with the counts per category, exactly the planted ones, and nothing deleted',
+     rep.line?.what.startsWith('report') && same(rep.line.counts, want) && same(await snapshot(), planted), JSON.stringify(rep.line) + rep.out.slice(-300))
+
+  // ---- enforce, on the production path
+  const enf = await pass('enforce')
+  const after = await snapshot()
+  ok('[retention] production, RETENTION_MODE=enforce: the log line says it removed exactly what report counted',
+     enf.line?.what.startsWith('enforce') && same(enf.line.counts, want), JSON.stringify(enf.line) + enf.out.slice(-300))
+  ok('[retention] and exactly those rows are gone: 2 dead keys (and the old one\'s networks with it), 1 address cleared, 1 each of decisions, replays, closed reservations, steps, recovery and sign-in links, page events, and 1 event\'s metadata; the event row itself stays',
+     after.keys === planted.keys - 2 && after.origins === planted.origins - 1 && after.lastIps === planted.lastIps - 2 && after.decisions === planted.decisions - 1
+       && after.replays === planted.replays - 1 && after.reservations === planted.reservations - 1 && after.events === planted.events && after.metadata === planted.metadata - 1
+       && after.steps === planted.steps - 1 && after.recovery === planted.recovery - 1 && after.signin === planted.signin - 1 && after.pulse === planted.pulse - 1,
+     JSON.stringify({ planted, after }))
+  const [open] = await sql`SELECT count(*)::int AS n FROM reservations WHERE account_id = ${R} AND released_at IS NULL`
+  const [keptKey] = await sql`SELECT count(*)::int AS n FROM developer_api_keys WHERE account_id = ${R} AND label = 'ret-rev-new'`
+  const [keptOrigin] = await sql`SELECT last_ip FROM api_key_ip_origins WHERE origin = '203.0.113.10'`
+  const [keptEvent] = await sql`SELECT metadata->>'note' AS note FROM events WHERE idempotency_key = 'ret-ev-new'`
+  ok('[retention] nothing live or inside its period is touched: the open reservation (400 days old), the key revoked 89 days ago, the network first seen 89 days ago, the 399-day event\'s metadata, and the live key still authenticates',
+     open.n === 1 && keptKey.n === 1 && keptOrigin?.lastIp === '203.0.113.10' && keptEvent?.note === 'new' && enf.stillServes === 200 && rep.stillServes === 200,
+     JSON.stringify({ open: open.n, keptKey: keptKey.n, keptOrigin, keptEvent, s: [rep.stillServes, enf.stillServes] }))
+  ok('[retention] and none of the excluded billing and claim records is touched: the Polar delivery, the quota-alert and usage-alert claims, the plan and its Polar ids',
+     after.excluded === planted.excluded, `${planted.excluded} -> ${after.excluded}`)
+  const again = await runRetention('enforce')
+  const off = await runRetention('off')
+  ok('[retention] a second enforce pass removes nothing, and mode off does nothing at all',
+     Object.values(again.counts).every((v) => v === 0) && same(off.counts, {}), JSON.stringify(again.counts))
+
+  await sql`DELETE FROM polar_webhook_deliveries WHERE webhook_id = 'msg_bc_retention_old'`
+  await sql`DELETE FROM email_sign_in_tokens WHERE email LIKE 'ret-%@example.invalid'`
+  await sql`DELETE FROM site_pulse WHERE view_id LIKE 'ret-bc-%'`
+  await sql`DELETE FROM accounts WHERE id = ${R}`
 }
