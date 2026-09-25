@@ -976,3 +976,69 @@ def test_a_gemini_client_without_the_per_round_method_refuses_a_call_that_would_
                                 config={"tools": [get_weather], "automatic_function_calling": {"disable": True}})
     llm.models.generate_content(model="gemini-2.5-flash", contents="x", config={"tools": [{"function_declarations": []}]})
     assert len(g.sent) == 2 and len(server["events"]()) == 2
+
+
+# ---------------------------------------------------------------- a job in dollars (server 2026-09-25)
+
+USD_APPROVED = {**APPROVED, "estimated_units": 100000, "task_ceiling": 5000000, "task_remaining_units": 4900000,
+                "task_unit": "usd", "estimate_source": "default", "estimated_usd": 0.1,
+                "task_ceiling_usd": 5.0, "task_remaining_usd": 4.9}
+USD_REFUSED = {"approved": False, "reason": "task_ceiling_exceeded", "estimated_units": 100000, "task_ref": "job-usd",
+               "task_ceiling": 250000, "task_used_units": 200000, "task_remaining_units": 50000, "task_unit": "usd",
+               "estimate_source": "default", "estimated_usd": 0.1, "task_ceiling_usd": 0.25, "task_used_usd": 0.2,
+               "task_remaining_usd": 0.05}
+
+
+def test_task_ceiling_usd_opens_a_dollar_job_and_leaves_the_estimate_to_the_server(server):
+    server["preflight"] = USD_APPROVED
+    oa = FakeOpenAI()
+    llm = wrap(oa, task_ref="job-usd", agent_id="researcher", task_ceiling_usd=5, agentbill_client=AB)
+    llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    pre = server["preflights"]()[0]
+    assert pre["unit"] == "usd" and pre["task_ceiling_usd"] == 5
+    assert "estimated_units" not in pre and "task_ceiling" not in pre     # the server estimates in dollars
+    ev = server["events"]()[0]
+    assert ev["metadata"]["model"] and ev["metadata"]["tokens"]            # what the server prices
+    assert ev["reservation_id"] == RID
+
+
+def test_unit_usd_meters_a_dollar_job_opened_elsewhere(server):
+    server["preflight"] = USD_APPROVED
+    llm = wrap(FakeOpenAI(), task_ref="job-usd", agent_id="r", unit="usd", agentbill_client=AB)
+    llm.chat.completions.create(model="gpt-4o-mini", messages=[])
+    pre = server["preflights"]()[0]
+    assert pre["unit"] == "usd" and "task_ceiling_usd" not in pre and "estimated_units" not in pre
+
+
+def test_a_dollar_refusal_says_dollars_at_list_price(server):
+    server["preflight"] = USD_REFUSED
+    oa = FakeOpenAI()
+    r = wrap(oa, task_ref="job-usd", agent_id="r", unit="usd", agentbill_client=AB).chat.completions.create(model="gpt-4o-mini", messages=[])
+    assert isinstance(r, Refusal) and r.unit == "usd" and oa.sent == []
+    assert "$0.2 of $0.25 at list price" in str(r) and "$0.1 this call asked" in str(r)
+    with pytest.raises(TaskCeilingExceededError) as raised:
+        AB.preflight("r", task_ref="job-usd", unit="usd")
+    assert raised.value.task_unit == "usd" and "$0.05 remaining" in str(raised.value)
+
+
+def test_dollar_arguments_are_checked(server):
+    with pytest.raises(ValueError):
+        wrap(FakeOpenAI(), task_ref="j", agent_id="r", task_ceiling_usd=5, task_ceiling=100, agentbill_client=AB)
+    with pytest.raises(ValueError):
+        wrap(FakeOpenAI(), task_ref="j", agent_id="r", task_ceiling_usd=5, unit="token", agentbill_client=AB)
+    with pytest.raises(ValueError):
+        wrap(FakeOpenAI(), task_ref="j", agent_id="r", unit="dollars", agentbill_client=AB)
+
+
+def test_a_token_job_is_unchanged(server):
+    wrap(FakeOpenAI(), task_ref="job-7", agent_id="r", task_ceiling=100000, agentbill_client=AB).chat.completions.create(model="gpt-4o-mini", messages=[])
+    pre = server["preflights"]()[0]
+    assert pre["unit"] == "token" and pre["task_ceiling"] == 100000 and "task_ceiling_usd" not in pre and "estimated_units" in pre
+
+
+def test_the_client_preflight_carries_the_dollar_fields(server):
+    server["preflight"] = USD_APPROVED
+    res = AB.preflight("r", task_ref="job-usd", task_ceiling_usd=5, estimated_usd=0.02)
+    pre = server["preflights"]()[0]
+    assert pre["task_ceiling_usd"] == 5 and pre["estimated_usd"] == 0.02
+    assert res.task_unit == "usd" and res.estimated_usd == 0.1 and res.task_remaining_usd == 4.9 and res.estimate_source == "default"

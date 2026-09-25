@@ -10,7 +10,7 @@ import { KEY_CTA, KEY_CTA_SHORT, CHROME_CSS, siteNav, siteFooter } from '../ui/c
 import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
 import { z } from 'zod'
 import { isId, INT4_MAX, plain } from '../lib/ids.js'
-import { setTaskCeiling, CONSOLE_AGENT, unitWord } from '../lib/task-ceiling.js'
+import { setTaskCeiling, CONSOLE_AGENT, unitWord, TASK_UNITS, asTaskUnit, amountText, usdText, usdAmount, microsFromUsd, microsFromListPrice, type TaskUnit } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import {
   VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
@@ -201,7 +201,13 @@ export async function appRoute(app: FastifyInstance) {
     const body = request.body as Record<string, unknown>
     const ref = typeof body?.task_ref === 'string' ? body.task_ref.trim() : ''
     const agent = typeof body?.agent_id === 'string' ? body.agent_id.trim() : ''
-    const raw = typeof body?.ceiling_units === 'string' ? body.ceiling_units.trim() : ''
+    // The amount arrives as ceiling (the form's field, since 2026-09-25) or
+    // ceiling_units (the field before it, still accepted), in the unit the
+    // form's select names: dollars for "usd", a whole number otherwise.
+    const rawField = typeof body?.ceiling === 'string' ? body.ceiling : body?.ceiling_units
+    const raw = typeof rawField === 'string' ? rawField.trim() : ''
+    const unitRaw = body?.unit
+    const unitSel: TaskUnit | undefined = typeof unitRaw === 'string' && (TASK_UNITS as readonly string[]).includes(unitRaw) ? unitRaw as TaskUnit : undefined
     // Which screen the answer lands on. The start screen posts back=start so a
     // reader on the three-step path stays on it; the tasks view's editor sends
     // nothing and lands where it always has. An allowlist of two, not an echo:
@@ -217,11 +223,20 @@ export async function appRoute(app: FastifyInstance) {
     if (agent && !isId(agent)) return fail('agent')
     // Digits only, then the int4 bound the column and the API both enforce.
     // Number('1e3') is 1000 and Number('') is 0; neither is a ceiling anyone typed.
-    if (!/^[0-9]{1,10}$/.test(raw) || Number(raw) < 1 || Number(raw) > INT4_MAX) return fail('ceiling')
+    if (unitRaw !== undefined && unitSel === undefined) return fail('ceiling')
+    // A ceiling in dollars is read exactly to the micro-dollar ("5", "5.00",
+    // "$0.25"); any other unit is a whole number, as it always was.
+    const amount = unitSel === 'usd'
+      ? microsFromUsd(raw)
+      : /^[0-9]{1,10}$/.test(raw) && Number(raw) >= 1 && Number(raw) <= INT4_MAX ? Number(raw) : null
+    if (amount === null) return fail(unitSel === 'usd' ? 'usd' : 'ceiling')
 
-    const result = await setTaskCeiling(viewer.accountId, ref, Number(raw), agent || null)
-    // The form sends no unit, so a save here never meets a unit mismatch; the
-    // narrowing is for the type, and the job keeps the unit it opened with.
+    // The unit is read when this save opens the job and checked against one
+    // that exists: a job's unit is fixed, so a save in another unit is refused
+    // with the job's own unit in the answer, never a relabel. A form with no
+    // unit (a row's editor for a job in tokens or units) checks nothing.
+    const result = await setTaskCeiling(viewer.accountId, ref, amount, agent || null, unitSel)
+    if (!result.ok && result.reason === 'unit_mismatch') return fail('unit')
     if (!result.ok) return to(`err=below&ref=${encodeURIComponent(ref)}&min=${result.reason === 'below_committed' ? result.minimum : 0}`)
     // An agent label typed for a job that already existed was not applied
     // (the label is read only when a save opens the job); say so.
@@ -673,10 +688,10 @@ function readFilter(q: Record<string, unknown>): Filter {
  *  no price reads as unpriced, never as $0; tokens is what providers reported. */
 type Series = { day: string; blocks: number; units: number; refused: number; usd: number; priced: number; tokens: number; calls: number }
 /** What POST /app/tasks left on the query string for the tasks view to say. */
-type Flash = { saved?: string; created?: boolean; agentKept?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below' | 'rate'; ref?: string; min?: number
+type Flash = { saved?: string; created?: boolean; agentKept?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below' | 'rate' | 'usd' | 'unit'; ref?: string; min?: number
   /** The named job's unit, read off its row by verifyFlash, never off the URL. */
   unit?: string }
-const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below', 'rate'])
+const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below', 'rate', 'usd', 'unit'])
 
 /** Shape only. readFlash accepts what a redirect from POST /app/tasks would
  *  carry; verifyFlash below decides what may be shown. */
@@ -687,7 +702,7 @@ function readFlash(q: Record<string, unknown>): Flash | null {
   if (q?.agent === 'kept') f.agentKept = true
   if (typeof q?.err === 'string' && FLASH_ERRS.has(q.err)) f.err = q.err as Flash['err']
   if (isId(q?.ref)) f.ref = q.ref as string
-  if (typeof q?.min === 'string' && /^[0-9]{1,10}$/.test(q.min)) f.min = Number(q.min)
+  if (typeof q?.min === 'string' && /^[0-9]{1,13}$/.test(q.min)) f.min = Number(q.min)
   return Object.keys(f).length ? f : null
 }
 
@@ -745,7 +760,7 @@ type Suggest = {
 async function loadHistory(accountId: string): Promise<HistoryJob[]> {
   const rows = await sql`
     WITH finished AS (
-      SELECT agent_id, used_units, updated_at, unit,
+      SELECT agent_id, used_units, updated_at, unit, task_ref,
              row_number() OVER (PARTITION BY agent_id ORDER BY updated_at DESC, id DESC) AS rn
       FROM task_budgets
       WHERE account_id = ${accountId}
@@ -760,11 +775,22 @@ async function loadHistory(accountId: string): Promise<HistoryJob[]> {
       ORDER BY last_at DESC, agent_id COLLATE "C"
       LIMIT ${HISTORY_AGENTS}
     )
-    SELECT f.agent_id, f.used_units, f.updated_at, f.unit
+    SELECT f.agent_id, f.used_units, f.updated_at, f.unit, c.usd::text AS usd, coalesce(c.priced, 0) AS priced, coalesce(c.calls, 0) AS calls
     FROM finished f JOIN agents a ON a.agent_id = f.agent_id
+    LEFT JOIN LATERAL (
+      SELECT sum(list_price_usd) AS usd, count(list_price_usd) AS priced, count(*) AS calls
+      FROM events WHERE account_id = ${accountId} AND task_ref = f.task_ref
+    ) c ON true
     WHERE f.rn <= ${HISTORY_JOBS}
   `
-  return rows.map((r) => ({ agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date), unit: String(r.unit ?? 'unit') }))
+  // A job's dollar total is offered only when every one of its calls was
+  // priced; a job in dollars counts them already (src/lib/ceiling-suggest.ts).
+  return rows.map((r) => {
+    const unit = String(r.unit ?? 'unit')
+    const calls = Number(r.calls), priced = Number(r.priced)
+    const usdMicros = unit === 'usd' ? Number(r.usedUnits) : calls > 0 && priced === calls && r.usd != null ? microsFromListPrice(String(r.usd)) : null
+    return { agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date), unit, usdMicros }
+  })
 }
 
 /** The same test as loadHistory, on the sample rows ?demo=1 lists, so the
@@ -793,7 +819,7 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
 // is priced, never 0 for "unpriced"), from events.task_ref (migration 017).
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; unit?: string; usageMissingCalls?: number; updatedAt: Date
                  firstSeen: Date | null; lastSeen: Date | null; preflights: number
-                 usd?: number | null; pricedCalls?: number; calls?: number; tokens?: number }
+                 usd?: number | null; pricedCalls?: number; calls?: number; tokens?: number; unpricedCalls?: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 // unit is the job's (task_budgets.unit, joined on task_ref), so a refusal on a
@@ -914,7 +940,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
   const order = () => sort === 'used' ? sql`used_units DESC, updated_at DESC` : sql`updated_at DESC`
   const tasks = await sql`
     WITH page AS (
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, updated_at
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls, updated_at
       FROM task_budgets
       WHERE account_id = ${accountId}
       ORDER BY ${order()}
@@ -937,7 +963,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
       WHERE account_id = ${accountId} AND task_ref IN (SELECT task_ref FROM page)
       GROUP BY task_ref
     )
-    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.unit, page.usage_missing_calls, page.updated_at,
+    SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.unit, page.usage_missing_calls, page.unpriced_calls, page.updated_at,
            spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights,
            cost.usd, coalesce(cost.priced_calls, 0) AS priced_calls, coalesce(cost.calls, 0) AS calls, coalesce(cost.tokens, 0) AS tokens
     FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
@@ -1278,9 +1304,9 @@ function num(n: number): string {
  * place that prints one labels it as an estimate at list price.
  */
 function usd(n: number): string {
-  if (n === 0) return '$0'
-  if (Math.abs(n) < 0.01) return '$' + n.toLocaleString('en-US', { maximumSignificantDigits: 2 })
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // One formatter for every dollar on the page (src/lib/task-ceiling.ts), at
+  // micro-dollar resolution, the ledger's own.
+  return usdAmount(n)
 }
 
 /** "Aug 8" from an ISO day. The chart's x-axis used to print 2026-08-08. */
@@ -1326,6 +1352,12 @@ export function decisionLine(r: DecisionRow): string {
   // A job counted in tokens (the unit wrap() opens a job in) says tokens; a
   // row with no job, or a job in the developer's own unit, says units.
   const word = (k: number) => unitWord(r.unit === 'token' ? 'token' : 'unit', k)
+  if (r.unit === 'usd') {
+    // A dollar job: the columns are micro-dollars, printed as the estimate they are.
+    const $ = (v: number | null) => (v == null ? '?' : usdText(Number(v)))
+    if (r.reason === 'task_ceiling_exceeded') return `Asked to reserve ${$(n)} with the task at ${$(r.usedUnits)} of ${$(r.ceilingUnits)}, at list price.`
+    if (r.reason === 'task_overrun_recorded') return `Recorded ${$(r.estimatedUnits)} after the call ran; the task stands at ${$(r.usedUnits)} of ${$(r.ceilingUnits)}, at list price.`
+  }
   const asked = `${num(n)} ${word(n)}`
   const of = r.unit === 'token' ? ' tokens' : ''
   switch (r.reason) {
@@ -2636,13 +2668,17 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
       ? '<span class="chip-no">ceiling hit</span>'
       : ratio >= 0.8 ? '<span class="chip-near">close</span>' : tag('running')
   const refusedRow = leaked || used >= ceiling
-  // A job counted in tokens says so beside its numbers (migration 014). A job
-  // in the developer's own unit reads as it always has.
   // Every row names its unit (migration 014): tokens for a job wrap() opened,
   // units for a job counted in the developer's own unit, which is labelled as
   // exactly that, because it is the one number here nobody measured.
   const tokens = t.unit === 'token'
+  // A job in dollars (migration 025) keeps micro-dollars in its row and
+  // prints them as dollars; its ledger IS the list-price estimate, so it
+  // carries no second cost line, only how many calls were charged at an
+  // estimate because they could not be priced.
+  const dollars = t.unit === 'usd'
   const per = tokens ? ' tokens' : ' units'
+  const amt = (n: number) => (dollars ? usdText(n) : `${num(n)}${per}`)
   // Calls recorded without a usage count were charged at least the
   // reservation they settled, not 0, so the total is partly an estimate; the
   // row says how many. A call that found no reservation open was recorded at
@@ -2656,19 +2692,38 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   return `<tr${refusedRow ? ' class="is-no"' : ''}>
       <td class="lead"><div class="tk">
         <div class="tk-n"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a><span class="tk-a">${esc(t.agentId)}</span></div>
-        <div class="tk-f">${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
-        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>${missingLine}${costLine(t)}
+        <div class="tk-f">${leaked ? `${amt(used - ceiling)} past the ceiling` : `${amt(remaining)} left`}${reserved > 0 ? ` · ${dollars ? usdText(reserved) : num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
+        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>${missingLine}${dollars ? unpricedLine(t) : costLine(t)}
       </div></td>
-      <td class="num" data-l="used"${tokens ? '' : ' title="units: your own count"'}><b>${num(used)}</b> / ${num(ceiling)}${per}</td>
+      ${dollars
+        ? `<td class="num" data-l="used" title="${esc(LIST_PRICE_LABEL)}"><b>${usdText(used)}</b> / ${usdText(ceiling)} <span class="est">est.</span></td>`
+        : `<td class="num" data-l="used"${tokens ? '' : ' title="units: your own count"'}><b>${num(used)}</b> / ${num(ceiling)}${per}</td>`}
       <td class="burn"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${usedPct.toFixed(1)}%"></i><s style="left:${usedPct.toFixed(1)}%;width:${resPct.toFixed(1)}%"></s><u></u></div></td>
       <td class="state">${state}</td>${editable ? `
       <td class="wide"><form method="POST" action="/app/tasks" class="bset" autocomplete="off">
           <input type="hidden" name="task_ref" value="${esc(t.taskRef)}" />
-          <label class="cv-label" for="ceil-${i}">ceiling</label>
-          <input id="ceil-${i}" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />
+          <label class="cv-label" for="ceil-${i}">ceiling${dollars ? ', $' : ''}</label>
+          ${dollars
+            ? `<input type="hidden" name="unit" value="usd" /><input id="ceil-${i}" class="cv-field m" name="ceiling" type="text" inputmode="decimal" pattern="\\$?[0-9]{1,7}(\\.[0-9]{1,6})?" value="${dollarInput(ceiling)}" required />`
+            : `<input id="ceil-${i}" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="${Math.max(1, used + reserved)}" max="${INT4_MAX}" step="1" value="${ceiling}" required />`}
           <button class="btn-ghost" type="submit">Save</button>
         </form></td>` : ''}
     </tr>`
+}
+
+/** Micro-dollars as a form value: 5000000 is "5.00", 90000 is "0.09", 7500 is "0.0075". */
+function dollarInput(micros: number): string {
+  const s = (micros / 1_000_000).toFixed(6).replace(/0+$/, '')
+  const [w, f = ''] = s.split('.')
+  return `${w}.${f.padEnd(2, '0')}`
+}
+
+/** A dollar job's calls that could not be priced: charged what was held for them, never $0. */
+function unpricedLine(t: TaskRow): string {
+  const n = Number(t.unpricedCalls ?? 0)
+  return n > 0
+    ? `<div class="tk-f tk-s"><span class="bmiss">${num(n)} ${n === 1 ? 'call' : 'calls'} with no list price, charged at ${n === 1 ? 'its' : 'their'} estimate</span></div>`
+    : ''
 }
 
 /**
@@ -2726,9 +2781,11 @@ function jobSide(p: Page): string {
   const ceiling = Number(job.ceilingUnits)
   return `<div class="cv-side">
         <div class="side-h">${label('this job')}${tag(esc(job.taskRef), true)}</div>
-        <div class="cv-stat"><b>${num(used)}</b> <span>/ ${num(ceiling)} ${unitWord(job.unit)}${job.unit === 'token' ? '' : ', your own count'}</span></div>
+        ${job.unit === 'usd'
+          ? `<div class="cv-stat" title="${esc(LIST_PRICE_LABEL)}"><b>${usdText(used)}</b> <span>/ ${usdText(ceiling)}, est. at list price</span></div>`
+          : `<div class="cv-stat"><b>${num(used)}</b> <span>/ ${num(ceiling)} ${unitWord(job.unit)}${job.unit === 'token' ? '' : ', your own count'}</span></div>`}
         ${meter(used, ceiling)}
-        ${job.usd != null ? `<p class="side-cost" title="${esc(LIST_PRICE_LABEL)}"><b>${usd(job.usd)}</b> est. at list price</p>` : ''}
+        ${job.usd != null && job.unit !== 'usd' ? `<p class="side-cost" title="${esc(LIST_PRICE_LABEL)}"><b>${usd(job.usd)}</b> est. at list price</p>` : ''}
         ${refusal ? `<p class="cv-no">${esc(decisionLine(refusal))}</p>
         <div class="cv-code is-sm plate">${plateBody(refusal.snapshot)}</div>` : ''}
       </div>`
@@ -2750,10 +2807,14 @@ function plateBody(snapshot: string): string {
 const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
   ref: () => 'The job name (task_ref) is 1 to 128 characters with no control characters.',
   ceiling: () => 'The ceiling is a whole number, 1 or more, in the job\u2019s own unit.',
+  usd: () => 'A ceiling in dollars is more than $0 and at most $1,000,000, with at most six decimals: 5, 5.00 or 0.25.',
+  unit: (f) => f.ref && f.unit
+    ? `<code>${esc(f.ref)}</code> is counted in ${f.unit === 'usd' ? 'dollars' : unitWord(f.unit)}, and a job\u2019s unit is fixed when it opens. Choose ${f.unit === 'usd' ? 'dollars' : unitWord(f.unit)} and save again, or name a new job.`
+    : 'That job is counted in another unit, and a job\u2019s unit is fixed when it opens. Choose its unit and save again, or name a new job.',
   agent: () => 'The agent label is 1 to 128 characters with no control characters.',
   rate: () => 'Too many saves in one minute for this key. Wait a moment and try again.',
   below: (f) => f.ref && f.min != null
-    ? `<code>${esc(f.ref)}</code> already has <b>${num(f.min)}</b> ${unitWord(f.unit, f.min)} committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min)} or more, or wait for the reservations to settle or expire.`
+    ? `<code>${esc(f.ref)}</code> already has ${f.unit === 'usd' ? `<b>${usdText(f.min)}</b>` : `<b>${num(f.min)}</b> ${unitWord(f.unit, f.min)}`} committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${f.unit === 'usd' ? usdText(f.min) : num(f.min)} or more, or wait for the reservations to settle or expire.`
     : 'That ceiling is under what the job has already committed: spent, plus reserved by calls in flight. Set it at or above that number, or wait for the reservations to settle or expire.',
 }
 
@@ -2786,7 +2847,9 @@ function ceilingForm(p: Page): string {
   const pick = p.suggest?.pick ?? null
   const fields = `
       <div><label class="cv-flabel" for="t-ref">Job <code>task_ref</code></label><input id="t-ref" class="cv-field m" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label class="cv-flabel" for="t-ceil">Ceiling, in the job's unit</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${pick ? `value="${pick.units}"` : 'placeholder="500"'} required /></div>
+      <div><label class="cv-flabel" for="t-ceil">Ceiling</label><input id="t-ceil" class="cv-field m" name="ceiling" type="text" inputmode="decimal" maxlength="16" ${pick ? `value="${pick.unit === 'usd' ? dollarInput(pick.units) : pick.units}"` : 'placeholder="5.00"'} required /></div>
+      <div><label class="cv-flabel" for="t-unit">In</label><select id="t-unit" class="cv-field m" name="unit">${(['usd', 'token', 'unit'] as const).map((u) =>
+        `<option value="${u}"${(pick ? pick.unit : 'usd') === u ? ' selected' : ''}>${u === 'usd' ? 'dollars, at list price' : u === 'token' ? 'tokens' : 'units, your own count'}</option>`).join('')}</select></div>
       <div><label class="cv-flabel" for="t-agent">Agent label, optional</label><input id="t-agent" class="cv-field m" name="agent_id" placeholder="researcher" maxlength="128"${pick ? ` value="${esc(pick.agentId)}"` : ''} /></div>`
   const form = p.demo
     ? `<div class="setf">${fields}
@@ -2800,7 +2863,7 @@ function ceilingForm(p: Page): string {
     ${form}
     ${pickLine(p)}
     ${historyBlock(p)}
-    <p class="fine">One job, one budget. A job <code>wrap()</code> opened counts tokens; a job opened here counts units of your own. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job has no room left, preflight answers <code>approved: false</code> and your code decides what next.</p>
+    <p class="fine">One job, one budget, in dollars, tokens or units of your own, chosen when the job opens and fixed after. A ceiling in dollars is the list-price estimate of the tokens each call reports: preflight reserves the job's recent median call, or $0.10 before its first priced call, and each record settles to what the call cost. A call with no list price is charged its reservation, never $0. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job has no room left, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
 }
 
@@ -2814,7 +2877,7 @@ function pickLine(p: Page): string {
   const from = k.jobs === 1
     ? `what your last job of ${who} used`
     : `the ${k.which} of your last ${num(k.jobs)} jobs of ${who}`
-  return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${unitWord(k.unit, k.units)}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
+  return `<p class="conv">In the ceiling field: <b>${amountText(k.unit, k.units)}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
 }
 
 
@@ -2830,15 +2893,15 @@ function historyBlock(p: Page): string {
   const rows = s.history.map((h) => {
     const on = (k: Pick) => s.pick?.agentId === h.agentId && s.pick.which === k
     const link = (k: Pick, name: string) =>
-      `<a class="pk${on(k) ? ' on' : ''}" href="${href(p, 'tasks', { history: h.agentId, pick: k })}"${on(k) ? ' aria-current="true"' : ''}>${name}<b>${num(h[k])}</b></a>`
+      `<a class="pk${on(k) ? ' on' : ''}" href="${href(p, 'tasks', { history: h.agentId, pick: k })}"${on(k) ? ' aria-current="true"' : ''}>${name}<b>${h.unit === 'usd' ? usdText(h[k]) : num(h[k])}</b></a>`
     // One job has one figure; three equal links would be noise.
     const figures = h.jobs === 1 ? link('max', '') : PICKS.map((k) => link(k, `${k} `)).join('')
-    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">${unitWord(h.unit)}</span></span></div>`
+    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">${h.unit === 'usd' ? 'at list price' : unitWord(h.unit)}</span></span></div>`
   }).join('')
   return `<div class="hist">
       <p class="lbl cv-label">Suggested ceilings</p>
       ${rows}
-      <p class="fine">A pick fills the ceiling field with that agent's label; ${p.demo ? 'sample data, so nothing here is saved' : 'nothing is saved until you press Set ceiling'}. Each figure is the p50, p90 or max of that agent's last ${num(HISTORY_JOBS)} finished jobs: one real job's total. <a href="/docs#ceiling-suggestion">How the suggestion is computed</a>.</p>
+      <p class="fine">A pick fills the ceiling field with that agent's label; ${p.demo ? 'sample data, so nothing here is saved' : 'nothing is saved until you press Set ceiling'}. Each figure is the p50, p90 or max of that agent's last ${num(HISTORY_JOBS)} finished jobs: one real job's total, in dollars at list price when every call of those jobs was priced, and in the jobs' own unit otherwise. <a href="/docs#ceiling-suggestion">How the suggestion is computed</a>.</p>
     </div>`
 }
 
@@ -3437,7 +3500,7 @@ function consolePage(p: Page): string {
         ${body}
         <div class="foot">
           Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets and <code>/tasks/:task_ref</code> for a job's list-price estimate, <code>/usage?by=event_type</code> for the split by event_type and its estimate, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets and <code>/tasks/:task_ref</code> for a job's list-price estimate, <code>/usage?by=event_type</code> for the split by event_type and its estimate, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, or its <code>breakdown.list_price_usd_estimate</code> when every call was priced, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
     </main>

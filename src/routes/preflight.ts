@@ -6,7 +6,9 @@ import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
-import { CONSOLE_AGENT, TASK_UNITS, unitMismatchMessage } from '../lib/task-ceiling.js'
+import { CONSOLE_AGENT, TASK_UNITS, unitMismatchMessage, microsFromUsd, usdOf, USD_MICROS_MAX } from '../lib/task-ceiling.js'
+import { usdEstimate, type EstimateSource } from '../lib/usd-estimate.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { unitsOf, unitsOrNull } from '../db/int8.js'
 
 const PreflightBody = z.object({
@@ -22,6 +24,14 @@ const PreflightBody = z.object({
   // different unit is a 422, never a relabel. Omitted, nothing is checked and
   // a job this call opens is counted in 'unit'. See migration 014.
   unit: z.enum(TASK_UNITS).optional(),
+  // A job in dollars (T3, migration 025). task_ceiling_usd opens one, in
+  // dollars, and implies unit "usd"; estimated_usd is this call's own
+  // estimate in dollars. Both are read through microsFromUsd, exact to the
+  // micro-dollar. On a dollar job the numbers on the wire (task_ceiling,
+  // estimated_units, task_remaining_units) are micro-dollars, and the answer
+  // carries the same figures in dollars beside them.
+  task_ceiling_usd: z.number().positive().max(usdOf(USD_MICROS_MAX)).optional(),
+  estimated_usd: z.number().positive().max(usdOf(USD_MICROS_MAX)).optional(),
 })
 
 // Every rejection inside the reserve transaction is thrown, never returned.
@@ -68,12 +78,31 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
 
     const {
       agent_id, customer_id, estimated_units, ceiling,
-      task_ref, task_ceiling, idempotency_key, unit,
+      task_ref, task_ceiling: taskCeilingRaw, idempotency_key, task_ceiling_usd, estimated_usd,
     } = parse.data
+    // task_ceiling_usd is a dollar job's ceiling, so it declares the unit. A
+    // different unit declared beside it, or both ceilings at once, is a 422:
+    // two numbers for one ceiling is a question the server will not guess at.
+    if (task_ceiling_usd !== undefined && (taskCeilingRaw !== undefined || (parse.data.unit !== undefined && parse.data.unit !== 'usd'))) {
+      return { status: 422, body: {
+        error: 'validation_error',
+        message: 'task_ceiling_usd opens a job counted in dollars. Send it without task_ceiling, and with unit "usd" or no unit.',
+      } }
+    }
+    const unit = task_ceiling_usd !== undefined ? 'usd' as const : parse.data.unit
+    const usdCeiling = task_ceiling_usd !== undefined ? microsFromUsd(task_ceiling_usd) : null
+    const usdAsked = estimated_usd !== undefined ? microsFromUsd(estimated_usd) : null
+    if ((task_ceiling_usd !== undefined && usdCeiling === null) || (estimated_usd !== undefined && usdAsked === null)) {
+      return { status: 422, body: {
+        error: 'validation_error',
+        message: 'task_ceiling_usd and estimated_usd are dollars: more than 0, at most 1,000,000, with at most six decimals.',
+      } }
+    }
+    const task_ceiling = usdCeiling ?? taskCeilingRaw
     // A unit belongs to a job. Sent without one it would be read by nothing,
     // and a field the server silently ignores is how a caller comes to
     // believe a job is counted in tokens when no job was named.
-    if (unit !== undefined && task_ref === undefined) {
+    if ((unit !== undefined || estimated_usd !== undefined) && task_ref === undefined) {
       return { status: 422, body: {
         error: 'validation_error',
         message: 'unit describes a job, so it needs task_ref. Pass task_ref (and task_ceiling to open the job), or leave unit out.',
@@ -193,7 +222,12 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
     const planLimit: number | null =
       account.plan === 'paid' ? null : PLAN_LIMITS[account.plan] ?? PLAN_LIMITS.free
 
-    const reserveUnits = estimated_units ?? 1
+    // What this call reserves. On a job in units or tokens it is the caller's
+    // number, as it always was. On a dollar job it is decided inside the
+    // transaction, once the job's unit is read (src/lib/usd-estimate.ts).
+    let reserveUnits = estimated_units ?? 1
+    let estimateSource: EstimateSource | null = null
+    let jobUnit: string | null = null
     const expiresAt = reservationExpiry()
 
     let result
@@ -254,6 +288,60 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
           ON CONFLICT DO NOTHING
         `
 
+        // The job, before anything is reserved, because on a dollar job the
+        // job decides how much this call reserves on the customer too. Moved
+        // up from after the customer reserve on 2026-09-25; nothing else
+        // changed about it, and a refusal still rolls all of it back.
+        if (task_ref) {
+          if (task_ceiling != null) {
+            // The first call for a new task_ref opens it with this ceiling.
+            // Once the row exists, a task_ceiling sent here is not applied:
+            // the ceiling changes only through PUT /tasks/:task_ref/ceiling or
+            // the console form, and the last save is the one in force. So a
+            // retry of THIS call cannot raise the number it was meant to
+            // respect. An approved answer and a task_ceiling_exceeded refusal
+            // carry the ceiling that decided them as task_ceiling; the other
+            // refusals are decided before this row is consulted.
+            await tx`
+              INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, unit)
+              VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling}, ${unit ?? 'unit'})
+              ON CONFLICT (account_id, task_ref) DO NOTHING
+            `
+          }
+          const [declared] = await tx`
+            SELECT unit FROM task_budgets
+            WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+          `
+          // A declared unit is checked before anything is reserved, so a
+          // mismatch rolls back like every other rejection here: no quota
+          // burned, nothing held. The unit is fixed when the job opens.
+          if (declared && unit !== undefined && declared.unit !== unit) {
+            throw new PreflightRejection('task_unit_mismatch', { unit: declared.unit })
+          }
+          // estimated_usd on a job that is not in dollars would be read by
+          // nothing: said, not ignored.
+          if (declared && estimated_usd !== undefined && declared.unit !== 'usd') {
+            throw new PreflightRejection('task_unit_mismatch', { unit: declared.unit, declared: 'usd' })
+          }
+          jobUnit = declared ? String(declared.unit) : null
+          if (jobUnit === 'usd') {
+            // The caller's own dollar estimate when it gives one (estimated_usd,
+            // or estimated_units with unit "usd" declared, in micro-dollars);
+            // otherwise the job's median or the default. A bare estimated_units
+            // without unit "usd" is in some other unit and is not read as
+            // money; the answer's estimate_source says which one was used.
+            if (usdAsked !== null) { reserveUnits = usdAsked; estimateSource = 'caller' }
+            // Declared, not implied: task_ceiling_usd makes the unit "usd" but
+            // says nothing about what estimated_units counts, so beside it a
+            // bare estimated_units is not read as micro-dollars either.
+            else if (parse.data.unit === 'usd' && estimated_units != null) { reserveUnits = estimated_units; estimateSource = 'caller' }
+            else {
+              const e = await usdEstimate(tx, accountId, task_ref)
+              reserveUnits = e.micros; estimateSource = e.source
+            }
+          }
+        }
+
         // Atomic reserve: only succeeds when budget allows it. Under concurrent
         // load a plain read-check-approve lets several requests see the same
         // remaining balance and all get approved; the conditional UPDATE cannot.
@@ -286,35 +374,6 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
         // reserve pattern as customers, scoped to (account_id, task_ref).
         let task = null
         if (task_ref) {
-          if (task_ceiling != null) {
-            // The first call for a new task_ref opens it with this ceiling.
-            // Once the row exists, a task_ceiling sent here is not applied:
-            // the ceiling changes only through PUT /tasks/:task_ref/ceiling or
-            // the console form, and the last save is the one in force. So a
-            // retry of THIS call cannot raise the number it was meant to
-            // respect. An approved answer and a task_ceiling_exceeded refusal
-            // carry the ceiling that decided them as task_ceiling; the other
-            // refusals are decided before this row is consulted.
-            await tx`
-              INSERT INTO task_budgets (account_id, agent_id, task_ref, ceiling_units, unit)
-              VALUES (${accountId}, ${agent_id}, ${task_ref}, ${task_ceiling}, ${unit ?? 'unit'})
-              ON CONFLICT (account_id, task_ref) DO NOTHING
-            `
-          }
-
-          // A declared unit is checked before anything is reserved, so a
-          // mismatch rolls back like every other rejection here: no quota
-          // burned, nothing held. The unit is fixed when the job opens.
-          if (unit !== undefined) {
-            const [declared] = await tx`
-              SELECT unit FROM task_budgets
-              WHERE account_id = ${accountId} AND task_ref = ${task_ref}
-            `
-            if (declared && declared.unit !== unit) {
-              throw new PreflightRejection('task_unit_mismatch', { unit: declared.unit })
-            }
-          }
-
           // A job opened from the console or the API without an agent label
           // carries the placeholder CONSOLE_AGENT. The first agent that spends
           // under it claims the label, in the same conditional UPDATE as the
@@ -384,12 +443,13 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
       if (err instanceof PreflightRejection) {
         if (err.reason === 'task_unit_mismatch') {
           const jobUnit = String(err.detail.unit)
+          const said = String(err.detail.declared ?? unit)
           const body = {
             error: 'task_unit_mismatch',
-            message: unitMismatchMessage(task_ref!, jobUnit, unit!),
+            message: unitMismatchMessage(task_ref!, jobUnit, said),
             task_ref,
             unit: jobUnit,
-            declared_unit: unit,
+            declared_unit: said,
           }
           return { status: 422, body }
         }
@@ -422,9 +482,12 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
               : {
                   approved: false,
                   reason: 'task_ceiling_exceeded',
-                  estimated_units: estimated_units ?? null,
+                  // On a dollar job, what this call asked to reserve, in
+                  // micro-dollars, and where that number came from.
+                  estimated_units: jobUnit === 'usd' ? reserveUnits : estimated_units ?? null,
                   task_ref,
                   ...err.detail,
+                  ...(jobUnit === 'usd' ? usdFields(reserveUnits, estimateSource, err.detail as Record<string, number>) : {}),
                 }
 
         // The first refusal of the period is the moment the customer needs to
@@ -442,7 +505,7 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
         recordDecision(log, {
           accountId, agentId: agent_id, customerRef, taskRef,
           reason: body.reason as string,
-          estimatedUnits: estimated_units ?? null,
+          estimatedUnits: jobUnit === 'usd' && err.reason === 'task_ceiling_exceeded' ? reserveUnits : estimated_units ?? null,
           ceilingUnits: (body as any).plan_limit ?? (body as any).task_ceiling ?? null,
           usedUnits: (body as any).monthly_calls ?? (body as any).task_used_units ?? null,
           snapshot: body,
@@ -481,7 +544,10 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
     const body = {
       approved: true,
       reason: null,
-      estimated_units: estimated_units ?? null,
+      // On a dollar job, the micro-dollars this call reserved (the caller's
+      // estimate or the job's own, see estimate_source); elsewhere the
+      // caller's number, as it always was.
+      estimated_units: jobUnit === 'usd' ? reserveUnits : estimated_units ?? null,
       remaining_units: remaining,
       // When settling this run, call record() before this timestamp. After it
       // the sweeper reclaims the reservation and the units stop being held.
@@ -501,6 +567,11 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
             task_ceiling: unitsOf(task.ceilingUnits),
             task_remaining_units:
               unitsOf(task.ceilingUnits) - unitsOf(task.usedUnits) - unitsOf(task.reservedUnits),
+            ...(jobUnit === 'usd' ? usdFields(reserveUnits, estimateSource, {
+              task_ceiling: unitsOf(task.ceilingUnits),
+              task_used_units: unitsOf(task.usedUnits),
+              task_remaining_units: unitsOf(task.ceilingUnits) - unitsOf(task.usedUnits) - unitsOf(task.reservedUnits),
+            }) : {}),
           }
         : {}),
     }
@@ -514,6 +585,24 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
     }
 
     return { status: 200, body }
+}
+
+/**
+ * The dollar figures beside a dollar job's micro-dollars, additively: the same
+ * numbers divided by a million, never a second computation. estimate_source
+ * says whose estimate was reserved: the caller's, the job's median, or the
+ * default (src/lib/usd-estimate.ts).
+ */
+function usdFields(reserved: number, source: EstimateSource | null, d: Record<string, number>) {
+  return {
+    task_unit: 'usd',
+    estimate_source: source,
+    estimated_usd: usdOf(reserved),
+    ...(typeof d.task_ceiling === 'number' ? { task_ceiling_usd: usdOf(d.task_ceiling) } : {}),
+    ...(typeof d.task_used_units === 'number' ? { task_used_usd: usdOf(d.task_used_units) } : {}),
+    ...(typeof d.task_remaining_units === 'number' ? { task_remaining_usd: usdOf(d.task_remaining_units) } : {}),
+    list_price_label: LIST_PRICE_LABEL,
+  }
 }
 
 export async function preflightRoute(app: FastifyInstance) {

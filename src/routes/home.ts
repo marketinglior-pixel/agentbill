@@ -191,7 +191,7 @@ const QUESTIONS: ReadonlyArray<readonly [q: string, a: string]> = [
   [`What happens when I reach the free tier's ${num(PLAN_LIMITS.free)} calls?`,
     'Preflight starts answering approved: false with reason free_tier_exceeded (plan_limit_exceeded on a paid plan) and an upgrade_url. The SDK returns that answer instead of raising, so check result.approved. A refused call reserves nothing and is not counted.'],
   ['Can I show the ceiling in dollars?',
-    'Not in the product. You decide what a unit is worth, the way the estimator above does with your cost per call; AgentBill counts units and never reads what a call cost.'],
+    'Yes, on a job opened in dollars: set $5 for the job in the console or with ceiling_usd. The figure is an estimate at public list price of the tokens each call reports, from a dated price table, not your invoice, and a call with no list price is charged its reservation, never $0. In units you decide what a unit is worth, the way the estimator above does with your cost per call.'],
 ]
 
 export async function homeRoute(app: FastifyInstance) {

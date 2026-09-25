@@ -114,8 +114,11 @@ export class Refusal {
   readonly remaining?: number
   readonly upgradeUrl?: string
   readonly answer: Record<string, unknown>
+  /** 'usd' on a job whose ceiling is in dollars: asked, used, ceiling and remaining are micro-dollars. */
+  readonly unit: 'token' | 'usd'
 
-  constructor(f: { reason: string; taskRef?: string; asked?: number; used?: number; ceiling?: number; remaining?: number; upgradeUrl?: string; answer?: Record<string, unknown> }) {
+  constructor(f: { reason: string; taskRef?: string; asked?: number; used?: number; ceiling?: number; remaining?: number; upgradeUrl?: string; answer?: Record<string, unknown>; unit?: 'token' | 'usd' }) {
+    this.unit = f.unit ?? 'token'
     this.reason = f.reason
     this.taskRef = f.taskRef
     this.asked = f.asked
@@ -130,6 +133,10 @@ export class Refusal {
 
   toString(): string {
     const job = `'${this.taskRef}'`
+    const a = this.answer
+    if (this.reason === 'task_ceiling_exceeded' && this.unit === 'usd') {
+      return `Refused (task_ceiling_exceeded): job ${job} is at $${a.task_used_usd} of $${a.task_ceiling_usd} at list price, and $${a.task_remaining_usd} remaining is not enough for the $${a.estimated_usd} this call asked to reserve. The call was not sent.`
+    }
     switch (this.reason) {
       case 'task_ceiling_exceeded':
         return `Refused (task_ceiling_exceeded): job ${job} is at ${this.used}/${this.ceiling} tokens and ${this.remaining} remaining is not enough for the ${this.asked} this call asked for. The call was not sent.`
@@ -196,6 +203,16 @@ export interface WrapOptions {
   customerId?: string
   /** Opens the job with this ceiling, in tokens, if it does not exist yet. */
   taskCeiling?: number
+  /** Opens the job with a ceiling in DOLLARS at public list price if it does
+   *  not exist yet, and makes its unit 'usd' (server 2026-09-25): the server
+   *  reserves the job's recent median call before each measured call ($0.10
+   *  before the first priced one) and charges each record the list price of
+   *  the tokens reported. A call it cannot price is charged its reservation,
+   *  never $0. */
+  taskCeilingUsd?: number
+  /** 'token' (the default) or 'usd', for a dollar job opened elsewhere (the
+   *  console, PUT /tasks/:task_ref/ceiling with ceiling_usd). taskCeilingUsd implies 'usd'. */
+  unit?: 'token' | 'usd'
   /** The estimate before the job's first measured call in this process.
    *  Default 2,000. See Average for the whole rule. */
   defaultEstimate?: number
@@ -461,6 +478,8 @@ interface Meter {
   customerId?: string
   step?: string
   taskCeiling?: number
+  taskCeilingUsd?: number
+  unit: 'token' | 'usd'
   defaultEstimate: number
   onQuota: 'refuse' | 'send'
   averages: Map<string, Average>
@@ -485,7 +504,7 @@ function refusalOf(e: unknown, m: Meter, asked: number): Refusal | null {
   const askedFor = num(answer.estimated_units) ?? asked
   if (e instanceof TaskCeilingExceededError) {
     return new Refusal({ reason: 'task_ceiling_exceeded', taskRef: e.taskRef || m.taskRef, asked: askedFor,
-      used: e.taskUsedUnits, ceiling: e.taskCeiling, remaining: e.taskRemainingUnits, answer })
+      used: e.taskUsedUnits, ceiling: e.taskCeiling, remaining: e.taskRemainingUnits, answer, unit: m.unit })
   }
   if (e instanceof CeilingExceededError) {
     return new Refusal({ reason: 'ceiling_exceeded', taskRef: m.taskRef, asked: askedFor, ceiling: num(answer.ceiling) ?? e.ceiling, answer })
@@ -501,10 +520,11 @@ async function preflightFor(m: Meter, kind: Kind, body: any): Promise<Preflight 
   const asked = averageOf(m).estimate(m.defaultEstimate, maxTokens(kind, body))
   let pf: Preflight
   try {
-    pf = await preflight({
-      agentId: m.agentId, customerId: m.customerId, taskRef: m.taskRef, taskCeiling: m.taskCeiling, unit: 'token',
-      estimatedUnits: asked,
-    })
+    // A job in dollars: the server holds the price table, so it works out the
+    // reservation (the job's median call, or its default) and prices the record.
+    pf = await preflight(m.unit === 'usd'
+      ? { agentId: m.agentId, customerId: m.customerId, taskRef: m.taskRef, unit: 'usd', taskCeilingUsd: m.taskCeilingUsd }
+      : { agentId: m.agentId, customerId: m.customerId, taskRef: m.taskRef, taskCeiling: m.taskCeiling, unit: 'token', estimatedUnits: asked })
   } catch (e) {
     // Your spend rule refused the call: preflight() throws, and here the same
     // refusal is a value. Nothing was reserved. A failure passes through.
@@ -847,7 +867,8 @@ export function wrap<T extends object>(client: T, options: WrapOptions = {}): Wr
   }
   if (inner) {
     if (options.provider) throw new TypeError('A wrapped client keeps its provider; wrap the original to change it.')
-    const changed = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined))
+    const changed: Record<string, unknown> = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined))
+    if (options.taskCeilingUsd !== undefined) changed.unit = 'usd'
     return proxy(inner.target, { ...inner.meter, ...changed }, []) as unknown as Wrapped<T>
   }
   if (!options.taskRef || !options.agentId) {
@@ -860,9 +881,14 @@ export function wrap<T extends object>(client: T, options: WrapOptions = {}): Wr
   if (options.defaultEstimate !== undefined && !(Number.isSafeInteger(options.defaultEstimate) && options.defaultEstimate >= 1)) {
     throw new TypeError('defaultEstimate is a whole number of tokens, 1 or more.')
   }
+  if (options.unit !== undefined && options.unit !== 'token' && options.unit !== 'usd') throw new TypeError("unit is 'token' or 'usd'.")
+  if (options.taskCeilingUsd !== undefined && (options.taskCeiling !== undefined || options.unit === 'token')) {
+    throw new TypeError("taskCeilingUsd opens a job in dollars: pass it without taskCeiling and without unit: 'token'.")
+  }
   return proxy(client, {
     provider, endpoint: endpointOf(client, provider), taskRef: options.taskRef, agentId: options.agentId,
     customerId: options.customerId, step: options.step, taskCeiling: options.taskCeiling,
+    taskCeilingUsd: options.taskCeilingUsd, unit: options.taskCeilingUsd !== undefined ? 'usd' : options.unit ?? 'token',
     defaultEstimate: options.defaultEstimate ?? DEFAULT_ESTIMATE, onQuota: options.onQuota ?? 'refuse',
     averages: new Map(), warned: new Set(),
   }, []) as unknown as Wrapped<T>

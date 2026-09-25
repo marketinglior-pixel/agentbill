@@ -20,7 +20,10 @@ export const PICKS: readonly Pick[] = ['p50', 'p90', 'max']
 
 /** One finished job: the agent that spent under it, what it spent, when it last moved. */
 /** unit is the job's (task_budgets.unit): a figure is only ever a p50 of one kind of number. */
-export type HistoryJob = { agentId: string; usedUnits: number; updatedAt: Date; unit?: string }
+/** usdMicros is what the job cost at list price, in micro-dollars, when every
+ *  one of its calls was priced (or, on a job in dollars, its used_units); null
+ *  when any call had no list price, so a dollar figure is never a partial sum. */
+export type HistoryJob = { agentId: string; usedUnits: number; updatedAt: Date; unit?: string; usdMicros?: number | null }
 export type AgentHistory = { agentId: string; jobs: number; unit: string } & Record<Pick, number>
 
 /**
@@ -59,9 +62,15 @@ export function summarizeHistory(rows: readonly HistoryJob[]): AgentHistory[] {
     const sorted = [...list].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
     const unit = sorted[0].unit ?? 'unit'
     const recent = sorted.filter((r) => (r.unit ?? 'unit') === unit).slice(0, HISTORY_JOBS)
-    const used = recent.map((r) => Number(r.usedUnits)).sort((a, b) => a - b)
+    // In dollars when the history is priced (T3, 2026-09-25): a job in
+    // dollars already counts them, and a job in tokens or units whose every
+    // call was priced has a list-price total. One unpriced job and the agent
+    // is suggested in its own unit, because a p50 of partial sums would
+    // understate what a job costs.
+    const inUsd = unit === 'usd' || recent.every((r) => r.usdMicros != null)
+    const used = recent.map((r) => Number(inUsd ? r.usdMicros ?? r.usedUnits : r.usedUnits)).sort((a, b) => a - b)
     out.push({
-      h: { agentId, jobs: used.length, unit, p50: percentileDisc(used, 50), p90: percentileDisc(used, 90), max: used[used.length - 1] },
+      h: { agentId, jobs: used.length, unit: inUsd ? 'usd' : unit, p50: percentileDisc(used, 50), p90: percentileDisc(used, 90), max: used[used.length - 1] },
       lastAt: recent[0].updatedAt.getTime(),
     })
   }

@@ -7,7 +7,9 @@ import { mailOwner, ownerMailReady } from '../lib/mail.js'
 import { recordDecision } from '../lib/decisions.js'
 import { consumeReservations, findNamedReservation, oldestOpenReservationUnits, settleNamedReservation, type NamedReservation } from '../lib/reservations.js'
 import { jsonbSafe } from '../lib/jsonb.js'
-import { priceEvent } from '../lib/prices.js'
+import { priceEvent, PRICE_VERSION } from '../lib/prices.js'
+import { microsFromListPrice, usdOf } from '../lib/task-ceiling.js'
+import { usdEstimate } from '../lib/usd-estimate.js'
 
 const ALERT_THRESHOLD = 800
 
@@ -240,12 +242,44 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
         //     sent are recorded. The job still counts the call in
         //     usage_missing_calls, so the total never reads as clean.
         const found = named != null && named.state !== 'not_found' ? named : null
-        const floorUnits = !usageMissing
-          ? 0
-          : found
-            ? found.units
-            : await oldestOpenReservationUnits(tx, locked.id, taskRef)
-        const units = usageMissing ? Math.max(reportedUnits, floorUnits) : reportedUnits
+
+        // A job in dollars (migration 025). Its ledger is micro-dollars, and
+        // what a call is charged is decided here, never by the caller's
+        // units: the list price of the tokens the record reports, rounded up
+        // to the micro-dollar. A call that cannot be priced (no model named,
+        // a model with no list price, usage missing) is NEVER charged $0: it
+        // is charged the reservation it settles (the estimate preflight held
+        // for it), or with none open the job's own estimate, and counted in
+        // unpriced_calls. The unit is fixed when a job opens, so reading it
+        // here without a lock cannot race a relabel.
+        const [job] = task_ref
+          ? await tx`SELECT unit FROM task_budgets WHERE account_id = ${accountId} AND task_ref = ${task_ref}`
+          : []
+        const usdJob = job?.unit === 'usd'
+        let usd: { basis: 'list_price' | 'reservation' | 'estimate'; unpriced: boolean } | null = null
+        let units: number
+        if (usdJob) {
+          if (price.listPriceUsd != null && !usageMissing) {
+            units = microsFromListPrice(price.listPriceUsd)
+            usd = { basis: 'list_price', unpriced: false }
+          } else {
+            const held = found ? found.units : await oldestOpenReservationUnits(tx, locked.id, taskRef)
+            if (held > 0) {
+              units = held
+              usd = { basis: 'reservation', unpriced: true }
+            } else {
+              units = (await usdEstimate(tx, accountId, task_ref!)).micros
+              usd = { basis: 'estimate', unpriced: true }
+            }
+          }
+        } else {
+          const floorUnits = !usageMissing
+            ? 0
+            : found
+              ? found.units
+              : await oldestOpenReservationUnits(tx, locked.id, taskRef)
+          units = usageMissing ? Math.max(reportedUnits, floorUnits) : reportedUnits
+        }
 
         // ----------------------------------------------------------------
         // 3a. If success=false: release the preflight reservation only.
@@ -258,9 +292,13 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
           // instead of being decremented a second time. A named reservation
           // is released whole; an unnamed release goes FIFO by `units`, as
           // before, and so does a name that matched nothing.
+          // On a dollar job the caller's units are not micro-dollars, so an
+          // unnamed release closes the oldest open reservation whole instead
+          // of shrinking it by a number in another unit.
           const consumed = found
             ? await settleNamedReservation(tx, found)
-            : await consumeReservations(tx, locked.id, taskRef, reportedUnits)
+            : await consumeReservations(tx, locked.id, taskRef,
+                usdJob ? Math.max(1, await oldestOpenReservationUnits(tx, locked.id, taskRef)) : reportedUnits)
           await tx`
             UPDATE customers
             SET reserved_units = GREATEST(0, reserved_units - ${consumed}),
@@ -310,11 +348,22 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
         //    task_ref, and the list-price columns, from migration 017: the
         //    row says which job it was recorded for, which is what
         //    GET /tasks/:task_ref breaks down by model and by step.
+        //    On a dollar job every settled event names the price table it was
+        //    charged against, priced or not, and its metadata says how the
+        //    charge was reached, so a charge at the estimate is never read as
+        //    a measured cost.
+        const eventMetadata = usd
+          ? JSON.stringify({ ...(rowMetadata ?? {}), usd_charge_basis: usd.basis, ...(usd.unpriced ? { usd_unpriced: true } : {}) })
+          : metadataText
+        const priceVersion = usd ? (price.priceVersion ?? PRICE_VERSION) : price.priceVersion
+        const priceNote = usd && usd.unpriced
+          ? `${price.note ?? 'no model named in the record'}; charged at the ${usd.basis === 'reservation' ? 'reservation it settled' : "job's estimate"}, never $0`
+          : price.note
         const [event] = await tx`
           INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata,
                               task_ref, price_version, list_price_usd, price_note)
-          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${metadataText}::text::jsonb,
-                  ${taskRef}, ${price.priceVersion}, ${price.listPriceUsd}::numeric, ${price.note})
+          VALUES (${accountId}, ${customer.id}, ${event_type}, ${units}, ${idempotency_key}, ${eventMetadata}::text::jsonb,
+                  ${taskRef}, ${priceVersion}, ${usd?.unpriced ? null : price.listPriceUsd}::numeric, ${priceNote})
           ON CONFLICT (account_id, idempotency_key) DO NOTHING
           RETURNING id
         `
@@ -382,6 +431,7 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
             SET used_units          = used_units + ${units},
                 reserved_units      = GREATEST(0, reserved_units - ${consumed}),
                 usage_missing_calls = usage_missing_calls + ${usageMissing ? 1 : 0},
+                unpriced_calls      = unpriced_calls + ${usd?.unpriced ? 1 : 0},
                 updated_at          = now()
             WHERE account_id = ${accountId} AND task_ref = ${task_ref}
             RETURNING agent_id, ceiling_units, used_units, reserved_units
@@ -403,6 +453,7 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
           units,
           reservation: statusOf(named),
           consumed,
+          usd,
         }
       })
 
@@ -466,6 +517,17 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
         // Present only for usage_missing: the units the call was charged,
         // which is at least its reservation and may be more than was sent.
         ...(usageMissing ? { usage_missing: true, units_recorded: result.units } : {}),
+        // A dollar job: what the call was charged, in micro-dollars and in
+        // dollars, and on what basis. list_price is the tokens at list price;
+        // reservation and estimate are an unpriced call charged what was held
+        // for it, or the job's estimate, never $0.
+        ...(result.usd ? {
+          task_unit: 'usd',
+          units_recorded: result.units,
+          charged_usd: usdOf(result.units),
+          charge_basis: result.usd.basis,
+          ...(t ? { task_used_usd: usdOf(t.usedUnits), task_remaining_usd: usdOf(Math.max(0, t.ceilingUnits - t.usedUnits - t.reservedUnits)) } : {}),
+        } : {}),
       }
       // Spend that landed past the ceiling: preflight was skipped, or the
       // actual exceeded the estimate it approved. Nothing stopped it. Recorded

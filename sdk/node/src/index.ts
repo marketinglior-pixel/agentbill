@@ -69,13 +69,18 @@ export class TaskCeilingExceededError extends Error {
   readonly taskCeiling?: number
   readonly taskUsedUnits?: number
   readonly taskRemainingUnits?: number
+  /** 'usd' on a job whose ceiling is in dollars: the numbers above are then micro-dollars. */
+  readonly taskUnit?: string
   /** The preflight answer as the server sent it, set when preflight() throws. */
   answer?: Record<string, unknown>
-  constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number) {
-    super(
-      `Refused (task_ceiling_exceeded): task '${taskRef}' is at ${taskUsedUnits}/${taskCeiling} units and ` +
-      `${taskRemainingUnits} remaining is not enough for this call.`
+  constructor(taskRef: string, taskCeiling?: number, taskUsedUnits?: number, taskRemainingUnits?: number, usd?: Record<string, unknown>) {
+    super(usd
+      ? `Refused (task_ceiling_exceeded): task '${taskRef}' is at $${usd.task_used_usd} of $${usd.task_ceiling_usd} at list price, and ` +
+        `$${usd.task_remaining_usd} remaining is not enough for the $${usd.estimated_usd} this call asked to reserve.`
+      : `Refused (task_ceiling_exceeded): task '${taskRef}' is at ${taskUsedUnits}/${taskCeiling} units and ` +
+        `${taskRemainingUnits} remaining is not enough for this call.`
     )
+    this.taskUnit = usd ? 'usd' : undefined
     this.name = 'TaskCeilingExceededError'
     this.taskRef = taskRef
     this.taskCeiling = taskCeiling
@@ -315,7 +320,14 @@ export interface PreflightOptions {
    * Needs taskRef. Read when this call opens the job and checked on a job
    * that exists: a different unit is a 422, thrown as AgentBillError.
    */
-  unit?: 'unit' | 'token'
+  unit?: 'unit' | 'token' | 'usd'
+  /** Opens a job whose ceiling is in DOLLARS at public list price, and implies
+   *  unit 'usd' (server 2026-09-25). The server then reserves an estimate and
+   *  charges each record the list price of the tokens it reports. */
+  taskCeilingUsd?: number
+  /** This call's own estimate in dollars, on a job in dollars. Left out, the
+   *  server reserves the job's recent median call, or $0.10 before its first. */
+  estimatedUsd?: number
 }
 
 export interface PreflightResult {
@@ -326,6 +338,13 @@ export interface PreflightResult {
   taskRef?: string
   taskRemainingUnits?: number
   upgradeUrl?: string
+  /** On a job in dollars: 'usd', and estimatedUnits / taskRemainingUnits are
+   *  micro-dollars; these are the same figures in dollars, and whose estimate
+   *  was reserved ('caller', 'job_median' or 'default'). */
+  taskUnit?: string
+  estimatedUsd?: number
+  taskRemainingUsd?: number
+  estimateSource?: string
   /**
    * Settle before this or the sweeper reclaims the reservation and the units
    * stop being held. ISO 8601, absent when nothing was reserved.
@@ -387,6 +406,8 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
   if (options.taskCeiling != null) body.task_ceiling = options.taskCeiling
   if (options.idempotencyKey) body.idempotency_key = options.idempotencyKey
   if (options.unit) body.unit = options.unit
+  if (options.taskCeilingUsd != null) body.task_ceiling_usd = options.taskCeilingUsd
+  if (options.estimatedUsd != null) body.estimated_usd = options.estimatedUsd
 
   const res = await apiFetch('/preflight', { method: 'POST', body: JSON.stringify(body) })
   const data = await res.json() as Record<string, any>
@@ -415,7 +436,8 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
         data.task_ref ?? options.taskRef ?? '',
         data.task_ceiling,
         data.task_used_units,
-        data.task_remaining_units
+        data.task_remaining_units,
+        data.task_unit === 'usd' ? data : undefined,
       )
     } else if (data.reason === 'budget_exhausted') {
       refused = new BudgetExhaustedError(options.customerId ?? 'default')
@@ -448,6 +470,7 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
     upgradeUrl: data.upgrade_url,
     reservationExpiresAt: data.reservation_expires_at,
     reservationId: data.reservation_id,
+    ...(data.task_unit === 'usd' ? { taskUnit: 'usd', estimatedUsd: data.estimated_usd, taskRemainingUsd: data.task_remaining_usd, estimateSource: data.estimate_source } : {}),
   }
   Object.defineProperty(result, 'record', {
     enumerable: false,

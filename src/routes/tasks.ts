@@ -2,15 +2,20 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
-import { setTaskCeiling, TASK_UNITS, asTaskUnit, unitWord, unitMismatchMessage } from '../lib/task-ceiling.js'
+import { setTaskCeiling, TASK_UNITS, asTaskUnit, unitWord, unitMismatchMessage, amountText, microsFromUsd, usdOf, USD_MICROS_MAX } from '../lib/task-ceiling.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { unitsOf } from '../db/int8.js'
 import { taskBreakdown } from '../lib/task-breakdown.js'
 
 const TaskParams = z.object({ task_ref: zId() })
 
 const CeilingBody = z.object({
-  // Same bounds as task_ceiling on POST /preflight: a positive int4.
-  ceiling_units: z.number().int().positive().max(INT4_MAX),
+  // Same bounds as task_ceiling on POST /preflight: a positive int4. On a job
+  // in dollars it is micro-dollars; ceiling_usd says the same in dollars.
+  ceiling_units: z.number().int().positive().max(INT4_MAX).optional(),
+  // A ceiling in dollars (T3, migration 025): opens the job in "usd" when it
+  // is new, and must meet a job that already is. Exactly one of the two.
+  ceiling_usd: z.number().positive().max(usdOf(USD_MICROS_MAX)).optional(),
   // Only read when this call opens the job. An existing job keeps the agent
   // that opened it: the label attributes spend, and a save is not spend.
   agent_id: zId().optional(),
@@ -37,6 +42,7 @@ export function serialize(t: {
   reservedUnits: unknown
   unit?: unknown
   usageMissingCalls?: unknown
+  unpricedCalls?: unknown
   createdAt: Date
   updatedAt: Date
 }) {
@@ -61,6 +67,18 @@ export function serialize(t: {
     usage_missing_calls: t.usageMissingCalls == null ? 0 : unitsOf(t.usageMissingCalls),
     created_at: t.createdAt,
     updated_at: t.updatedAt,
+    // A job in dollars: every *_units above is micro-dollars (1,000,000 is
+    // $1), and here are the same numbers in dollars, divided, never computed
+    // twice. unpriced_calls counts calls charged at their reservation or the
+    // job's estimate because they could not be priced (migration 025).
+    ...(asTaskUnit(t.unit) === 'usd' ? {
+      ceiling_usd: usdOf(ceiling),
+      used_usd: usdOf(used),
+      reserved_usd: usdOf(reserved),
+      remaining_usd: usdOf(Math.max(0, ceiling - used - reserved)),
+      unpriced_calls: t.unpricedCalls == null ? 0 : unitsOf(t.unpricedCalls),
+      list_price_label: LIST_PRICE_LABEL,
+    } : {}),
   }
 }
 
@@ -82,7 +100,7 @@ export const taskNotFound = (taskRef: string) => ({
  */
 export async function taskStatus(accountId: string, taskRef: string) {
   const [row] = await sql`
-    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
+    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls, created_at, updated_at
     FROM task_budgets
     WHERE account_id = ${accountId} AND task_ref = ${taskRef}
   `
@@ -103,7 +121,7 @@ export async function tasksRoute(app: FastifyInstance) {
     const accountId = (request as any).accountId
 
     const rows = await sql`
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls, created_at, updated_at
       FROM task_budgets
       WHERE account_id = ${accountId}
         ${agent_id ? sql`AND agent_id = ${agent_id}` : sql``}
@@ -161,28 +179,41 @@ export async function tasksRoute(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(422).send({
         error: 'validation_error',
-        message: 'Body needs ceiling_units (a positive integer): the same number preflight calls task_ceiling, named ceiling_units here and on GET /tasks. agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job. unit is optional, "unit" or "token", read when this call opens the job and checked against one that exists.',
+        message: 'Body needs ceiling_units (a positive integer): the same number preflight calls task_ceiling, named ceiling_units here and on GET /tasks. Or ceiling_usd, a ceiling in dollars. agent_id is optional (1 to 128 characters, no control characters) and is read only when this call opens the job. unit is optional, "unit", "token" or "usd", read when this call opens the job and checked against one that exists.',
         details: parsed.error.issues,
       })
     }
+    const b = parsed.data
+    // Exactly one ceiling. ceiling_usd means unit "usd"; any other unit beside it is a 422.
+    const usdMicros = b.ceiling_usd !== undefined ? microsFromUsd(b.ceiling_usd) : null
+    if ((b.ceiling_units === undefined) === (b.ceiling_usd === undefined) || (b.ceiling_usd !== undefined && (usdMicros === null || (b.unit !== undefined && b.unit !== 'usd')))) {
+      return reply.code(422).send({
+        error: 'validation_error',
+        message: 'Send exactly one of ceiling_units (a positive integer, micro-dollars on a job in "usd") or ceiling_usd (dollars, more than 0, at most 1,000,000, at most six decimals, with unit "usd" or no unit).',
+      })
+    }
+    const ceilingUnits = usdMicros ?? b.ceiling_units!
+    const unit = usdMicros !== null ? 'usd' as const : b.unit
     const taskRef = params.data.task_ref
     const accountId = (request as any).accountId
 
     try {
-      const result = await setTaskCeiling(accountId, taskRef, parsed.data.ceiling_units, parsed.data.agent_id, parsed.data.unit)
+      const result = await setTaskCeiling(accountId, taskRef, ceilingUnits, b.agent_id, unit)
       if (!result.ok && result.reason === 'unit_mismatch') {
         return reply.code(422).send({
           error: 'task_unit_mismatch',
-          message: unitMismatchMessage(taskRef, result.unit, parsed.data.unit!),
+          message: unitMismatchMessage(taskRef, result.unit, unit!),
           task_ref: taskRef,
           unit: result.unit,
-          declared_unit: parsed.data.unit,
+          declared_unit: unit,
         })
       }
       if (!result.ok) {
         return reply.code(409).send({
           error: 'ceiling_below_committed',
-          message: `Task "${taskRef}" has ${result.usedUnits} ${unitWord(result.unit)} spent and ${result.reservedUnits} reserved by calls in flight. The ceiling cannot go under ${result.minimum}: pass ${result.minimum} or more, or wait for the reservations to settle or expire.`,
+          message: result.unit === 'usd'
+            ? `Task "${taskRef}" has ${amountText('usd', result.usedUnits)} spent and ${amountText('usd', result.reservedUnits)} reserved by calls in flight. The ceiling cannot go under ${amountText('usd', result.minimum)} (${result.minimum} micro-dollars): pass that or more, or wait for the reservations to settle or expire.`
+            : `Task "${taskRef}" has ${result.usedUnits} ${unitWord(result.unit)} spent and ${result.reservedUnits} reserved by calls in flight. The ceiling cannot go under ${result.minimum}: pass ${result.minimum} or more, or wait for the reservations to settle or expire.`,
           task_ref: taskRef,
           ceiling_units: result.ceilingUnits,
           used_units: result.usedUnits,

@@ -39,6 +39,7 @@ export type TaskCeilingRow = {
   reservedUnits: number
   unit: TaskUnit
   usageMissingCalls: number
+  unpricedCalls: number
   createdAt: Date
   updatedAt: Date
   taskCreated: boolean
@@ -50,26 +51,91 @@ export type SetTaskCeiling =
   | { ok: false; reason: 'unit_mismatch'; unit: TaskUnit }
 
 /**
- * What a job's numbers count (migration 014). 'unit' is the developer's own
- * unit and the default; 'token' is a count the caller's provider reported,
- * which the SDKs' wrap() sends. Declared by whoever opens the job and fixed
- * from then on: the server counts nothing itself, this only labels the number
- * the caller sends.
+ * What a job's numbers count (migrations 014, 025). 'unit' is the developer's
+ * own unit and the default; 'token' is a count the caller's provider reported,
+ * which the SDKs' wrap() sends; 'usd' is integer micro-dollars at public list
+ * price, which the SERVER works out: preflight reserves an estimate
+ * (src/lib/usd-estimate.ts) and record charges the list price of the tokens
+ * the record reports (src/lib/prices.ts). Declared by whoever opens the job
+ * and fixed from then on.
  */
-export const TASK_UNITS = ['unit', 'token'] as const
+export const TASK_UNITS = ['unit', 'token', 'usd'] as const
 export type TaskUnit = (typeof TASK_UNITS)[number]
 
-export const asTaskUnit = (v: unknown): TaskUnit => (v === 'token' ? 'token' : 'unit')
+export const asTaskUnit = (v: unknown): TaskUnit => (v === 'token' ? 'token' : v === 'usd' ? 'usd' : 'unit')
 
-/** "tokens" / "units", singular for exactly one. For labels next to a number. */
+/** "tokens" / "units" / "micro-dollars", singular for exactly one. For labels next to a raw number. */
 export function unitWord(unit: unknown, n = 2): string {
   const one = asTaskUnit(unit)
+  if (one === 'usd') return n === 1 ? 'micro-dollar' : 'micro-dollars'
   return n === 1 ? one : `${one}s`
+}
+
+/** One dollar in the ledger's unit. */
+export const MICROS_PER_USD = 1_000_000
+/** The largest dollar ceiling accepted: $1,000,000, 1e12 micro-dollars, exact in a JS number and a BIGINT. */
+export const USD_MICROS_MAX = 1_000_000_000_000
+
+/** Micro-dollars as a plain dollar figure. Display and JSON only; the ledger stays in integers. */
+export const usdOf = (micros: number): number => micros / MICROS_PER_USD
+
+/**
+ * Dollars, as a caller or a form sends them, to integer micro-dollars, or
+ * null when the value is not a positive amount with at most six decimals
+ * under USD_MICROS_MAX. Read through its decimal string, never multiplied as
+ * a float, so "0.1" is exactly 100,000 and not 100,000.00000000001.
+ */
+export function microsFromUsd(v: unknown): number | null {
+  const text = typeof v === 'number' ? (Number.isFinite(v) ? v.toFixed(7).replace(/0+$/, '').replace(/\.$/, '') : '') : typeof v === 'string' ? v.trim().replace(/^\$/, '') : ''
+  const m = /^([0-9]{1,7})(?:\.([0-9]{1,6}))?$/.exec(text)
+  if (!m) return null
+  const micros = Number(m[1]) * MICROS_PER_USD + Number((m[2] ?? '').padEnd(6, '0'))
+  return micros >= 1 && micros <= USD_MICROS_MAX ? micros : null
+}
+
+/**
+ * A stored list price (events.list_price_usd, a NUMERIC with twelve places,
+ * src/lib/prices.ts) to micro-dollars, rounded UP: a dollar ceiling may be
+ * charged a fraction of a micro-dollar more than the call cost, never less.
+ */
+export function microsFromListPrice(decimal: string): number {
+  const [whole, frac = ''] = decimal.split('.')
+  const pico = BigInt(whole) * 1_000_000_000_000n + BigInt(frac.padEnd(12, '0').slice(0, 12) || '0')
+  return Number((pico + 999_999n) / 1_000_000n)
+}
+
+/**
+ * A micro-dollar amount the way a person reads one: $5.00, $0.225, $0.0081, $0.
+ * Under a cent it keeps two significant figures, under a dollar up to four
+ * decimals, and from a dollar two, so a job's $0.015 never reads as $0.02 and
+ * a priced call never reads as the $0 it must not be.
+ */
+export function usdText(micros: number): string {
+  return usdAmount(usdOf(micros))
+}
+
+/** The same rule on a dollar figure that may be finer than a micro-dollar (a stored list price). */
+export function usdAmount(n: number): string {
+  if (n === 0) return '$0'
+  const a = Math.abs(n)
+  if (a < 0.01) return '$' + n.toLocaleString('en-US', { maximumSignificantDigits: 2 })
+  if (a < 1) {
+    const [w, f = ''] = n.toFixed(4).replace(/0+$/, '').split('.')
+    return `$${w}.${f.padEnd(2, '0')}`
+  }
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/** A job's number in its own unit, for a sentence: "$5.00", "20,000 tokens", "3 units". */
+export function amountText(unit: unknown, n: number): string {
+  const u = asTaskUnit(unit)
+  return u === 'usd' ? usdText(n) : `${n.toLocaleString('en-US')} ${unitWord(u, n)}`
 }
 
 /** The one sentence a unit mismatch answers with, on preflight and on PUT. */
 export function unitMismatchMessage(taskRef: string, jobUnit: string, declared: string): string {
-  return `Task "${taskRef}" is counted in ${unitWord(jobUnit)}, and this call declared ${unitWord(declared)}. A job's unit is fixed when it opens, so every number in it stays the same kind of number. Send unit "${jobUnit}", leave unit out, or use a new task_ref for a job counted in ${unitWord(declared)}.`
+  const name = (u: string) => (asTaskUnit(u) === 'usd' ? 'dollars' : unitWord(u))
+  return `Task "${taskRef}" is counted in ${name(jobUnit)}, and this call declared ${name(declared)}. A job's unit is fixed when it opens, so every number in it stays the same kind of number. Send unit "${jobUnit}", leave unit out, or use a new task_ref for a job counted in ${name(declared)}.`
 }
 
 /** The agent label a job gets when it is opened from the console or the API
@@ -115,7 +181,7 @@ export async function setTaskCeiling(
         SET ceiling_units = EXCLUDED.ceiling_units,
             updated_at    = now()
         WHERE task_budgets.used_units + task_budgets.reserved_units <= EXCLUDED.ceiling_units
-      RETURNING task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls,
+      RETURNING task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls,
                 created_at, updated_at, (xmax = 0) AS task_created
     `
     if (!row) {
@@ -140,6 +206,7 @@ export async function setTaskCeiling(
         reservedUnits: unitsOf(row.reservedUnits),
         unit: asTaskUnit(row.unit),
         usageMissingCalls: unitsOf(row.usageMissingCalls),
+        unpricedCalls: unitsOf(row.unpricedCalls ?? 0),
         createdAt: row.createdAt as Date,
         updatedAt: row.updatedAt as Date,
         taskCreated: row.taskCreated === true,
