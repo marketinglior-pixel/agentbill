@@ -52,6 +52,13 @@ const PAGES = [
   // The keys view, 2026-09-25 (security batch B): every key as agb_1234…abcd,
   // the key commands, and no key in full anywhere on it.
   ['console-demo-keys', '/app?demo=1&view=keys'],
+  // Security batch C, 2026-09-25: the rewritten policy (the widest prose page,
+  // with its field lists), and a buy button's path for a visitor who is not
+  // signed in: /app/checkout/team, and an old link carrying ?account_id=, both
+  // land on the sign-in for that tier and mint no checkout.
+  ['privacy', '/privacy'],
+  ['pricing-signin', '/app/checkout/team'],
+  ['pricing-signin-old-link', '/checkout/team?account_id=00000000-0000-0000-0000-0000000000aa'],
   ['blog', '/blog'],
   ['about', '/about'],
   ['faq', '/faq'],
