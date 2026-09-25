@@ -4640,7 +4640,7 @@ ok('[secfix S23] /security says how to report and how to revoke, and claims no k
    secText.includes('hello@agentbill.dev') && secText.includes('/keys/revoke') && !/\bhash(ed|es)? (API )?keys\b|keys are (stored )?hashed/i.test(secText) && /plain text/i.test(secText),
    secText.slice(0, 160))
 ok('[secfix S23] and none of its copy says stop, block or kill, or carries an em dash',
-   !/\b(stops|blocks|kills)\b/i.test(secText) && !secHtml.includes('—'))
+   !/\b(stops|blocks|kills)\b/i.test(secText) && !secHtml.includes('\u2014'))
 ok('[secfix S24] the runtime image runs as the node user', /^USER node$/m.test(readS(`${ROOT_S}Dockerfile`, 'utf8')))
 
 console.log(`\n${pass} passed, ${fail} failed`)
