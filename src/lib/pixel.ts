@@ -4,6 +4,19 @@ import { inlineScript } from './csp.js'
 // stays clean until the pixel exists in the ad platform. Conversion
 // events (CompleteRegistration, SignUp) fire from the register page's
 // success handler.
+/**
+ * The pages that call pixelSnippet(): home.ts, register.ts and upgrade.ts
+ * (/pricing). /privacy names them; the [privacy] gate fetches every page in
+ * the sitemap with a pixel configured and fails if the pixel is on any page
+ * not listed here, or missing from one that is.
+ */
+export const PIXEL_PATHS = ['/', '/register', '/pricing'] as const
+
+/** The ad pixels this server is configured to render, by name. */
+export function configuredPixels(): string[] {
+  return [metaSnippet() ? 'Meta Pixel' : '', redditSnippet() ? 'Reddit Pixel' : ''].filter(Boolean)
+}
+
 export function pixelSnippet(): string {
   return [metaSnippet(), redditSnippet()].filter(Boolean).join('\n')
 }

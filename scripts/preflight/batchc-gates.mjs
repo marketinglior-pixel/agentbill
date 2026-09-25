@@ -20,6 +20,9 @@
 //   [retention]  the retention job (src/lib/retention.ts) is off by default;
 //                report counts and deletes nothing; enforce removes exactly
 //                the rows past their period and nothing live or excluded.
+//   [privacy]    /privacy says what the code does: the retention table, what
+//                wrap() sends and never sends (read off the wire from both
+//                SDKs), the processors, the pixels and the pages they are on.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
@@ -28,13 +31,13 @@ import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates], ['recover', recoverGates], ['retention', retentionGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates], ['recover', recoverGates], ['retention', retentionGates], ['privacy', privacyGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -846,4 +849,137 @@ async function retentionGates({ API, sql, ok, bootS, stopS, portS, serverLog }) 
   await sql`DELETE FROM email_sign_in_tokens WHERE email LIKE 'ret-%@example.invalid'`
   await sql`DELETE FROM site_pulse WHERE view_id LIKE 'ret-bc-%'`
   await sql`DELETE FROM accounts WHERE id = ${R}`
+}
+
+// ------------------------------------------------------------------ /privacy
+async function privacyGates({ API, sql, ok, bootS, stopS, portS }) {
+  const { RETENTION } = await import('../../dist/lib/retention.js')
+  const { OAUTH_PRUNE_AFTER_EXPIRY } = await import('../../dist/lib/mcp-oauth.js')
+  const { WRAP_SENDS } = await import('../../dist/lib/privacy-facts.js')
+  const { PIXEL_PATHS } = await import('../../dist/lib/pixel.js')
+  const text = (html) => html.replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/\s+/g, ' ')
+  const page = await fetch(`${API}/privacy`).then((r) => r.text())
+  const t = text(page)
+  const main = text((page.match(/<main[\s\S]*<\/main>/) ?? [''])[0])
+
+  ok('[privacy] the retention section is the job\'s own table: every category, its period and what it counts from, labelled "once retention is on" while the job is off',
+     RETENTION.every((c) => t.includes(`${c.days} days after ${c.from}`) && t.includes(c.what)) && /Once retention is on/.test(t),
+     RETENTION.filter((c) => !t.includes(`${c.days} days after ${c.from}`) || !t.includes(c.what)).map((c) => c.key).join(','))
+  ok('[privacy] and the OAuth periods it states are the ones pruneOAuth deletes by',
+     t.includes(`deleted ${OAUTH_PRUNE_AFTER_EXPIRY.requests} after it expires`) && t.includes(`${OAUTH_PRUNE_AFTER_EXPIRY.codes} after they expire`))
+  ok('[privacy] no promise the code does not keep: no backup period, no "we do not sell", no "we do not send marketing email", and every processor that is actually in use is named (Fly.io, Supabase, Resend, Polar, Google, GitHub, Google Fonts)',
+     !/roll off within|do not sell|do not send marketing/i.test(t) && ['Fly.io', 'Supabase', 'Resend', 'Polar', 'Google and GitHub', 'Google Fonts', 'fonts.googleapis.com'].every((w) => t.includes(w)))
+  const mainHtml = (page.match(/<main[\s\S]*<\/main>/) ?? [''])[0]
+  ok('[privacy] and none of the policy\'s own copy (its <main>) says stop, block, kill or dies, or carries an em dash',
+     main.length > 2000 && !/\b(stops?|blocks?|kills?|dies)\b/i.test(main) && !mainHtml.includes('\u2014'), (main.match(/.{30}\b(stops?|blocks?|kills?|dies)\b.{30}/i) ?? [''])[0])
+
+  // Pixels: the harness server runs with META_PIXEL_ID (run.sh) and no Reddit id.
+  ok('[privacy] with a Meta pixel configured, the page names the Meta Pixel and the pages it is on, and does not name a Reddit pixel that is not',
+     t.includes('Meta Pixel') && !t.includes('Reddit') && PIXEL_PATHS.every((p) => page.includes(`<code>${p}</code>`)))
+  const sitemap = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+  const paths = [...sitemap.matchAll(/<loc>https:\/\/agentbill\.dev([^<]*)<\/loc>/g)].map((m) => m[1] || '/')
+  const wrong = []
+  for (const p of paths) {
+    const html = await fetch(`${API}${p}`).then((r) => r.text())
+    const has = html.includes('connect.facebook.net/en_US/fbevents.js')
+    if (has !== PIXEL_PATHS.includes(p)) wrong.push(`${p}:${has}`)
+  }
+  ok(`[privacy] across all ${paths.length} pages in the sitemap, the pixel is on exactly the pages the policy names`, paths.length > 10 && wrong.length === 0, wrong.join(' '))
+
+  // Plain-text keys: what the page says is what the database holds.
+  const [pt] = await sql`SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'developer_api_keys_scrub_plaintext' AND NOT tgisinternal) AS scrubbed`
+  ok('[privacy] the page says whether keys are still stored in plain text, and it matches the database (027 applied or not)',
+     pt.scrubbed ? /The key itself is not stored/.test(t) : /still stored in plain text/.test(t), `027 applied: ${pt.scrubbed} (APPLY_LATER=${process.env.APPLY_LATER ?? ''})`)
+
+  // The production path: a NODE_ENV=production server with no pixel, and one with enforce.
+  const LONG = 'batchc-production-session-secret-0123456789'
+  const base = { NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG }
+  let b = await bootS(base, portS)
+  let pp = ''
+  try { pp = text(await fetch(`http://localhost:${portS}/privacy`).then((r) => r.text())) } finally { await stopS(b) }
+  ok('[privacy] production, no pixel configured: no ad pixel is named, retention is labelled as not yet on', pp.includes('Privacy Policy') && !/Pixel/.test(pp) && /Once retention is on/.test(pp))
+  b = await bootS({ ...base, RETENTION_MODE: 'enforce', RETENTION_FIRST_RUN_MS: '600000' }, portS)
+  try { pp = text(await fetch(`http://localhost:${portS}/privacy`).then((r) => r.text())) } finally { await stopS(b) }
+  ok('[privacy] production with RETENTION_MODE=enforce: the label is gone and the periods are stated as in force', !/Once retention is on/.test(pp) && pp.includes('A daily job removes each of these'))
+
+  // ---- what wrap() puts on the wire, both SDKs, read by a stand-in for AgentBill
+  const M = `MARKER-PROMPT-${randomBytes(3).toString('hex')}`, RSP = `MARKER-ANSWER-${randomBytes(3).toString('hex')}`
+  const PK = `sk-MARKER-PROVIDER-KEY-${randomBytes(3).toString('hex')}`, PH = `MARKER-HEADER-${randomBytes(3).toString('hex')}`
+  const seen = []
+  const fake = createServer((q, a) => { let body = ''; q.on('data', (d) => { body += d }); q.on('end', () => {
+    seen.push({ path: q.url, headers: q.headers, body })
+    a.writeHead(200, { 'Content-Type': 'application/json' })
+    a.end(JSON.stringify(q.url === '/preflight'
+      ? { approved: true, reason: null, reservation_id: '11111111-1111-4111-8111-111111111111', task_ref: 'priv-job', task_ceiling: 100000, task_remaining_units: 99000, estimated_units: 1000 }
+      : { status: 'recorded', event_id: 'e' }))
+  }) })
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r))
+  const BASE = `http://127.0.0.1:${fake.address().port}`
+  const dir = mkdtempSync(`${tmpdir()}/bc-priv-`)
+  writeFileSync(`${dir}/w.py`, `
+from types import SimpleNamespace as NS
+import agentbill
+class C:
+    def create(self, **kw):
+        if kw.get("stream"):
+            return iter([NS(id="chatcmpl-priv-s", model="gpt-4o-mini", choices=[NS(delta=NS(content="${RSP}"))], usage=None),
+                         NS(id="chatcmpl-priv-s", model="gpt-4o-mini", choices=[], usage=NS(prompt_tokens=5, completion_tokens=1))])
+        return NS(id="chatcmpl-priv-1", model="gpt-4o-mini-2024-07-18", service_tier="default", choices=[NS(message=NS(content="${RSP}"))],
+                  usage=NS(prompt_tokens=10, completion_tokens=2, prompt_tokens_details=NS(cached_tokens=0), completion_tokens_details=NS(reasoning_tokens=0)))
+client = NS(chat=NS(completions=C()), base_url="https://api.openai.com/v1/", api_key="${PK}", default_headers={"X-Secret": "${PH}"})
+llm = agentbill.wrap(client, task_ref="priv-job", agent_id="priv-agent", step="plan", task_ceiling=100000, provider="openai", customer_id="priv-cust")
+llm.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "system", "content": "${M}"}, {"role": "user", "content": "${M}"}], max_tokens=50, extra_headers={"X-Secret": "${PH}"})
+for _ in llm.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "${M}"}], stream=True):
+    pass
+`)
+  const py = await new Promise((res) => {
+    const c = spawn(process.env.WRAP_PYTHON ?? 'python3', [`${dir}/w.py`], { env: { ...process.env, PYTHONPATH: new URL('../../sdk/python', import.meta.url).pathname, AGENTBILL_BASE_URL: BASE, AGENTBILL_API_KEY: 'agb_' + 'c'.repeat(48) } })
+    let e = ''; c.stderr.on('data', (d) => { e += d }); c.on('exit', (code) => res({ code, e }))
+  })
+  const pySeen = seen.splice(0)
+  // The Node SDK reads AGENTBILL_BASE_URL once, when it is first imported, so
+  // it runs in a child process of its own, pointed at the stand-in.
+  const sdkUrl = new URL('../../sdk/node/dist/index.js', import.meta.url).href
+  writeFileSync(`${dir}/w.mjs`, `
+import { wrap } from ${JSON.stringify(sdkUrl)}
+const client = { baseURL: 'https://api.openai.com/v1', apiKey: ${JSON.stringify(PK)}, _options: { defaultHeaders: { 'X-Secret': ${JSON.stringify(PH)} } }, chat: { completions: { async create(body) {
+  if (body.stream) return { async *[Symbol.asyncIterator]() {
+    yield { id: 'chatcmpl-priv-ns', model: 'gpt-4o-mini', choices: [{ delta: { content: ${JSON.stringify(RSP)} } }], usage: null }
+    yield { id: 'chatcmpl-priv-ns', model: 'gpt-4o-mini', choices: [], usage: { prompt_tokens: 5, completion_tokens: 1 } } } }
+  return { id: 'chatcmpl-priv-n', model: 'gpt-4o-mini-2024-07-18', service_tier: 'default', choices: [{ message: { content: ${JSON.stringify(RSP)} } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }
+} } } }
+const llm = wrap(client, { taskRef: 'priv-job', agentId: 'priv-agent', step: 'plan', taskCeiling: 100000, customerId: 'priv-cust' })
+await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: ${JSON.stringify(M)} }], max_tokens: 50 }, { headers: { 'X-Secret': ${JSON.stringify(PH)} } })
+const st = await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: ${JSON.stringify(M)} }], stream: true })
+for await (const _c of st) { /* drain */ }
+`)
+  const nd = await new Promise((res) => {
+    const c = spawn(process.execPath, [`${dir}/w.mjs`], { env: { PATH: process.env.PATH, AGENTBILL_BASE_URL: BASE, AGENTBILL_API_KEY: 'agb_' + 'd'.repeat(48) } })
+    let e = ''; c.stderr.on('data', (d) => { e += d }); c.on('exit', (code) => res({ code, e }))
+  })
+  const nodeSeen = seen.splice(0)
+  fake.close()
+  const check = (list) => {
+    const bad = []
+    for (const r of list) {
+      const b = JSON.parse(r.body || '{}')
+      const allowed = r.path === '/preflight' ? WRAP_SENDS.preflight : r.path === '/events' ? WRAP_SENDS.record : null
+      if (!allowed) { bad.push(`path ${r.path}`); continue }
+      for (const k of Object.keys(b)) if (!allowed.includes(k)) bad.push(`${r.path}.${k}`)
+      for (const k of Object.keys(b.metadata ?? {})) if (!WRAP_SENDS.metadata.includes(k)) bad.push(`metadata.${k}`)
+    }
+    const wire = JSON.stringify(list)
+    for (const m of [M, RSP, PK, PH]) if (wire.includes(m)) bad.push(`leaked ${m.slice(0, 20)}`)
+    return bad
+  }
+  const pyBad = check(pySeen), nodeBad = check(nodeSeen)
+  const kinds = (list) => list.map((r) => r.path).join(',')
+  ok('[privacy] python wrap() on the wire: a preflight and a record per call, only the fields /privacy lists, and none of the planted prompt, answer, provider key or provider header',
+     py.code === 0 && kinds(pySeen) === '/preflight,/events,/preflight,/events' && pyBad.length === 0, `${py.code} ${kinds(pySeen)} ${pyBad.join(' ')} ${py.e.slice(-300)}`)
+  ok('[privacy] node wrap() on the wire: the same, with the same fields',
+     nd.code === 0 && kinds(nodeSeen) === '/preflight,/events,/preflight,/events' && nodeBad.length === 0, `${nd.code} ${kinds(nodeSeen)} ${nodeBad.join(' ')} ${nd.e.slice(-300)}`)
+  const sent = new Set([...pySeen, ...nodeSeen].flatMap((r) => { const b = JSON.parse(r.body || '{}'); return [...Object.keys(b), ...Object.keys(b.metadata ?? {})] }))
+  ok('[privacy] and the page lists every field it saw sent (model, requested_model, service_tier, the response id as idempotency_key, the token counts)',
+     [...sent].every((k) => page.includes(`<code>${k}</code>`)) && ['model', 'requested_model', 'service_tier', 'idempotency_key', 'tokens', 'stream'].every((k) => sent.has(k)),
+     [...sent].filter((k) => !page.includes(`<code>${k}</code>`)).join(',') + ' | sent: ' + [...sent].join(','))
 }
