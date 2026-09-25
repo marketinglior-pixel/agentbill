@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { randomBytes } from 'crypto'
 import { ID_MAX, plain } from '../lib/ids.js'
+import { readPage } from '../lib/page.js'
 
 function generateApiKey(): string {
   return 'agb_' + randomBytes(24).toString('hex')
@@ -34,19 +35,31 @@ const RevokeBody = z.object({
 })
 
 export async function keysRoute(app: FastifyInstance) {
-  // List all keys for the authenticated account
+  // List the keys of the authenticated account, oldest first.
+  //
+  // Paged since 2026-09-25 (src/lib/page.ts): at most `limit` keys (default
+  // 200, max 500). next_cursor is null on the last page, which for every
+  // account that exists today is the only page, so the body is what it was
+  // plus that one field.
   app.get('/keys', async (request, reply) => {
-    const accountId = (request as any).accountId
+    const accountId = request.accountId
+    const r = readPage(request.query)
+    if (!r.ok) return reply.code(422).send({ error: 'validation_error', message: r.message })
+    const { limit, cursor } = r.page
 
     const keys = await sql`
-      SELECT api_key, label, created_at, revoked_at, expires_at
+      SELECT id, api_key, label, created_at, revoked_at, expires_at
       FROM developer_api_keys
       WHERE account_id = ${accountId}
-      ORDER BY created_at ASC
+        ${cursor ? sql`AND (created_at, id) > (SELECT created_at, id FROM developer_api_keys WHERE id = ${cursor} AND account_id = ${accountId})` : sql``}
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${limit + 1}
     `
+    const more = keys.length > limit
+    const page = keys.slice(0, limit)
 
     return reply.send({
-      keys: keys.map(k => ({
+      keys: page.map(k => ({
         api_key: k.apiKey,
         label: k.label,
         created_at: k.createdAt,
@@ -54,6 +67,7 @@ export async function keysRoute(app: FastifyInstance) {
         expires_at: k.expiresAt ?? null,
         status: keyStatus({ revokedAt: k.revokedAt, expiresAt: k.expiresAt }),
       })),
+      next_cursor: more ? (page[page.length - 1]!.id as string) : null,
     })
   })
 

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { isIP } from 'node:net'
-import { clientIp as resolveClientIp } from '../lib/client-ip.js'
+import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
 import { ipOrigin } from '../lib/ip-origin.js'
-import { checkRateLimit } from '../lib/rate-limiter.js'
+import { checkRateLimit, checkAccountRateLimit, authFailureLimiter, MAX_REQUESTS, MAX_ACCOUNT_REQUESTS } from '../lib/rate-limiter.js'
 import type { FastifyBaseLogger } from 'fastify'
 import { mailUser } from '../lib/mail.js'
 
@@ -40,6 +40,13 @@ declare module 'fastify' {
  * build on anything but 200.
  */
 export const publicRoute = () => ({ config: { public: true } })
+
+/**
+ * True for a string shaped like an AgentBill API key: agb_ and 48 lowercase
+ * hex characters, the only shape register.ts, keys.ts and recover.ts mint.
+ */
+export const KEY_SHAPE = /^agb_[0-9a-f]{48}$/
+export const isKeyShaped = (v: unknown): v is string => typeof v === 'string' && KEY_SHAPE.test(v)
 
 
 /**
@@ -187,13 +194,32 @@ export function registerAuth(app: FastifyInstance) {
       })
     }
 
-    // Rate limit: 100 requests per minute per key
-    const rate = checkRateLimit(token)
-    if (!rate.allowed) {
+    // The one shape a key has: agb_ and 48 lowercase hex characters, which is
+    // what register.ts, keys.ts and recover.ts all mint (randomBytes(24)). A
+    // token of any other shape cannot be a key, so it is answered here, before
+    // any counter or the database is touched. This is what makes a flood of
+    // random tokens cost a regex instead of a Map entry each (2026-09-25:
+    // the old limiter kept every distinct token forever, and 12k-40k fake
+    // ones took the process past the machine's 256MB). Same body as a key
+    // that matched nothing, so the shape rule tells a prober nothing new.
+    if (!isKeyShaped(token)) {
+      return reply.code(401).send({
+        error: 'unauthorized',
+        message: 'Invalid API key.',
+      })
+    }
+
+    // Failed lookups are counted per network and checked before the next
+    // lookup, so guessing keys from one place is capped at a few dozen
+    // database round trips a minute. Checked, not counted: only a lookup that
+    // finds nothing counts (below).
+    const network = limiterKey(request)
+    const failures = authFailureLimiter.blocked(network)
+    if (!failures.allowed) {
       return reply.code(429).send({
         error: 'rate_limit_exceeded',
-        message: 'Too many requests. Limit: 100 per minute.',
-        reset_at: new Date(rate.resetAt).toISOString(),
+        message: 'Too many requests with an unknown API key from this network. Wait a minute, then check the key you are sending.',
+        reset_at: new Date(failures.resetAt).toISOString(),
       })
     }
 
@@ -217,12 +243,25 @@ export function registerAuth(app: FastifyInstance) {
     `
 
     if (rows.length === 0) {
+      authFailureLimiter.hit(network)
       return reply.code(401).send({
         error: 'unauthorized',
         message: 'Invalid API key.',
       })
     }
 
+    // The per-key limit, once the key is known and before its state is read:
+    // only a real key ever has a per-key entry (keyed by its id, not by the
+    // token), and a revoked key retried in a loop is held to the same rate as
+    // a live one.
+    const rate = checkRateLimit(rows[0].id as string)
+    if (!rate.allowed) {
+      return reply.code(429).send({
+        error: 'rate_limit_exceeded',
+        message: `Too many requests. Limit: ${MAX_REQUESTS} per minute.`,
+        reset_at: new Date(rate.resetAt).toISOString(),
+      })
+    }
     // revoked_at in the past = immediately revoked; in the future = grace period (rotation)
     if (rows[0].isRevoked) {
       return reply.code(401).send({
@@ -235,6 +274,19 @@ export function registerAuth(app: FastifyInstance) {
       return reply.code(401).send({
         error: 'key_expired',
         message: 'This API key has expired. Generate a new one with POST /keys/generate.',
+      })
+    }
+
+    // Per account, across every key it holds, so minting more keys does not
+    // buy more requests. After the state checks on purpose: a revoked key
+    // retried in a loop must not spend the allowance of the account's live
+    // keys.
+    const accountRate = checkAccountRateLimit(rows[0].accountId as string)
+    if (!accountRate.allowed) {
+      return reply.code(429).send({
+        error: 'rate_limit_exceeded',
+        message: `Too many requests for this account. Limit: ${MAX_ACCOUNT_REQUESTS} per minute across all of its keys.`,
+        reset_at: new Date(accountRate.resetAt).toISOString(),
       })
     }
 
