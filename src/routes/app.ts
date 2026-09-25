@@ -27,6 +27,7 @@ import { signinPanel, signinFonts, SIGNIN_CSS } from '../ui/signin.js'
 import { GOOGLE_G, GITHUB_MARK } from '../ui/provider-marks.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
 import { randomBytes } from 'crypto'
+import { connectedApps, SCOPE_TEXT, type ConnectedApp } from '../lib/mcp-oauth.js'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -78,7 +79,7 @@ const loginHits = new Map<string, number[]>()
 // login that 303s into a redirect chain ending at polar.sh is blocked at the
 // last hop, silently. The hand-off below therefore lands on a 200 page and
 // hops from there.
-const APP_CSP = "default-src 'none'; img-src 'self' data:; manifest-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+export const APP_CSP = "default-src 'none'; img-src 'self' data:; manifest-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // The only places a post-login redirect may go: a checkout hand-off, or the
 // start screen, which is where /register#done signs a new key in. Anything
@@ -88,12 +89,16 @@ const APP_CSP = "default-src 'none'; img-src 'self' data:; manifest-src 'self'; 
 // Exported 2026-09-25: the sign-in routes (src/routes/auth.ts) carry `next`
 // through Google, GitHub and the email link with this same allowlist, so a
 // sign-in cannot become an open redirect either.
-const NEXT_RE = /^\/app(\/upgrade\/(builder|team|scale)|\?view=start)$/
+// 2026-09-25: and the MCP connect flow's consent page, by the id of the
+// authorization request waiting there (src/routes/oauth.ts). An id, not the
+// request's own query string: the path is fixed and the id is 32 characters of
+// base64url, so nothing a caller puts in it can change where the browser goes.
+const NEXT_RE = /^\/app(\/upgrade\/(builder|team|scale)|\?view=start|\/oauth\/authorize\?request_id=[A-Za-z0-9_-]{32})$/
 export const safeNext = (v: unknown): string => (typeof v === 'string' && NEXT_RE.test(v) ? v : '')
 const TIERS = new Set(['builder', 'team', 'scale'])
 const back = (err: string, next: string) => `/app?err=${err}${next ? `&next=${encodeURIComponent(next)}` : ''}`
 
-type Viewer = {
+export type Viewer = {
   /** The key this console reads as. A user session with no active key yet has ''. */
   keyId: string
   apiKey: string
@@ -168,7 +173,11 @@ export async function appRoute(app: FastifyInstance) {
     // or, under sample data, the sample rows the same view lists below.
     const suggest = view !== 'tasks' ? null
       : readSuggest(demo ? demoHistory(data.tasks) : await loadHistory(viewer.accountId), q)
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort,
+    // Apps connected over MCP (OAuth, src/lib/mcp-oauth.ts), on the keys view,
+    // with the outcome of a Disconnect: a code from a closed set, never echoed.
+    const apps = view === 'keys' && !demo ? await connectedApps(viewer.accountId) : []
+    const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -480,7 +489,7 @@ export async function hasSession(request: FastifyRequest): Promise<boolean> {
   return (await loadSession(request)) !== null
 }
 
-async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
+export async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
   const u = readUserSession(request.headers.cookie)
   if (u) {
     const v = await loadUserViewer(u)
@@ -2064,7 +2073,11 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** A connect attempt's outcome code, already checked against LINK_TEXT. */
   link?: string | null
   /** The providers configured on this server. */
-  providers?: Provider[] }
+  providers?: Provider[]
+  /** Apps connected to this account over MCP, for the keys view. */
+  apps?: ConnectedApp[]
+  /** A Disconnect's outcome, 'disconnected' or 'gone'. */
+  appMsg?: 'disconnected' | 'gone' | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -3060,9 +3073,42 @@ function connectButton(pr: Provider): string {
   return `<form method="POST" action="/app/connect/${pr}"><button class="pbtn is-${pr}" type="submit">${pr === 'google' ? GOOGLE_G : GITHUB_MARK}<span>Continue with ${name}</span></button></form>`
 }
 
+/**
+ * Apps connected over MCP with OAuth: Claude's custom connector, ChatGPT, or
+ * any client that went through the consent page. Each is one grant, and
+ * Disconnect revokes it and every token it holds at once. An app that uses an
+ * API key instead is not listed here: it is a key, above, and revoking the key
+ * is how it is disconnected.
+ */
+function connectedAppsBlock(p: Page): string {
+  if (p.anon || p.demo) return ''
+  const apps = p.apps ?? []
+  const said = p.appMsg === 'disconnected'
+    ? '<p class="ok" id="app-flash">Disconnected. That app can no longer call AgentBill on this account; connecting it again asks you again.</p>'
+    : p.appMsg === 'gone' ? '<p class="err cv-err" id="app-flash">That connection was already gone.</p>' : ''
+  const body = apps.length === 0
+    ? `<div class="cv-empty"><p class="nothing">No app is connected. Connect one from <a href="/integrations/mcp">the MCP page</a>.</p></div>`
+    : `<div class="cv-body flush cv-scroll"><table class="cv-table cards" id="connected-apps">
+    <thead><tr><th>App</th><th>Goes back to</th><th>Can</th><th>Connected</th><th>Last used</th><th></th></tr></thead>
+    <tbody>${apps.map((a) => `<tr>
+      <td class="wide">${a.clientName ? esc(a.clientName) : '<span class="none">no name</span>'} <span class="none" title="The app chose this name">named by the app</span></td>
+      <td class="id">${esc(a.redirectHost)}</td>
+      <td>${a.scopes.map((s) => `<span title="${esc(SCOPE_TEXT[s].title)}">${tag(s.replace('agentbill:', ''))}</span>`).join(' ')}</td>
+      <td class="when" data-l="connected">${rel(a.createdAt)}</td>
+      <td class="when" data-l="last used">${a.lastUsedAt ? rel(a.lastUsedAt) : '<span class="none">not yet</span>'}</td>
+      <td><form method="POST" action="/app/oauth/grants/${a.id}/disconnect"><button class="btn-ghost" type="submit">Disconnect</button></form></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`
+  return `<h2 id="apps">Connected apps <span>over MCP, with your approval</span></h2>
+    ${said}
+    ${frame(p, barOf('apps'), body)}
+    <p class="note">Each row is an app you allowed on the consent page. It reaches this account only through the MCP tools, never your API keys, your plan or billing. An app you connected with an API key is that key, above.</p>`
+}
+
 function keysView(p: Page): string {
   return `${waysIn(p)}
     ${keysTable(p, p.d.keys, p.v.via === 'key' ? p.v.apiKey : '')}
+    ${connectedAppsBlock(p)}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
     <div class="cv-card cmds">
       ${KEY_COMMANDS.map(([ep, what]) =>

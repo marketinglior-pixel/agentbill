@@ -40,6 +40,9 @@ import { recoverRoute } from './routes/recover.js'
 import { authRoute } from './routes/auth.js'
 import { statusRoute } from './routes/status.js'
 import { securityRoute } from './routes/security.js'
+import { oauthRoute } from './routes/oauth.js'
+import { mcpRoute } from './routes/mcp.js'
+import { startOAuthPruner } from './lib/mcp-oauth.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
@@ -167,6 +170,10 @@ const API_PREFIXES = [
   '/preflight', '/events', '/keys', '/tasks', '/budget', '/customers',
   '/checkpoint', '/step', '/decisions', '/webhook-config', '/webhooks/',
   '/health', '/pulse', '/account/', '/usage',
+  // 2026-09-25: the remote MCP endpoint and its OAuth server. /mcp carries a
+  // Bearer on GET like any API path; the metadata and token endpoints are
+  // read by clients that follow no cross-host redirect with a body.
+  '/mcp', '/oauth/', '/.well-known/',
 ]
 const isApiPath = (path: string) => API_PREFIXES.some((p) => path === p || path.startsWith(p))
 app.addHook('onRequest', async (request, reply) => {
@@ -268,6 +275,8 @@ app.register(recoverRoute)
 app.register(authRoute)
 app.register(statusRoute)
 app.register(securityRoute)
+app.register(oauthRoute)
+app.register(mcpRoute)
 app.register(heCostPerClientRoute)
 registerAuth(app)
 // Registered next to registerAuth because they are two halves of one decision.
@@ -472,6 +481,7 @@ app.listen({ port, host: '0.0.0.0' }, (err) => {
   startDbWatchdog()
   startConversionDigest()
   startReservationSweeper()
+  startOAuthPruner(app.log)
 })
 
 // Drain on shutdown so fire-and-forget writes dispatched just before a deploy
