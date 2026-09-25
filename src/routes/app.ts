@@ -18,6 +18,8 @@ import {
   INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
 } from '../ui/steps.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
+import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
+import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
 import { rankOrderSql } from '../lib/task-rank.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
@@ -167,6 +169,7 @@ export async function appRoute(app: FastifyInstance) {
       if (demo) {
         const sample = demoConsole(filter, RANGES[range].days, sort)
         return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter, sort,
+                                        dash: view === 'overview' ? demoDashboard(range as DashRange) : null,
                                         suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
       }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
@@ -184,10 +187,12 @@ export async function appRoute(app: FastifyInstance) {
     const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
     const keysMsg = q?.keys === 'revoked_all' || q?.keys === 'revoke_refused' || q?.keys === 'confirm' ? q.keys : null
     const via = asVia(q?.via)
+    // The overview's cards. Only the overview draws them, so only it pays.
+    const dash = view !== 'overview' ? null : demo ? demoDashboard(range as DashRange) : await loadDashboard(viewer.accountId, range as DashRange)
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -740,6 +745,9 @@ const DEFAULT_VIEW: ViewKey = 'overview'
 const RANGED: ReadonlySet<ViewKey> = new Set<ViewKey>(['overview', 'activity', 'limits'])
 
 const RANGES: Record<string, { days: number; label: string }> = {
+  // 24h is the dashboard's hourly window (src/lib/dashboard.ts); the other
+  // views read it as the one day it ends in.
+  '24h': { days: 1, label: '24 hours' },
   '7d':  { days: 7,  label: '7 days' },
   '30d': { days: 30, label: '30 days' },
   '90d': { days: 90, label: '90 days' },
@@ -2178,7 +2186,7 @@ const LOGIN_CSS = `${CHROME_CSS}${SIGNIN_CSS}${COPY_CSS}
   }
 `
 
-const HEAD = (title: string, css = CSS) => head({
+const HEAD = (title: string, css = CSS + DASH_CSS) => head({
   title: `${esc(title)} · AgentBill`,
   description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
@@ -2352,7 +2360,9 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** A Revoke all's outcome, a code from a closed set. */
   keysMsg?: 'revoked_all' | 'revoke_refused' | 'confirm' | null
   /** The start screen's answer to "how will you connect?", off ?via=. */
-  via?: Via | null }
+  via?: Via | null
+  /** The overview's dashboard (src/lib/dashboard.ts), for its window. */
+  dash?: Dash | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -3442,10 +3452,21 @@ function overviewView(p: Page, rangeLabel: string): string {
   if (p.view === 'start' ? !p.demo : onboardingDue(p)) return startScreen(p)
   const latest = d.decisions.slice(0, 5)
   const topCustomers = d.customers.slice(0, 5)
-  return `${figures(p, rangeLabel)}
+  // The dashboard's cards when this window has anything in it; the figures and
+  // chart it replaced otherwise, which say what an empty window means.
+  const grid = p.dash && (p.dash.totals.calls > 0 || p.dash.totals.refused > 0)
+    ? dashboardGrid(p.dash, { sample: p.demo ? SAMPLE_TAG : '', hrefAll: {
+        agents: href(p, 'activity'), customers: href(p, 'customers'), refusals: href(p, 'refusals'), activity: href(p, 'activity') } })
+    : ''
+  // The one number that should be zero keeps its own strip above the cards,
+  // under the key it belongs to: the lede promises it on this screen.
+  const mask = p.demo ? DEMO_VIEWER.keyMask : p.v.keyMask
+  const leaks = grid ? frame(p, barOf(mask ? esc(mask) : 'no key yet', true), leakRow(p), 'figs') : ''
+  return `${grid ? `${leaks}
+    ${grid}` : `${figures(p, rangeLabel)}
 
     <h2>Activity <a href="${href(p, 'activity')}">Day by day &rarr;</a></h2>
-    ${chartBlock(p, d.series, rangeLabel)}
+    ${chartBlock(p, d.series, rangeLabel)}`}
 
     <h2>Recent tasks <a href="${href(p, 'tasks')}">All ${d.taskCount ? num(d.taskCount) + ' ' : ''}&rarr;</a></h2>
     ${tasksBlock(p, d.tasks.slice(0, 4), jobSide(p))}
@@ -3455,8 +3476,8 @@ function overviewView(p: Page, rangeLabel: string): string {
       ? frame(p, barOf('refusals'), refusalRows(p, latest))
       : '<div class="cv-empty"><p class="nothing">Nothing refused yet.</p></div>'}
 
-    <h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customerCount ? num(d.customerCount) + ' ' : ''}&rarr;</a></h2>
-    ${customersTable(p, topCustomers, d.customerTotal, true)}`
+    ${grid ? '' : `<h2>Customers by spend <a href="${href(p, 'customers')}">All ${d.customerCount ? num(d.customerCount) + ' ' : ''}&rarr;</a></h2>
+    ${customersTable(p, topCustomers, d.customerTotal, true)}`}`
 }
 
 function activityView(p: Page, rangeLabel: string): string {
@@ -3666,7 +3687,7 @@ function consolePage(p: Page): string {
       <div class="wrap">
         <header class="vh">
           <div><h1>${meta.title}</h1><p class="sub">${meta.lede}</p></div>
-          ${RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
+          ${p.view === 'overview' && !asStart ? dashRangeControl(p.range, (k) => href(p, 'overview', { range: k })) : RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
         </header>
         ${banner}
         ${nudge}

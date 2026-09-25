@@ -1382,7 +1382,7 @@ const overST = await pageST('/app').then(r => r.text())
 ok('[start] a record that names no model: the screen says none can be priced, and shows no dollar figure for it',
    handST.includes('none of them names a model, so none can be priced') && !handST.includes('Your first call was recorded'), 'no unpriced line')
 ok('[start] and once anything is recorded the overview is the dashboard, with the start screen still reachable',
-   overST.includes('class="kpis"') && !overST.includes('How will you connect?') && handST.includes('How will you connect?'))
+   overST.includes('class="dash"') && overST.includes('class="leak') && !overST.includes('How will you connect?') && handST.includes('How will you connect?'))
 
 // The production path, Python: the literal on the page, run as pasted.
 const { mkdtempSync: mkdtST, writeFileSync: writeST, mkdirSync: mkdirST, symlinkSync: linkST } = await import('node:fs')
@@ -1462,9 +1462,10 @@ ok('[start] the first call stays the first: the Node run after it (24 tokens) do
 
 // The console that follows, on this account: dollars lead, tokens beside them.
 const actST = await pageST('/app?view=activity').then(r => r.text())
-const tilesST = visibleST((await pageST('/app').then(r => r.text())).match(/<div class="kpis">([\s\S]*?)<div class="leak/)?.[1] ?? '').replace(/\s+/g, ' ')
-ok('[start] after a priced call the overview tiles lead with the estimate and tokens, not units',
-   tilesST.includes('Est. cost') && tilesST.includes('$0.000016') && tilesST.includes('Tokens') && tilesST.includes('47') && !/Units (metered|recorded|refused)/.test(tilesST), tilesST.slice(0, 240))
+// Since M2 (2026-09-26) the overview's figures are the dashboard's cards.
+const tilesST = visibleST((await pageST('/app').then(r => r.text())).match(/<div class="dash">([\s\S]*?)<h2>Recent tasks/)?.[1] ?? '').replace(/\s+/g, ' ')
+ok('[start] after a priced call the overview cards lead with the estimate and tokens, not units',
+   /Cost \$0\.000016/.test(tilesST) && /Tokens 47/.test(tilesST) && tilesST.includes('List-price estimate') && !/Units (metered|recorded|refused)/.test(tilesST), tilesST.slice(0, 240))
 ok('[start] and the activity chart is the cost chart, its split by event_type in dollars',
    actST.includes('id="cost-chart"') && actST.includes('Share of cost') && actST.includes('An estimate at public list price') && !actST.includes('Units recorded'),
    'activity is not the cost view')
@@ -4794,6 +4795,9 @@ await batchcGates({
 // ------------------------------------------------ [inbound] hello@agentbill.dev forwarding (2026-09-25), in its own file
 const { inboundGates } = await import('./inbound-gates.mjs')
 await inboundGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
+// ------------------------------------------------ [dash] the overview's dashboard (M2, 2026-09-26), in its own file
+const { dashGates } = await import('./dash-gates.mjs')
+await dashGates({ API, sql, ok })
 // ------------------------------------------------ [capi] Meta Conversions API (2026-09-26), in its own file
 const { capiGates } = await import('./capi-gates.mjs')
 await capiGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
