@@ -26,7 +26,7 @@
     "@fastify/etag": "^6.2.0",
     "@modelcontextprotocol/sdk": "1.30.1",
     "dotenv": "^17.4.2",
-    "fastify": "^5.12.3",
+    "fastify": "^5.12.5",
     "postgres": "^3.4.4",
     "resend": "^6.12.3",
     "standardwebhooks": "^1.1.1",
