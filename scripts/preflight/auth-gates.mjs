@@ -13,8 +13,22 @@
 import { readFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 
-export async function authGates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, portS, legacyKey, legacyAccount }) {
+// A gate that throws takes every gate after it with it, silently: a broken
+// step (no authorize URL, no cookie) must read as a FAIL, and the run must say
+// that it did not reach its end.
+export async function authGates(opts) {
   console.log('\n[auth] sign-in with Google, GitHub and an email link')
+  let reached = false
+  try {
+    await gates(opts)
+    reached = true
+  } catch (err) {
+    opts.ok('[auth] a gate threw', false, String(err?.stack ?? err).slice(0, 300))
+  }
+  opts.ok('[auth] every gate ran to the end', reached)
+}
+
+async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, portS, legacyKey, legacyAccount }) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
   const rnd = () => randomBytes(5).toString('hex')
   const SAME = { 'Sec-Fetch-Site': 'same-origin' }
@@ -44,7 +58,8 @@ export async function authGates({ API, sql, ok, fakeBase, outbox, serverLog, boo
     return { status: r.status, location: r.headers.get('location') ?? '', flow: cookieVal(r, 'agentbill_oauth'), raw: r }
   }
   const authorize = async (authUrl, user, extra = {}) => {
-    const u = new URL(authUrl)
+    let u
+    try { u = new URL(authUrl) } catch { return { error: `no authorize URL (${JSON.stringify(authUrl)})` } }
     u.searchParams.set('fake_user', b64(user))
     for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v)
     const r = await fetch(u, { redirect: 'manual' })
