@@ -83,9 +83,11 @@ which is for planned rotation. For a leak, revoke.
 
 Every request carries your AgentBill API key in the `Authorization` header, over
 HTTPS. The clients in this repository refuse a base URL that is not `https://`,
-except `localhost`, `127.0.0.1` and `[::1]` for local testing; the releases up
-to `agentbill-sdk` 0.7.0, `agentbill` 0.5.0, `agentbill-mcp` 0.2.2 and
-`@agentbill/openclaw` 0.2.0 do not check this yet, so keep the default base URL.
+except `localhost`, `127.0.0.1` and `[::1]` for local testing. The releases that
+check it are `agentbill-sdk` 0.8.0, `agentbill` 0.6.0 and `agentbill-mcp` 0.3.0
+and later; `agentbill-sdk` 0.7.0, `agentbill` 0.5.0, `agentbill-mcp` 0.2.2 and
+earlier, and `@agentbill/openclaw` 0.2.0 do not yet, so keep the default base
+URL with those.
 
 - **`preflight()` / `record()` / `meter()`** send what you pass them: `agent_id`,
   `task_ref`, `customer_id`, the units you estimate or report, an
@@ -101,8 +103,8 @@ to `agentbill-sdk` 0.7.0, `agentbill` 0.5.0, `agentbill-mcp` 0.2.2 and
   API keys. They stay between your process and the provider.
 - **The MCP server** sends the same fields as `preflight()` and `record()` for the
   tools an agent calls. In this repository its HTTP mode listens on `127.0.0.1`
-  by default, with DNS-rebinding protection on (0.2.2 and earlier bind
-  `0.0.0.0`; prefer the default stdio mode with those).
+  by default, with DNS-rebinding protection on, since 0.3.0 (0.2.2 and earlier
+  bind `0.0.0.0`; prefer the default stdio mode with those).
 - **The OpenClaw plugin** sends a preflight before each model turn and each
   tool call, and a record after, with the session's `task_ref`, the token total
   the host reports, the provider and model names for a model call, the tool's
