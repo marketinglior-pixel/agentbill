@@ -18,6 +18,7 @@
 //     server: the production path, a real key over HTTP, no test bypass.
 //
 // Every account here is its own, planted and deleted by this file.
+import { keyHash, insertKeyRow } from './key-fixture.mjs'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -43,7 +44,7 @@ async function gates({ API, sql, ok, legacyKey }) {
   for (const [id, k] of [[A, KA], [B, KB]]) {
     await sql`DELETE FROM accounts WHERE id = ${id}`
     await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${id}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
-    await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${id}, ${k}, 'harness-usd')`
+    await insertKeyRow(sql, id, k, 'harness-usd')
   }
   const call = async (method, path, body, k = KA) => {
     const r = await fetch(`${API}${path}`, { method, headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
@@ -379,7 +380,7 @@ print(json.dumps(out))
   const C = '00000000-0000-0000-0000-0000000000d3', KC = key('usd-c')
   await sql`DELETE FROM accounts WHERE id = ${C}`
   await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${C}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${C}, ${KC}, 'harness-usd-old')`
+  await insertKeyRow(sql, C, KC, 'harness-usd-old')
   await call('PUT', '/budget', { customer_id: 'old-a', limit_units: 100 }, KC)
   for (const [c, t, u] of [['old-a', 'old-j1', 30], ['old-b', 'old-j2', 70], ['old-a', 'old-j3', 5], ['old-c', 'old-j2', 1]]) {
     const p = await pre({ task_ref: t, task_ceiling: 1000, customer_id: c, estimated_units: u }, KC)
@@ -400,7 +401,7 @@ print(json.dumps(out))
   const R = '00000000-0000-0000-0000-0000000000d4', KR = key('usd-r')
   await sql`DELETE FROM accounts WHERE id = ${R}`
   await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${R}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${R}, ${KR}, 'harness-usd-rank')`
+  await insertKeyRow(sql, R, KR, 'harness-usd-rank')
   const gpt4oOut = (output) => ({ provider: 'openai', model: 'gpt-4o', tokens: { input: 0, output } })
   // $0.50 on a dollar job (500,000 micro-dollars), $2.00 on a token job that
   // used 200,000 tokens, $0.30 on a $5 dollar job (300,000), a 400,000-token

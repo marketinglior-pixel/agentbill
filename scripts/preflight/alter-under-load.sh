@@ -21,6 +21,14 @@
 #
 # The migration is applied with scripts/db/apply-migration.mjs, the runner the
 # production step uses, so its retry on a busy lock is rehearsed too.
+#
+# ALTER_MIGRATION=026_add_api_key_hash.sql (2026-09-25) rehearses the key-hash
+# migration instead: the PREVIOUS build serves (with prepared statements ON,
+# production's setting, because 026 claims it needs no window) and keeps
+# minting keys while 026 runs; then the new build is started as the deploy and
+# every key the old build ever minted must authenticate on it.
+# PLANT_NO_TRIGGER=1 applies 026 without its fill trigger, and must be red: a
+# key the old build mints after the migration would have no hash.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-docker}"
@@ -79,6 +87,27 @@ SQL
 
 (cd "$ROOT" && npm run build --silent)
 
+# 026 (API key hashing, 2026-09-25) is applied BEFORE its code, so what is
+# serving while it runs is the PREVIOUS build, and that is what the rehearsal
+# must run: compiled from OLD_REF (default origin/main, production's build)
+# into .rehearsal/old, where node finds this checkout's node_modules by walking
+# up. The new build is only started afterwards, as the deploy.
+OLD_SERVER_JS="${OLD_SERVER_JS:-}"
+case "$ALTER_MIGRATION" in
+  026_*)
+    if [ -z "$OLD_SERVER_JS" ]; then
+      OLD_REF="${OLD_REF:-origin/main}"
+      OLD_DIR="$ROOT/.rehearsal/old"
+      rm -rf "$OLD_DIR" && mkdir -p "$OLD_DIR"
+      git -C "$ROOT" archive "$OLD_REF" src tsconfig.json package.json | tar -x -C "$OLD_DIR"
+      (cd "$OLD_DIR" && "$ROOT/node_modules/.bin/tsc" -p tsconfig.json)
+      OLD_SERVER_JS="$OLD_DIR/dist/server.js"
+      echo "previous build: $OLD_REF ($(git -C "$ROOT" rev-parse --short "$OLD_REF")) at $OLD_SERVER_JS"
+    fi
+    ;;
+esac
+
 DATABASE_SSL=disable PORT="$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
   ALTER_FILE="$TARGET" PLANT_SKIP_WINDOW="${PLANT_SKIP_WINDOW:-}" \
+  OLD_SERVER_JS="$OLD_SERVER_JS" PLANT_NO_TRIGGER="${PLANT_NO_TRIGGER:-}" \
   node "$ROOT/scripts/preflight/alter-under-load.mjs"

@@ -10,6 +10,7 @@
 // Called from verify.mjs with its `ok`, its database handle and its boot
 // helpers. Every network is its own fly-client-ip, so the per-network limiters
 // under test never meet each other or the rest of the harness.
+import { keyHash, insertKeyRow } from './key-fixture.mjs'
 import { readFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 
@@ -268,7 +269,7 @@ async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, 
   const vEmail = `auth-victim-${rnd()}@example.com`
   const vKey = 'agb_' + createHash('sha256').update(`victim-${vEmail}`).digest('hex').slice(0, 48)
   const [vAcct] = await sql`INSERT INTO accounts (email, plan) VALUES (${vEmail}, 'free') RETURNING id`
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${vAcct.id}, ${vKey}, 'pre-registered')`
+  await insertKeyRow(sql, vAcct.id, vKey, 'pre-registered')
   const v1 = await signInWith('google', { sub: `v-${rnd()}`, email: vEmail, email_verified: true })
   const vUser = await userOf(vEmail)
   const vNew = vUser ? await acctOfUser(vUser.id) : null

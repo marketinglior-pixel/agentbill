@@ -20,6 +20,7 @@ import { createHash as createHashK } from 'node:crypto'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { ipOrigin } from '../../dist/lib/ip-origin.js'
 import { int8Type, parseInt8 } from '../../dist/db/int8.js'
+import { keyHash, insertKeyRow } from './key-fixture.mjs'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
 // Every key the harness plants is shaped like a real one (agb_ and 48 hex),
@@ -243,7 +244,10 @@ const alive = (key) => fetch(`${API}/keys`, { headers: { 'Authorization': `Beare
 const gen = await post('/keys/generate', { label: 'lifecycle-test' })
 ok('generated a scratch key', gen.status === 200 && typeof gen.body.api_key === 'string', JSON.stringify(gen.body))
 const victim = gen.body.api_key
-const prefix = victim.slice(0, 16)
+// The whole key: since 2026-09-25 a prefix longer than the 8 stored
+// characters cannot be matched (keys.ts), and the whole key is matched by its
+// hash, which names exactly this one.
+const prefix = victim
 
 ok('the new key authenticates', await alive(victim) === 200)
 
@@ -256,7 +260,7 @@ ok('rotated key still works during its grace window', await alive(victim) === 20
 // just-written NOW() and is the second bug this phase found.
 const rotatingRow = (await sql`
   SELECT revoked_at IS NOT NULL AS scheduled, revoked_at > NOW() AS in_future
-  FROM developer_api_keys WHERE api_key = ${victim}`)[0]
+  FROM developer_api_keys WHERE key_hash = ${keyHash(victim)}`)[0]
 ok('grace window is a FUTURE revoked_at, not NULL',
    rotatingRow.scheduled === true && rotatingRow.inFuture === true,
    JSON.stringify(rotatingRow))
@@ -268,7 +272,7 @@ ok('revoke kills a mid-rotation key', rev.status === 200 && rev.body.revoked ===
 ok('revoked key is dead on the very next request', await alive(victim) === 401, `got ${await alive(victim)}`)
 
 const revokedRow = (await sql`
-  SELECT revoked_at <= NOW() AS is_past FROM developer_api_keys WHERE api_key = ${victim}`)[0]
+  SELECT revoked_at <= NOW() AS is_past FROM developer_api_keys WHERE key_hash = ${keyHash(victim)}`)[0]
 ok('revoked_at was pulled back to the past', revokedRow.isPast === true, JSON.stringify(revokedRow))
 
 // The two zero-row cases must not answer with the same sentence any more.
@@ -276,7 +280,7 @@ const again = await post('/keys/revoke', { key_prefix: prefix })
 ok('revoking it twice reports already_revoked',
    again.status === 400 && again.body.error === 'already_revoked', JSON.stringify(again.body))
 
-const missing = await post('/keys/revoke', { key_prefix: 'agb_thiskeydoesnotexist' })
+const missing = await post('/keys/revoke', { key_prefix: 'agb_zzzz' })
 ok('an unknown prefix reports key_not_found, not already_revoked',
    missing.status === 400 && missing.body.error === 'key_not_found', JSON.stringify(missing.body))
 
@@ -317,7 +321,7 @@ ok('a non-address has no origin', ipOrigin('not-an-ip') === null)
 
 const ipGen = await post('/keys/generate', { label: 'ip-origin-test' })
 const ipKey = ipGen.body.api_key
-const ipKeyId = (await sql`SELECT id FROM developer_api_keys WHERE api_key = ${ipKey}`)[0].id
+const ipKeyId = (await sql`SELECT id FROM developer_api_keys WHERE key_hash = ${keyHash(ipKey)}`)[0].id
 
 // fly-client-ip is what clientIp() trusts first, and behind Fly the proxy
 // overwrites whatever a caller sent. Here there is no proxy, so it is the lever.
@@ -492,13 +496,10 @@ ok('five alerts accumulate, which is the cap value', ipc.alerts === 5, JSON.stri
 // fresh allowance of five into the SAME mailbox: the flood of 2026-09-11 built
 // out of the one thing the cap was not counting. Mutating the `recent` subquery
 // back to `WHERE api_key_id = ...` makes this gate red.
-const [acctOfKey8] = await sql`SELECT account_id FROM developer_api_keys WHERE api_key = ${KEY}`
+const [acctOfKey8] = await sql`SELECT account_id FROM developer_api_keys WHERE key_hash = ${keyHash(KEY)}`
 const secondKey8 = 'agb_' + 'c'.repeat(48)
-await sql`
-  INSERT INTO developer_api_keys (account_id, api_key, label)
-  VALUES (${acctOfKey8.accountId ?? acctOfKey8.account_id}, ${secondKey8}, 'ip-cap-second-key')
-  ON CONFLICT DO NOTHING`
-const [k2] = await sql`SELECT id FROM developer_api_keys WHERE api_key = ${secondKey8}`
+await insertKeyRow(sql, acctOfKey8.accountId ?? acctOfKey8.account_id, secondKey8, 'ip-cap-second-key', { ifAbsent: true })
+const [k2] = await sql`SELECT id FROM developer_api_keys WHERE key_hash = ${keyHash(secondKey8)}`
 // Two origins on the fresh key, so its own per-key count would permit an alert.
 for (const n of ['2001:db8:9a::1', '2001:db8:9b::1']) {
   await sql`
@@ -586,8 +587,11 @@ ok('a task_ref past the limit is 422', tooLong.status === 422, `got ${tooLong.st
 // because the key it would revoke is the one this harness authenticates with.
 // The prefix is long enough to pass the length rule and still carries a
 // wildcard: under LIKE this matched the harness's own key (the % swallowing
-// the rest of it), under starts_with it matches nothing.
-const wildcard = await post('/keys/revoke', { key_prefix: `${KEY.slice(0, 15)}%` })
+// the rest of it), under starts_with it matched nothing, and since
+// 2026-09-25 it is compared for equality with the stored 8-character
+// key_prefix, which no pattern language reaches either. 8 characters, the one
+// prefix length a hashed key can still be matched by (keys.ts).
+const wildcard = await post('/keys/revoke', { key_prefix: `${KEY.slice(0, 4)}%%%%` })
 ok('a prefix is a prefix, not a LIKE pattern',
    wildcard.status === 400 && wildcard.body.error === 'key_not_found', JSON.stringify(wildcard.body))
 ok('the harness key survived the wildcard prefix', await alive(KEY) === 200, `got ${await alive(KEY)}`)
@@ -869,6 +873,9 @@ await sql`
   INSERT INTO account_recovery_tokens (account_id, token_hash, expires_at)
   VALUES (${revealAcct.id}, ${createHash('sha256').update(revealToken).digest('hex')}, NOW() + INTERVAL '10 minutes')
 `
+// 2026-09-25 (security batch B): reveal is gone. The server keeps only a hash,
+// so recovery makes a NEW key. A form rendered before the change still posts
+// action=reveal, and that is read as "add": a new key beside the old ones.
 const revealRes = await fetch(`${API}/recover/${revealToken}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: API },
@@ -876,15 +883,18 @@ const revealRes = await fetch(`${API}/recover/${revealToken}`, {
   redirect: 'manual',
 })
 const revealHtml = await revealRes.text()
-ok('[recover] the reveal page prints the live key', revealRes.status === 200 && revealHtml.includes(KEY),
-   `${revealRes.status}`)
+const revealKey = (revealHtml.match(/agb_[0-9a-f]{48}/g) ?? [])
+ok('[recover] a pre-change "reveal" post prints a NEW key, never the existing one',
+   revealRes.status === 200 && revealKey.length >= 1 && new Set(revealKey).size === 1 && !revealHtml.includes(KEY), `${revealRes.status} ${revealKey.length}`)
 ok('[recover] and the export line that sets it, with the key already in it and no placeholder',
-   revealHtml.includes(`export AGENTBILL_API_KEY=${KEY}`)
+   revealKey.length > 0 && revealHtml.includes(`export AGENTBILL_API_KEY=${revealKey[0]}`)
      && !/export AGENTBILL_API_KEY=(&lt;|\s|<)/.test(revealHtml))
 ok('[recover] and names the two ways in that need no terminal',
    revealHtml.includes('AgentBillClient(api_key=...)') && revealHtml.includes('Authorization: Bearer')
      && !revealHtml.includes('Store it in an environment variable, not in your code'))
-ok('[recover] a spent token cannot show it again',
+ok('[recover] the new key authenticates, and the old one still does (add revokes nothing)',
+   revealKey.length > 0 && await alive(revealKey[0]) === 200 && await alive(KEY) === 200)
+ok('[recover] a spent token cannot make another',
    (await fetch(`${API}/recover/${revealToken}`, { method: 'POST', redirect: 'manual',
      headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: API },
      body: 'action=reveal' })).status !== 200)
@@ -1222,7 +1232,7 @@ const OTHER8 = '00000000-0000-0000-0000-0000000000cc'
 await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
           VALUES (${OTHER8}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
 const OTHERKEY8 = shapedKey('other-account-8')
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHER8}, ${OTHERKEY8}, 'other') ON CONFLICT DO NOTHING`
+await insertKeyRow(sql, OTHER8, OTHERKEY8, 'other', { ifAbsent: true })
 await putCeil('job-iso', { ceiling_units: 80, agent_id: 'r' })   // job-c was cleared by reset() above
 const foreign8 = await putCeil('job-iso', { ceiling_units: 7 }, OTHERKEY8)
 ok('another account writing the same task_ref gets its own row', foreign8.status === 200 && foreign8.body.task_created === true, JSON.stringify(foreign8.body))
@@ -1320,7 +1330,7 @@ const ACCT_ST = '00000000-0000-0000-0000-0000000000c1'
 const KEY_ST = shapedKey(`start-screen-${Date.now()}`)
 await sql`DELETE FROM accounts WHERE id = ${ACCT_ST}`
 await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_ST}, 'free', 0, date_trunc('month', CURRENT_DATE)::date)`
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_ST}, ${KEY_ST}, 'harness-start')`
+await insertKeyRow(sql, ACCT_ST, KEY_ST, 'harness-start')
 const loginST = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY_ST}` })
 const cookieST = (loginST.headers.get('set-cookie') ?? '').split(';')[0]
 const pageST = (path) => nav8(path, { headers: { cookie: cookieST } })
@@ -2604,7 +2614,7 @@ ok('[meter] a reservation_id that is not a uuid is a 422, never a 500', garbled.
 const ACCT_BM = '00000000-0000-0000-0000-0000000000bd'
 const KEY_BM = shapedKey(`meter-b-${Date.now()}`)
 await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_BM}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_BM}, ${KEY_BM}, 'harness-meter-b')`
+await insertKeyRow(sql, ACCT_BM, KEY_BM, 'harness-meter-b')
 const bP = await preM({ agent_id: 'meter', task_ref: 'meter-x', task_ceiling: 1_000, estimated_units: 40 }, KEY_BM)
 await preM({ agent_id: 'meter', task_ref: 'meter-x', task_ceiling: 1_000, estimated_units: 25 })
 const crossM = await recM({ customer_id: 'default', event_type: 'meter', idempotency_key: keyM('cross'), units: 25, task_ref: 'meter-x', reservation_id: bP.body?.reservation_id })
@@ -3240,7 +3250,7 @@ if (nodeSdk) {
   const ACCT_Q = '00000000-0000-0000-0000-0000000000be'
   const KEY_Q = shapedKey(`wrap-quota-${runW}`)
   await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_Q}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 0, plan = 'free'`
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_Q}, ${KEY_Q}, 'harness-wrap-quota')`
+  await insertKeyRow(sql, ACCT_Q, KEY_Q, 'harness-wrap-quota')
   const refQ = `wrap-quota-${runW}`
   const openQ = await fetch(`${API}/tasks/${refQ}/ceiling`, { method: 'PUT', headers: { 'Authorization': `Bearer ${KEY_Q}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ceiling_units: 3_000, unit: 'token' }) })
   await sql`UPDATE accounts SET monthly_calls = 1000, billing_period_start = date_trunc('month', CURRENT_DATE)::date WHERE id = ${ACCT_Q}`
@@ -3361,7 +3371,7 @@ const e2eW = new URL('./wrap_e2e.py', import.meta.url).pathname
 const ACCT_QP = '00000000-0000-0000-0000-0000000000bf'
 const KEY_QP = shapedKey(`wrap-quota-py-${runW}`)
 await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_QP}, 'free', 1000, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 1000, plan = 'free', billing_period_start = date_trunc('month', CURRENT_DATE)::date`
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_QP}, ${KEY_QP}, 'harness-wrap-quota-py')`
+await insertKeyRow(sql, ACCT_QP, KEY_QP, 'harness-wrap-quota-py')
 const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW, AGENTBILL_QUOTA_KEY: KEY_QP } }) : null
 let pyOut = null
 try { pyOut = JSON.parse((pyRun?.stdout ?? '').trim().split('\n').pop()) } catch {}
@@ -3984,7 +3994,7 @@ const OTHERJ = '00000000-0000-0000-0000-0000000000dd'
 const OTHERKEYJ = shapedKey('other-account-jobs')
 await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
           VALUES (${OTHERJ}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHERJ}, ${OTHERKEYJ}, 'other-jobs') ON CONFLICT DO NOTHING`
+await insertKeyRow(sql, OTHERJ, OTHERKEYJ, 'other-jobs', { ifAbsent: true })
 const authJ = (key) => ({ 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' })
 const preJ = (body, key = KEYJ) => fetch(`${API}/preflight`, { method: 'POST', headers: authJ(key), body: JSON.stringify(body) })
   .then(async r => ({ status: r.status, body: await r.json() }))
@@ -4332,24 +4342,24 @@ ok('[secfix S1] migrate-multitenancy.sql no longer inserts any API key', !/INSER
 const LEGACY_HASH_S = 'aa759fef4307b14170837d3c226ac284414ff2c7c7e41ce8a2194faa5a2c8b42'
 const [legacyLiveS] = await sql`
   SELECT count(*)::int AS n FROM developer_api_keys
-  WHERE (label = 'legacy-hardcoded-key' OR encode(sha256(convert_to(api_key, 'UTF8')), 'hex') = ${LEGACY_HASH_S})
+  WHERE (label = 'legacy-hardcoded-key' OR key_hash = ${LEGACY_HASH_S})
     AND (revoked_at IS NULL OR revoked_at > NOW())`
 ok('[secfix S1] after the schema chain, no live row carries the seeded key or its label', legacyLiveS.n === 0, `${legacyLiveS.n} live`)
 // A database built from an older checkout still has the row: plant one and apply 019 to it.
 const plantedS = shapedKey(`legacy-plant-${Date.now()}`)
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT}, ${plantedS}, 'legacy-hardcoded-key')`
+await insertKeyRow(sql, ACCT, plantedS, 'legacy-hardcoded-key')
 const beforeS1 = await getSX(API, '/keys', plantedS)
 const mig019 = readS(`${ROOT_S}src/db/migrations/019_revoke_legacy_hardcoded_key.sql`, 'utf8')
 await sql.unsafe(mig019)
 const afterS1 = await getSX(API, '/keys', plantedS)
 ok('[secfix S1] migration 019 revokes a planted legacy row: it authenticated before, key_revoked after',
    beforeS1.status === 200 && afterS1.status === 401 && afterS1.body?.error === 'key_revoked', `${beforeS1.status} -> ${afterS1.status} ${JSON.stringify(afterS1.body)}`)
-const [rev1S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE api_key = ${plantedS}`
+const [rev1S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE key_hash = ${keyHash(plantedS)}`
 await settleS(20)
 await sql.unsafe(mig019)
-const [rev2S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE api_key = ${plantedS}`
+const [rev2S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE key_hash = ${keyHash(plantedS)}`
 ok('[secfix S1] and 019 is idempotent: a second run leaves revoked_at as it was', rev1S?.revokedAt != null && rev1S.revokedAt.getTime() === rev2S?.revokedAt?.getTime(), `${rev1S?.revokedAt} ${rev2S?.revokedAt}`)
-await sql`DELETE FROM developer_api_keys WHERE api_key = ${plantedS}`
+await sql`DELETE FROM developer_api_keys WHERE key_hash = ${keyHash(plantedS)}`
 
 // ------------------------------------------------ S2: shape before counters, bounded counters
 const { createLimiter, authFailureLimiter } = await import('../../dist/lib/rate-limiter.js')
@@ -4373,7 +4383,7 @@ ok('[secfix S2] 2,000 distinct malformed tokens are each a 401 unauthorized, non
 ok('[secfix S2] the real key still works after them', await alive(KEY) === 200)
 const authSrcS = readS(`${ROOT_S}src/middleware/auth.ts`, 'utf8')
 const iShape = authSrcS.indexOf('if (!isKeyShaped(token))'), iBlocked = authSrcS.indexOf('authFailureLimiter.blocked(network)')
-const iLookup = authSrcS.indexOf('WHERE k.api_key = ${token}'), iKeyRate = authSrcS.indexOf('checkRateLimit(rows[0].id')
+const iLookup = authSrcS.indexOf('WHERE k.key_hash = ${hashKey(token)}'), iKeyRate = authSrcS.indexOf('checkRateLimit(rows[0].id')
 ok('[secfix S2] auth.ts order: shape, then the network failure check, then the lookup, then the per-key limit by key id',
    iShape > 0 && iShape < iBlocked && iBlocked < iLookup && iLookup < iKeyRate, `${iShape} ${iBlocked} ${iLookup} ${iKeyRate}`)
 
@@ -4381,7 +4391,7 @@ ok('[secfix S2] auth.ts order: shape, then the network failure check, then the l
 const ACCT_S16 = '00000000-0000-0000-0000-00000000516a'
 await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_S16}, 'free', ${`secfix-s16-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
 const keysS16 = [1, 2, 3].map((n) => shapedKey(`s16-${n}-${Date.now()}`))
-for (const k of keysS16) await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_S16}, ${k}, 'secfix-s16')`
+for (const k of keysS16) await insertKeyRow(sql, ACCT_S16, k, 'secfix-s16')
 const srvS = await bootS({ NODE_ENV: 'test', DATABASE_SSL: 'disable', AUTH_FAILURES_PER_MINUTE: '10', RATE_LIMIT_PER_MINUTE: '5', RATE_LIMIT_ACCOUNT_PER_MINUTE: '8' }, PORT_S)
 ok('[secfix] a second server with production-shaped limits started', !srvS.exited && !srvS.timedOut, srvS.out().slice(-300))
 const netA = { 'fly-client-ip': '198.51.100.21' }, netB = { 'fly-client-ip': '198.51.100.22' }
@@ -4417,8 +4427,9 @@ await stopS(srvS)
 const ACCT_PG = '00000000-0000-0000-0000-0000000005a9'
 await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_PG}, 'free', ${`secfix-pg-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
 const KEY_PG = shapedKey(`pg-${Date.now()}`)
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_PG}, ${KEY_PG}, 'pg-1')`
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_PG}, ${shapedKey(`pg2-${Date.now()}`)}, 'pg-2'), (${ACCT_PG}, ${shapedKey(`pg3-${Date.now()}`)}, 'pg-3')`
+await insertKeyRow(sql, ACCT_PG, KEY_PG, 'pg-1')
+await insertKeyRow(sql, ACCT_PG, shapedKey(`pg2-${Date.now()}`), 'pg-2')
+await insertKeyRow(sql, ACCT_PG, shapedKey(`pg3-${Date.now()}`), 'pg-3')
 await sql`INSERT INTO customers (account_id, customer_ref, created_at)
           SELECT ${ACCT_PG}, 'c-' || g, now() - (g || ' seconds')::interval FROM generate_series(1, 205) g`
 const c1S = await getSX(API, '/customers', KEY_PG)
@@ -4577,7 +4588,7 @@ ok('[secfix S8] a customer_id carrying markup is escaped in the alert body and s
 const ACCT_S8 = '00000000-0000-0000-0000-0000000005e8'
 await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_S8}, 'free', ${`secfix-s8-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
 const KEY_S8 = shapedKey(`s8-${Date.now()}`)
-await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_S8}, ${KEY_S8}, 's8')`
+await insertKeyRow(sql, ACCT_S8, KEY_S8, 's8')
 for (let i = 0; i < 6; i++) {
   await postS(API, '/events', { customer_id: `s8-${i}-${evilRef}`, event_type: 'run', idempotency_key: `s8-${i}-${Date.now()}`, units: 900 }, KEY_S8)
 }
@@ -4762,6 +4773,17 @@ await mcpGates({
   serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
   legacyKey: KEY, legacyAccount: ACCT,
 })
+
+// ------------------------------------------------ [keyhash] API keys stored hashed (security batch B, 2026-09-25), in its own file
+const { keyhashGates, keyhashFinalGates } = await import('./keyhash-gates.mjs')
+await keyhashGates({
+  API, sql, ok, bootS, stopS, portS: PORT_S, adminCookie, root: ROOT_S,
+  outbox: process.env.MAIL_TEST_OUTBOX,
+  preKey: process.env.PRE_026_KEY, preAccount: process.env.PRE_026_ACCOUNT,
+})
+// Last, so every mail and every log line of the run is in what they read.
+await new Promise((r) => setTimeout(r, 500))
+keyhashFinalGates({ ok, serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log', outbox: process.env.MAIL_TEST_OUTBOX })
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
