@@ -91,7 +91,7 @@ export function softwareLd(): unknown {
       'agent_id is an attribution label carried on tasks, steps and refusals and filterable on GET /tasks and GET /decisions. No budget is bound to it.',
       'GET /decisions returns the decision log: every refusal, and every record that landed past a ceiling, each row holding the literal response body the SDK received.',
       'POST /step records a named step and flags it when its units exceed twice the baseline of the last thirty samples, once at least five exist.',
-      'API keys can be rotated, which issues a new key and keeps the old one working for 24 hours, and revoked, which stops it authenticating on the next request.',
+      'API keys can be rotated, which issues a new key and keeps the old one working for an hour by default, and revoked, which stops it authenticating on the next request.',
       'Python and Node SDKs plus an MCP server exposing preflight and record_event. Your code calls the API next to your provider call; there is no proxy or gateway endpoint for provider traffic to route through.',
     ],
     offers: PLAN_ORDER.map((tier) => ({

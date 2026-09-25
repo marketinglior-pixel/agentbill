@@ -65,14 +65,18 @@ Revoke it. From the next request on, the key no longer authenticates:
 curl -X POST https://agentbill.dev/keys/revoke \
   -H "Authorization: Bearer <a key on the same account>" \
   -H "Content-Type: application/json" \
-  -d '{"key_prefix":"<the leading 8 or more characters of the leaked key>"}'
+  -d '{"key_prefix":"<the leaked key, or the agb_1234…abcd form GET /keys shows>"}'
 ```
 
-Or open the console at https://agentbill.dev/app, where the keys view lists
-every key on the account. If you have lost every key, https://agentbill.dev/recover
-sends a single-use link to the account's email address.
+`GET /keys` lists every key on the account by its id and its display form,
+`agb_1234…abcd`; it never returns a key itself. Or open the console at
+https://agentbill.dev/app, whose keys view lists the same and has "Revoke all
+keys" (`POST /keys/revoke-all` with `{"confirm": true}` from the API). If you
+have lost every key, https://agentbill.dev/recover sends a single-use link to
+the account's email address, which makes a new key.
 
-`POST /keys/rotate` issues a new key and keeps the old one working for 24 hours,
+`POST /keys/rotate` issues a new key and keeps the old one working for a grace
+window, one hour unless you pass `grace_minutes` (`0` revokes it at once),
 which is for planned rotation. For a leak, revoke.
 
 ## What the clients send

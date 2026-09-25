@@ -55,7 +55,7 @@ import { HERO_LOOP_MP4, HERO_POSTER_JPG } from './lib/hero-video.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 import { llmsTxt, llmsFullTxt } from './lib/llms.js'
-import { redactUrl, serializeRequest } from './lib/log-redact.js'
+import { redactUrl, serializeRequest, redactingStream } from './lib/log-redact.js'
 import { assertProductionSecrets } from './lib/secrets.js'
 
 // Refuses to start in production with a session or admin secret short enough
@@ -66,7 +66,9 @@ const app = Fastify({
   // The request line in every log entry is the path alone, with a recovery
   // token replaced (./lib/log-redact.ts). The default wrote req.url whole,
   // so each click on a recovery link left a live token in the log.
-  logger: { serializers: { req: serializeRequest as never } },
+  // Every line also passes redactingStream, which replaces anything shaped
+  // like an API key (security batch B, 2026-09-25).
+  logger: { serializers: { req: serializeRequest as never }, stream: redactingStream },
   // A malformed percent-encoding in the path (/%) fails inside the router,
   // before any hook or setErrorHandler this app registers can see it, and
   // Fastify's default answer is a JSON body that echoes the URL back to the

@@ -47,11 +47,13 @@ export async function securityRoute(app: FastifyInstance) {
 curl -X POST https://agentbill.dev/keys/revoke \\
   -H "Authorization: Bearer agb_another_key_on_the_account" \\
   -H "Content-Type: application/json" \\
-  -d '{"key_prefix":"agb_1234abcd"}'</pre></div>
-  <p>The console's keys view at <a href="/app">agentbill.dev/app</a> lists every key on the account.
-     If you have no key left at all, <a href="/recover">agentbill.dev/recover</a> sends a single-use
-     link to the account's email address. Rotation (<code class="inline">POST /keys/rotate</code>)
-     keeps the old key working for 24 hours, which is for planned changes; for a leak, revoke.</p>
+  -d '{"key_prefix":"agb_1234…abcd"}'</pre></div>
+  <p>That is the form <code class="inline">GET /keys</code> and the console's keys view at
+     <a href="/app">agentbill.dev/app</a> show each key in; neither ever shows a key itself. The keys
+     view can also revoke every key on the account at once. If you have no key left at all,
+     <a href="/recover">agentbill.dev/recover</a> sends a single-use link to the account's email address,
+     which makes a new key. Rotation (<code class="inline">POST /keys/rotate</code>) keeps the old key
+     working for an hour unless you ask for less, which is for planned changes; for a leak, revoke.</p>
 
   <h2 id="what-the-clients-send">What our code sends from your machine</h2>
   <p>Every request carries your AgentBill key and goes over HTTPS.</p>

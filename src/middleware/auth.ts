@@ -6,10 +6,19 @@ import { ipOrigin } from '../lib/ip-origin.js'
 import { checkRateLimit, checkAccountRateLimit, authFailureLimiter, MAX_REQUESTS, MAX_ACCOUNT_REQUESTS } from '../lib/rate-limiter.js'
 import type { FastifyBaseLogger } from 'fastify'
 import { mailUser } from '../lib/mail.js'
+import { hashKey, maskKey } from '../lib/api-keys.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
     accountId: string
+    /**
+     * The key that authenticated this request (developer_api_keys.id), and the
+     * latest moment a key it mints may live to: the earlier of its own expiry
+     * and the end of its rotation grace, or null when it has neither. Set by
+     * authenticateKey() only; a console session never sets them.
+     */
+    apiKeyId?: string
+    apiKeyOutlivesAt?: Date | null
   }
   interface FastifyContextConfig {
     /**
@@ -65,8 +74,7 @@ const ALERTS_PER_DAY = 5
 // by the account list. Counted, never refused: this is the notification that
 // says a key may have been taken, and a ceiling that can drop it would suppress
 // exactly the mail somebody needs most.
-async function sendIpAlert(log: FastifyBaseLogger, email: string, apiKey: string, origin: string, ip: string) {
-  const masked = apiKey.slice(0, 8) + '...'
+async function sendIpAlert(log: FastifyBaseLogger, email: string, masked: string, origin: string, ip: string) {
   await mailUser(log, 'account', email, {
     subject: `AgentBill: your API key was used from a new network`,
     // origin is built from parsed integers by ipOrigin(), and ip is guarded by
@@ -104,7 +112,7 @@ async function sendIpAlert(log: FastifyBaseLogger, email: string, apiKey: string
 async function noteIpOrigin(
   keyId: string,
   email: string,
-  apiKey: string,
+  masked: string,
   ip: string,
   log: FastifyBaseLogger,
 ) {
@@ -157,7 +165,7 @@ async function noteIpOrigin(
   }
 
   await sql`UPDATE api_key_ip_origins SET alerted_at = NOW() WHERE id = ${claimed[0]!.id}`
-  await sendIpAlert(log, email, apiKey, origin, ip)
+  await sendIpAlert(log, email, masked, origin, ip)
 }
 
 export function registerAuth(app: FastifyInstance) {
@@ -263,8 +271,15 @@ export async function authenticateKey(request: FastifyRequest, reply: FastifyRep
     // Measured at ~120ms against a local container, and app and database are
     // different hosts in production. The clock that writes the timestamp is the
     // clock that must read it.
+    //
+    // By the hash since 2026-09-25 (migration 026, src/lib/api-keys.ts): the
+    // unique index on key_hash answers, so the secret itself is never compared
+    // by anything whose time depends on how much of it matched.
     const rows = await sql`
-      SELECT k.id, k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip,
+      SELECT k.id, k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, k.key_prefix, k.key_last4,
+             -- What a key minted by this one may not outlive: its expiry, or
+             -- the end of its rotation grace. LEAST ignores NULLs.
+             LEAST(k.expires_at, CASE WHEN k.revoked_at > NOW() THEN k.revoked_at END) AS outlives_at,
              -- An account created by a sign-in beside a legacy account that
              -- holds the same address has no accounts.email (src/lib/users.ts);
              -- its owner's verified address is where its alerts go.
@@ -273,7 +288,7 @@ export async function authenticateKey(request: FastifyRequest, reply: FastifyRep
              (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired
       FROM developer_api_keys k
       JOIN accounts a ON a.id = k.account_id
-      WHERE k.api_key = ${token}
+      WHERE k.key_hash = ${hashKey(token)}
       LIMIT 1
     `
 
@@ -341,17 +356,19 @@ export async function authenticateKey(request: FastifyRequest, reply: FastifyRep
       sql`
         UPDATE developer_api_keys
         SET last_seen_ip = ${clientIp}
-        WHERE api_key = ${token}
+        WHERE id = ${rows[0].id}
       `.catch(() => {})
     }
 
     // Fire and forget like the write above, but logged rather than swallowed:
     // the failure mode being fixed here was invisible for two days.
     if (clientIp) {
-      noteIpOrigin(rows[0].id as string, rows[0].email as string, token, clientIp, request.log)
+      noteIpOrigin(rows[0].id as string, rows[0].email as string, maskKey(rows[0].keyPrefix as string, rows[0].keyLast4 as string), clientIp, request.log)
         .catch((err) => request.log.warn({ err }, 'ip origin check failed'))
     }
 
     request.accountId = rows[0].accountId as string
+    request.apiKeyId = rows[0].id as string
+    request.apiKeyOutlivesAt = (rows[0].outlivesAt as Date | null) ?? null
     return true
 }

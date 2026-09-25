@@ -17,14 +17,36 @@
 //
 // So every logged URL is the path alone, with either token replaced.
 
-/** The URL as it may be logged: no query string, no recovery or sign-in token. */
+/**
+ * Anything shaped like an API key, anywhere in a log line (security batch B,
+ * 2026-09-25). A key is never logged on purpose: the request serializer keeps
+ * no headers and no body, and every key-making route logs the account, not
+ * the key. This is the net under that: a key in a path (/keys/agb_..., a
+ * mistyped client), in an error message a dependency wrote, or in whatever a
+ * future log call passes, leaves as agb_[redacted] and never as itself.
+ */
+const KEY_ANYWHERE = /agb_[0-9a-f]{48}/g
+export const redactKeys = (s: string): string => s.replace(KEY_ANYWHERE, 'agb_[redacted]')
+
+/** The URL as it may be logged: no query string, no recovery or sign-in token, no key. */
 export function redactUrl(url: string | undefined): string {
   if (!url) return ''
   const q = url.search(/[?#]/)
   const path = q === -1 ? url : url.slice(0, q)
-  return path
+  return redactKeys(path
     .replace(/^(\/recover\/)[^/]+/i, '$1[redacted]')
-    .replace(/^(\/+auth\/+email\/+)[^/]+/i, '$1[redacted]')
+    .replace(/^(\/+auth\/+email\/+)[^/]+/i, '$1[redacted]'))
+}
+
+/**
+ * The logger's destination: stdout, with every key-shaped string replaced
+ * on the way out. Pino hands each finished line to write(), so this sees the
+ * serialized entry whole, whichever field the key was in.
+ */
+export const redactingStream = {
+  write(line: string): void {
+    process.stdout.write(redactKeys(line))
+  },
 }
 
 interface ReqLike {

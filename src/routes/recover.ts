@@ -10,6 +10,7 @@ import { limiterKey } from '../lib/client-ip.js'
 import { allowRecoverAttempt, recoveryInCooldown, markRecoverySent, clearRecoveryMark } from '../lib/register-limiter.js'
 import { ORIGIN } from '../ui/site.js'
 import { mailUser } from '../lib/mail.js'
+import { insertKey } from '../lib/api-keys.js'
 
 // Getting back into an account whose key is gone.
 //
@@ -23,10 +24,19 @@ import { mailUser } from '../lib/mail.js'
 // then offers exactly two things, because a lost key and a leaked key are
 // opposite problems:
 //
-//   reveal   you lost your copy. Whatever is deployed keeps running.
-//   replace  the key may have leaked. It stops working now, and the account
-//            gets a new one. Anything still using the old key is refused until
-//            it is redeployed, which is the point.
+//   add      you lost your copy. The account gets a NEW key, shown once, and
+//            every key it already had keeps working, so whatever is deployed
+//            keeps running.
+//   replace  the key may have leaked. Every key on the account stops working
+//            now, and the account gets a new one. Anything still using an old
+//            key is refused until it is redeployed, which is the point.
+//
+// Until 2026-09-25 the first choice was "reveal": it showed the existing key.
+// It cannot any more, and must not: since migration 026 the server looks keys
+// up by a hash (src/lib/api-keys.ts), and a key is shown once, when it is
+// made. So recovery makes one. A form rendered before that change and posted
+// after it says action=reveal; it is read as add, which is what the reader of
+// that page wanted (a key in hand, nothing deployed broken).
 //
 // A previous version of this mailed the live API key to whoever typed the
 // address into the register form. That reached the owner's mailbox rather than
@@ -49,10 +59,6 @@ const RequestBody = z.object({
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
 
 const hashToken = (t: string) => createHash('sha256').update(t).digest('hex')
-
-function generateApiKey(): string {
-  return 'agb_' + randomBytes(24).toString('hex')
-}
 
 /**
  * Mint a link for an account, retiring that account's other outstanding links
@@ -150,7 +156,7 @@ async function sendRecoveryEmail(log: FastifyBaseLogger, email: string, token: s
     subject: 'Get back into your AgentBill account',
     html: `
         <p>Someone asked for a way back into the AgentBill account registered to this address.</p>
-        <p><a href="${link}">Open this link</a> to see your current API key, or to replace it with a new one.</p>
+        <p><a href="${link}">Open this link</a> to get a new API key. You choose there whether the keys you have now keep working.</p>
         <p>It works once and expires in ${TTL_MINUTES} minutes. It carries no key of its own.</p>
         <p>If this was not you, nothing has happened yet and you can ignore this. The link
            expires on its own, and your key has not changed.</p>
@@ -274,8 +280,8 @@ export async function recoverRoute(app: FastifyInstance) {
     }
     return secure(reply).send(page('Recover access', `
   <h1>Get back into your account.</h1>
-  <p class="lede">Your API key is shown once when you register, and it is also how you open the
-     console. If you no longer have it, put in the address you registered with.</p>
+  <p class="lede">An API key is shown once, when it is made. If you no longer have yours, put in the
+     address you registered with and we will send a link that makes you a new one.</p>
   <form class="rec-form" method="POST" action="/recover">
     <label class="cv-flabel" for="email">Email</label>
     <input class="cv-field" id="email" name="email" type="email" placeholder="you@company.com" required autocomplete="email" autofocus />
@@ -348,26 +354,27 @@ export async function recoverRoute(app: FastifyInstance) {
 
     return secure(reply).send(page('Recover access', `
   <h1>You are back in.</h1>
-  <p class="lede">This link is good for one of the two things below, then it stops working.</p>
+  <p class="lede">Either way you get a new API key, shown once on the next screen. An existing key is
+     never shown again. This link is good for one of the two, then it stops working.</p>
 
   <div class="cv-panel choices">
   <div class="cv-card choice">
     <h2>Lost your copy of the key</h2>
-    <p>Nothing has leaked, you just do not have it any more. Whatever is already deployed
-       keeps running on it.</p>
+    <p>Nothing has leaked, you just do not have it any more. You get a new key, and the keys the
+       account already has keep working, so whatever is deployed keeps running.</p>
     <form method="POST" action="/recover/${token}">
-      <input type="hidden" name="action" value="reveal" />
-      <button class="btn" type="submit">Show my key</button>
+      <input type="hidden" name="action" value="add" />
+      <button class="btn" type="submit">Get a new key (the old ones keep working)</button>
     </form>
   </div>
 
   <div class="cv-card choice">
     <h2>The key may have leaked</h2>
-    <p>The account gets a new key and the old one stops working straight away. Any agent still
-       calling with the old key is refused until you deploy the new one.</p>
+    <p>You get a new key and every key the account had stops working straight away. Any agent still
+       calling with an old key is refused until you deploy the new one.</p>
     <form method="POST" action="/recover/${token}">
       <input type="hidden" name="action" value="replace" />
-      <button class="btn-ghost" type="submit">Replace my key</button>
+      <button class="btn-ghost" type="submit">Replace my key (the old ones stop working)</button>
     </form>
   </div>
   </div>`))
@@ -377,58 +384,41 @@ export async function recoverRoute(app: FastifyInstance) {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
 
     const token = (request.params as { token: string }).token
-    const action = (request.body as Record<string, unknown>)?.action
-    if (!TOKEN_RE.test(token) || (action !== 'reveal' && action !== 'replace')) {
+    const said = (request.body as Record<string, unknown>)?.action
+    // 'reveal' is the choice a page rendered before 2026-09-25 posts; it is
+    // read as 'add' (see the top of this file).
+    const action = said === 'replace' ? 'replace' : said === 'add' || said === 'reveal' ? 'add' : null
+    if (!TOKEN_RE.test(token) || !action) {
       return secure(reply).code(410).send(page('Link expired', deadLink, true))
     }
 
     const accountId = await consumeToken(token)
     if (!accountId) return secure(reply).code(410).send(page('Link expired', deadLink, true))
 
-    if (action === 'reveal') {
-      // Every key still good, because an account may hold more than one and the
-      // reader needs whichever one their deployment is using.
-      const rows = await sql`
-        SELECT api_key, label FROM developer_api_keys
-        WHERE account_id = ${accountId}
-          AND (revoked_at IS NULL OR revoked_at > NOW())
-          AND (expires_at IS NULL OR expires_at > NOW())
-        ORDER BY created_at ASC
-      `
-      if (!rows.length) {
-        // Recoverable rather than a dead end: the account is real, it simply has
-        // nothing live to show, so mint one instead of sending them away.
-        const fresh = generateApiKey()
-        await sql`
-          INSERT INTO developer_api_keys (account_id, api_key, label)
-          VALUES (${accountId}, ${fresh}, 'recovered')
-        `
-        return secure(reply).send(page('Your API key', keyPage([{ apiKey: fresh, label: 'recovered' }],
-          'This account had no active key left, so here is a new one.')))
-      }
-      return secure(reply).send(page('Your API key', keyPage(rows as any,
-        rows.length > 1 ? 'Every key currently active on the account.' : '')))
+    if (action === 'add') {
+      // A new key beside the ones the account has. Nothing is revoked.
+      const minted = await insertKey(sql, { accountId, label: 'recovered' })
+      request.log.info({ accountId }, 'account key added through recovery')
+      return secure(reply).send(page('Your new API key', keyPage(minted.key,
+        'The keys this account already had still work.')))
     }
 
-    // Replace. Revoke NOW rather than with the 24h grace /keys/rotate uses:
-    // this branch exists for a key that may be in someone else's hands, and a
-    // grace window is exactly what you do not want there. Someone who only lost
-    // their copy has the other button.
-    const fresh = generateApiKey()
-    await sql.begin(async (tx) => {
+    // Replace. Revoke NOW rather than with the grace /keys/rotate gives: this
+    // branch exists for a key that may be in someone else's hands, and a grace
+    // window is exactly what you do not want there. Someone who only lost
+    // their copy has the other button. One transaction, so there is never a
+    // moment with the old keys dead and no new one.
+    const minted = await sql.begin(async (tx) => {
       await tx`
         UPDATE developer_api_keys
         SET revoked_at = NOW()
         WHERE account_id = ${accountId} AND (revoked_at IS NULL OR revoked_at > NOW())
       `
-      await tx`
-        INSERT INTO developer_api_keys (account_id, api_key, label)
-        VALUES (${accountId}, ${fresh}, 'recovered')
-      `
+      return insertKey(tx, { accountId, label: 'recovered' })
     })
     request.log.info({ accountId }, 'account key replaced through recovery')
-    return secure(reply).send(page('Your new API key', keyPage([{ apiKey: fresh, label: 'recovered' }],
-      'The old key stopped working just now. Deploy this one wherever the old one was.')))
+    return secure(reply).send(page('Your new API key', keyPage(minted.key,
+      'Every key this account had stopped working just now. Deploy this one wherever the old ones were.')))
   })
 }
 
@@ -448,18 +438,19 @@ export async function recoverRoute(app: FastifyInstance) {
  * Both blocks are complete on purpose. A gap in a line a reader copies is how a
  * key became agb_agb_... and a 401 on a first run (2026-09-09).
  */
-function keyPage(keys: { apiKey: string; label: string | null }[], note: string): string {
+function keyPage(key: string, note: string): string {
   return `
-  <h1>Here is your key.</h1>
-  <p class="lede">Copy it now. This page will not show it again, and the link you used is spent.
-     ${note}</p>
-  ${keys.map((k) => `<p class="cv-plate"><span>${k.apiKey}</span></p>`).join('\n  ')}
+  <h1>Here is your new key.</h1>
+  <p class="lede">Copy it now. This page will not show it again, nothing else will, and the link you
+     used is spent. ${note}</p>
+  <p class="cv-plate"><span>${key}</span></p>
   <p>Nothing here needs it pasted back in: your code is what sends it, with every call. In Python or
      Node that means <code>AGENTBILL_API_KEY</code>, set in the terminal your code runs in, and this
      line does it with the key already in place:</p>
-  ${keys.map((k) => `<p class="cv-plate"><span>export AGENTBILL_API_KEY=${k.apiKey}</span></p>`).join('\n  ')}
+  <p class="cv-plate"><span>export AGENTBILL_API_KEY=${key}</span></p>
   <p>No terminal? Pass the key to <code>AgentBillClient(api_key=...)</code>, or send it as an
      <code>Authorization: Bearer</code> header from whatever makes the call. The same value opens
-     <a href="/app">your console</a>, which asks for it once and then does not show it.</p>
+     <a href="/app">your console</a>, which asks for it once and then shows only its first and last
+     characters.</p>
   <p class="fine">Lost it again? <a href="/recover">Ask for another link</a>.</p>`
 }
