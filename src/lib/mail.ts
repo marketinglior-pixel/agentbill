@@ -503,7 +503,7 @@ export async function forwardInbound(emailId: string): Promise<ForwardResult> {
     ].filter(Boolean)
     const text = `Forwarded from hello@agentbill.dev. Reply to answer the sender.\n\n${head.join('\n')}\n\n${e.text ?? ''}`
     const html =
-      `<div style="font:13px/1.5 system-ui,sans-serif;color:#555;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:12px">` +
+      `<div style="font:13px/1.5 system-ui,sans-serif;opacity:.7;border-bottom:1px solid;padding-bottom:8px;margin-bottom:12px">` +
       `Forwarded from hello@agentbill.dev. Reply to answer the sender.<br>${head.map(escHtml).join('<br>')}</div>` +
       (e.html ? e.html : `<pre style="white-space:pre-wrap;font:14px/1.5 system-ui,sans-serif">${escHtml(e.text ?? '')}</pre>`)
     const sent = await resend.emails.send({ from: FORWARD_FROM, to: ownerEmail, replyTo, subject, text, html })
