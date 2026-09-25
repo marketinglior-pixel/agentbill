@@ -18,12 +18,10 @@ CREATE TABLE IF NOT EXISTS developer_api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_key
   ON developer_api_keys (api_key);
 
--- Seed: migrate existing hardcoded key to the DB
--- so the current setup keeps working after migration
-INSERT INTO developer_api_keys (account_id, api_key, label)
-VALUES (
-  '00000000-0000-0000-0000-000000000001',
-  'df9b76cf2027fa0850fa5328f19acd7b7bcbbf09a988727e2eddcf7a4f53e0c6',
-  'legacy-hardcoded-key'
-)
-ON CONFLICT (api_key) DO NOTHING;
+-- There was a seed INSERT here until 2026-09-25: a working API key, written
+-- out in this public file, attached to the seed account ...0001 under the label
+-- 'legacy-hardcoded-key'. Every database built from this chain had it, and it
+-- was live on production until it was revoked by hand on 2026-09-25. It is gone
+-- from this file, and migration 019 revokes the row wherever an older copy of
+-- this file already created it. A fresh schema needs no seed key: accounts get
+-- their keys from POST /register.
