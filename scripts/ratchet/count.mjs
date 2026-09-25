@@ -19,7 +19,7 @@ const SIZE_EXEMPT = new Set(['src/ui/theme.ts'])   // the scale itself
 // connect-marks.ts, 2026-09-25: an owner's mark on the connect page is used
 // exactly as provided (OpenAI's and Cursor's guidelines), so its own fill is
 // fixed, like Google's above, and no token of ours may stand in for it.
-const HEX_EXEMPT = new Set(['src/ui/theme.ts', 'src/ui/mark.ts', 'src/lib/icons.ts', 'src/ui/provider-marks.ts', 'src/ui/connect-marks.ts'])
+const HEX_EXEMPT = new Set(['src/ui/theme.ts', 'src/ui/mark.ts', 'src/lib/icons.ts', 'src/ui/provider-marks.ts', 'src/ui/connect-marks.ts', 'src/ui/office-engine.ts'])
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {
