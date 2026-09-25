@@ -122,7 +122,7 @@ export async function getCheckoutMetadata(checkoutId: string): Promise<Record<st
  * product maps to, by the same function the webhook uses, so the page and the
  * upgrade cannot disagree about what was sold.
  */
-export type CheckoutSummary = { status: string; accountId: string | null; plan: string }
+export type CheckoutSummary = { status: string; accountId: string | null; plan: string | null }
 
 export async function getCheckoutSummary(checkoutId: string): Promise<CheckoutSummary | null> {
   const j = await fetchCheckout(checkoutId)
@@ -169,17 +169,35 @@ export const PLAN_PRICES: Record<string, number> = {
 /** Display order for the four tiers wherever they are listed. */
 export const PLAN_ORDER = ['free', 'builder', 'team', 'scale'] as const
 
-const TIER_PRODUCTS: Record<string, string> = {
-  [process.env.POLAR_PRODUCT_ID_BUILDER ?? '__builder_unset']: 'builder',
-  [process.env.POLAR_PRODUCT_ID_TEAM ?? '__team_unset']: 'team',
-  [process.env.POLAR_PRODUCT_ID_SCALE ?? '__scale_unset']: 'scale',
+// The Polar products this server sells, and the plan each one buys. Built only
+// from ids that are actually configured, so an unset variable can never make
+// the empty string (or a placeholder) a product that upgrades anything.
+//
+// POLAR_PRODUCT_ID_PAID is the legacy pay-as-you-go product, if one is still on
+// sale. Unset (the default), nothing maps to 'paid' any more.
+function tierProducts(): Map<string, string> {
+  const m = new Map<string, string>()
+  const add = (id: string | undefined, plan: string) => { if (id && id.trim()) m.set(id.trim(), plan) }
+  add(process.env.POLAR_PRODUCT_ID_BUILDER, 'builder')
+  add(process.env.POLAR_PRODUCT_ID_TEAM, 'team')
+  add(process.env.POLAR_PRODUCT_ID_SCALE, 'scale')
+  add(process.env.POLAR_PRODUCT_ID_PAID, 'paid')
+  return m
 }
+const TIER_PRODUCTS = tierProducts()
 
-// Map a Polar product to a plan name. Unknown products fall back to the
-// legacy 'paid' plan so old checkouts keep working.
-export function planFromProductId(productId: string | null | undefined): string {
-  if (!productId) return 'paid'
-  return TIER_PRODUCTS[productId] ?? 'paid'
+/**
+ * The plan a Polar product buys, or null for a product this server does not
+ * sell.
+ *
+ * Until 2026-09-25 an unknown product fell back to 'paid', the legacy plan with
+ * no monthly cap, so any product in the Polar organisation (a $0 test product,
+ * a donation, something added later) upgraded the buyer to unlimited. A product
+ * we did not configure now buys nothing, and the webhook logs it and says so.
+ */
+export function planFromProductId(productId: string | null | undefined): string | null {
+  if (!productId) return null
+  return TIER_PRODUCTS.get(productId) ?? null
 }
 
 

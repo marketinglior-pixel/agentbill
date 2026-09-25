@@ -35,7 +35,7 @@ import { mailOwner, ownerMailReady } from './mail.js'
 /** One email per reason per hour. A sender that retries must not become a mailbox. */
 const COOLDOWN_MS = 60 * 60_000
 
-export type WebhookAlertReason = 'invalid_signature' | 'not_configured' | 'unusable_account_id'
+export type WebhookAlertReason = 'invalid_signature' | 'not_configured' | 'unusable_account_id' | 'unknown_product'
 
 const URGENCY: Record<WebhookAlertReason, string> = {
   invalid_signature: 'Polar retries a 401, so this is recoverable until it stops retrying.',
@@ -47,6 +47,7 @@ const URGENCY: Record<WebhookAlertReason, string> = {
   // 3am alert that overstates its own certainty is the same defect as a metric
   // that cannot name its own source. The customer id travels in the note below,
   // so the reader can settle it in the Polar dashboard in one click.
+  unknown_product: 'A signed Polar event for a product that is not one of the configured tiers (POLAR_PRODUCT_ID_BUILDER, _TEAM, _SCALE, or the legacy _PAID) arrived, and no plan was changed. If a buyer paid for it, they are waiting; if the product is meant to be sold, configure its id and upgrade the account by hand.',
   unusable_account_id: 'A signed Polar event arrived that could not be matched to an account, and answering 200 stopped Polar retrying it. If it was a real purchase, someone paid and was not upgraded; it may instead be a test or a redelivery. This alert cannot tell which. Check the customer below in the Polar dashboard.',
 }
 
