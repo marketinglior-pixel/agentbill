@@ -511,6 +511,15 @@ async function gates({ API, sql, ok, bootS, stopS, portS, serverLog, legacyKey, 
      `${cimdPage.status}`)
   ok('[mcp] a document whose client_id is not its own URL is refused, and a client_id on loopback, a private or metadata address, .internal or plain http is never fetched',
      liar.status === 400 && !liar.headers.get('location') && ssrf.every((r) => r.status === 400 && !r.loc), `${liar.status} ${ssrf.map((r) => r.status).join(',')}`)
+  // The production path. Every client_id above is either the test origin, which
+  // skips the URL rules, or one the rules refuse; none was a public name. A
+  // public name must pass the rules and be refused, if at all, only by what its
+  // document says. Until 2026-09-25 it was refused as "not a public address",
+  // which is how Claude's own connector failed on production.
+  const pubHost = await fetch(cimdQ('https://example.com/agentbill-cimd-gate.json'), { redirect: 'manual', headers: { cookie: personA.cookie, ...newNet() } })
+  const pubHostHtml = await pubHost.text()
+  ok('[mcp] a client_id on a public host name passes the URL rules and is fetched: the refusal names the document, never "not a public address"',
+     pubHost.status === 400 && !pubHostHtml.includes('not a public address') && pubHostHtml.includes('client metadata document'), `${pubHost.status}`)
   await stopS(cimd)
   docServer.close()
 
