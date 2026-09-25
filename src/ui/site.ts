@@ -114,10 +114,14 @@ const INTEGRATIONS = ['Integrations', '/integrations'] as const
 export const PAGES: readonly PageMeta[] = [
   { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-23', priority: 1.0, changefreq: 'weekly' },
   { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-09', priority: 0.8, changefreq: 'monthly' },
-  { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-12', priority: 0.8, changefreq: 'monthly' },
+  { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-25', priority: 0.8, changefreq: 'monthly' },
   // noindex and NOT disallowed, for the same reason as /app and /thanks: a real
   // person follows a link here out of their mailbox, and a Disallowed URL is one
   // whose noindex a crawler never gets to read.
+  // noindex, not disallowed: the sign-in page (2026-09-25). A person follows a
+  // link here from the nav and from their mailbox; nothing on it is a search
+  // answer, and /register is the indexed front door.
+  { path: '/login', section: 'marketing', crumbs: [HOME], crumb: 'Sign in', og: 'default', index: false, updated: '2026-09-25', priority: 0, changefreq: 'yearly' },
   { path: '/recover', section: 'marketing', crumbs: [HOME], crumb: 'Recover access', og: 'default', index: false, updated: '2026-09-09', priority: 0, changefreq: 'yearly' },
 
   { path: '/faq', section: 'docs', crumbs: [HOME], crumb: 'Questions', og: 'docs', index: true, updated: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
@@ -159,7 +163,7 @@ export const PAGES: readonly PageMeta[] = [
   // reachable, and noindex beside a canonical sends two contradictory signals
   // about one URL.
   { path: '/terms', section: 'legal', crumbs: [HOME], crumb: 'Terms', og: 'default', index: true, updated: '2026-08-27', priority: 0.2, changefreq: 'yearly' },
-  { path: '/privacy', section: 'legal', crumbs: [HOME], crumb: 'Privacy', og: 'default', index: true, updated: '2026-09-18', priority: 0.2, changefreq: 'yearly' },
+  { path: '/privacy', section: 'legal', crumbs: [HOME], crumb: 'Privacy', og: 'default', index: true, updated: '2026-09-25', priority: 0.2, changefreq: 'yearly' },
   { path: '/security', section: 'legal', crumbs: [HOME], crumb: 'Security', og: 'default', index: true, updated: '2026-09-25', priority: 0.4, changefreq: 'monthly' },
 
   // Not indexable, and here anyway: robots.txt's Disallow lines are generated

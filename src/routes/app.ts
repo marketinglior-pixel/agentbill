@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { createHmac, timingSafeEqual } from 'crypto'
+import { sessionSecret, hmacHex, readCookie, safeEqual } from '../lib/session-secret.js'
 import { sql } from '../db/index.js'
 import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
 import { limiterKey } from '../lib/client-ip.js'
@@ -20,6 +20,13 @@ import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 import { INSTALL_PY } from '../ui/site.js'
 import { usageByEventType, type EventTypeUsage } from '../lib/usage.js'
+import { readUserSession, CLEAR_USER_COOKIE } from '../lib/user-session.js'
+import { endSessions, linkedProviders } from '../lib/users.js'
+import { configuredProviders, providerConfig, isProvider, newFlow, flowCookie, authorizeUrl, type Provider } from '../lib/oauth.js'
+import { signinPanel, signinFonts, SIGNIN_CSS } from '../ui/signin.js'
+import { GOOGLE_G, GITHUB_MARK } from '../ui/provider-marks.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
+import { randomBytes } from 'crypto'
 
 // /app is the console: the only browser surface a registered user has. It is
 // a workbench with a side rail and seven server-rendered views (overview,
@@ -78,12 +85,16 @@ const APP_CSP = "default-src 'none'; img-src 'self' data:; manifest-src 'self'; 
 // else, a full URL included, is dropped and the login lands on /app as it
 // always has, so this cannot become an open redirect however the query is
 // edited.
+// Exported 2026-09-25: the sign-in routes (src/routes/auth.ts) carry `next`
+// through Google, GitHub and the email link with this same allowlist, so a
+// sign-in cannot become an open redirect either.
 const NEXT_RE = /^\/app(\/upgrade\/(builder|team|scale)|\?view=start)$/
-const safeNext = (v: unknown): string => (typeof v === 'string' && NEXT_RE.test(v) ? v : '')
+export const safeNext = (v: unknown): string => (typeof v === 'string' && NEXT_RE.test(v) ? v : '')
 const TIERS = new Set(['builder', 'team', 'scale'])
 const back = (err: string, next: string) => `/app?err=${err}${next ? `&next=${encodeURIComponent(next)}` : ''}`
 
 type Viewer = {
+  /** The key this console reads as. A user session with no active key yet has ''. */
   keyId: string
   apiKey: string
   keyLabel: string | null
@@ -93,6 +104,21 @@ type Viewer = {
   monthlyCalls: number
   /** The balance every new customer of this account is born with. NULL = no limit. */
   defaultBudgetUnits: number | null
+  /** How this browser signed in: a pasted key (the legacy login) or as a person. */
+  via: 'key' | 'user'
+  /** The person, for a user session; null for a key session. */
+  userId: string | null
+  userEmail: string | null
+  /** The providers the account's owner can sign in with. */
+  linked: string[]
+}
+
+/** The rate bucket for the console's own writes: the key's, as the API uses,
+ *  or the account's when a person is signed in with no key yet. */
+const bucket = (v: Viewer): string => v.keyId || `account:${v.accountId}`
+
+function generateApiKey(): string {
+  return 'agb_' + randomBytes(24).toString('hex')
 }
 
 export async function appRoute(app: FastifyInstance) {
@@ -119,6 +145,7 @@ export async function appRoute(app: FastifyInstance) {
     // reads the same rows and must stay recent whatever the query says.
     const sort: TaskSort = view === 'tasks' && q?.sort === 'used' ? 'used' : 'recent'
     const flash = readFlash(q)
+    const link = typeof q?.link === 'string' && Object.hasOwn(LINK_TEXT, q.link) ? q.link : null
     const viewer = await loadSession(request)
 
     // The sample console is the only place a prospect can see what the product
@@ -134,6 +161,7 @@ export async function appRoute(app: FastifyInstance) {
       }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
     }
+    const providers = configuredProviders()
 
     const data = demo ? demoConsole(filter, RANGES[range].days, sort) : await loadConsole(viewer.accountId, RANGES[range].days, filter, sort)
     // The tasks view's suggested ceilings: the account's own finished jobs,
@@ -141,7 +169,7 @@ export async function appRoute(app: FastifyInstance) {
     const suggest = view !== 'tasks' ? null
       : readSuggest(demo ? demoHistory(data.tasks) : await loadHistory(viewer.accountId), q)
     return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort,
-                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest }))
+                                    flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
   // The console's one write: open a job with a ceiling, or change one. A plain
@@ -171,7 +199,7 @@ export async function appRoute(app: FastifyInstance) {
 
     // The same 100/min bucket the API applies to this key, so the console is
     // not a less-limited path to the same table than the endpoint.
-    if (!checkRateLimit(viewer.keyId).allowed) return fail('rate')
+    if (!checkRateLimit(bucket(viewer)).allowed) return fail('rate')
     if (!isId(ref)) return fail('ref')
     if (agent && !isId(agent)) return fail('agent')
     // Digits only, then the int4 bound the column and the API both enforce.
@@ -188,18 +216,17 @@ export async function appRoute(app: FastifyInstance) {
     return to(`saved=${encodeURIComponent(ref)}${result.row.taskCreated ? '&created=1' : ''}${kept}`)
   })
 
-  // The optional context the signup form used to ask for, asked on the key
-  // screen instead (src/routes/register.ts, 2026-09-19). A fetch from that
-  // screen, on the session cookie the 201 set, so JSON in and JSON out and no
-  // redirect: a redirect would navigate a page whose whole point is a key
-  // shown once. Every field is optional and every field is bounded the way
+  // The optional context the signup form used to ask for (name, what you are
+  // building, language). It was asked on /register's key screen from
+  // 2026-09-19 until that screen left with sign-in (2026-09-25); the endpoint
+  // stays for any client that already posts to it, and JSON in and JSON out. Every field is optional and every field is bounded the way
   // RegisterBody bounds it; the two selects are closed sets, so they are
   // enums here and not free text.
   app.post('/app/profile', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     const viewer = await loadSession(request)
     if (!viewer) return reply.code(401).send({ error: 'unauthorized', message: 'Sign in to the console first.' })
-    if (!checkRateLimit(viewer.keyId).allowed) return reply.code(429).send({ error: 'rate_limited' })
+    if (!checkRateLimit(bucket(viewer)).allowed) return reply.code(429).send({ error: 'rate_limited' })
     const parsed = ProfileBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(422).send({
@@ -257,14 +284,88 @@ export async function appRoute(app: FastifyInstance) {
 
     const cookie = sessionCookieFor(row.id as string)
     if (!cookie) return reply.redirect('/app?err=unavailable', 303)
-    reply.header('Set-Cookie', cookie)
+    // One session per browser: a key sign-in ends a person's sign-in here,
+    // or the console would have two answers to "who is this".
+    reply.header('Set-Cookie', [cookie, CLEAR_USER_COOKIE])
     return reply.redirect(next || '/app', 303)
   })
 
+  // Logout ends the session on the server as well as in this browser, for a
+  // person: the epoch moves on, so a copy of the cookie taken before this
+  // (another device, a stolen jar) stops working on its next request. A key
+  // session still ends only in this browser and with its key, as before.
   app.post('/app/logout', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
-    reply.header('Set-Cookie', `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=0`)
+    const u = readUserSession(request.headers.cookie)
+    if (u) await endSessions(u.userId, u.epoch)
+    reply.header('Set-Cookie', [CLEAR_KEY_COOKIE, CLEAR_USER_COOKIE])
     return reply.redirect('/app', 303)
+  })
+
+  // The first key, made by the person it belongs to. An account created by a
+  // sign-in is born with no key (src/lib/users.ts): the verified address comes
+  // first and the key second, which is the whole of "no key to an unverified
+  // email". The start screen's one button posts here; the answer is a 200 page
+  // that shows the key once, not a redirect, because a key in a redirect's URL
+  // lands in history, Referer headers and every log on the way.
+  //
+  // Only for a person, and only while the account has no working key: a key
+  // session already holds one, and a second key is POST /keys/generate's job.
+  // The row lock makes a double submit one key, not two.
+  app.post('/app/keys/first', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    if (viewer.via !== 'user') return reply.redirect('/app?view=keys', 303)
+    if (!checkRateLimit(bucket(viewer)).allowed) return reply.redirect('/app?view=start&err=rate', 303)
+    const apiKey = await sql.begin(async (tx) => {
+      await tx`SELECT id FROM accounts WHERE id = ${viewer.accountId} FOR UPDATE`
+      const [live] = await tx`
+        SELECT 1 AS ok FROM developer_api_keys
+        WHERE account_id = ${viewer.accountId}
+          AND (revoked_at IS NULL OR revoked_at > NOW())
+          AND (expires_at IS NULL OR expires_at > NOW())
+        LIMIT 1
+      `
+      if (live) return null
+      const k = generateApiKey()
+      await tx`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${viewer.accountId}, ${k}, 'default')`
+      return k
+    })
+    if (!apiKey) return reply.redirect('/app?view=keys', 303)
+    request.log.info({ accountId: viewer.accountId }, 'first key created from the console')
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
+    return reply.send(firstKeyPage(apiKey))
+  })
+
+  // "Connect Google" / "Connect GitHub" in the console. The one way an account
+  // made before sign-in existed gets an owner: somebody signed into it (with
+  // its key, or as its owner) asks for it here, from this origin. Nothing ever
+  // links by matching accounts.email. The account id travels in the signed
+  // flow cookie, never in a URL.
+  //
+  // A 200 hand-off page, not a redirect: APP_CSP's form-action 'self' is
+  // enforced by Chrome on every redirect after a form POST, so a 303 to
+  // accounts.google.com would be blocked at the hop, silently (see APP_CSP).
+  app.post('/app/connect/:provider', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const p = (request.params as { provider: string }).provider
+    const cfg = isProvider(p) ? providerConfig(p) : null
+    if (!cfg) return reply.code(404).send({ error: 'not_found' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    const flow = newFlow(cfg.provider, 'link', '', viewer.accountId)
+    const cookie = flowCookie(flow)
+    if (!cookie) return reply.redirect('/app?err=unavailable', 303)
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', APP_CSP)
+      .header('Set-Cookie', cookie)
+    return reply.send(connectHandoff(cfg.provider, authorizeUrl(cfg, flow)))
   })
 
   // Where the paid buttons on /pricing point. The pricing page cannot see the
@@ -298,24 +399,9 @@ export async function appRoute(app: FastifyInstance) {
 // Session
 // ---------------------------------------------------------------------------
 
-function sessionSecret(): string {
-  const explicit = process.env.APP_SESSION_SECRET
-  if (explicit) return explicit
-  const admin = process.env.ADMIN_SECRET
-  if (!admin) return ''
-  // Derived, so no new secret to provision; rotating ADMIN_SECRET logs everyone out.
-  return createHmac('sha256', admin).update('agentbill-app-session-v1').digest('hex')
-}
-
-function sign(payload: string, secret: string): string {
-  return createHmac('sha256', secret).update(payload).digest('hex')
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const A = Buffer.from(a)
-  const B = Buffer.from(b)
-  return A.length === B.length && timingSafeEqual(A, B)
-}
+// sessionSecret, safeEqual and readCookie live in src/lib/session-secret.ts
+// since 2026-09-25, shared with the user session and the OAuth flow cookie.
+const sign = (payload: string, secret: string): string => hmacHex(secret, payload)
 
 function mintToken(keyId: string, secret: string): string {
   const exp = Math.floor(Date.now() / 1000) + MAX_AGE
@@ -323,20 +409,16 @@ function mintToken(keyId: string, secret: string): string {
   return `${payload}.${sign(payload, secret)}`
 }
 
+/** Ends a key session in this browser. Every sign-in as a person sends it, so
+ *  a browser is never signed in two ways at once. */
+export const CLEAR_KEY_COOKIE = `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=0`
+
 /**
- * The Set-Cookie value that signs a browser into the console as `keyId`.
- *
- * One recipe, because two routes mint it: the login form above, and POST
- * /register (src/routes/register.ts), whose 201 carries this header so the
- * browser that just created an account IS that account on its next /app load.
- * Same name, same Path, so it overwrites a cookie an earlier sign-in left in
- * the browser instead of sitting beside it. That is the whole fix for the
- * 2026-09-11 re-verify: a fresh register followed by the header's Console link
- * opened a dogfood account from the day before, because nothing on the
- * register path had ever touched the cookie.
- *
- * Null when this server has no session secret; the caller then sets nothing,
- * and a 201 with no cookie is still a 201.
+ * The Set-Cookie value that signs a browser into the console as `keyId`: the
+ * legacy key login, POST /app/session. Until 2026-09-25 POST /register minted
+ * it too, on the 201 that carried a new key; register no longer issues keys
+ * (src/routes/register.ts), so the key login is its one caller. Null when this
+ * server has no session secret.
  */
 export function sessionCookieFor(keyId: string): string | null {
   const secret = sessionSecret()
@@ -355,16 +437,55 @@ function verifyToken(token: string, secret: string): string | null {
   return keyId
 }
 
-function readCookie(header: string, name: string): string {
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq === -1) continue
-    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim()
+
+/**
+ * A person's session. The epoch is compared against the row, so a cookie
+ * minted before the last logout is dead however valid its signature. The key
+ * it reads as is the account's oldest working one, or none: an account a
+ * sign-in created has no key until its start screen makes one.
+ */
+async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Viewer | null> {
+  const [row] = await sql`
+    SELECT u.id AS user_id, u.email AS user_email, u.session_epoch,
+           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.default_budget_units
+    FROM users u JOIN accounts a ON a.owner_user_id = u.id
+    WHERE u.id = ${u.userId}
+  `
+  if (!row || Number(row.sessionEpoch) !== u.epoch) return null
+  const [key] = await sql`
+    SELECT id, api_key, label FROM developer_api_keys
+    WHERE account_id = ${row.accountId}
+      AND (revoked_at IS NULL OR revoked_at > NOW())
+      AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY created_at ASC LIMIT 1
+  `
+  return {
+    keyId: (key?.id as string) ?? '',
+    apiKey: (key?.apiKey as string) ?? '',
+    keyLabel: (key?.label as string | null) ?? null,
+    accountId: row.accountId as string,
+    email: (row.email as string | null) ?? null,
+    plan: (row.plan as string) ?? 'free',
+    monthlyCalls: Number(row.monthlyCalls ?? 0),
+    defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
+    via: 'user',
+    userId: row.userId as string,
+    userEmail: row.userEmail as string,
+    linked: await linkedProviders(row.accountId as string),
   }
-  return ''
+}
+
+/** Whether this browser holds a live console session of either kind. */
+export async function hasSession(request: FastifyRequest): Promise<boolean> {
+  return (await loadSession(request)) !== null
 }
 
 async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
+  const u = readUserSession(request.headers.cookie)
+  if (u) {
+    const v = await loadUserViewer(u)
+    if (v) return v
+  }
   const secret = sessionSecret()
   if (!secret) return null
   const token = readCookie(request.headers.cookie ?? '', COOKIE)
@@ -396,6 +517,10 @@ async function loadSession(request: FastifyRequest): Promise<Viewer | null> {
     plan: (row.plan as string) ?? 'free',
     monthlyCalls: Number(row.monthlyCalls ?? 0),
     defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
+    via: 'key',
+    userId: null,
+    userEmail: null,
+    linked: await linkedProviders(row.accountId as string),
   }
 }
 
@@ -877,6 +1002,10 @@ const DEMO_VIEWER: Viewer = {
   plan: 'builder',
   monthlyCalls: 12480,
   defaultBudgetUnits: 5000,
+  via: 'key',
+  userId: null,
+  userEmail: null,
+  linked: [],
 }
 
 // The average ask on a refused sample call. One factor, applied per day, so the
@@ -1472,6 +1601,27 @@ ${MARK_CSS}
           line-height: 1.7; }
   .foot code { font-size: var(--fs-micro); color: var(--muted); }
 
+  /* ---- Sign-in, 2026-09-25. Who this browser is signed in as, on the account
+     card; the ways in on the keys view; the first key on the start screen. */
+  .acct-via { font-family: var(--mono); font-size: var(--fs-chip); color: var(--dim); letter-spacing: var(--track-chip);
+              text-transform: uppercase; }
+  .connects { display: grid; gap: var(--s2); max-width: 360px; }
+  .connects form { display: block; }
+  .ways { padding: var(--s2) 20px var(--s4); display: grid; gap: 0; }
+  .way { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s4); align-items: center;
+         padding: 14px 0; border-bottom: 1px solid var(--row-line); }
+  .way:last-child { border-bottom: 0; }
+  .way p { margin: 0; color: var(--muted); }
+  .way b { color: var(--text); font-weight: 500; }
+  .way form { min-width: 240px; }
+  .firstkey { display: grid; gap: var(--s3); justify-items: start; }
+  .firstkey p { max-width: 70ch; }
+  @media (max-width: ${BP.md}px) {
+    .way { grid-template-columns: minmax(0, 1fr); }
+    .way form { min-width: 0; }
+  }
+${SIGNIN_CSS}
+
   /* ---- Forms: the kit's fields. A save confirmation is one line on a white
      strip; an error is one line of --red, never a filled block. */
   .ok { color: var(--text); background: var(--surface); border: 1px solid var(--card-line); border-radius: var(--r-field);
@@ -1720,7 +1870,7 @@ ${MARK_CSS}
 // reaches them from the site nav's Console link, so they carry the same nav
 // and footer as every other page, and the card is the panel-in-panel frame.
 // No sticky bar: the one action on this page is the card's own button.
-const LOGIN_CSS = `${CHROME_CSS}
+const LOGIN_CSS = `${CHROME_CSS}${SIGNIN_CSS}${COPY_CSS}
   :root { --shell: var(--chrome-w); }
   .login-wrap { max-width: var(--shell); margin: 0 auto; padding: var(--s8) var(--gutter) 0; }
   .login { max-width: 520px; margin: 0 auto; }
@@ -1733,6 +1883,15 @@ const LOGIN_CSS = `${CHROME_CSS}
   .login .fine { font-size: var(--fs-small); color: var(--dim); }
   .login .fine + .fine { margin-top: calc(-1 * var(--s2)); }
   .login .err { margin: 0; }
+  .login .signin form { margin-top: 0; }
+  .login .signin form .btn { margin-top: var(--s3); }
+  /* The key login, under the ways in: the legacy door for the accounts made
+     before sign-in existed, a disclosure so it is there without competing. */
+  .login details summary { cursor: pointer; color: var(--muted); font-size: var(--fs-small); }
+  .login details[open] summary { margin-bottom: var(--s3); }
+  .login .keyform .btn { background: var(--surface3); color: var(--text); }
+  .login .cv-plate { margin: 0; }
+  .login .go { justify-self: start; }
   .site-foot { margin-top: var(--s9); }
   @media (max-width: ${BP.md}px) {
     .login-wrap { padding-top: var(--s6); }
@@ -1747,15 +1906,30 @@ const HEAD = (title: string, css = CSS) => head({
   // robots.txt reads, so the two cannot disagree about this page.
   path: '/app',
   css,
+  // Google Sans for the Google button, only on a server where it is drawn.
+  extraHead: signinFonts(configuredProviders()),
 })
 const LOGIN_HEAD = (title: string) => HEAD(title, LOGIN_CSS)
 
 const ERRORS: Record<string, string> = {
-  key: 'That key was not found. It starts with agb_ and comes from /register.',
+  key: 'That key was not found. It starts with agb_ and was shown once, when it was made.',
   revoked: 'That key has been revoked. Generate a new one with POST /keys/generate.',
   expired: 'That key has expired. Generate a new one with POST /keys/generate.',
   rate: 'Too many attempts from this address. Try again in 15 minutes.',
   unavailable: 'Sign-in is not configured on this server.',
+}
+
+/** What a connect attempt came back with, on the keys view. Codes only: the
+ *  query string is text anyone can put in a link, so nothing free is echoed. */
+const LINK_TEXT: Record<string, string> = {
+  ok: 'Connected. You can sign in to this account with it from now on, and the console no longer needs your key to open.',
+  denied: 'Nothing was connected: the sign-in was cancelled.',
+  expired: 'Nothing was connected: that attempt expired or was started in another browser. Try again.',
+  unverified: 'Nothing was connected: that account has no verified email address.',
+  failed: 'Nothing was connected: the provider did not confirm the sign-in. Try again.',
+  in_use: 'Nothing was connected: that sign-in already opens a different AgentBill account.',
+  taken: 'Nothing was connected: this account already has a different sign-in with that provider.',
+  email_in_use: 'Nothing was connected: that address already signs in to a different AgentBill account.',
 }
 
 /**
@@ -1774,19 +1948,24 @@ ${siteNav('/app', { sticky: false })}
     <div class="login cv-panel"><div class="cv-card">
     ${tier
       ? `<h1>Sign in to buy ${esc(tierName)}.</h1>
-    <p>Paste the API key of the account that should carry the plan. After that you go straight to checkout.
-       No key yet? <a href="/register">Get a free one</a> in 30 seconds, then come back to this page.</p>`
+    <p>Sign in to the account that should carry the plan. After that you go straight to checkout.
+       No account yet? The same sign-in makes one, free.</p>`
       : `<h1>Your console</h1>
-    <p>Live task budgets, every call refused on your behalf, and the exact response your agent got. Paste the API key from <a href="/register">/register</a>.</p>`}
+    <p>Live task budgets, every call refused on your behalf, and the exact response your agent got. Sign in, or sign up: the first sign-in makes a free account.</p>`}
     ${Object.hasOwn(ERRORS, err) ? `<p class="err cv-err">${esc(ERRORS[err])}</p>` : ''}
-    <form method="POST" action="/app/session" autocomplete="off">
-      ${next ? `<input type="hidden" name="next" value="${esc(next)}" />` : ''}
-      <label class="cv-flabel" for="api_key">API key</label>
-      <input id="api_key" class="cv-field m" name="api_key" type="password" placeholder="agb_..." autofocus required />
-      <button class="btn btn-lg" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
-    </form>
-    <p class="fine">The key is exchanged for an HttpOnly cookie that lasts 7 days and ends when the key is revoked. This page loads no script. <a href="/app?demo=1">See it with sample data</a> first.</p>
-    <p class="fine">No longer have the key? <a href="/recover">Get back in</a> with the email you registered with.</p>
+    ${signinPanel({ providers: configuredProviders(), from: 'app', next, submit: 'Email me a sign-in link' })}
+    <details class="keyform"${err && Object.hasOwn(ERRORS, err) ? ' open' : ''}>
+      <summary>Sign in with an API key instead</summary>
+      <form method="POST" action="/app/session" autocomplete="off">
+        ${next ? `<input type="hidden" name="next" value="${esc(next)}" />` : ''}
+        <label class="cv-flabel" for="api_key">API key</label>
+        <input id="api_key" class="cv-field m" name="api_key" type="password" placeholder="agb_..." required />
+        <button class="btn btn-lg" type="submit">${tier ? 'Continue to checkout' : 'Open console'} &rarr;</button>
+      </form>
+      <p class="fine">For an account made before sign-in existed. The key is exchanged for an HttpOnly cookie that lasts 7 days and ends when the key is revoked. Once in, connect Google or GitHub from the keys view and the console opens without the key from then on.</p>
+    </details>
+    <p class="fine">This page loads no script. <a href="/app?demo=1">See the console with sample data</a> first.</p>
+    <p class="fine">Had a key and no longer have it? <a href="/recover">Get back in</a> with the email you registered with.</p>
     </div></div>
   </main>
 ${siteFooter()}
@@ -1824,11 +2003,68 @@ ${siteFooter()}
 </html>`
 }
 
+/** The 200 page between "Continue with Google" in the console and the
+ *  provider. Same reason as handoffPage: a redirect after a form POST is
+ *  checked against form-action, and the provider is not 'self'. */
+function connectHandoff(provider: Provider, to: string): string {
+  const name = provider === 'google' ? 'Google' : 'GitHub'
+  return `${head({
+    title: `Connecting ${name} · AgentBill`,
+    description: 'Handing this sign-in to the provider.',
+    path: '/app',
+    css: LOGIN_CSS,
+    extraHead: `<meta http-equiv="refresh" content="0;url=${esc(to)}">`,
+  })}
+<body>
+${siteNav('/app', { sticky: false })}
+  <main class="login-wrap">
+    <div class="login cv-panel"><div class="cv-card">
+    <h1>Opening ${esc(name)}.</h1>
+    <p>Sign in there and you come straight back here, with ${esc(name)} connected to this account.
+       If nothing happens in a second, <a href="${esc(to)}">continue to ${esc(name)}</a>.</p>
+    </div></div>
+  </main>
+${siteFooter()}
+</body>
+</html>`
+}
+
+/**
+ * The first key, shown once. The same two plates the register screen used to
+ * carry (the key, and the line that sets it), each with Copy, because this is
+ * the screen that screen's job moved to: a key made for a verified person, in
+ * the console, after the sign-in rather than before it.
+ */
+function firstKeyPage(apiKey: string): string {
+  return `${HEAD('Your API key', LOGIN_CSS)}
+<body>
+${siteNav('/app', { sticky: false })}
+  <main class="login-wrap">
+    <div class="login cv-panel"><div class="cv-card">
+    <h1>Your API key is ready.</h1>
+    <p>Copy it now. This page is not shown again, and the console masks every key it lists.</p>
+    ${copyPlate('key-display', esc(apiKey))}
+    <p>Nothing in the console needs it pasted in: your code sends it, with every call. In Python or Node that means <code>AGENTBILL_API_KEY</code>, and this line sets it in the terminal your code runs in.</p>
+    ${copyPlate('key-export', `export AGENTBILL_API_KEY=${esc(apiKey)}`)}
+    <p class="fine">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p>
+    <a class="btn btn-lg go" href="/app?view=start">Continue to the start screen &rarr;</a>
+    </div></div>
+  </main>
+${siteFooter()}
+${COPY_JS}
+</body>
+</html>`
+}
+
 // ---------------------------------------------------------------------------
 // Page state and links
 // ---------------------------------------------------------------------------
 
-type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; sort: TaskSort; flash?: Flash | null; suggest?: Suggest | null }
+type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string; view: ViewKey; filter: Filter; sort: TaskSort; flash?: Flash | null; suggest?: Suggest | null
+  /** A connect attempt's outcome code, already checked against LINK_TEXT. */
+  link?: string | null
+  /** The providers configured on this server. */
+  providers?: Provider[] }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -1882,10 +2118,11 @@ function planOf(v: Viewer): { limit: number | null; pct: number; cls: string } {
  *  are sample under demo, because a real quota above invented tiles was the
  *  one number on the sample page that the banner's promise did not cover. */
 function accountCard(p: Page): string {
-  const who = p.anon ? 'Sample console' : (p.v.email ?? 'no email')
+  const who = p.anon ? 'Sample console' : p.v.via === 'user' ? (p.v.userEmail ?? 'no email') : (p.v.email ?? 'no email')
+  const via = p.anon ? '' : p.v.via === 'user' ? 'Signed in as' : 'Signed in with a key'
   const plan = p.demo ? DEMO_VIEWER : p.v
   const { limit, pct, cls } = planOf(plan)
-  const keyTail = p.v.apiKey.slice(0, 8) + '…' + p.v.apiKey.slice(-4)
+  const keyTail = p.v.apiKey ? p.v.apiKey.slice(0, 8) + '…' + p.v.apiKey.slice(-4) : 'no key yet'
   const quota = limit === null
     ? `<b>${num(plan.monthlyCalls)}</b> calls this month · metered, no cap`
     : `<b>${num(plan.monthlyCalls)}</b> / ${num(limit)} calls · this billing month${pct >= 75
@@ -1894,6 +2131,7 @@ function accountCard(p: Page): string {
   // share is the meter's own arithmetic from the two numbers; the state class
   // is planOf's, so the colour and the percentage cannot disagree.
   return `<div class="acct">
+        ${via ? `<div class="acct-via">${via}</div>` : ''}
         <div class="acct-who" title="${esc(who)}">${esc(who)}</div>
         <div class="acct-row">${tag(esc(plan.plan))}<span title="${p.v.keyLabel ? esc(p.v.keyLabel) : 'key'}">${esc(keyTail)}</span></div>
         ${limit === null ? '' : `<div class="acct-m${cls ? ` is-${cls}` : ''}">${meter(plan.monthlyCalls, limit)}</div>`}
@@ -2045,7 +2283,7 @@ function leakRow(p: Page): string {
 /** The overview's figures: one card whose bar names the account they belong to. */
 function figures(p: Page, rangeLabel: string): string {
   const key = p.demo ? DEMO_KEY : p.v.apiKey
-  return frame(p, barOf(esc(tailOf(key)), true), `${kpis(p, rangeLabel)}
+  return frame(p, barOf(key ? esc(tailOf(key)) : 'no key yet', true), `${kpis(p, rangeLabel)}
       ${leakRow(p)}`, 'figs')
 }
 
@@ -2668,9 +2906,17 @@ except TaskCeilingExceededError as refused:
     third = `<p>Nothing here yet. Run the lines above, then <a href="${href(p, 'start')}">reload this page</a>: the refusal appears here with the body your code received.</p>`
   }
 
+  // A person whose account has no key yet: the key comes first, from here.
+  const firstKey = !p.anon && !p.demo && p.v.via === 'user' && !p.v.apiKey
+    ? `<div class="ns3 firstkey-row"><span class="ns3-n">0</span><div class="firstkey">
+          <p>Your account is open and has no API key yet. Make it here: it is shown once, on the next screen, and your code sends it with every call.</p>
+          <form method="POST" action="/app/keys/first"><button class="btn btn-lg" type="submit">Create my API key &rarr;</button></form>
+        </div></div>`
+    : ''
   return `<div class="start cv-panel">
       ${said}
       <p class="intro">${SEQUENCE_INTRO}</p>
+      ${firstKey}
       <form method="POST" action="/app/tasks" class="setf3" autocomplete="off">
         <input type="hidden" name="back" value="start" />
         <div class="ns3"><span class="ns3-n">1</span><div>
@@ -2786,14 +3032,43 @@ function customersView(p: Page): string {
     <p class="note">${p.d.customerCount > p.d.customers.length ? `The ${num(p.d.customers.length)} heaviest of ${num(p.d.customerCount)} customers.` : `${num(p.d.customerCount)} ${p.d.customerCount === 1 ? 'customer' : 'customers'}, heaviest first.`} Share is of every customer's lifetime spend on this account, including any not listed. The full list is on <code>GET /customers</code>.</p>`
 }
 
+/** Every way into this account, and a button for each one it does not have. */
+function waysIn(p: Page): string {
+  if (p.anon || p.demo) return ''
+  const providers = p.providers ?? []
+  const said = p.link && Object.hasOwn(LINK_TEXT, p.link)
+    ? `<p class="${p.link === 'ok' ? 'ok' : 'err cv-err'}">${esc(LINK_TEXT[p.link])}</p>` : ''
+  const rows = (['google', 'github'] as const).filter((pr) => providers.includes(pr) || p.v.linked.includes(pr)).map((pr) => {
+    const name = pr === 'google' ? 'Google' : 'GitHub'
+    return p.v.linked.includes(pr)
+      ? `<div class="way"><p><b>${name}</b> is connected. It opens this account.</p>${tag('connected')}</div>`
+      : `<div class="way"><p><b>${name}</b> is not connected.</p>${connectButton(pr)}</div>`
+  })
+  const email = p.v.linked.includes('email')
+    ? `<div class="way"><p><b>Email link</b> to ${esc(p.v.userEmail ?? '')}. It opens this account.</p>${tag('connected')}</div>` : ''
+  const key = `<div class="way"><p><b>API key</b>: ${p.v.via === 'key' ? 'how this browser signed in.' : 'any active key still opens this console from the sign-in page.'}</p>${tag(p.v.via === 'key' ? 'this session' : 'works')}</div>`
+  return `<h2 id="signin">Sign-in <span>the ways into this account</span></h2>
+    ${said}
+    ${frame(p, barOf('sign-in'), `<div class="ways">${[...rows, email, key].filter(Boolean).join('\n      ')}</div>`)}
+    <p class="note">A sign-in is connected only from here, by somebody already signed in. Nothing is ever connected because an email address matches.</p>`
+}
+
+function connectButton(pr: Provider): string {
+  // Google's rules allow three phrasings on its button, and "Connect" is not
+  // one of them, so both buttons say Continue; the row says what it does.
+  const name = pr === 'google' ? 'Google' : 'GitHub'
+  return `<form method="POST" action="/app/connect/${pr}"><button class="pbtn is-${pr}" type="submit">${pr === 'google' ? GOOGLE_G : GITHUB_MARK}<span>Continue with ${name}</span></button></form>`
+}
+
 function keysView(p: Page): string {
-  return `${keysTable(p, p.d.keys, p.v.apiKey)}
+  return `${waysIn(p)}
+    ${keysTable(p, p.d.keys, p.v.via === 'key' ? p.v.apiKey : '')}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
     <div class="cv-card cmds">
       ${KEY_COMMANDS.map(([ep, what]) =>
         `<div class="cmd"><b>${ep}</b><span>${what}${ep.endsWith('/revoke') ? ' A revoked key ends this session on its next request.' : ''}</span></div>`).join('\n      ')}
     </div>
-    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : 'Oldest first. The key that opened this console is marked.'}</p>`
+    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : p.v.via === 'key' ? 'Oldest first. The key that opened this console is marked.' : 'Oldest first.'}</p>`
 }
 
 // ---------------------------------------------------------------------------
@@ -2815,6 +3090,16 @@ function consolePage(p: Page): string {
         <p>${p.anon
             ? 'Every number on this page is invented. This is what the console looks like once your agents are calling preflight. <a href="/register">Get an API key</a> and it fills with your own runs.'
             : `Nothing on this page is from your account. It shows what the console looks like once your agents are calling preflight. <a href="${href(p, p.view, { demo: false })}">Back to your real console</a>.`}</p>
+      </div>`
+    : ''
+
+  // A key session on an account nobody has connected a sign-in to yet: the
+  // one nudge, on every view, until it is done.
+  const providers = p.providers ?? []
+  const nudge = !p.anon && !p.demo && p.v.via === 'key' && p.v.linked.length === 0 && providers.length && p.view !== 'keys'
+    ? `<div class="banner cv-callout">
+        ${label('Sign-in')}
+        <p>You opened this console with your API key. Connect Google or GitHub and it opens without the key from now on. <a href="${href(p, 'keys')}#signin">Connect a sign-in</a>.</p>
       </div>`
     : ''
 
@@ -2842,6 +3127,7 @@ function consolePage(p: Page): string {
           ${RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
         </header>
         ${banner}
+        ${nudge}
         ${body}
         <div class="foot">
           Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
