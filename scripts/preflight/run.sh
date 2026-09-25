@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-docker}"
 PORT="${PORT:-3999}"
 ACCOUNT_ID="00000000-0000-0000-0000-0000000000aa"
-API_KEY="agb_testkey_local_verification_0001"
+API_KEY="agb_7e5700000000000000000000000000000000000000000001"
 WEBHOOK_SECRET="preflight-verify-webhook-secret"
 # ADMIN_SECRET, 2026-09-20. /admin is the only surface that reads site_pulse
 # back, so the gate on the tagged-source slice has to authenticate like the
@@ -82,7 +82,12 @@ export WRAP_PYTHON="$WRAP_VENV/bin/python"
 # nothing here talks to Meta.
 # The server's log is read by the last gate in verify.mjs (every answer sent once).
 SERVER_LOG="${SERVER_LOG:-/tmp/agentbill-verify-server.log}"
-META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
+# POLAR_PRODUCT_ID_*: since 2026-09-25 only a configured product upgrades an
+# account, so the harness configures three and signs webhooks for them.
+# AUTH_FAILURES_PER_MINUTE: raised for the same reason as the rate limit; the
+# [secfix] gates start a second server with the production values to test it.
+export POLAR_PRODUCT_ID_BUILDER=prod_verify_builder POLAR_PRODUCT_ID_TEAM=prod_verify_team POLAR_PRODUCT_ID_SCALE=prod_verify_scale
+AUTH_FAILURES_PER_MINUTE=100000 META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break

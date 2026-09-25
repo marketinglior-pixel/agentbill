@@ -26,7 +26,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-docker}"
 PORT="${PORT:-3996}"
 ACCOUNT_ID="00000000-0000-0000-0000-0000000000aa"
-API_KEY="agb_testkey_local_verification_0001"
+API_KEY="agb_7e5700000000000000000000000000000000000000000001"
 ALTER_MIGRATION="${ALTER_MIGRATION:-016_unit_columns_to_bigint.sql}"
 
 cleanup() {
