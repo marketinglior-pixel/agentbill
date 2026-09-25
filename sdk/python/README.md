@@ -277,6 +277,8 @@ else:
 - **The job is counted in tokens.** One opened in units answers 422 `task_unit_mismatch`, and the call is not sent.
 - **What it cost:** `client.get_task("tokens-1").breakdown` has the job by model and by step, with tokens and `list_price_usd_estimate`, an estimate at public list price from a dated price table. List price, your invoice may differ; a model with no list price is counted in `unpriced_calls`, never as $0.
 
+> **Since 0.8.0: a ceiling in dollars.** `wrap(client, task_ref="job-9", agent_id="writer", task_ceiling_usd=0.50)` opens the job with a ceiling in dollars at public list price (unit `"usd"`), and `unit="usd"` meters a dollar job opened in the console. Before each measured call the server reserves the job's recent median call, or $0.10 before its first priced call, so a job whose whole ceiling is under $0.10 needs `estimated_usd` from the plain client. Each record is charged the list price of the tokens the provider reported; a call it cannot price is charged its reservation, never $0. A refusal on such a job has `unit == "usd"` and says dollars. On the plain client, `preflight(..., task_ceiling_usd=..., estimated_usd=...)`, and the result carries `task_unit`, `estimated_usd`, `task_remaining_usd` and `estimate_source`. Needs an AgentBill API from 2026-09-25 or later.
+
 ---
 
 ## Node.js
@@ -442,6 +444,8 @@ reserved until the sweeper reclaims them, so the ceiling gets **tighter**, never
 | `customer_id` | `str` | `"default"` | Your internal customer identifier. Carries its own balance. |
 | `idempotency_key` | `str` | none | Stable across retries: same key, same decision, one reservation. |
 | `ceiling` | `int` | none | Set on `AgentBillClient(...)`, not per call. Refuses any single call whose `estimated_units` exceed it. |
+
+**Base URL.** `AGENTBILL_BASE_URL` (or `AgentBillClient(base_url=...)`) must be `https`, or plain `http` to `localhost`, `127.0.0.1` or `[::1]`, since 0.8.0. Any other value raises `AgentBillError` before a request is sent, because every request carries your API key. `approved` is read as approved only when the server's answer is JSON `true`.
 
 ### `client.record(...)` and `check.record(...)`
 
