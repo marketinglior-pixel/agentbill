@@ -167,6 +167,22 @@ if (cardBtn && cardImg && cardDl) cardBtn.addEventListener('click', function () 
   cardImg.src = c.toDataURL('image/png'); cardImg.hidden = false;
   c.toBlob(function (b) { if (!b) return; if (cardDl.href && cardDl.href.indexOf('blob:') === 0) URL.revokeObjectURL(cardDl.href); cardDl.href = URL.createObjectURL(b); cardDl.hidden = false; }, 'image/png');
 });
+// Share: the device's own share sheet, with the card as a file, only on a
+// click and only where the browser can share files. The person picks the app;
+// nothing goes anywhere they did not choose.
+var shareBtn = document.getElementById('office-card-share');
+var canFiles = !!(navigator.canShare && window.File) && (function () { try { return navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] }); } catch (e) { return false; } })();
+if (shareBtn && canFiles) {
+  shareBtn.hidden = false;
+  shareBtn.addEventListener('click', function () {
+    var c = makeCard(cardAnon && cardAnon.checked);
+    c.toBlob(function (b) {
+      if (!b) return;
+      var f = new File([b], 'agentbill-payroll-' + ((DATA.summary || {}).month || 'month') + '.png', { type: 'image/png' });
+      navigator.share({ files: [f], text: DATA.shareText || '' }).catch(function () {});
+    }, 'image/png');
+  });
+}
 img.onload = function () { if (REDUCE) frame(); else tick(); };
 img.src = cv.getAttribute('data-sprites');
 })();

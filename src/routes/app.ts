@@ -20,7 +20,7 @@ import {
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
 import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
-import { loadOffice, demoOffice, officeJson, WORKING_MINUTES, OFFICE_MAX, type Office } from '../lib/office.js'
+import { loadOffice, demoOffice, officeJson, shareText, WORKING_MINUTES, OFFICE_MAX, type Office } from '../lib/office.js'
 import { OFFICE_JS, OFFICE_SPRITES_PNG } from '../ui/office-engine.js'
 import { agentRows, demoAgentRows, monthlyReport, demoReport, reportCsv, asMonth, thisMonth, recentMonths, type AgentRow, type Report } from '../lib/report.js'
 import { rankOrderSql } from '../lib/task-rank.js'
@@ -2248,7 +2248,8 @@ const OFFICE_CSS = `
   .of-bar { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s3) 0 var(--s2); font-size: var(--fs-micro); }
   .of-anon { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
   .of-cardout img { display: block; width: 100%; max-width: 720px; border-radius: var(--r-field); margin: var(--s3) 0 var(--s2); }
-  .of-cardout img[hidden], .of-cardout a[hidden] { display: none; }
+  .of-cardout img[hidden], .of-cardout a[hidden], .of-cardout button[hidden] { display: none; }
+  .of-share { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin: var(--s2) 0; font-size: var(--fs-small); }
   .of-list { list-style: none; padding: 0; margin: 0 0 var(--s3); }
   .of-list li { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--row-line); font-size: var(--fs-small); }
   .of-list li span:first-of-type { font-weight: 500; }
@@ -3739,7 +3740,13 @@ function officeView(p: Page): string {
     </div>`)}
     <div class="of-cardout">
       <img id="office-card-img" hidden alt="Your payroll card: the office, this month's payroll, the staff count, the highest paid and who was sent home">
-      <p class="note"><a id="office-card-dl" hidden download="agentbill-payroll-${esc(o.month)}.png" href="#">Download the card (PNG)</a> The card is drawn in this browser from the room above and saved to your computer only: nothing is uploaded or posted. Share it where you like, or not at all.</p>
+      <div class="of-share">
+        <a id="office-card-dl" hidden download="agentbill-payroll-${esc(o.month)}.png" href="#">Download the card (PNG)</a>
+        <button type="button" class="btn-ghost" id="office-card-share" hidden>Share…</button>
+        <a class="btn-ghost" href="https://x.com/intent/post?text=${encodeURIComponent(shareText(o, p.demo))}" target="_blank" rel="noopener noreferrer">Post on X</a>
+        <a class="btn-ghost" href="https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent('https://agentbill.dev')}" target="_blank" rel="noopener noreferrer">Post on LinkedIn</a>
+      </div>
+      <p class="note">The card is drawn in this browser from the room above and saved to your computer only: nothing is uploaded. Share opens your device's own share sheet with the card attached, and the X and LinkedIn buttons open a post for you to finish, with the card added from your download. Nothing is posted unless you post it.</p>
     </div>
     <h2>Staff <a href="${href(p, 'agents')}">All agents &rarr;</a></h2>
     <ul class="of-list">${rows}</ul>
