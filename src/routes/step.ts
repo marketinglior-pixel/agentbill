@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
+import { deliverWebhook, webhookSecretFor } from '../lib/webhook-target.js'
 
 const ANOMALY_MULTIPLIER = 2.0  // flag if units > baseline * 2
 const BASELINE_MIN_SAMPLES = 5  // need at least 5 samples before flagging
@@ -15,14 +16,17 @@ const StepBody = z.object({
 })
 
 export async function stepRoute(app: FastifyInstance) {
-  app.post('/step', async (request, reply) => {
+  // /step takes four small fields and no metadata (unknown keys are dropped
+  // by the schema, never stored), so 16 KB is generous. Fastify's default was
+  // 1 MB of JSON parsed for every call.
+  app.post('/step', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const parse = StepBody.safeParse(request.body)
     if (!parse.success) {
       return reply.code(422).send({ error: 'validation_error', details: parse.error.issues })
     }
 
     const { agent_id, step_name, units } = parse.data
-    const accountId = (request as any).accountId
+    const accountId = request.accountId
 
     // Record this step
     await sql`
@@ -63,7 +67,7 @@ export async function stepRoute(app: FastifyInstance) {
     const anomaly = units > baselineAvg * ANOMALY_MULTIPLIER
 
     if (anomaly) {
-      const [acct] = await sql`SELECT webhook_url FROM accounts WHERE id = ${accountId}`
+      const [acct] = await sql`SELECT webhook_url, webhook_secret_nonce FROM accounts WHERE id = ${accountId}`
       if (acct?.webhookUrl) {
         const payload = JSON.stringify({
           event: 'anomaly.detected',
@@ -74,11 +78,17 @@ export async function stepRoute(app: FastifyInstance) {
           deviation_pct: deviationPct,
           timestamp: new Date().toISOString(),
         })
-        void fetch(acct.webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-AgentBill-Account-Id': accountId },
-          body: payload,
-        }).catch(() => {})
+        // Fire and forget, as before, but through the guarded sender: the
+        // address rules again at send time, no redirect followed, five
+        // seconds at most, and signed when the row has a nonce (a URL saved
+        // before migration 020 has none and goes out unsigned, as it did).
+        const secret = acct.webhookSecretNonce ? webhookSecretFor(acct.webhookSecretNonce as string) : null
+        const log = request.log
+        void deliverWebhook(acct.webhookUrl as string, payload, { 'X-AgentBill-Account-Id': accountId }, secret)
+          .then((r) => {
+            if (!r.delivered) log.warn({ accountId, reason: r.reason, status: r.status }, 'anomaly webhook not delivered')
+          })
+          .catch((err) => log.warn({ accountId, err }, 'anomaly webhook threw'))
       }
     }
 
