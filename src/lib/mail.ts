@@ -433,3 +433,86 @@ async function announceCeiling(log: FastifyBaseLogger, reason: 'welcome' | 'sign
   })
   if (!ok) log.error({ window }, 'welcome ceiling notice was not sent')
 }
+
+// ---------------------------------------------------------------------------
+// hello@agentbill.dev, 2026-09-25
+//
+// The contact on /security, /about, /privacy and SECURITY.md had no MX record,
+// so every mail to it bounced. Resend now receives for agentbill.dev and posts
+// an email.received webhook per message (src/routes/inbound-mail.ts); these two
+// helpers are the only parts of that path that touch the Resend client, which
+// lives in this file and nowhere else.
+
+/**
+ * Resend's own check: Svix, through the Resend SDK. Returns null for anything
+ * that does not verify, including a missing header or a missing secret. Needs
+ * no API key, so it works on an instance that cannot send.
+ */
+export function verifyInboundWebhook(payload: string, h: { id: string; timestamp: string; signature: string }, secret: string): unknown {
+  if (!secret || !h.id || !h.timestamp || !h.signature) return null
+  try {
+    return (resend ?? new Resend('re_verify_only')).webhooks.verify({ payload, headers: h, webhookSecret: secret })
+  } catch {
+    return null
+  }
+}
+
+/** Where a forward comes from. Any local part of the verified sending domain. */
+const FORWARD_FROM = 'AgentBill hello@ <forward@agentbill.dev>'
+
+export type ForwardResult =
+  | { ok: true }
+  /** Resend answered 4xx: the same request will fail the same way, so do not retry it. */
+  | { ok: false; permanent: true; why: string }
+  /** Unset mailer, a 5xx, a network failure: worth a retry. */
+  | { ok: false; permanent: false; why: string }
+
+const escHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * Forward one received message to OWNER_ALERT_EMAIL, with Reply-To set to the
+ * person who wrote it.
+ *
+ * Not the SDK's receiving.forward(). That helper sends from our address with no
+ * Reply-To in either of its modes, so pressing Reply in the owner's mailbox
+ * would write back to hello@agentbill.dev, which forwards to the owner: the
+ * sender never hears back. Here the message is read once (subject, text, html,
+ * the addresses) and sent again with the sender as Reply-To. Attachments are
+ * named, not re-attached; they stay in Resend's dashboard under Receiving.
+ */
+export async function forwardInbound(emailId: string): Promise<ForwardResult> {
+  if (!resend || !ownerEmail) return { ok: false, permanent: false, why: 'RESEND_API_KEY or OWNER_ALERT_EMAIL is unset' }
+  try {
+    const got = await resend.emails.receiving.get(emailId)
+    if (got.error || !got.data) {
+      const code = (got.error as { statusCode?: number } | null)?.statusCode ?? 0
+      return { ok: false, permanent: code >= 400 && code < 500, why: `get: ${got.error?.message ?? 'no data'}` }
+    }
+    const e = got.data
+    const line = (s: string | null | undefined, max: number) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, max)
+    const subject = `[hello@] ${line(e.subject, 180) || '(no subject)'}`
+    const replyTo = (e.reply_to?.length ? e.reply_to : [e.from]).map((a) => line(a, 320)).filter(Boolean).slice(0, 5)
+    const files = (e.attachments ?? []).map((a) => line(a.filename, 120) || '(unnamed)')
+    const head = [
+      `From: ${line(e.from, 320)}`,
+      `To: ${(e.to ?? []).map((a) => line(a, 320)).join(', ')}`,
+      e.cc?.length ? `Cc: ${e.cc.map((a) => line(a, 320)).join(', ')}` : '',
+      `Date: ${line(e.created_at, 64)}`,
+      files.length ? `Attachments (in Resend, Emails, Receiving): ${files.join(', ')}` : '',
+    ].filter(Boolean)
+    const text = `Forwarded from hello@agentbill.dev. Reply to answer the sender.\n\n${head.join('\n')}\n\n${e.text ?? ''}`
+    const html =
+      `<div style="font:13px/1.5 system-ui,sans-serif;color:#555;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:12px">` +
+      `Forwarded from hello@agentbill.dev. Reply to answer the sender.<br>${head.map(escHtml).join('<br>')}</div>` +
+      (e.html ? e.html : `<pre style="white-space:pre-wrap;font:14px/1.5 system-ui,sans-serif">${escHtml(e.text ?? '')}</pre>`)
+    const sent = await resend.emails.send({ from: FORWARD_FROM, to: ownerEmail, replyTo, subject, text, html })
+    if (sent.error) {
+      const code = (sent.error as { statusCode?: number }).statusCode ?? 0
+      return { ok: false, permanent: code >= 400 && code < 500 && code !== 429, why: `send: ${sent.error.message}` }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, permanent: false, why: err instanceof Error ? err.message : 'threw' }
+  }
+}
