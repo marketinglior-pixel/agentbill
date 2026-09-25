@@ -307,7 +307,7 @@ export async function appRoute(app: FastifyInstance) {
     // by the database clock, so an app-side comparison turns clock skew into a
     // window where a revoked key can still open the console.
     const [row] = await sql`
-      SELECT id,
+      SELECT id, session_epoch,
              (revoked_at IS NOT NULL AND revoked_at <= NOW()) AS is_revoked,
              (expires_at IS NOT NULL AND expires_at <= NOW()) AS is_expired
       FROM developer_api_keys
@@ -318,7 +318,7 @@ export async function appRoute(app: FastifyInstance) {
     if (row.isRevoked) return reply.redirect(back('revoked', next), 303)
     if (row.isExpired) return reply.redirect(back('expired', next), 303)
 
-    const cookie = sessionCookieFor(row.id as string)
+    const cookie = sessionCookieFor(row.id as string, Number(row.sessionEpoch))
     if (!cookie) return reply.redirect('/app?err=unavailable', 303)
     // One session per browser: a key sign-in ends a person's sign-in here,
     // or the console would have two answers to "who is this".
@@ -326,14 +326,19 @@ export async function appRoute(app: FastifyInstance) {
     return reply.redirect(next || '/app', 303)
   })
 
-  // Logout ends the session on the server as well as in this browser, for a
-  // person: the epoch moves on, so a copy of the cookie taken before this
-  // (another device, a stolen jar) stops working on its next request. A key
-  // session still ends only in this browser and with its key, as before.
+  // Logout ends the session on the server as well as in this browser: the
+  // epoch moves on, so a copy of the cookie taken before this (another
+  // device, a stolen jar) stops working on its next request. For a person
+  // since migration 023; for a key session since 030 (S17, 2026-09-25), when
+  // it ended only in this browser. The key's epoch is per key, so this ends
+  // every console session opened with that key. Conditional on the epoch the
+  // cookie carries, so a stale cookie's logout cannot end a newer session.
   app.post('/app/logout', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     const u = readUserSession(request.headers.cookie)
     if (u) await endSessions(u.userId, u.epoch)
+    const k = readKeySession(request)
+    if (k) await sql`UPDATE developer_api_keys SET session_epoch = session_epoch + 1 WHERE id = ${k.keyId} AND session_epoch = ${k.epoch}`
     reply.header('Set-Cookie', [CLEAR_KEY_COOKIE, CLEAR_USER_COOKIE])
     return reply.redirect('/app', 303)
   })
@@ -483,10 +488,22 @@ export async function appRoute(app: FastifyInstance) {
 // since 2026-09-25, shared with the user session and the OAuth flow cookie.
 const sign = (payload: string, secret: string): string => hmacHex(secret, payload)
 
-function mintToken(keyId: string, secret: string): string {
+// The key session cookie, since 2026-09-25 (S17, migration 030):
+//   v2.<keyId>.<epoch>.<exp>.<mac>
+//   mac = HMAC-SHA256(secret, "agentbill-key-session-v2." + <keyId>.<epoch>.<exp>)
+// The epoch is developer_api_keys.session_epoch when the cookie was minted,
+// and loadSession compares it with the row, so logout (which moves the row
+// on) kills every copy of the cookie, not only the one in this browser. The
+// purpose prefix keeps this MAC from ever matching the old shape's or the
+// user session's. A cookie in the old shape (<keyId>.<exp>.<mac>, minted
+// before this) is read as epoch 0: it keeps working until its key's first
+// logout, and then dies like any other.
+const KEY_SESSION_PURPOSE = 'agentbill-key-session-v2'
+
+function mintToken(keyId: string, epoch: number, secret: string): string {
   const exp = Math.floor(Date.now() / 1000) + MAX_AGE
-  const payload = `${keyId}.${exp}`
-  return `${payload}.${sign(payload, secret)}`
+  const payload = `${keyId}.${epoch}.${exp}`
+  return `v2.${payload}.${sign(`${KEY_SESSION_PURPOSE}.${payload}`, secret)}`
 }
 
 /** Ends a key session in this browser. Every sign-in as a person sends it, so
@@ -500,21 +517,43 @@ export const CLEAR_KEY_COOKIE = `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Pat
  * (src/routes/register.ts), so the key login is its one caller. Null when this
  * server has no session secret.
  */
-export function sessionCookieFor(keyId: string): string | null {
+export function sessionCookieFor(keyId: string, epoch: number): string | null {
   const secret = sessionSecret()
-  if (!secret) return null
-  return `${COOKIE}=${mintToken(keyId, secret)}; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=${MAX_AGE}`
+  if (!secret || !Number.isInteger(epoch) || epoch < 0) return null
+  return `${COOKIE}=${mintToken(keyId, epoch, secret)}; HttpOnly; Secure; SameSite=Lax; Path=/app; Max-Age=${MAX_AGE}`
 }
 
-function verifyToken(token: string, secret: string): string | null {
+const KEY_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/** What a key session cookie claims, when its signature and expiry hold. The
+ *  epoch is checked against the row by the caller. */
+function verifyToken(token: string, secret: string): { keyId: string; epoch: number } | null {
   const parts = token.split('.')
-  if (parts.length !== 3) return null
-  const [keyId, expStr, mac] = parts
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(keyId)) return null
+  let keyId: string, epochStr: string, expStr: string, mac: string, signed: string
+  if (parts.length === 5 && parts[0] === 'v2') {
+    ;[, keyId, epochStr, expStr, mac] = parts as [string, string, string, string, string]
+    if (!/^[0-9]{1,9}$/.test(epochStr)) return null
+    signed = `${KEY_SESSION_PURPOSE}.${keyId}.${epochStr}.${expStr}`
+  } else if (parts.length === 3) {
+    ;[keyId, expStr, mac] = parts as [string, string, string]
+    epochStr = '0'
+    signed = `${keyId}.${expStr}`
+  } else {
+    return null
+  }
+  if (!KEY_ID_RE.test(keyId)) return null
   const exp = Number(expStr)
-  if (!Number.isFinite(exp) || exp < Date.now() / 1000) return null
-  if (!/^[0-9a-f]{64}$/.test(mac) || !safeEqual(mac, sign(`${keyId}.${exp}`, secret))) return null
-  return keyId
+  if (!/^[0-9]{1,12}$/.test(expStr) || exp < Date.now() / 1000) return null
+  if (!/^[0-9a-f]{64}$/.test(mac) || !safeEqual(mac, sign(signed, secret))) return null
+  return { keyId, epoch: Number(epochStr) }
+}
+
+/** The key session this request carries, if its signature and expiry hold. */
+function readKeySession(request: FastifyRequest): { keyId: string; epoch: number } | null {
+  const secret = sessionSecret()
+  if (!secret) return null
+  const token = readCookie(request.headers.cookie ?? '', COOKIE)
+  return token ? verifyToken(token, secret) : null
 }
 
 
@@ -570,15 +609,11 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
     const v = await loadUserViewer(u)
     if (v) return v
   }
-  const secret = sessionSecret()
-  if (!secret) return null
-  const token = readCookie(request.headers.cookie ?? '', COOKIE)
-  if (!token) return null
-  const keyId = verifyToken(token, secret)
-  if (!keyId) return null
+  const claim = readKeySession(request)
+  if (!claim) return null
 
   const [row] = await sql`
-    SELECT k.id AS key_id, k.key_prefix, k.key_last4, k.label,
+    SELECT k.id AS key_id, k.key_prefix, k.key_last4, k.label, k.session_epoch,
            (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
            (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired,
            a.id AS account_id, a.email,
@@ -586,10 +621,12 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
            a.plan_ends_at, a.monthly_calls, a.monthly_events, a.default_budget_units
     FROM developer_api_keys k
     JOIN accounts a ON a.id = k.account_id
-    WHERE k.id = ${keyId}
+    WHERE k.id = ${claim.keyId}
     LIMIT 1
   `
   if (!row) return null
+  // Minted before this key's last logout: dead, however valid its signature.
+  if (Number(row.sessionEpoch) !== claim.epoch) return null
   // Same clock rule as the API middleware: an existing session dies the moment
   // its key is revoked, not one clock-skew later.
   if (row.isRevoked) return null
