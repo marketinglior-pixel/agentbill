@@ -102,7 +102,18 @@ export async function thanksRoute(app: FastifyInstance) {
         }
       }
 
-      if (livePlan === summary.plan) {
+      if (summary.plan === null) {
+        // Paid, for a product this server does not sell (src/integrations/
+        // polar.ts). The webhook changes no plan for it, so this page must
+        // not promise one either.
+        pageTitle = 'Payment received · AgentBill'
+        heading = 'Payment received.'
+        body = `
+  <p class="lede">Polar has confirmed a payment on this checkout, but it is not for one of the plans
+     this account can switch to on its own, so nothing has changed on your account.</p>
+  <p>Write to <a href="mailto:${CONTACT}">${CONTACT}</a> from the address on your account and it
+     will be put right by hand.</p>`
+      } else if (livePlan === summary.plan) {
         pageTitle = `You are on ${title(summary.plan)} · AgentBill`
         heading = `You are on ${title(summary.plan)}.`
         body = `

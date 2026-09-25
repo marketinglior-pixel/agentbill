@@ -79,115 +79,150 @@ export async function webhooksRoute(app: FastifyInstance) {
 
     const event = request.body as any
     const eventType: string = event?.type ?? ''
+    const data = event?.data ?? {}
+    // Verified above, so it is present: the library refuses a delivery
+    // without one. Bounded like every other id before it reaches a column.
+    const rawWebhookId = request.headers['webhook-id']
+    const webhookId = typeof rawWebhookId === 'string' && isId(rawWebhookId, 256) ? rawWebhookId : ''
 
-    // Subscription activated, upgrade account to paid
-    if (eventType === 'subscription.active' || eventType === 'order.created') {
-      // Caller input, same as the account id: it lands in polar_customer_id,
-      // and a control character there was a 500 the webhook sender retries.
-      const rawCustomerId: string = event?.data?.customer_id ?? event?.data?.customerId ?? ''
-      const polarCustomerId: string = isId(rawCustomerId) ? rawCustomerId : ''
-      let accountId: string =
-        event?.data?.metadata?.agentbill_account_id ??
-        event?.data?.checkoutMetadata?.agentbill_account_id ??
-        ''
+    // What this delivery would do, decided before anything is written.
+    //
+    // Upgrade only on an event that says money moved or a subscription is
+    // live, and only for a product this server sells. Until 2026-09-25 this
+    // upgraded on order.created, whatever the order's status, and any product
+    // id it did not recognise mapped to 'paid', the legacy plan with no
+    // monthly cap: a pending order for any product in the organisation was
+    // unlimited usage.
+    //   order.paid                                    money moved
+    //   subscription.active / subscription.created    with data.status 'active'
+    // Everything else (order.created, a pending or incomplete subscription,
+    // an unknown product) changes nothing and is logged.
+    const status: string = typeof data.status === 'string' ? data.status : ''
+    const isUpgradeEvent =
+      (eventType === 'order.paid' && (status === '' || status === 'paid')) ||
+      ((eventType === 'subscription.active' || eventType === 'subscription.created') && status === 'active')
+    const isDowngradeEvent = eventType === 'subscription.revoked' || eventType === 'subscription.canceled'
 
-      // Fallback via checkout_id. The subscription's own metadata comes back
-      // empty (verified on the first real delivery, 2026-09-07), but the payload
-      // always carries data.checkout_id, and the session /checkout/:tier minted
-      // put the account id on that checkout. One guarded GET recovers it, and it
-      // only runs when the fast path above found nothing, so a well-formed
-      // upgrade pays for no extra call.
-      if (!isUuid(accountId)) {
-        const checkoutId: string = event?.data?.checkout_id ?? event?.data?.checkoutId ?? ''
-        if (checkoutId) {
-          const md = await getCheckoutMetadata(checkoutId)
-          const fromCheckout = md?.agentbill_account_id
-          if (typeof fromCheckout === 'string') accountId = fromCheckout
-        }
+    if (!isUpgradeEvent && !isDowngradeEvent) {
+      request.log.info({ eventType, status: status || null, webhookId }, 'Polar webhook: nothing to do for this event')
+      return reply.send({ received: true })
+    }
+
+    let accountId: string =
+      data?.metadata?.agentbill_account_id ??
+      data?.checkoutMetadata?.agentbill_account_id ??
+      ''
+
+    // Fallback via checkout_id. The subscription's own metadata comes back
+    // empty (verified on the first real delivery, 2026-09-07), but the payload
+    // always carries data.checkout_id, and the session /checkout/:tier minted
+    // put the account id on that checkout. One guarded GET recovers it, and it
+    // only runs when the fast path above found nothing, so a well-formed
+    // upgrade pays for no extra call. Done before the transaction below, so
+    // no row is locked across a call to Polar.
+    if (!isUuid(accountId)) {
+      const checkoutId: string = data?.checkout_id ?? data?.checkoutId ?? ''
+      if (checkoutId) {
+        const md = await getCheckoutMetadata(checkoutId)
+        const fromCheckout = md?.agentbill_account_id
+        if (typeof fromCheckout === 'string') accountId = fromCheckout
       }
+    }
+    if (typeof accountId !== 'string') accountId = ''
 
+    // Caller input, same as the account id: it lands in polar_customer_id,
+    // and a control character there was a 500 the webhook sender retries.
+    const rawCustomerId: string = data?.customer_id ?? data?.customerId ?? ''
+    const polarCustomerId: string = isId(rawCustomerId) ? rawCustomerId : ''
+
+    // Which tier was bought? Product id appears in different shapes across
+    // Polar event types.
+    const productId: string = data?.product_id ?? data?.productId ?? data?.product?.id ?? ''
+    const plan = isUpgradeEvent ? planFromProductId(typeof productId === 'string' ? productId : '') : null
+
+    // The claim and the change, in one transaction: of N copies of one
+    // delivery exactly one acts, and a change that fails rolls its claim back
+    // so Polar's retry can still land. A delivery with no usable id is acted
+    // on without a claim (the library already required the header, so this
+    // is belt and braces rather than a path Polar takes).
+    type Outcome = 'duplicate' | 'unusable_account' | 'unknown_product' | 'upgraded' | 'downgraded'
+    const outcome: Outcome = await sql.begin(async (tx) => {
+      if (webhookId) {
+        const [claim] = await tx`
+          INSERT INTO polar_webhook_deliveries (webhook_id, event_type)
+          VALUES (${webhookId}, ${eventType})
+          ON CONFLICT (webhook_id) DO NOTHING
+          RETURNING webhook_id
+        `
+        if (!claim) return 'duplicate' as const
+      }
       // The metadata comes back from Polar, but it started life in a checkout
       // URL the customer could edit, so it is caller input by the time it
       // lands here. accounts.id is a uuid column: any other shape is 22P02, a
-      // 500, and a webhook Polar then retries for hours. 200 with a warning
-      // instead, because no retry will ever make this payload valid.
-      // Read before the guard, not inside it. isUuid is a `v is string`
-      // predicate, so on a value already typed string TypeScript narrows the
-      // FAILING branch to never and .length stops existing there.
+      // 500, and a webhook Polar then retries for hours.
+      if (!isUuid(accountId)) return 'unusable_account' as const
+      if (isUpgradeEvent) {
+        if (!plan) return 'unknown_product' as const
+        await tx`
+          UPDATE accounts
+          SET
+            plan                = ${plan},
+            polar_customer_id   = ${polarCustomerId},
+            monthly_calls       = 0,
+            billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
+          WHERE id = ${accountId}
+        `
+        return 'upgraded' as const
+      }
+      await tx`
+        UPDATE accounts
+        SET
+          plan              = 'free',
+          polar_customer_id = NULL,
+          monthly_calls     = 0,
+          billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
+        WHERE id = ${accountId}
+      `
+      return 'downgraded' as const
+    })
+
+    if (outcome === 'duplicate') {
+      request.log.info({ eventType, webhookId }, 'Polar webhook: already processed this delivery, ignored')
+      return reply.send({ received: true, duplicate: true })
+    }
+
+    if (outcome === 'unusable_account') {
       const accountIdLen = accountId.length
-      if (!isUuid(accountId)) {
-        request.log.warn({ eventType, polarCustomerId, malformed: Boolean(accountId) },
-          accountId ? 'Polar webhook carried a malformed agentbill_account_id' : 'Polar webhook missing agentbill_account_id')
-        // The loudest of the three, despite answering 200. A signature that
-        // verified means this is a REAL payment from Polar, and the 200 below
-        // is what stops the retries, so nothing will ever deliver it again.
-        // Somebody paid and their account is still on free.
+      request.log.warn({ eventType, polarCustomerId, malformed: Boolean(accountId) },
+        accountId ? 'Polar webhook carried a malformed agentbill_account_id' : 'Polar webhook missing agentbill_account_id')
+      // Only an upgrade earns the alert. A signature that verified means this
+      // is a REAL payment from Polar, and the 200 below is what stops the
+      // retries, so nothing will ever deliver it again: somebody paid and
+      // their account is still on free.
+      if (isUpgradeEvent) {
         alertRejectedWebhook('unusable_account_id', {
           eventType,
           accountIdShape: accountIdLen ? `present but not a uuid (${accountIdLen} chars)` : 'absent',
           note: polarCustomerId ? `polar_customer_id ${polarCustomerId}` : 'no polar customer id either',
         })
-        return reply.send({ received: true })
       }
-
-      // Which tier was bought? Product id appears in different shapes across
-      // Polar event types; unknown/legacy products map to 'paid'.
-      const productId: string =
-        event?.data?.product_id ??
-        event?.data?.productId ??
-        event?.data?.product?.id ??
-        ''
-      const plan = planFromProductId(productId)
-
-      await sql`
-        UPDATE accounts
-        SET
-          plan                = ${plan},
-          polar_customer_id   = ${polarCustomerId},
-          monthly_calls       = 0,
-          billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
-        WHERE id = ${accountId}
-      `
-
-      request.log.info({ accountId, polarCustomerId, plan, productId }, 'Account upgraded')
+      return reply.send({ received: true })
     }
 
-    // Subscription canceled, downgrade to free
-    if (eventType === 'subscription.revoked' || eventType === 'subscription.canceled') {
-      let accountId: string =
-        event?.data?.metadata?.agentbill_account_id ??
-        event?.data?.checkoutMetadata?.agentbill_account_id ??
-        ''
-
-      // Fallback via checkout_id. The subscription's own metadata comes back
-      // empty (verified on the first real delivery, 2026-09-07), but the payload
-      // always carries data.checkout_id, and the session /checkout/:tier minted
-      // put the account id on that checkout. One guarded GET recovers it, and it
-      // only runs when the fast path above found nothing, so a well-formed
-      // upgrade pays for no extra call.
-      if (!isUuid(accountId)) {
-        const checkoutId: string = event?.data?.checkout_id ?? event?.data?.checkoutId ?? ''
-        if (checkoutId) {
-          const md = await getCheckoutMetadata(checkoutId)
-          const fromCheckout = md?.agentbill_account_id
-          if (typeof fromCheckout === 'string') accountId = fromCheckout
-        }
-      }
-
-      // Same rule as the upgrade branch: a uuid, or nothing happens.
-      if (isUuid(accountId)) {
-        await sql`
-          UPDATE accounts
-          SET
-            plan              = 'free',
-            polar_customer_id = NULL,
-            monthly_calls     = 0,
-            billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
-          WHERE id = ${accountId}
-        `
-        request.log.info({ accountId }, 'Account downgraded to free')
-      }
+    if (outcome === 'unknown_product') {
+      // A real, verified payment for a product this server does not sell.
+      // No plan changes, and the owner hears about it, because a buyer is
+      // waiting on the other end of it.
+      request.log.warn({ eventType, accountId, productId }, 'Polar webhook for a product this server does not sell: no plan change')
+      alertRejectedWebhook('unknown_product', {
+        eventType,
+        note: `product ${String(productId).slice(0, 64) || '(none)'} is not a configured tier; account ${accountId} left as it was`,
+      })
+      return reply.send({ received: true })
     }
+
+    if (outcome === 'upgraded') request.log.info({ accountId, polarCustomerId, plan, productId }, 'Account upgraded')
+    else request.log.info({ accountId }, 'Account downgraded to free')
 
     return reply.send({ received: true })
   })
