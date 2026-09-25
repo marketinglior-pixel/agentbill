@@ -370,7 +370,8 @@ print(json.dumps(out))
      cm?.used === 800 && cm.limit === 800 && cm.remaining === 0 && cm.isBlocked === true && cm.listPriceUsdEstimate === Number(cmUsd.usd) && cm.listPriceUsdEstimate === 0.35
        && cm.pricedCalls === 1 && /list price/.test(cm.listPriceLabel ?? ''), JSON.stringify(cm))
   const custPage = await page('view=customers')
-  const cmRow = (custPage.match(/<tr[^>]*>\s*<td class="id lead" title="cust-mix">[\s\S]*?<\/tr>/) ?? [''])[0]
+  // The balances table, below the month's report since M2 (2026-09-26).
+  const cmRow = (custPage.slice(custPage.indexOf('<h2>Balances')).match(/<tr[^>]*>\s*<td class="id lead" title="cust-mix">[\s\S]*?<\/tr>/) ?? [''])[0]
   ok('[usd] the customers view shows Est. cost and Units used as two columns: $0.35 beside 800, never 350,800',
      custPage.includes('<th class="num">Est. cost</th><th class="num">Units used</th>') && cmRow.includes('>$0.35</td>') && cmRow.includes('title="units and tokens your code reported, never dollars">800</td>')
        && !custPage.includes('350,800') && !custPage.includes('350800'), cmRow.replace(/\s+/g, ' ').slice(0, 400))

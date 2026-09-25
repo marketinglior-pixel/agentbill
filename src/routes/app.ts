@@ -20,6 +20,7 @@ import {
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
 import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
+import { agentRows, demoAgentRows, monthlyReport, demoReport, reportCsv, asMonth, thisMonth, recentMonths, type AgentRow, type Report } from '../lib/report.js'
 import { rankOrderSql } from '../lib/task-rank.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
@@ -170,6 +171,8 @@ export async function appRoute(app: FastifyInstance) {
         const sample = demoConsole(filter, RANGES[range].days, sort)
         return reply.send(consolePage({ v: DEMO_VIEWER, d: sample, demo: true, anon: true, range, view, filter, sort,
                                         dash: view === 'overview' ? demoDashboard(range as DashRange) : null,
+                                        agents: view === 'agents' ? demoAgentRows(range as DashRange) : null,
+                                        report: view === 'customers' ? demoReport(asMonth(q?.month) ?? thisMonth()) : null,
                                         suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
       }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
@@ -189,10 +192,13 @@ export async function appRoute(app: FastifyInstance) {
     const via = asVia(q?.via)
     // The overview's cards. Only the overview draws them, so only it pays.
     const dash = view !== 'overview' ? null : demo ? demoDashboard(range as DashRange) : await loadDashboard(viewer.accountId, range as DashRange)
+    const agents = view !== 'agents' ? null : demo ? demoAgentRows(range as DashRange) : await agentRows(viewer.accountId, range as DashRange)
+    const month = asMonth(q?.month) ?? thisMonth()
+    const report = view !== 'customers' ? null : demo ? demoReport(month) : await monthlyReport(viewer.accountId, month)
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -290,6 +296,36 @@ export async function appRoute(app: FastifyInstance) {
 
   // The canonical-host redirect preserves a trailing slash; without this the
   // 404 handler's Bearer hook would answer /app/ with a JSON 401.
+  // The monthly customer report (M2, 2026-09-26): the customers view's month
+  // as a CSV to bill from, and as a page to print or save as PDF. Both read
+  // the signed-in account only, or the sample under ?demo=1. Never cached.
+  app.get('/app/report.csv', publicRoute(), async (request, reply) => {
+    const q = request.query as Record<string, unknown>
+    const demo = q?.demo === '1'
+    const month = asMonth(q?.month) ?? thisMonth()
+    const viewer = demo ? null : await loadSession(request)
+    if (!demo && !viewer) return reply.redirect(`/app?view=customers&month=${month}`, 303)
+    const r = demo ? demoReport(month) : await monthlyReport(viewer!.accountId, month)
+    return reply.type('text/csv; charset=utf-8').header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Disposition', `attachment; filename="agentbill-${demo ? 'sample-' : ''}report-${month}.csv"`)
+      .send(reportCsv(r))
+  })
+
+  app.get('/app/report', publicRoute(), async (request, reply) => {
+    const q = request.query as Record<string, unknown>
+    const demo = q?.demo === '1'
+    const month = asMonth(q?.month) ?? thisMonth()
+    const viewer = demo ? null : await loadSession(request)
+    if (!demo && !viewer) return reply.redirect(`/app?view=customers&month=${month}`, 303)
+    const full = demo ? demoReport(month) : await monthlyReport(viewer!.accountId, month)
+    const only = isId(q?.customer) ? String(q.customer) : null
+    const customers = only ? full.customers.filter((c) => c.customer === only) : full.customers
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex').header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', APP_CSP)
+    return reply.send(reportPage({ month, customers, totals: only ? null : full.totals, demo,
+      who: demo ? 'Sample account' : (viewer!.via === 'user' ? viewer!.userEmail : viewer!.email) ?? '' }))
+  })
+
   app.get('/app/', publicRoute(), async (_request, reply) => reply.redirect('/app' + (_request.url.includes('?') ? _request.url.slice(_request.url.indexOf('?')) : ''), 301))
 
   app.post('/app/session', publicRoute(), async (request, reply) => {
@@ -732,10 +768,11 @@ const VIEWS = {
   // "overview" is two names for the same first screen.
   start:     { title: 'Start',        lede: 'Connect once, and your first recorded call shows up here with its tokens and what it cost at list price.', hidden: true },
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
+  agents:    { title: 'Agents',       lede: 'Every agent that recorded a call in this window: what it cost at list price, how much it did, how fast, and what was refused.' },
   activity:  { title: 'Activity',     lede: 'What your calls cost at list price, the tokens they used and the calls refused, day by day, split by event_type.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
   refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, and every one that ran past a ceiling, newest first, with the literal body the agent got.' },
-  customers: { title: 'Customers',    lede: 'One balance per customer_id. Balances are lifetime, not a period.' },
+  customers: { title: 'Customers',    lede: 'What each customer_id cost you this month, ready to bill from, and each one\'s lifetime balance.' },
   keys:      { title: 'API keys',     lede: 'Every key on this account, its state, and where it was last used from.' },
   limits:    { title: 'Limits',       lede: 'What refuses a call on this account, in the order preflight checks it.' },
 } as const
@@ -2186,7 +2223,12 @@ const LOGIN_CSS = `${CHROME_CSS}${SIGNIN_CSS}${COPY_CSS}
   }
 `
 
-const HEAD = (title: string, css = CSS + DASH_CSS) => head({
+const REPORT_CSS = `
+  .rep-actions { display: flex; gap: var(--s2); flex-wrap: wrap; margin: var(--s3) 0 0; }
+  .cv-table tfoot td { font-weight: 500; border-top: 1px solid var(--row-line); }
+  h2 .cv-seg { margin-left: var(--s3); vertical-align: middle; }
+`
+const HEAD = (title: string, css = CSS + DASH_CSS + REPORT_CSS) => head({
   title: `${esc(title)} · AgentBill`,
   description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
@@ -2362,12 +2404,16 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** The start screen's answer to "how will you connect?", off ?via=. */
   via?: Via | null
   /** The overview's dashboard (src/lib/dashboard.ts), for its window. */
-  dash?: Dash | null }
+  dash?: Dash | null
+  /** The agents view's rows (src/lib/report.ts), for its window. */
+  agents?: AgentRow[] | null
+  /** The customers view's monthly report, for ?month= (this UTC month by default). */
+  report?: Report | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick; via: Via }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick; via: Via; month: string }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
@@ -2386,6 +2432,7 @@ function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: stri
   if (extra.history) q.push(`history=${encodeURIComponent(extra.history)}`)
   if (extra.pick) q.push(`pick=${extra.pick}`)
   if (extra.via) q.push(`via=${extra.via}`)
+  if (extra.month) q.push(`month=${encodeURIComponent(extra.month)}`)
   return q.length ? `/app?${q.join('&amp;')}` : '/app'
 }
 
@@ -3529,7 +3576,9 @@ function refusalsView(p: Page): string {
 }
 
 function customersView(p: Page): string {
-  return `${customersTable(p, p.d.customers, p.d.customerTotal)}
+  return `${monthlyBlock(p)}
+    <h2>Balances <span>lifetime, per customer_id</span></h2>
+    ${customersTable(p, p.d.customers, p.d.customerTotal)}
     <p class="note">${p.d.customerCount > p.d.customers.length ? `The ${num(p.d.customers.length)} heaviest of ${num(p.d.customerCount)} customers.` : `${num(p.d.customerCount)} ${p.d.customerCount === 1 ? 'customer' : 'customers'}, heaviest first.`} Heaviest is the list-price estimate where a customer has priced calls, then units. Units used, limit and left are each customer's lifetime balance in the units and tokens your code reported, and share is of every customer's units on this account, including any not listed. A job whose ceiling is in dollars never moves that balance: its spend is in Est. cost, at public list price over priced calls only, and it is bounded by its own ceiling, not by a customer limit. The full list is on <code>GET /customers</code>.</p>`
 }
 
@@ -3620,6 +3669,125 @@ function revokeAllBlock(p: Page): string {
     </div>`
 }
 
+/** "September 2026" from YYYY-MM. */
+function monthLabel(m: string): string {
+  const [y, mo] = m.split('-').map(Number)
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** Milliseconds as the agents table prints them. */
+function msText(ms: number | null): string {
+  if (ms == null) return '<span class="dim">not timed</span>'
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`
+}
+
+function agentsView(p: Page): string {
+  const rows = p.agents ?? []
+  if (!rows.length) {
+    return `<div class="cv-empty"><p class="nothing">No agent recorded a call in this window. An agent here is the <code>event_type</code> your records carry: <code>record()</code> and <code>wrap()</code> send the <code>agent_id</code> you give them there.</p></div>`
+  }
+  const priced = rows.some((r) => r.usd != null)
+  const since = Date.now() - (RANGES[p.range]?.days ?? 30) * 86_400_000
+  const body = rows.map((r) => {
+    const isNew = r.firstSeen != null && new Date(r.firstSeen).getTime() >= since
+    return `<tr>
+      <td class="id lead" title="${esc(r.agent)}">${esc(r.agent)}${isNew ? ` ${tag('new')}` : ''}</td>${priced ? `
+      <td class="num" data-l="est. cost"${r.usd != null ? ` title="${esc(LIST_PRICE_LABEL)}"` : ''}>${r.usd != null ? usd(r.usd) : '<span class="dim">no price</span>'}</td>` : ''}
+      <td class="num" data-l="calls">${num(r.calls)}</td>
+      <td class="num" data-l="tokens">${num(r.tokens)}</td>
+      <td class="num" data-l="latency">${msText(r.latMs)}</td>
+      <td class="num" data-l="refused">${r.refused ? `<a href="${href(p, 'refusals', { agent: r.agent })}">${num(r.refused)}</a>` : '<span class="dim">0</span>'}</td>
+      <td data-l="first seen">${rel(r.firstSeen)}</td>
+      <td data-l="last seen">${rel(r.lastSeen)}</td>
+    </tr>`
+  }).join('')
+  return `${frame(p, barOf('event_type', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
+    <thead><tr><th>Agent</th>${priced ? '<th class="num">Est. cost</th>' : ''}<th class="num">Calls</th><th class="num">Tokens</th><th class="num">Latency</th><th class="num">Refused</th><th>First seen</th><th>Last seen</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`)}
+    <p class="note">${rows.length === 100 ? 'The 100 dearest agents in this window.' : `${num(rows.length)} ${rows.length === 1 ? 'agent' : 'agents'} in this window, dearest first.`} An agent is the <code>event_type</code> on its records; refused counts preflight refusals whose <code>agent_id</code> is the same name. Latency is the mean <code>duration_ms</code> <code>wrap()</code> records. First seen is all time: <b>new</b> marks an agent whose first call is inside this window. Est. cost is at public list price over priced calls only.</p>`
+}
+
+/** The customers view's month: what each customer cost, ready to bill from. */
+function monthlyBlock(p: Page): string {
+  const r = p.report
+  if (!r) return ''
+  const months = recentMonths()
+  const control = `<span class="cv-seg" aria-label="Month">${months.map((m) =>
+    `<a href="${href(p, 'customers', { month: m })}"${m === r.month ? ' aria-current="true"' : ''}>${esc(monthLabel(m).replace(/ \d{4}$/, ''))}</a>`).join('')}</span>`
+  const q = `month=${r.month}${p.demo ? '&amp;demo=1' : ''}`
+  const actions = r.customers.length
+    ? `<div class="rep-actions"><a class="btn-ghost" href="/app/report.csv?${q}">Download CSV</a><a class="btn-ghost" href="/app/report?${q}">Printable report</a></div>` : ''
+  const priced = r.totals.priced > 0
+  const rows = r.customers.map((c) => {
+    const top = c.lines[0]
+    return `<tr>
+      <td class="id lead" title="${esc(c.customer)}">${esc(c.customer)}</td>
+      <td class="num" data-l="est. cost">${c.usd != null ? usd(c.usd) : '<span class="dim">no price</span>'}</td>
+      <td class="num" data-l="calls">${num(c.calls)}${c.calls > c.priced && priced ? ` <span class="dim">(${num(c.calls - c.priced)} unpriced)</span>` : ''}</td>
+      <td class="num" data-l="tokens">${num(c.tokensIn + c.tokensOut)}</td>
+      <td data-l="top line">${top ? `${esc(top.agent)}${top.model ? ` · <code>${esc(top.model)}</code>` : ''}` : ''}</td>
+      <td data-l="report"><a href="/app/report?${q}&amp;customer=${encodeURIComponent(c.customer)}">Report</a></td>
+    </tr>`
+  }).join('')
+  const table = r.customers.length
+    ? frame(p, barOf('customer_id', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
+    <thead><tr><th>Customer</th><th class="num">Est. cost</th><th class="num">Calls</th><th class="num">Tokens</th><th>Top line</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td class="lead">Total</td><td class="num">${r.totals.usd != null ? usd(r.totals.usd) : '<span class="dim">no price</span>'}</td><td class="num">${num(r.totals.calls)}</td><td></td><td></td><td></td></tr></tfoot>
+  </table></div>`)
+    : `<div class="cv-empty"><p class="nothing">No record in ${esc(monthLabel(r.month))} carries a <code>customer_id</code>. Pass one on each record and every customer gets a line here.</p></div>`
+  return `<h2>${esc(monthLabel(r.month))} ${control}</h2>
+    ${table}
+    ${actions}
+    <p class="note">Calendar month, UTC. Est. cost is an estimate at public list price over priced calls, from the same figures as <code>GET /usage</code>: your provider's invoice may differ. The CSV has one line per customer, agent and model.</p>`
+}
+
+/** The printable report. Plain on purpose: it is printed, or saved as a PDF
+ *  from the browser's print dialog, and sent to somebody else. */
+function reportPage(o: { month: string; customers: Report['customers']; totals: Report['totals'] | null; demo: boolean; who: string }): string {
+  const sections = o.customers.map((c) => `
+    <section class="rp-c">
+      <header><h2>${esc(c.customer)}</h2><b>${c.usd != null ? usd(c.usd) : 'no priced call'}</b></header>
+      <p class="rp-sub">${num(c.calls)} calls${c.calls > c.priced ? ` (${num(c.calls - c.priced)} with no list price, left out of the estimate)` : ''} · ${num(c.tokensIn)} tokens in · ${num(c.tokensOut)} out</p>
+      <table class="rp-t"><thead><tr><th>Agent</th><th>Model</th><th class="num">Calls</th><th class="num">Tokens</th><th class="num">Est. cost</th></tr></thead>
+      <tbody>${c.lines.map((l) => `<tr><td>${esc(l.agent)}</td><td>${l.model ? esc(l.model) : '<span class="dim">none named</span>'}</td><td class="num">${num(l.calls)}</td><td class="num">${num(l.tokensIn + l.tokensOut)}</td><td class="num">${l.usd != null ? usd(l.usd) : '<span class="dim">no price</span>'}</td></tr>`).join('')}</tbody></table>
+    </section>`).join('')
+  const css = `
+  body { background: var(--bg); }
+  .rp { max-width: 820px; margin: 0 auto; padding: var(--s7) var(--gutter); color: var(--text); font: 400 var(--fs-small)/1.5 var(--sans); }
+  .rp-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); border-bottom: 1px solid var(--border); padding-bottom: var(--s4); margin-bottom: var(--s5); }
+  .rp-top h1 { font: 500 26px/1.2 var(--display); margin: 0; }
+  .rp-top p { margin: 4px 0 0; color: var(--muted); }
+  .rp-total { text-align: right; } .rp-total b { display: block; font: 500 28px/1.1 var(--display); }
+  .rp-c { margin-bottom: var(--s6); break-inside: avoid; }
+  .rp-c header { display: flex; justify-content: space-between; align-items: baseline; }
+  .rp-c h2 { font: 500 18px/1.3 var(--mono); margin: 0; } .rp-c header b { font: 500 18px var(--sans); }
+  .rp-sub { color: var(--muted); margin: 2px 0 var(--s3); font-size: var(--fs-micro); }
+  .rp-t { width: 100%; border-collapse: collapse; font-size: var(--fs-micro); }
+  .rp-t th { text-align: left; color: var(--dim); font-weight: 500; border-bottom: 1px solid var(--border); padding: 6px 4px; }
+  .rp-t td { border-bottom: 1px solid var(--border-soft); padding: 6px 4px; }
+  .rp-t .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dim { color: var(--dim); }
+  .rp-foot { color: var(--dim); font-size: var(--fs-micro); border-top: 1px solid var(--border); padding-top: var(--s3); }
+  .rp-bar { display: flex; gap: var(--s3); align-items: center; margin-bottom: var(--s5); font-size: var(--fs-micro); color: var(--muted); }
+  .rp-sample { border: 1px solid var(--border2); border-radius: var(--r-chip); padding: 2px 8px; font: 500 var(--fs-chip) var(--mono); text-transform: uppercase; }
+  @media print { .rp-bar { display: none; } .rp { padding: 0; } }`
+  return `${HEAD(`Report ${monthLabel(o.month)}`, css)}
+<body>
+  <main class="rp">
+    <div class="rp-bar"><a href="/app?view=customers&amp;month=${o.month}${o.demo ? '&amp;demo=1' : ''}">&larr; Back to the console</a><span>To keep a copy, print this page or save it as a PDF from your browser's print dialog.</span></div>
+    <div class="rp-top">
+      <div><h1>Usage report · ${esc(monthLabel(o.month))}</h1><p>${o.demo ? '<span class="rp-sample">sample</span> ' : ''}${esc(o.who)} · generated ${new Date().toISOString().slice(0, 10)} · UTC calendar month</p></div>
+      ${o.totals ? `<div class="rp-total"><span class="dim">Est. cost, all customers</span><b>${o.totals.usd != null ? usd(o.totals.usd) : 'no priced call'}</b></div>` : ''}
+    </div>
+    ${sections || `<p>No record in ${esc(monthLabel(o.month))} carries this customer_id.</p>`}
+    <p class="rp-foot">${esc(LIST_PRICE_LABEL)}${o.demo ? ' Every number on this page is invented sample data.' : ''} Generated by AgentBill.</p>
+  </main>
+</body>
+</html>`
+}
+
 function keysView(p: Page): string {
   return `${waysIn(p)}
     ${keysMsg(p)}
@@ -3667,6 +3835,7 @@ function consolePage(p: Page): string {
     : ''
 
   const body = p.view === 'overview' || p.view === 'start' ? overviewView(p, rangeLabel)
+    : p.view === 'agents' ? agentsView(p)
     : p.view === 'activity' ? activityView(p, rangeLabel)
     : p.view === 'tasks' ? tasksView(p)
     : p.view === 'refusals' ? refusalsView(p)
@@ -3678,6 +3847,16 @@ function consolePage(p: Page): string {
   // timestamps, and no route returns reservations. So a page that draws a
   // span names it as the exception. taskRow is what draws one.
   const spanShown = body.includes('<span class="bseen">')
+  // The dashboard's cuts, the agents view and the monthly report are worked
+  // out on this page from the same records the API returns, and no route
+  // returns them as such (M2, 2026-09-26). A page that draws one says so.
+  const workedOut = p.view === 'overview' && body.includes('<div class="dash">')
+    ? "the dashboard's cuts by model, agent, customer and window and its latency"
+    : p.view === 'agents' && (p.agents?.length ?? 0) > 0 ? "this view's latency, first seen and last seen"
+    : p.view === 'customers' && (p.report?.customers.length ?? 0) > 0 ? 'the monthly report, which is also a CSV'
+    : ''
+  const exceptions = [spanShown ? 'the preflight span on a task row, which the API does not return' : '',
+    workedOut ? `${workedOut}, which this page works out from those same records` : ''].filter(Boolean)
 
   return `${HEAD(meta.title)}
 <body>
@@ -3687,13 +3866,13 @@ function consolePage(p: Page): string {
       <div class="wrap">
         <header class="vh">
           <div><h1>${meta.title}</h1><p class="sub">${meta.lede}</p></div>
-          ${p.view === 'overview' && !asStart ? dashRangeControl(p.range, (k) => href(p, 'overview', { range: k })) : RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
+          ${(p.view === 'overview' || p.view === 'agents') && !asStart ? dashRangeControl(p.range, (k) => href(p, p.view, { range: k })) : RANGED.has(p.view) && !asStart ? periodControl(p) : p.view === 'tasks' ? sortControl(p) : ''}
         </header>
         ${banner}
         ${nudge}
         ${body}
         <div class="foot">
-          Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
+          Every number on this page is on the API too${exceptions.length ? `, except ${exceptions.join(', and ')}` : ''}:
           <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets and <code>/tasks/:task_ref</code> for a job's list-price estimate, <code>/usage?by=event_type</code> for the split by event_type and its estimate, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, or its <code>breakdown.list_price_usd_estimate</code> when every call was priced, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
