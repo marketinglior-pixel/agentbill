@@ -81,7 +81,7 @@ function charOf(name) { var h = 0; for (var i = 0; i < name.length; i++) h = (h 
 // A stable pseudo-random per agent, so positions do not jump between reloads.
 function rng(seed) { var s = (Math.abs(Math.imul(seed | 0, 2654435761)) % 2147483646) + 1; var f = function () { s = (s * 16807) % 2147483647; return s / 2147483647; }; for (var i = 0; i < 5; i++) f(); return f; }
 var agents = [];
-function mk(d, i) { var h = 0; for (var c = 0; c < d.name.length; c++) h = (h * 131 + d.name.charCodeAt(c)) | 0; var r = rng(h + i * 7919); return { name: d.name, sal: d.sal, st: d.state, ch: charOf(d.name), r: r, x: 2 + r() * 8, y: 4 + r() * 2.5, path: [], mode: 'idle', timer: 30 + r() * 60, t: r() * 99, desk: null, alpha: 1, gone: false, toDesk: false }; }
+function mk(d, i) { var h = 0; for (var c = 0; c < d.name.length; c++) h = (h * 131 + d.name.charCodeAt(c)) | 0; var r = rng(h + i * 7919); return { idx: i, name: d.name, sal: d.sal, st: d.state, ch: charOf(d.name), r: r, x: 2 + r() * 8, y: 4 + r() * 2.5, path: [], mode: 'idle', timer: 30 + r() * 60, t: r() * 99, desk: null, alpha: 1, gone: false, toDesk: false }; }
 function freeDesk() { for (var k = 0; k < DESKS.length; k++) { var used = false; for (var j = 0; j < agents.length; j++) if (agents[j].desk === k) used = true; if (!used) return k; } return null; }
 function walkTo(a, x, y) { a.path = [[x, a.y], [x, y]]; a.mode = 'walk'; }
 function plan(a) {
@@ -104,7 +104,9 @@ function drawAgent(a) { var name = 'front_idle', fi = Math.floor(a.t / 30), flip
   g.globalAlpha = a.alpha; if (a.mode !== 'desk') { g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(s[0], s[1], 15, 6, 0, 0, 7); g.fill(); }
   if (flip) { g.save(); g.translate(x + dw, y); g.scale(-1, 1); g.drawImage(img, col * FW, a.ch * FH, FW, FH, 0, 0, dw, dh); g.restore(); } else g.drawImage(img, col * FW, a.ch * FH, FW, FH, x, y, dw, dh);
   g.globalAlpha = 1; if (SHOW && a.alpha > .3) LABELS.push([a, s[0], y - 4]); }
-function label(a, cx, cy) { var s = a.name + '  ' + money(a.sal); g.font = '11px ui-monospace,monospace'; var w = Math.ceil(g.measureText(s).width) + 12; var x = Math.round(cx - w / 2); var y = Math.round(cy - 18);
+var ANON = false;
+function shownName(a) { return ANON ? 'agent ' + (a.idx + 1) : a.name; }
+function label(a, cx, cy) { var s = shownName(a) + '  ' + money(a.sal); g.font = '11px ui-monospace,monospace'; var w = Math.ceil(g.measureText(s).width) + 12; var x = Math.round(cx - w / 2); var y = Math.round(cy - 18);
   var sub = a.st === 'sent' ? 'ceiling hit, heading home' : a.st === 'panic' ? '3x its usual day' : a.st === 'new' ? 'new hire' : ''; var top = sub ? 14 : 0;
   for (var k = 0; k < 5; k++) { var hit = false; for (var j = 0; j < PLACED.length; j++) { var r = PLACED[j]; if (x < r[0] + r[2] && x + w > r[0] && y - top < r[1] + r[3] && y + 18 > r[1]) hit = true; } if (!hit) break; y -= 22; } PLACED.push([x, y - top, w, 18 + top]);
   var st = a.st === 'sent' ? ['#fcebeb', '#a32d2d'] : a.st === 'panic' ? ['#fff3cd', '#8a5a00'] : a.st === 'new' ? ['#e1f5ee', '#085041'] : ['#ffffff', '#2c2c2a'];
@@ -138,6 +140,33 @@ function tick() { T++; agents.forEach(step); agents = agents.filter(function (a)
 });
 var btn = document.getElementById('office-labels');
 if (btn) btn.addEventListener('click', function () { SHOW = !SHOW; btn.textContent = SHOW ? 'Hide salaries' : 'Show salaries'; if (REDUCE) frame(); });
+/* ---------- the payroll card: made here, from this frame, and never sent anywhere ---------- */
+function usdText(v) { return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function monthText(m) { var p = String(m || '').split('-'); var d = new Date(Date.UTC(+p[0], (+p[1] || 1) - 1, 1)); return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }); }
+function makeCard(anon) {
+  var S = DATA.summary || {};
+  var was = ANON; ANON = !!anon; frame(); ANON = was;
+  var c = document.createElement('canvas'); c.width = 1200; c.height = 630; var k = c.getContext('2d'); k.imageSmoothingEnabled = false;
+  k.fillStyle = '#111110'; k.fillRect(0, 0, 1200, 630);
+  // The room, cropped to its floor and walls, on the left.
+  var sx = 130, sy = 96, sw = 930, sh = 700; k.drawImage(cv, sx, sy, sw, sh, 24, 24, 760, 572);
+  var x = 820, y = 70; var font = function (w, px) { return w + ' ' + px + 'px Geist, "Helvetica Neue", Arial, sans-serif'; };
+  k.fillStyle = '#8f8c85'; k.font = font(500, 18); k.fillText('PAYROLL · ' + monthText(S.month).toUpperCase(), x, y);
+  k.fillStyle = '#e8e6e1'; k.font = font(500, 64); k.fillText(S.payroll == null ? 'unpriced' : usdText(S.payroll), x, y + 78);
+  k.fillStyle = '#8f8c85'; k.font = font(400, 18); k.fillText('this month, at list price', x, y + 108);
+  var rows = [['Agents on staff', String(S.staff || 0)], ['At their desk', String(S.atDesk || 0)], ['Sent home today', String(S.sentHome || 0)]];
+  if (S.top) rows.unshift(['Highest paid', (anon ? 'agent ' + ((S.top.idx | 0) + 1) : S.top.name) + '  ' + usdText(S.top.sal)]);
+  rows.forEach(function (r, i) { var yy = y + 170 + i * 58; k.fillStyle = '#8f8c85'; k.font = font(400, 16); k.fillText(r[0], x, yy); k.fillStyle = r[0] === 'Sent home today' && r[1] !== '0' ? '#f97316' : '#e8e6e1'; k.font = font(500, 24); var t = r[1]; while (k.measureText(t).width > 350 && t.length > 4) t = t.slice(0, -2); k.fillText(t === r[1] ? t : t + '…', x, yy + 28); });
+  if (DATA.sample) { k.fillStyle = '#f97316'; k.font = font(600, 16); k.fillText('SAMPLE DATA · every number is invented', x, 560); }
+  k.fillStyle = '#8f8c85'; k.font = font(500, 16); k.fillText('made with AgentBill · agentbill.dev', x, 596);
+  return c;
+}
+var cardBtn = document.getElementById('office-card'), cardImg = document.getElementById('office-card-img'), cardDl = document.getElementById('office-card-dl'), cardAnon = document.getElementById('office-card-anon');
+if (cardBtn && cardImg && cardDl) cardBtn.addEventListener('click', function () {
+  var c = makeCard(cardAnon && cardAnon.checked);
+  cardImg.src = c.toDataURL('image/png'); cardImg.hidden = false;
+  c.toBlob(function (b) { if (!b) return; if (cardDl.href && cardDl.href.indexOf('blob:') === 0) URL.revokeObjectURL(cardDl.href); cardDl.href = URL.createObjectURL(b); cardDl.hidden = false; }, 'image/png');
+});
 img.onload = function () { if (REDUCE) frame(); else tick(); };
 img.src = cv.getAttribute('data-sprites');
 })();

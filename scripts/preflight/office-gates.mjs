@@ -95,6 +95,17 @@ async function gates({ API, sql, ok, F, O }) {
      js.status === 200 && /javascript/.test(js.headers.get('content-type') ?? '') && jsText.includes("getElementById('office-data')") && !/Hire an agent|Trigger a spike/.test(jsText))
   ok('[office] and it never changes a salary: no assignment to .sal anywhere in the engine',
      !/\.sal\s*(\+|-|\*)?=[^=]/.test(jsText), (jsText.match(/.{30}\.sal\s*(\+|-|\*)?=.{20}/) ?? [''])[0])
+  // The payroll card (M3, 2026-09-26): drawn in the browser and never sent.
+  ok('[office] the payroll card is made in the browser: the engine draws it with canvas and has no way to send it (no fetch, XHR, beacon, socket or form)',
+     jsText.includes('makeCard') && jsText.includes('toBlob') && jsText.includes('made with AgentBill')
+       && !/fetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|\.submit\(|navigator\.share/.test(jsText))
+  const s = data?.summary ?? {}
+  ok('[office] and it prints the same figures as the cards above the room: payroll $4.01, 7 on staff, 1 at a desk, 1 sent home, the highest paid named with its index',
+     s.payroll === 4.01 && s.staff === 7 && s.atDesk === 1 && s.sentHome === 1 && s.top?.name === 'panicky' && s.top?.sal === 2 && typeof s.top?.idx === 'number'
+       && data.agents[s.top.idx]?.name === 'panicky' && /^\d{4}-\d{2}$/.test(s.month ?? ''), JSON.stringify(s))
+  ok('[office] the page offers the card, the choice to hide agent names on it, and a download named for the month, and says nothing is uploaded',
+     html.includes('id="office-card"') && html.includes('id="office-card-anon"') && new RegExp(`download="agentbill-payroll-${s.month}\\.png"`).test(html)
+       && html.includes('nothing is uploaded or posted'))
   const png = await fetch(`${API}/app/office-sprites.png`)
   const buf = Buffer.from(await png.arrayBuffer())
   ok('[office] the sprite sheet is round 3\'s sheet_1x.png, byte for byte',
