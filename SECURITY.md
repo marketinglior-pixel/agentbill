@@ -57,13 +57,13 @@ Give us a reasonable time to fix a problem before you publish it.
 
 ## If your API key leaks
 
-Revoke it. The key stops authenticating on the next request:
+Revoke it. From the next request on, the key no longer authenticates:
 
 ```bash
 curl -X POST https://agentbill.dev/keys/revoke \
   -H "Authorization: Bearer <a key on the same account>" \
   -H "Content-Type: application/json" \
-  -d '{"key_prefix":"<the first 8 or more characters of the leaked key>"}'
+  -d '{"key_prefix":"<the leading 8 or more characters of the leaked key>"}'
 ```
 
 Or open the console at https://agentbill.dev/app, where the keys view lists
