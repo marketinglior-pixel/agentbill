@@ -108,8 +108,9 @@ async function deliver(log: FastifyBaseLogger, a: QuotaAlert): Promise<void> {
   )
 
   const [acc] = await sql`
-    SELECT email, to_char(billing_period_start + INTERVAL '1 month', 'FMDD FMMonth YYYY') AS resets_on
-    FROM accounts WHERE id = ${a.accountId}
+    SELECT COALESCE(a.email, (SELECT u.email FROM users u WHERE u.id = a.owner_user_id)) AS email,
+           to_char(a.billing_period_start + INTERVAL '1 month', 'FMDD FMMonth YYYY') AS resets_on
+    FROM accounts a WHERE a.id = ${a.accountId}
   `
   if (!acc?.email) {
     log.warn({ accountId: a.accountId }, 'quota alert: account has no email')

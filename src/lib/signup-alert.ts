@@ -13,9 +13,11 @@ import { ORIGIN } from '../ui/site.js'
 // only window in which a first-run question can be answered had closed. The
 // digest stays; it is the backstop for anything this send loses.
 //
-// No key, ever. The API key is shown once in the browser and is not in the
-// welcome mail on purpose (register.ts); putting it in the owner's mailbox
-// would recreate exactly the thing that decision avoids, in a second mailbox.
+// No key, ever. Since 2026-09-25 an account is born with no key at all: the
+// owner signs in (Google, GitHub or an email link, src/routes/auth.ts) and the
+// console's start screen makes the first one and shows it once. Putting a key
+// in the owner's mailbox would recreate exactly what that avoids, in a second
+// mailbox.
 //
 // ---------------------------------------------------------------------------
 // The cap, and why there is one at all
@@ -74,15 +76,16 @@ export interface SignupAlert {
   stack?: string | null
   useCase?: string | null
   plan: string
+  /** How they signed in: google, github or email. */
+  via?: string
 }
 
 /**
  * Never throws and returns nothing the caller waits on. Called with `void`.
  *
- * The caller is POST /register, which already holds the key in its 201 body.
- * An owner notification that could delay or fail a signup would be an
- * observability feature turned into an availability bug, on the one route whose
- * whole promise is that it takes thirty seconds.
+ * The caller is the first sign-in of a new person (src/routes/auth.ts), on the
+ * request that signs them in. An owner notification that could delay or fail a
+ * sign-in would be an observability feature turned into an availability bug.
  */
 export function alertNewSignup(log: FastifyBaseLogger, a: SignupAlert): void {
   void send(log, a).catch((err) => log.error({ err }, 'signup alert threw'))
@@ -145,7 +148,7 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
           <p>This is account number ${esc(String(rank + 1))} created today, which is past the
              per-signup cap of ${DAILY_CAP}. No further signup mail goes out until tomorrow, and
              this is the only notice.</p>
-          <p>Either something good happened or /register is being swept. The accounts table is the
+          <p>Either something good happened or sign-in is being swept. The accounts table is the
              record either way, and tomorrow morning's digest still counts every one of them.</p>
           <p><a href="${ORIGIN}/admin">Open the dashboard</a></p>
         `,
@@ -163,22 +166,20 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
         ${row('stack', a.stack ? esc(a.stack) : 'not given')}
         ${row('use case', a.useCase ? esc(a.useCase) : 'not given')}
         ${row('plan', esc(a.plan))}
+        ${a.via ? row('signed in with', esc(a.via)) : ''}
         ${row('account', `<code>${esc(a.accountId)}</code>`)}
         ${row('accounts now', `${esc(String(total))} total, and this is number ${esc(String(rank + 1))} today`)}
       </table>
-      <p>They have a key and nothing else yet: no job, no ceiling, no call. The next thing that
-         has to happen is the console's start screen, and until a job has a ceiling there is
-         nothing for a preflight to be checked against.</p>
-      <!-- "and cannot be" is what this said until it was read in a delivered
-           mail. It is true of this function, which is never handed the key, and
-           false of the system: POST /register holds it in the 201 body four
-           lines from the call that sends this, and chooses not to pass it. The
-           same overreach had already propagated through two other files as "the
-           console cannot print the key", when the console holds the plaintext
-           key on every render and masks it by policy. A claim about the product
-           has to be true of the product, not of the function it is written in. -->
-      <p>The key is not in this email: it is shown once, in their browser, and nothing sends it
-         anywhere else.</p>
+      <p>They have a verified address, an account and nothing else yet: no key, no job, no
+         ceiling, no call. The next thing that has to happen is the console's start screen, which
+         makes their key, and until a job has a ceiling there is nothing for a preflight to be
+         checked against.</p>
+      <!-- A claim about the product has to be true of the product, not of the
+           function it is written in: this used to say the key "cannot be" in
+           this mail while POST /register held it four lines away. Since
+           2026-09-25 no key exists yet when this is sent. -->
+      <p>No key is in this email. When they make one, the console shows it once, in their
+         browser, and nothing sends it anywhere else.</p>
       <p><a href="${ORIGIN}/admin">Open the dashboard</a></p>
     `,
   })
