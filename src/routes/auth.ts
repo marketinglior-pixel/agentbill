@@ -15,6 +15,7 @@ import { mailUser } from '../lib/mail.js'
 import { alertNewSignup } from '../lib/signup-alert.js'
 import { userSessionCookie } from '../lib/user-session.js'
 import { signIn, linkIdentity, type SignedIn } from '../lib/users.js'
+import { reportRegistration } from '../lib/capi.js'
 import {
   providerConfig, configuredProviders, isProvider, newFlow, flowCookie, readFlow, stateMatches,
   authorizeUrl, verifiedIdentity, CLEAR_FLOW_COOKIE, type Provider, type Refusal,
@@ -194,6 +195,7 @@ async function land(request: FastifyRequest, reply: FastifyReply, s: SignedIn, v
   if (s.created) {
     request.log.info({ accountId: s.accountId, via }, 'account created by sign-in')
     alertNewSignup(request.log, { accountId: s.accountId, email: s.email, plan: 'free', via })
+    reportRegistration(request.log, request, { accountId: s.accountId, email: s.email, via })
     void emailWelcome(request.log, s.email, s.accountId, via)
       .catch((err) => request.log.error({ err }, 'welcome email threw'))
   }

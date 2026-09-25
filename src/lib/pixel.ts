@@ -1,9 +1,9 @@
 import { inlineScript } from './csp.js'
 // Pixel base code for marketing pages (home, register, pricing).
 // Each snippet renders nothing until its env var is set, so the site
-// stays clean until the pixel exists in the ad platform. Conversion
-// events (CompleteRegistration, SignUp) fire from the register page's
-// success handler.
+// stays clean until the pixel exists in the ad platform. No browser code
+// fires a conversion: a signup completes on a redirect back from a sign-in,
+// so CompleteRegistration is sent by the server (src/lib/capi.ts).
 /**
  * The pages that call pixelSnippet(): home.ts, register.ts and upgrade.ts
  * (/pricing). /privacy names them; the [privacy] gate fetches every page in
