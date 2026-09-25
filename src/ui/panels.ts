@@ -31,12 +31,14 @@ export const PANEL_CSS = `
 `
 
 /**
- * The three key endpoints, once. The console's keys view and the homepage's
- * keys panel both render from here; the sentences mirror src/routes/keys.ts
- * and if they ever disagree, keys.ts is right and this is a bug.
+ * The key endpoints, once. The console's keys view renders from here; the
+ * sentences mirror src/routes/keys.ts and if they ever disagree, keys.ts is
+ * right and this is a bug.
  */
 export const KEY_COMMANDS: ReadonlyArray<readonly [endpoint: string, what: string]> = [
-  ['POST /keys/generate', 'A new key, with an optional label and expiry in days.'],
-  ['POST /keys/rotate', 'A new key now; the old one keeps working for 24 hours, then revokes itself.'],
-  ['POST /keys/revoke', 'Revokes the calling key immediately, or another by its prefix.'],
+  ['GET /keys', 'Every key on the account as agb_1234…abcd, with its id. Never the key itself.'],
+  ['POST /keys/generate', 'A new key, shown once, with an optional label and expiry in days. It never outlives the key that made it.'],
+  ['POST /keys/rotate', 'A new key now; the old one keeps working for a grace window, an hour unless you pass grace_minutes (0 for none), then revokes itself.'],
+  ['POST /keys/revoke', 'Revokes the calling key immediately, or another by its key_id or prefix.'],
+  ['POST /keys/revoke-all', 'Revokes every key on the account at once, with {"confirm": true}.'],
 ]

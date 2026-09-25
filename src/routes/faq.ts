@@ -96,7 +96,7 @@ const FAQ: readonly QA[] = [
   {
     // src/routes/keys.ts + src/middleware/auth.ts, all shipped.
     q: 'What can I do if a key leaks?',
-    a: `Revoke it, and it stops authenticating on the next request rather than at the end of a billing period. You can also rotate it, which issues a new key and keeps the old one working for 24 hours so a deploy is not an outage; set an expiry when you generate it; and hold several labelled keys per account. Keys are rate limited, and a key used from a new address emails you.`,
+    a: `Revoke it, and it stops authenticating on the next request rather than at the end of a billing period. You can also rotate it, which issues a new key and keeps the old one working for an hour (or as long as you ask, up to a day) so a deploy is not an outage; set an expiry when you generate it; and hold several labelled keys per account. Keys are rate limited, and a key used from a new address emails you.`,
   },
 ]
 

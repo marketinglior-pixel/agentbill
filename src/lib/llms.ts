@@ -684,8 +684,11 @@ anomaly.detected payload to the account webhook if one is configured.
 
 ### Keys, webhook, health
 
-GET /keys (200 a page by default, limit up to 500, next_cursor when there are more), POST /keys/generate, POST /keys/rotate (issues a new key and keeps the old one working
-for 24 hours), POST /keys/revoke (stops authenticating on the next request; the check is one
+GET /keys (200 a page by default, limit up to 500, next_cursor when there are more; each key as its id and
+agb_1234…abcd, never the key itself), POST /keys/generate (the key is in this response only; it never outlives
+the calling key's expiry), POST /keys/rotate (issues a new key and keeps the old one working for grace_minutes,
+60 by default, 0 for none), POST /keys/revoke-all ({"confirm": true}: every key on the account), POST /keys/revoke
+(by key_id, key_prefix or the calling key; stops authenticating on the next request; the check is one
 predicate on the database clock, so no app-to-database skew can keep a dead key alive). POST
 /webhook-config sets one https URL per account, on a public address (loopback, private,
 link-local and internal hosts are refused, when saved and again when sent), and returns a signing

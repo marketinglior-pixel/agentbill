@@ -4,7 +4,7 @@ import { sql } from '../db/index.js'
 import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
-import { publicRoute } from '../middleware/auth.js'
+import { publicRoute, isKeyShaped } from '../middleware/auth.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT, CHROME_CSS, siteNav, siteFooter } from '../ui/chrome.js'
 import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
@@ -27,7 +27,8 @@ import { configuredProviders, providerConfig, isProvider, newFlow, flowCookie, a
 import { signinPanel, signinFonts, SIGNIN_CSS } from '../ui/signin.js'
 import { GOOGLE_G, GITHUB_MARK } from '../ui/provider-marks.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
-import { randomBytes } from 'crypto'
+import { hashKey, insertKey, maskKey, keyPrefixOf, keyLast4Of } from '../lib/api-keys.js'
+import { revokeAllKeys } from './keys.js'
 import { connectedApps, SCOPE_TEXT, type ConnectedApp } from '../lib/mcp-oauth.js'
 
 // /app is the console: the only browser surface a registered user has. It is
@@ -102,7 +103,9 @@ const back = (err: string, next: string) => `/app?err=${err}${next ? `&next=${en
 export type Viewer = {
   /** The key this console reads as. A user session with no active key yet has ''. */
   keyId: string
-  apiKey: string
+  /** That key as every surface shows it, agb_1234…abcd, or '' with no key.
+   *  Never the key: since 2026-09-25 the server keeps only its hash. */
+  keyMask: string
   keyLabel: string | null
   accountId: string
   email: string | null
@@ -122,10 +125,6 @@ export type Viewer = {
 /** The rate bucket for the console's own writes: the key's, as the API uses,
  *  or the account's when a person is signed in with no key yet. */
 const bucket = (v: Viewer): string => v.keyId || `account:${v.accountId}`
-
-function generateApiKey(): string {
-  return 'agb_' + randomBytes(24).toString('hex')
-}
 
 export async function appRoute(app: FastifyInstance) {
   app.get('/app', publicRoute(), async (request, reply) => {
@@ -178,11 +177,12 @@ export async function appRoute(app: FastifyInstance) {
     // with the outcome of a Disconnect: a code from a closed set, never echoed.
     const apps = view === 'keys' && !demo ? await connectedApps(viewer.accountId) : []
     const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
+    const keysMsg = q?.keys === 'revoked_all' || q?.keys === 'revoke_refused' || q?.keys === 'confirm' ? q.keys : null
     const via = asVia(q?.via)
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, via,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -294,7 +294,9 @@ export async function appRoute(app: FastifyInstance) {
     // attempt so a buyer who mistypes the key is not dropped back on /app with
     // the tier forgotten.
     const next = safeNext(body?.next)
-    if (!/^[A-Za-z0-9_-]{8,200}$/.test(key)) return reply.redirect(back('key', next), 303)
+    // Only the one shape a key has reaches the database, as in the API
+    // middleware; anything else is the same "not found" a wrong key gets.
+    if (!isKeyShaped(key)) return reply.redirect(back('key', next), 303)
 
     // Decided in SQL, same reason as the API middleware: revoked_at is written
     // by the database clock, so an app-side comparison turns clock skew into a
@@ -304,7 +306,7 @@ export async function appRoute(app: FastifyInstance) {
              (revoked_at IS NOT NULL AND revoked_at <= NOW()) AS is_revoked,
              (expires_at IS NOT NULL AND expires_at <= NOW()) AS is_expired
       FROM developer_api_keys
-      WHERE api_key = ${key}
+      WHERE key_hash = ${hashKey(key)}
       LIMIT 1
     `
     if (!row) return reply.redirect(back('key', next), 303)
@@ -357,9 +359,7 @@ export async function appRoute(app: FastifyInstance) {
         LIMIT 1
       `
       if (live) return null
-      const k = generateApiKey()
-      await tx`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${viewer.accountId}, ${k}, 'default')`
-      return k
+      return (await insertKey(tx, { accountId: viewer.accountId, label: 'default' })).key
     })
     if (!apiKey) return reply.redirect('/app?view=keys', 303)
     request.log.info({ accountId: viewer.accountId }, 'first key created from the console')
@@ -368,6 +368,31 @@ export async function appRoute(app: FastifyInstance) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
     return reply.send(firstKeyPage(apiKey))
+  })
+
+  // "Revoke all keys", the console's half of POST /keys/revoke-all (the rule
+  // and the recovery-path guard are revokeAllKeys in src/routes/keys.ts). A
+  // form with a confirmation box, because it cannot be undone: every key on
+  // the account stops authenticating, and every console opened with a key
+  // (this one too, when it was) is signed out on its next request, because a
+  // key session reads its key's state every time. A person's session stays:
+  // it is not a key, and it is their way to a new one, the start screen's
+  // "Create my API key". A key session's way back is /recover, which the
+  // sign-in page it lands on says.
+  app.post('/app/keys/revoke-all', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    if ((request.body as Record<string, unknown>)?.confirm !== 'yes') return reply.redirect('/app?view=keys&keys=confirm', 303)
+    if (!checkRateLimit(bucket(viewer)).allowed) return reply.redirect('/app?view=keys&err=rate', 303)
+    const done = await revokeAllKeys(viewer.accountId)
+    if (!done.ok) return reply.redirect('/app?view=keys&keys=revoke_refused', 303)
+    request.log.info({ accountId: viewer.accountId, count: done.count, via: viewer.via }, 'every key revoked from the console')
+    if (viewer.via === 'key') {
+      reply.header('Set-Cookie', CLEAR_KEY_COOKIE)
+      return reply.redirect('/app?err=revoked_all', 303)
+    }
+    return reply.redirect('/app?view=keys&keys=revoked_all', 303)
   })
 
   // "Connect Google" / "Connect GitHub" in the console. The one way an account
@@ -482,7 +507,7 @@ async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Vie
   `
   if (!row || Number(row.sessionEpoch) !== u.epoch) return null
   const [key] = await sql`
-    SELECT id, api_key, label FROM developer_api_keys
+    SELECT id, key_prefix, key_last4, label FROM developer_api_keys
     WHERE account_id = ${row.accountId}
       AND (revoked_at IS NULL OR revoked_at > NOW())
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -490,7 +515,7 @@ async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Vie
   `
   return {
     keyId: (key?.id as string) ?? '',
-    apiKey: (key?.apiKey as string) ?? '',
+    keyMask: key ? maskKey(key.keyPrefix as string, key.keyLast4 as string) : '',
     keyLabel: (key?.label as string | null) ?? null,
     accountId: row.accountId as string,
     email: (row.email as string | null) ?? null,
@@ -523,7 +548,7 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
   if (!keyId) return null
 
   const [row] = await sql`
-    SELECT k.id AS key_id, k.api_key, k.label,
+    SELECT k.id AS key_id, k.key_prefix, k.key_last4, k.label,
            (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
            (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired,
            a.id AS account_id, a.email, a.plan, a.monthly_calls, a.default_budget_units
@@ -539,7 +564,7 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
   if (row.isExpired) return null
   return {
     keyId: row.keyId as string,
-    apiKey: row.apiKey as string,
+    keyMask: maskKey(row.keyPrefix as string, row.keyLast4 as string),
     keyLabel: (row.label as string | null) ?? null,
     accountId: row.accountId as string,
     email: (row.email as string | null) ?? null,
@@ -825,7 +850,7 @@ type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUni
 // micro-dollars; usd is what the customer's priced calls cost at list price,
 // null when none is priced (2026-09-25).
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number; usd?: number | null; pricedCalls?: number }
-type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
+type KeyRow = { id: string; keyPrefix: string; keyLast4: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 // unit is the job's (task_budgets.unit, joined on task_ref), so a refusal on a
 // job counted in tokens says tokens. Absent for a call that named no job.
 type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date; unit?: string | null }
@@ -1019,7 +1044,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
       ${f.only === 'leaks' ? sql`AND NOT blocked` : sql``}
   `
   const keys = await sql`
-    SELECT api_key, label, created_at, revoked_at, expires_at, last_seen_ip
+    SELECT id, key_prefix, key_last4, label, created_at, revoked_at, expires_at, last_seen_ip
     FROM developer_api_keys
     WHERE account_id = ${accountId}
     ORDER BY created_at ASC
@@ -1112,7 +1137,7 @@ const DEMO_KEY_LABEL = 'production'
 // that were born with it.
 const DEMO_VIEWER: Viewer = {
   keyId: 'demo',
-  apiKey: DEMO_KEY,
+  keyMask: maskKey(keyPrefixOf(DEMO_KEY), keyLast4Of(DEMO_KEY)),
   keyLabel: DEMO_KEY_LABEL,
   accountId: 'demo',
   email: null,
@@ -1269,8 +1294,8 @@ export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'
     customerWithLimit: customers.filter((c) => c.limitUnits != null).length,
     customerTotal: customers.reduce((a, c) => a + c.usedUnits, 0),
     keys: [
-      { apiKey: DEMO_KEY, label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
-      { apiKey: DEMO_KEY_CI, label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
+      { id: 'demo', keyPrefix: keyPrefixOf(DEMO_KEY), keyLast4: keyLast4Of(DEMO_KEY), label: DEMO_KEY_LABEL, createdAt: day(38), revokedAt: null, expiresAt: null, lastSeenIp: '203.0.113.42' },
+      { id: 'demo-ci', keyPrefix: keyPrefixOf(DEMO_KEY_CI), keyLast4: keyLast4Of(DEMO_KEY_CI), label: 'ci', createdAt: day(12), revokedAt: null, expiresAt: day(-9), lastSeenIp: '198.51.100.7' },
     ],
     usage,
     decisions,
@@ -1741,6 +1766,15 @@ ${MARK_CSS}
   .cmd b { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text); font-weight: 400; white-space: nowrap; }
   .cmd span { color: var(--muted); }
 
+  /* Revoke all keys, 2026-09-25: the kit's card, a sentence that says what
+     happens next, a box to tick and the outlined pill. No red fill: this is a
+     control somebody reaches for on purpose, not an error. */
+  .revall { padding: var(--s4) 20px; display: grid; gap: var(--s3); }
+  .revall p { margin: 0; color: var(--muted); max-width: 72ch; }
+  .revall a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+  .revall form { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s4); align-items: center; }
+  .revall-ok { display: inline-flex; gap: var(--s2); align-items: center; color: var(--text); }
+
   /* Empty states: the kit's dashed frame, saying what would be here and the
      one step that fills it. */
   .cv-empty p { max-width: 64ch; }
@@ -2089,6 +2123,7 @@ const ERRORS: Record<string, string> = {
   expired: 'That key has expired. Generate a new one with POST /keys/generate.',
   rate: 'Too many attempts from this address. Try again in 15 minutes.',
   unavailable: 'Sign-in is not configured on this server.',
+  revoked_all: 'Every key on the account is revoked, the one this browser signed in with too. Get a new key with the account\'s email address at agentbill.dev/recover, or sign in above if the account has Google, GitHub or an email link.',
 }
 
 /** What a connect attempt came back with, on the keys view. Codes only: the
@@ -2241,6 +2276,8 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   apps?: ConnectedApp[]
   /** A Disconnect's outcome, 'disconnected' or 'gone'. */
   appMsg?: 'disconnected' | 'gone' | null
+  /** A Revoke all's outcome, a code from a closed set. */
+  keysMsg?: 'revoked_all' | 'revoke_refused' | 'confirm' | null
   /** The start screen's answer to "how will you connect?", off ?via=. */
   via?: Via | null }
 
@@ -2301,7 +2338,7 @@ function accountCard(p: Page): string {
   const via = p.anon ? '' : p.v.via === 'user' ? 'Signed in as' : 'Signed in with a key'
   const plan = p.demo ? DEMO_VIEWER : p.v
   const { limit, pct, cls } = planOf(plan)
-  const keyTail = p.v.apiKey ? p.v.apiKey.slice(0, 8) + '…' + p.v.apiKey.slice(-4) : 'no key yet'
+  const keyTail = p.v.keyMask || 'no key yet'
   const quota = limit === null
     ? `<b>${num(plan.monthlyCalls)}</b> calls this month · metered, no cap`
     : `<b>${num(plan.monthlyCalls)}</b> / ${num(limit)} calls · this billing month${pct >= 75
@@ -2405,7 +2442,6 @@ function frame(p: Page, bar: string, body: string, cls = ''): string {
 const barOf = (name: string, id = false) => tag(name, id)
 
 /** The key a frame belongs to, masked the way every key on this page is. */
-const tailOf = (key: string) => key.slice(0, 8) + '…' + key.slice(-4)
 
 function kpis(p: Page, rangeLabel: string): string {
   const d = p.d
@@ -2497,8 +2533,8 @@ function leakRow(p: Page): string {
 
 /** The overview's figures: one card whose bar names the account they belong to. */
 function figures(p: Page, rangeLabel: string): string {
-  const key = p.demo ? DEMO_KEY : p.v.apiKey
-  return frame(p, barOf(key ? esc(tailOf(key)) : 'no key yet', true), `${kpis(p, rangeLabel)}
+  const mask = p.demo ? DEMO_VIEWER.keyMask : p.v.keyMask
+  return frame(p, barOf(mask ? esc(mask) : 'no key yet', true), `${kpis(p, rangeLabel)}
       ${leakRow(p)}`, 'figs')
 }
 
@@ -3051,12 +3087,12 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
   </table></div>`)
 }
 
-function keysTable(p: Page, rows: KeyRow[], viewerKey: string): string {
+function keysTable(p: Page, rows: KeyRow[], viewerKeyId: string): string {
   if (rows.length === 0) return `<div class="cv-empty"><p class="nothing">No keys on this account.</p></div>`
   const now = Date.now()
   const body = rows.map((k) => {
-    const mine = k.apiKey === viewerKey
-    const mask = tailOf(k.apiKey)
+    const mine = viewerKeyId !== '' && k.id === viewerKeyId
+    const mask = maskKey(k.keyPrefix, k.keyLast4)
     const revoked = k.revokedAt ? new Date(k.revokedAt).getTime() : null
     const expires = k.expiresAt ? new Date(k.expiresAt).getTime() : null
     // A working key is not an achievement, so it is a plain tag. A colour
@@ -3242,7 +3278,7 @@ function startScreen(p: Page): string {
     : f.err ? `<p class="err cv-err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
   // A person whose account has no key yet: the key comes first, from here.
-  const firstKey = !p.anon && !p.demo && p.v.via === 'user' && !p.v.apiKey
+  const firstKey = !p.anon && !p.demo && p.v.via === 'user' && !p.v.keyId
     ? `<div class="ns3 firstkey-row"><span class="ns3-n">0</span><div class="firstkey">
           <p>Your account is open and has no API key yet. Make it here: it is shown once, on the next screen, and your code sends it with every call.</p>
           <form method="POST" action="/app/keys/first"><button class="btn btn-lg" type="submit">Create my API key &rarr;</button></form>
@@ -3451,16 +3487,45 @@ function connectedAppsBlock(p: Page): string {
     <p class="note">Each row is an app you allowed on the consent page. It reaches this account only through the MCP tools, never your API keys, your plan or billing. An app you connected with an API key is that key, above.</p>`
 }
 
+/** The outcome of Revoke all, on the keys view. Codes only, never echoed. */
+function keysMsg(p: Page): string {
+  if (p.keysMsg === 'revoked_all') return `<p class="ok" id="keys-flash">Every key on this account is revoked and no longer authenticates. ${p.v.via === 'user' ? '<a href="/app?view=start">Create a new key</a> on the start screen; it is shown once.' : ''}</p>`
+  if (p.keysMsg === 'confirm') return '<p class="err cv-err" id="keys-flash">Nothing was revoked: tick the box to confirm first.</p>'
+  if (p.keysMsg === 'revoke_refused') return '<p class="err cv-err" id="keys-flash">Nothing was revoked: this account has no email address and no sign-in, so with every key gone nobody could get back in. Connect Google or GitHub above first.</p>'
+  return ''
+}
+
+/** Revoke all keys: one form, a box to tick, and what happens next said
+ *  before the button, not after. Not drawn on the sample console. */
+function revokeAllBlock(p: Page): string {
+  if (p.anon || p.demo) return ''
+  const live = p.d.keys.filter((k) => !k.revokedAt || new Date(k.revokedAt).getTime() > Date.now()).length
+  if (live === 0) return ''
+  const after = p.v.via === 'key'
+    ? 'This console was opened with a key, so it signs out too. To get back in, use <a href="/recover">/recover</a> with the account\'s email address, or a sign-in connected above.'
+    : 'You stay signed in, and the start screen makes a new key, shown once.'
+  return `<h2 id="revoke-all">Revoke all keys <span>when a key may have leaked and you do not know which</span></h2>
+    <div class="cv-card revall">
+      <p>Every key on this account stops working on its next request, keys in a rotation grace too, and every console opened with a key is signed out. Nothing that calls AgentBill with one of them gets through until you deploy a new key. ${after}</p>
+      <form method="POST" action="/app/keys/revoke-all">
+        <label class="revall-ok"><input type="checkbox" name="confirm" value="yes" required /> Revoke all ${live} active key${live === 1 ? '' : 's'}</label>
+        <button class="btn-ghost" type="submit">Revoke all keys</button>
+      </form>
+    </div>`
+}
+
 function keysView(p: Page): string {
   return `${waysIn(p)}
-    ${keysTable(p, p.d.keys, p.v.via === 'key' ? p.v.apiKey : '')}
+    ${keysMsg(p)}
+    ${keysTable(p, p.d.keys, p.v.via === 'key' ? p.v.keyId : '')}
     ${connectedAppsBlock(p)}
     <h2>Manage keys <span>from the API, with any active key</span></h2>
     <div class="cv-card cmds">
       ${KEY_COMMANDS.map(([ep, what]) =>
         `<div class="cmd"><b>${ep}</b><span>${what}${ep.endsWith('/revoke') ? ' A revoked key ends this session on its next request.' : ''}</span></div>`).join('\n      ')}
     </div>
-    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : p.v.via === 'key' ? 'Oldest first. The key that opened this console is marked.' : 'Oldest first.'}</p>`
+    <p class="note">${p.anon ? 'Sample keys: neither authenticates anything.' : p.v.via === 'key' ? 'Oldest first. The key that opened this console is marked.' : 'Oldest first.'} A key is shown once, when it is made; here it is only its first and last characters.</p>
+    ${revokeAllBlock(p)}`
 }
 
 // ---------------------------------------------------------------------------
