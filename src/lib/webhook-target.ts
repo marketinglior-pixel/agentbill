@@ -103,8 +103,10 @@ function hostnameProblem(host: string): string | null {
   return null
 }
 
-/** URL rules, before any address is looked at. */
-function urlProblem(raw: string): { url: URL } | { reason: string } {
+/** URL rules, before any address is looked at. Exported for the OAuth client
+ *  metadata fetch (src/lib/mcp-oauth.ts), which holds an outbound URL to the
+ *  same rules as a webhook. */
+export function urlProblem(raw: string): { url: URL } | { reason: string } {
   let url: URL
   try { url = new URL(raw) } catch { return { reason: 'not a valid URL' } }
   if (url.protocol !== 'https:') return { reason: 'the URL must use https' }
@@ -271,4 +273,49 @@ export async function deliverWebhook(
   const h: Record<string, string> = { 'Content-Type': 'application/json', 'User-Agent': 'AgentBill-Webhook/1', ...headers }
   if (secret) h['X-AgentBill-Signature'] = signatureHeader(secret, payload)
   return postOnce(p.url.toString(), payload, h, { lookup: guardedLookup })
+}
+
+/**
+ * One GET for a small JSON document, through the same guarded resolver as a
+ * webhook delivery: every address checked, the connection made only to one
+ * that passed, no redirect followed, five seconds, and at most `maxBytes` read.
+ * Added 2026-09-25 for OAuth Client ID Metadata Documents, where the client_id
+ * a stranger sends is a URL this server fetches. Never throws.
+ */
+export function getJsonOnce(url: string, opts: PostOptions & { maxBytes: number }): Promise<{ ok: true; json: unknown } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (r: { ok: true; json: unknown } | { ok: false; reason: string }) => { if (!settled) { settled = true; resolve(r) } }
+    let req: ReturnType<typeof httpsRequest>
+    try {
+      req = httpsRequest(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', 'User-Agent': 'AgentBill-OAuth/1' },
+        lookup: opts.lookup as never,
+        ca: opts.ca,
+        signal: AbortSignal.timeout(opts.timeoutMs ?? WEBHOOK_TIMEOUT_MS),
+        agent: false,
+      }, (res) => {
+        const status = res.statusCode ?? 0
+        if (status !== 200) { res.resume(); return done({ ok: false, reason: status >= 300 && status < 400 ? 'redirect not followed' : `answered ${status}` }) }
+        const chunks: Buffer[] = []
+        let size = 0
+        res.on('data', (c: Buffer) => {
+          size += c.length
+          if (size > opts.maxBytes) { res.destroy(); return done({ ok: false, reason: `larger than ${opts.maxBytes} bytes` }) }
+          chunks.push(c)
+        })
+        res.on('end', () => {
+          try { done({ ok: true, json: JSON.parse(Buffer.concat(chunks).toString('utf8')) }) } catch { done({ ok: false, reason: 'not JSON' }) }
+        })
+        res.on('error', () => done({ ok: false, reason: 'read failed' }))
+      })
+    } catch (err) {
+      return done({ ok: false, reason: String((err as Error)?.message ?? err).slice(0, 120) })
+    }
+    req.on('error', (err: NodeJS.ErrnoException) => {
+      done({ ok: false, reason: err.name === 'AbortError' || err.name === 'TimeoutError' ? 'timed out' : (err.code ?? err.message).slice(0, 120) })
+    })
+    req.end()
+  })
 }
