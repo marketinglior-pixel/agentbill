@@ -7,6 +7,10 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -21,11 +25,11 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "undici": "^6.0.0"
+    "undici": "^6.28.1"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
   },
   "type": "module"
 }

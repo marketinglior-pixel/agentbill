@@ -33,7 +33,7 @@
  * no tool itself.
  */
 import type { OpenClawPluginApi } from 'openclaw/plugin-sdk/plugin-entry'
-import { AgentBillClient, AgentBillUnreachable, type PreflightDecision } from './client.js'
+import { AgentBillClient, AgentBillConfigError, AgentBillUnreachable, RefusedConfigClient, type PreflightDecision } from './client.js'
 
 export type Units = 'tokens' | 'calls'
 export type FailMode = 'closed' | 'open'
@@ -197,6 +197,14 @@ export class Ceiling {
         customerId,
       })
     } catch (err) {
+      if (err instanceof AgentBillConfigError) {
+        // Nothing was sent. Same rule as unreachable: failMode decides.
+        if (this.cfg.failMode === 'open') {
+          this.log.warn(`agentbill is misconfigured (${err.message}); failMode=open, letting the call run unmetered`)
+          return null
+        }
+        return `AgentBill is misconfigured (${err.message}), and this plugin is set to refuse rather than guess. Fix baseUrl in the agentbill plugin config.`
+      }
       const why = err instanceof AgentBillUnreachable ? err.message : String(err)
       if (this.cfg.failMode === 'open') {
         this.log.warn(`agentbill unreachable (${why}); failMode=open, letting the call run`)
@@ -329,6 +337,29 @@ function readUsage(usage: { total?: number; input?: number; output?: number } | 
   return { units: sum > 0 ? Math.round(sum) : 0, missing: false }
 }
 
+/**
+ * The client for this config. A baseUrl the key must not be sent to (plain
+ * http to another host, not a URL) is a config error: said once at startup,
+ * loudly, and the hooks still register with a client that sends nothing, so
+ * every call is decided by failMode exactly as when AgentBill is unreachable.
+ * With the default failMode=closed that refuses every call with a sentence
+ * naming the problem, which is how an operator who asked for a ceiling finds
+ * out; registering no gate (the no-key path) would let spend run unbounded
+ * while looking configured.
+ */
+function makeClient(cfg: PluginConfig, apiKey: string, log: Logger): AgentBillClient {
+  try {
+    return new AgentBillClient({ baseUrl: cfg.baseUrl, apiKey, timeoutMs: cfg.timeoutMs })
+  } catch (err) {
+    if (!(err instanceof AgentBillConfigError)) throw err
+    log.error(
+      `${err.message} Nothing is sent to AgentBill until baseUrl is fixed, and every model turn and tool call is ` +
+        (cfg.failMode === 'open' ? 'let through unmetered (failMode=open).' : 'refused (failMode=closed).'),
+    )
+    return new RefusedConfigClient(err)
+  }
+}
+
 /** Register the hooks on an OpenClaw plugin api. Exported so a test can drive it with a fake api. */
 export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | 'pluginConfig'> & Partial<Pick<OpenClawPluginApi, 'id' | 'config'>>, ceiling?: Ceiling): Ceiling {
   const cfg = resolveConfig(api.pluginConfig)
@@ -341,9 +372,9 @@ export function registerCeiling(api: Pick<OpenClawPluginApi, 'on' | 'logger' | '
     // Without a key nothing can be consulted. Say it once, loudly, and refuse
     // to pretend: registering no gate is the honest state, not a silent pass.
     log.error('no apiKey in plugin config and AGENTBILL_API_KEY is unset; the ceiling is NOT enforced. Get a key at https://agentbill.dev/register')
-    return ceiling ?? new Ceiling(cfg, new AgentBillClient({ baseUrl: cfg.baseUrl, apiKey: '', timeoutMs: cfg.timeoutMs }), log)
+    return ceiling ?? new Ceiling(cfg, makeClient(cfg, '', log), log)
   }
-  const c = ceiling ?? new Ceiling(cfg, new AgentBillClient({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, timeoutMs: cfg.timeoutMs }), log)
+  const c = ceiling ?? new Ceiling(cfg, makeClient(cfg, cfg.apiKey, log), log)
 
   // The host gates conversation hooks (before_agent_run, llm_output) behind an
   // operator flag and registers the others silently, so without the flag this

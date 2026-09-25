@@ -82,7 +82,7 @@ from urllib.parse import urlparse
 
 from .client import (BASE_URL, AgentBillClient, CeilingExceededError,
                      TaskCeilingExceededError, _answer_of)
-from .meter import BudgetExhaustedError
+from .meter import BudgetExhaustedError, _checked_base_url
 
 T = TypeVar("T")
 
@@ -1244,8 +1244,10 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
     if default_estimate is not None and (not isinstance(default_estimate, int) or default_estimate < 1):
         raise ValueError("default_estimate is a whole number of tokens, 1 or more.")
     if agentbill_client is None:
+        # Named for the variable the value came from; AgentBillClient checks it again.
+        base_url = _checked_base_url(os.environ.get("AGENTBILL_BASE_URL") or BASE_URL)
         agentbill_client = AgentBillClient(api_key=os.environ.get("AGENTBILL_API_KEY", ""),
-                                           base_url=os.environ.get("AGENTBILL_BASE_URL") or BASE_URL)
+                                           base_url=base_url)
     meter = _Meter(ab=agentbill_client, provider=kind, endpoint=_endpoint(client, kind), task_ref=task_ref,
                    agent_id=agent_id, customer_id=customer_id, step=step, task_ceiling=task_ceiling,
                    default_estimate=default_estimate or DEFAULT_ESTIMATE, on_quota=on_quota or "refuse",

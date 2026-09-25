@@ -194,10 +194,41 @@ function resolveUnits<TResult>(units: UnitsResolver<TResult>, result: TResult): 
   return units
 }
 
+// Every request carries the API key, so it only goes over https, or over plain
+// http to this machine (a local server in development). Checked when a request
+// is made, not at import, so an app that loads the SDK and never calls it is
+// not broken by a bad AGENTBILL_BASE_URL.
+const LOOPBACK_HTTP_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+function checkedBaseUrl(raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new AgentBillError(`AGENTBILL_BASE_URL is not a valid URL: ${JSON.stringify(raw)}`)
+  }
+  if (url.protocol === 'https:') return raw
+  if (url.protocol === 'http:' && LOOPBACK_HTTP_HOSTS.has(url.hostname)) return raw
+  throw new AgentBillError(
+    `AGENTBILL_BASE_URL must be an https URL (plain http is accepted only for localhost, ` +
+    `127.0.0.1 and [::1]). Refusing to send the API key to ${url.protocol}//${url.host}.`
+  )
+}
+
+/** How long one request to the AgentBill API may take before it is aborted. */
+const REQUEST_TIMEOUT_MS = 10_000
+
+function requestSignal(callerSignal?: AbortSignal | null): AbortSignal {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  return callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout
+}
+
 async function apiFetch(path: string, init: RequestInit): Promise<Response> {
+  const base = checkedBaseUrl(BASE_URL)
   const { fetch } = await import('undici')
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${base}${path}`, {
     ...init,
+    signal: requestSignal(init.signal),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey()}`,
