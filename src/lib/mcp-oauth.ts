@@ -281,15 +281,24 @@ const AUTH_METHODS = ['none', 'client_secret_post', 'client_secret_basic'] as co
 export type RegisterResult = { status: number; body: Record<string, unknown> }
 
 /** Drop registrations nobody used within a day, and every expired request, code and token. */
+/**
+ * How long past its expiry each OAuth record is kept before pruneOAuth
+ * removes it, and how long an unused dynamically registered client lives.
+ * Exported since 2026-09-25 so /privacy states these periods from the same
+ * values the DELETEs use (src/lib/retention.ts lists them as already covered).
+ */
+export const OAUTH_PRUNE_AFTER_EXPIRY = { requests: '1 hour', codes: '1 day', tokens: '1 day', unusedClients: '24 hours' } as const
+
 export async function pruneOAuth(): Promise<void> {
+  const p = OAUTH_PRUNE_AFTER_EXPIRY
   await sql`
     DELETE FROM oauth_clients c
-    WHERE c.kind = 'dcr' AND c.last_used_at IS NULL AND c.created_at < now() - INTERVAL '24 hours'
+    WHERE c.kind = 'dcr' AND c.last_used_at IS NULL AND c.created_at < now() - ${p.unusedClients}::interval
       AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id = c.client_id)
   `
-  await sql`DELETE FROM oauth_requests WHERE expires_at < now() - INTERVAL '1 hour'`
-  await sql`DELETE FROM oauth_codes WHERE expires_at < now() - INTERVAL '1 day'`
-  await sql`DELETE FROM oauth_tokens WHERE expires_at < now() - INTERVAL '1 day'`
+  await sql`DELETE FROM oauth_requests WHERE expires_at < now() - ${p.requests}::interval`
+  await sql`DELETE FROM oauth_codes WHERE expires_at < now() - ${p.codes}::interval`
+  await sql`DELETE FROM oauth_tokens WHERE expires_at < now() - ${p.tokens}::interval`
 }
 
 /**
