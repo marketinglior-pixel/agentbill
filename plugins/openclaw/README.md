@@ -102,7 +102,7 @@ ceiling can be raised from the console at any time.
 | Key | Default | What it does |
 |---|---|---|
 | `apiKey` | `AGENTBILL_API_KEY` from the environment | The key. Required for anything to be enforced. |
-| `baseUrl` | `https://agentbill.dev` | Where to ask. |
+| `baseUrl` | `https://agentbill.dev` | Where to ask. Must be `https`, or plain `http` to `localhost`, `127.0.0.1` or `[::1]`. Anything else is a config error: logged at startup, nothing is sent, and every call is decided by `failMode`. |
 | `ceilingUnits` | `500000` | Ceiling per session. Applied when the session's task is opened; later changes are made in the console. |
 | `units` | `tokens` | `tokens` or `calls`, see above. |
 | `estimateUnits` | `2000` tokens / `1` call | Reserved before a call whose cost is unknown. After the first model call the plugin uses the session's running average instead. |

@@ -25,6 +25,7 @@ import json
 import os
 import uuid
 from typing import Any, Callable, Optional, TypeVar, Union
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -121,6 +122,35 @@ def _raise_if_unauthorized(status_code: int, body_text: str) -> None:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_LOOPBACK_HTTP_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _checked_base_url(base_url: str, name: str = "AGENTBILL_BASE_URL") -> str:
+    """Return base_url if the API key may be sent there, else raise AgentBillError.
+
+    Every request carries the API key, so it only goes over https, or over
+    plain http to this machine (localhost, 127.0.0.1, [::1], any port) for a
+    local server. The decorator checks when a request is made, not at import,
+    so an app that imports the SDK and never calls it keeps working.
+    """
+    try:
+        parts = urlsplit(str(base_url))
+        host = parts.hostname
+    except ValueError:
+        parts, host = None, None
+    scheme = parts.scheme.lower() if parts else ""
+    if scheme == "https" and host:
+        return base_url
+    if scheme == "http" and host in _LOOPBACK_HTTP_HOSTS:
+        return base_url
+    # Host and port only: a netloc can carry user:password@, never echo that.
+    shown = f"{scheme}://{parts.netloc.rpartition('@')[2]}" if parts and scheme else "a value that is not a URL"
+    raise AgentBillError(
+        f"{name} must be an https URL (plain http is accepted only for localhost, "
+        f"127.0.0.1 and [::1]). Refusing to send the API key to {shown}."
+    )
+
+
 def _api_key() -> str:
     key = os.environ.get("AGENTBILL_API_KEY", "")
     if not key:
@@ -209,7 +239,7 @@ def _preflight_sync(customer_id: str) -> None:
     """Raise BudgetExhaustedError before the agent runs if the customer's balance is spent."""
     with httpx.Client() as client:
         resp = client.get(
-            f"{_BASE_URL}/budget",
+            f"{_checked_base_url(_BASE_URL)}/budget",
             params={"customer_id": customer_id},
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
@@ -226,7 +256,7 @@ async def _preflight_async(customer_id: str) -> None:
     """Async version of _preflight_sync."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"{_BASE_URL}/budget",
+            f"{_checked_base_url(_BASE_URL)}/budget",
             params={"customer_id": customer_id},
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
@@ -242,7 +272,7 @@ async def _preflight_async(customer_id: str) -> None:
 def _submit_sync(customer_id: str, event: str, units: int, metadata: dict | None, task_ref: str | None = None) -> None:
     with httpx.Client() as client:
         resp = client.post(
-            f"{_BASE_URL}/events",
+            f"{_checked_base_url(_BASE_URL)}/events",
             json=_build_payload(customer_id, event, units, metadata, task_ref),
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,
@@ -253,7 +283,7 @@ def _submit_sync(customer_id: str, event: str, units: int, metadata: dict | None
 async def _submit_async(customer_id: str, event: str, units: int, metadata: dict | None, task_ref: str | None = None) -> None:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            f"{_BASE_URL}/events",
+            f"{_checked_base_url(_BASE_URL)}/events",
             json=_build_payload(customer_id, event, units, metadata, task_ref),
             headers={"Authorization": f"Bearer {_api_key()}"},
             timeout=5.0,

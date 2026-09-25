@@ -42,7 +42,7 @@ Monthly caps let agents burn through a budget in hours. AgentBill adds a preflig
 
 ## API
 
-Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, defaults to `https://agentbill.dev`; `https://agentbill.fly.dev` serves the same application and keeps working).
+Environment: `AGENTBILL_API_KEY` (required), `AGENTBILL_BASE_URL` (optional, defaults to `https://agentbill.dev`; `https://agentbill.fly.dev` serves the same application and keeps working). The base URL must be `https`, or plain `http` to `localhost`, `127.0.0.1` or `[::1]`; any other value makes each call throw `AgentBillError` before a request is sent. Each request is aborted after 10 seconds.
 
 ### `preflight(options)`
 

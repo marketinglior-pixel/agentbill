@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from typing import Optional
 import httpx
@@ -105,8 +106,13 @@ def preflight(
 
     resp.raise_for_status()
     data = resp.json()
+    if not isinstance(data, dict):
+        data = {}
 
-    if not data.get("approved", True):
+    # Approved only on an explicit JSON true. A 200 without "approved" (a proxy
+    # page, a truncated body, a future shape) is not a verdict, so it is
+    # reported as refused rather than read as permission.
+    if data.get("approved") is not True:
         reason = data.get("reason", "unknown")
         refused = {
             "approved": False,
@@ -208,12 +214,64 @@ def _refusal_message(reason: str, data: dict) -> str:
     return f"Refused ({reason})."
 
 
+# HTTP mode (MCP_TRANSPORT=http) listens on loopback only, with DNS-rebinding
+# protection on. A browser tab can reach 127.0.0.1, so without the Host and
+# Origin checks any web page could drive this server's tools with the API key
+# in its environment. Binding elsewhere is an explicit choice made through the
+# environment:
+#
+#   AGENTBILL_MCP_HOST             interface to bind (default 127.0.0.1)
+#   AGENTBILL_MCP_PORT             port (default 8080)
+#   AGENTBILL_MCP_ALLOWED_HOSTS    extra Host header values to accept,
+#                                  comma separated ("mcp.example.com,
+#                                  10.0.0.5:*"); loopback is always allowed
+#   AGENTBILL_MCP_ALLOWED_ORIGINS  extra Origin values, comma separated
+#
+# There is no switch that turns the protection off. A server bound to a public
+# interface answers only the host names listed in AGENTBILL_MCP_ALLOWED_HOSTS.
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8080
+_LOOPBACK_HOSTS = ["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "[::1]", "[::1]:*"]
+_LOOPBACK_ORIGINS = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+_LOOPBACK_BINDS = ("127.0.0.1", "localhost", "::1")
+
+
+def _csv(value: Optional[str]) -> list:
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def configure_http(server: FastMCP, env: Optional[dict] = None) -> FastMCP:
+    """Apply the HTTP-mode bind address and transport security to `server`."""
+    # Imported here, not at module load: stdio mode never needs it.
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    env = os.environ if env is None else env
+    host = (env.get("AGENTBILL_MCP_HOST") or "").strip() or DEFAULT_HTTP_HOST
+    port_raw = (env.get("AGENTBILL_MCP_PORT") or "").strip()
+    port = int(port_raw) if port_raw else DEFAULT_HTTP_PORT
+    extra_hosts = _csv(env.get("AGENTBILL_MCP_ALLOWED_HOSTS"))
+    extra_origins = _csv(env.get("AGENTBILL_MCP_ALLOWED_ORIGINS"))
+
+    server.settings.host = host
+    server.settings.port = port
+    server.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_LOOPBACK_HOSTS + extra_hosts,
+        allowed_origins=_LOOPBACK_ORIGINS + extra_origins,
+    )
+    if host not in _LOOPBACK_BINDS and not extra_hosts:
+        print(
+            f"agentbill-mcp: bound to {host}:{port}, but AGENTBILL_MCP_ALLOWED_HOSTS is empty, "
+            "so only requests with a loopback Host header are answered.",
+            file=sys.stderr,
+        )
+    return server
+
+
 def main():
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport == "http":
-        mcp.settings.host = "0.0.0.0"
-        mcp.settings.port = 8080
-        mcp.settings.transport_security.enable_dns_rebinding_protection = False
+        configure_http(mcp)
         mcp.run(transport="streamable-http")
     else:
         mcp.run()

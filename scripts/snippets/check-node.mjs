@@ -110,7 +110,10 @@ const canned = (path) => {
   return { ok: true }
 }
 // Not a WHATWG bad port: 127.0.0.1:9 fails as "bad port" before the dispatcher is consulted.
-const BASE = 'http://agentbill.invalid'
+// https, not http: since 2026-09-25 the Node SDK refuses a non-https base URL
+// other than localhost, and a sample run against http would fail on that rule
+// rather than on anything the sample says. MockAgent answers it either way.
+const BASE = 'https://agentbill.invalid'
 process.env.AGENTBILL_BASE_URL = BASE
 process.env.AGENTBILL_API_KEY = 'agb_ci_stub'
 const agent = new MockAgent()

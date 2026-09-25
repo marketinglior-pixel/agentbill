@@ -57,6 +57,36 @@ export class AgentBillUnreachable extends Error {
   }
 }
 
+/** The plugin config names a baseUrl the API key must not be sent to. */
+export class AgentBillConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentBillConfigError'
+  }
+}
+
+const LOOPBACK_HTTP_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/**
+ * Every request carries the API key, so baseUrl has to be https, or plain
+ * http to this machine (localhost, 127.0.0.1, [::1], any port) for a local
+ * server. Anything else throws AgentBillConfigError. Exported for tests.
+ */
+export function checkBaseUrl(raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new AgentBillConfigError(`baseUrl is not a valid URL: ${JSON.stringify(raw)}`)
+  }
+  if (url.protocol === 'https:') return raw
+  if (url.protocol === 'http:' && LOOPBACK_HTTP_HOSTS.has(url.hostname)) return raw
+  throw new AgentBillConfigError(
+    `baseUrl must be an https URL (plain http is accepted only for localhost, 127.0.0.1 and [::1]); ` +
+      `refusing to send the API key to ${url.protocol}//${url.host}.`,
+  )
+}
+
 export type ClientOptions = {
   baseUrl: string
   apiKey: string
@@ -70,8 +100,9 @@ export class AgentBillClient {
   private readonly timeoutMs: number
   private readonly fetchImpl: typeof fetch
 
+  /** Throws AgentBillConfigError when baseUrl fails checkBaseUrl. */
   constructor(opts: ClientOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, '')
+    this.baseUrl = checkBaseUrl(opts.baseUrl).replace(/\/+$/, '')
     this.apiKey = opts.apiKey
     this.timeoutMs = opts.timeoutMs
     this.fetchImpl = opts.fetchImpl ?? fetch
@@ -166,6 +197,30 @@ export class AgentBillClient {
     }
   }
 }
+
+/**
+ * Stands in for a client whose config was refused. Every call fails with that
+ * AgentBillConfigError before anything is sent, so the key goes nowhere and
+ * the caller decides what a failure means (failMode), as it does for an
+ * unreachable server.
+ */
+export class RefusedConfigClient extends AgentBillClient {
+  constructor(readonly configError: AgentBillConfigError) {
+    super({ baseUrl: 'https://agentbill.dev', apiKey: '', timeoutMs: 100, fetchImpl: neverSend })
+  }
+
+  override async preflight(): Promise<PreflightDecision> {
+    throw this.configError
+  }
+
+  override async record(): Promise<void> {
+    throw this.configError
+  }
+}
+
+const neverSend = (async () => {
+  throw new AgentBillConfigError('RefusedConfigClient never sends')
+}) as unknown as typeof fetch
 
 function numberOrUndefined(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined

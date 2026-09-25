@@ -15,7 +15,9 @@ dependencies = [
     # on import. That is what shipped in 0.1.1: every fresh uvx agentbill-mcp
     # has been failing since mcp 2 was released. Migrating to the 2.x API is a
     # separate change; this pin restores a package that runs.
-    "mcp[cli]>=1.0.0,<2",
+    # Floor 1.10.0: HTTP mode builds TransportSecuritySettings, which arrived
+    # in mcp 1.10.0.
+    "mcp[cli]>=1.10.0,<2",
     "httpx>=0.27",
 ]
 authors = [
@@ -44,6 +46,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
 
 [project.urls]
 Homepage = "https://agentbill.dev"

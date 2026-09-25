@@ -77,6 +77,31 @@ The server answers approved=False when the customer has no remaining balance, an
 |---|---|---|---|
 | `AGENTBILL_API_KEY` | Yes | none | Your AgentBill API key |
 | `AGENTBILL_BASE_URL` | No | `https://agentbill.dev` | Override for self-hosted |
+| `MCP_TRANSPORT` | No | `stdio` | Set to `http` to serve streamable HTTP at `/mcp` instead of stdio |
+| `AGENTBILL_MCP_HOST` | No | `127.0.0.1` | HTTP mode only. Interface to bind |
+| `AGENTBILL_MCP_PORT` | No | `8080` | HTTP mode only. Port to bind |
+| `AGENTBILL_MCP_ALLOWED_HOSTS` | No | none | HTTP mode only. Extra `Host` header values to accept, comma separated (`mcp.example.com,10.0.0.5:*`) |
+| `AGENTBILL_MCP_ALLOWED_ORIGINS` | No | none | HTTP mode only. Extra `Origin` values to accept, comma separated |
+
+## HTTP mode
+
+```bash
+MCP_TRANSPORT=http AGENTBILL_API_KEY=agb_your_key_here uvx agentbill-mcp
+```
+
+The server listens on `127.0.0.1:8080` and checks the `Host` and `Origin` headers of every request (DNS-rebinding protection). A web page open in your browser can reach loopback addresses, and this server holds your API key, so both defaults stay on unless you change them on purpose.
+
+To serve on another interface, set the bind address and name the host names clients will use. Requests carrying any other `Host` header are answered with 421:
+
+```bash
+MCP_TRANSPORT=http \
+AGENTBILL_MCP_HOST=0.0.0.0 \
+AGENTBILL_MCP_ALLOWED_HOSTS=mcp.example.com \
+AGENTBILL_API_KEY=agb_your_key_here \
+uvx agentbill-mcp
+```
+
+Loopback host names are always accepted. There is no setting that turns the header checks off. Anyone who can reach an exposed port can spend the key in its environment, so put it behind your own authentication.
 
 ## Links
 

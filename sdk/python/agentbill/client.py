@@ -1,7 +1,7 @@
 import functools
 import weakref
 import requests
-from .meter import BudgetExhaustedError, AgentBillError, AuthenticationError, _raise_if_unauthorized
+from .meter import BudgetExhaustedError, AgentBillError, AuthenticationError, _raise_if_unauthorized, _checked_base_url
 from dataclasses import dataclass
 from typing import Optional
 
@@ -242,7 +242,17 @@ class AgentBillClient:
             )
         self.api_key = api_key
         self.ceiling = ceiling
+        # Checked here (and on every later assignment), so a client that would
+        # send its key over plain http to another host is never made.
         self.base_url = base_url
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @base_url.setter
+    def base_url(self, value: str) -> None:
+        self._base_url = _checked_base_url(value, name="base_url")
 
     def preflight(
         self,
