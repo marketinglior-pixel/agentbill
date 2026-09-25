@@ -54,7 +54,8 @@ const SUMMARY =
   'call, record settles what it used: your number or, through wrap(), the token counts your ' +
   'provider reported on the response, which the server prices as an estimate at public list ' +
   'price (list price, your invoice may differ). AgentBill never reads your provider bill and ' +
-  'never converts units you define into money. Python and Node SDKs and an MCP server. Free tier: ' +
+  'never converts units you define into money. Python and Node SDKs, and a remote MCP server at ' +
+  'https://agentbill.dev/mcp for Claude, ChatGPT, Cursor, Codex and other MCP clients. Free tier: ' +
   `${num(PLAN_LIMITS.free)} preflight calls a month.`
 
 const NOT_A = `## What AgentBill is not
@@ -164,12 +165,13 @@ function links(self: 'short' | 'full'): string {
 ${line('/docs', 'Documentation index|The SDK quick start, the core concepts, and the HTTP reference.')}${line('/docs/task-budgets', 'Task budgets, a hard cost ceiling per agent job|How one task_ref carries one ceiling across every call in a job.')}${line('/docs/limit-cost-per-agent-run', 'How to cap what one agent run can spend|The preflight-and-record pair applied to a single run.')}${line('/docs/first-run', 'Every setup failure, and its fix|The errors between installing the SDK and its refusal of a call, each with its fix.')}${line('/faq', 'Questions|What the product does and does not do, answered against the source.')}
 ## Integrations
 
-${line('/integrations', 'Integrations|What AgentBill publishes and where to install it; framework rows are guides that use the plain SDK, not packages.')}${line('/integrations/openclaw', 'OpenClaw plugin|One ceiling per OpenClaw session: the plugin asks before every tool call, and before every model turn on the embedded and CLI runners. OpenClaw does not run or send what the ceiling refused; on the Codex and Copilot harnesses only tool calls are asked.')}${line('/integrations/langchain', 'LangChain|A wrap_model_call middleware that asks before each model call, with the task_ref taken from the job.')}${line('/integrations/openai-agents-sdk', 'OpenAI Agents SDK|A RunHooks class that asks in on_llm_start, before each model request Runner.run makes.')}${line('/integrations/crewai', 'CrewAI|PRE_MODEL_CALL and POST_MODEL_CALL hooks; the refusal is raised as HookAborted because CrewAI runs hooks fail-open.')}${line('/integrations/mcp', 'MCP server|Two tools the host model can call; record_event takes no task_ref, so settle a job from the SDK or POST /events.')}
+${line('/integrations', 'Integrations|What AgentBill publishes and where to install it; framework rows are guides that use the plain SDK, not packages.')}${line('/integrations/openclaw', 'OpenClaw plugin|One ceiling per OpenClaw session: the plugin asks before every tool call, and before every model turn on the embedded and CLI runners. OpenClaw does not run or send what the ceiling refused; on the Codex and Copilot harnesses only tool calls are asked.')}${line('/integrations/langchain', 'LangChain|A wrap_model_call middleware that asks before each model call, with the task_ref taken from the job.')}${line('/integrations/openai-agents-sdk', 'OpenAI Agents SDK|A RunHooks class that asks in on_llm_start, before each model request Runner.run makes.')}${line('/integrations/crewai', 'CrewAI|PRE_MODEL_CALL and POST_MODEL_CALL hooks; the refusal is raised as HookAborted because CrewAI runs hooks fail-open.')}${line('/integrations/mcp', 'Connect over MCP|The remote MCP server at https://agentbill.dev/mcp: Streamable HTTP, OAuth or an API key as a Bearer header, with setup for Claude, ChatGPT, Claude Code, Codex, Cursor, Antigravity and VS Code.')}
 ## Packages
 
 - [agentbill-sdk on PyPI](https://pypi.org/project/agentbill-sdk/): Python SDK ${SDK_VERSIONS.python}. AgentBillClient with preflight, record, gate, get_task, checkpoint, record_step, and wrap() for model clients.
 - [agentbill on npm](https://www.npmjs.com/package/agentbill): Node SDK ${SDK_VERSIONS.node}, ESM. Exports preflight, record, getTask, meter and wrap.
-- [agentbill-mcp on PyPI](https://pypi.org/project/agentbill-mcp/): MCP server ${SDK_VERSIONS.mcp}, exposing the preflight and record_event tools to an agent host.
+- [Remote MCP server](https://agentbill.dev/mcp): Streamable HTTP, stateless. Sign in with OAuth 2.1 (dynamic client registration or a client ID metadata document, PKCE S256), or send Authorization: Bearer with an API key. Tools: preflight, record_event, task_status, top_jobs, recent_refusals.
+- [agentbill-mcp on PyPI](https://pypi.org/project/agentbill-mcp/): the local stdio MCP server ${SDK_VERSIONS.mcp}, exposing preflight and record_event to an agent host with the key in its environment.
 - [@agentbill/openclaw on ClawHub](https://clawhub.ai/agentbill/plugins/openclaw): OpenClaw plugin ${SDK_VERSIONS.openclaw}, one ceiling per session. Install with openclaw plugins install clawhub:@agentbill/openclaw.
 - [Source repository](https://github.com/marketinglior-pixel/agentbill): The API, this site, and both SDKs. MIT.
 
@@ -332,7 +334,28 @@ call are failures: the provider's own error, or from AgentBill a network error, 
   at public list price. List price, your invoice may differ.
 
 
-## MCP server
+## Remote MCP server
+
+https://agentbill.dev/mcp, Streamable HTTP, stateless (every message is its own POST; GET and
+DELETE answer 405). Two ways in:
+
+- OAuth 2.1, for Claude's custom connector, ChatGPT and any client that follows the MCP
+  authorization spec. With no credentials the endpoint answers 401 with
+  WWW-Authenticate: Bearer resource_metadata="https://agentbill.dev/.well-known/oauth-protected-resource/mcp".
+  Authorization server metadata is at https://agentbill.dev/.well-known/oauth-authorization-server:
+  dynamic client registration or a client ID metadata document, PKCE S256 only, tokens bound to
+  the resource https://agentbill.dev/mcp, rotating refresh tokens. Scopes: agentbill:read (the read
+  tools) and agentbill:meter (preflight and record_event).
+- Authorization: Bearer with an AgentBill API key, for Codex, Cursor, Antigravity, VS Code and
+  Claude Code with --header. The key's limits apply.
+
+Tools: preflight (same arguments and refusal sentences as the local server; approved: false is a
+result, not an error), record_event (adds task_ref, reservation_id, idempotency_key and success, so
+it settles a job's reservation), task_status, top_jobs (units, or an estimate at public list
+price), recent_refusals. No tool creates or shows an API key, changes a plan or touches billing.
+Setup per client: https://agentbill.dev/integrations/mcp
+
+## Local MCP server (stdio)
 
 \`\`\`
 uvx agentbill-mcp
@@ -352,8 +375,9 @@ uvx agentbill-mcp
 
 Two tools. preflight takes agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling
 and idempotency_key. record_event takes agent_id, units, customer_id and metadata, and has no
-task_ref parameter, so an MCP-only integration can open a task budget with preflight but cannot
-settle its reservation; the sweeper reclaims it when it expires. Settle from the Python or Node SDK.
+task_ref parameter, so a setup on the local server alone can open a task budget with preflight but
+cannot settle its reservation; the sweeper reclaims it when it expires. Settle from the Python or
+Node SDK, or use the remote server, whose record_event takes task_ref and reservation_id.
 
 ## How a task budget behaves
 

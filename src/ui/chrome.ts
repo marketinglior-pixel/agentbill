@@ -42,8 +42,12 @@ export const KEY_CTA = 'Get API key &rarr;'
 export const KEY_CTA_SHORT = 'Get key'
 
 /** The destinations, once. The centre cluster and the mobile menu both render from here. */
+// MCP, 2026-09-25: the connect page for the remote MCP endpoint, on every
+// page's nav and in the phone menu, where a builder looks for "how do I plug
+// this into Claude". Its words are the protocol's name, the one people search.
 const LINKS: ReadonlyArray<readonly [href: string, label: string]> = [
   ['/docs', 'Docs'],
+  ['/integrations/mcp', 'MCP'],
   ['/pricing', 'Pricing'],
   [GITHUB, 'GitHub'],
 ]
@@ -252,7 +256,7 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
     [GITHUB, 'GitHub', true],
     ['https://pypi.org/project/agentbill-sdk/', 'Python SDK', true],
     ['https://www.npmjs.com/package/agentbill', 'Node SDK', true],
-    ['https://pypi.org/project/agentbill-mcp/', 'MCP server', true],
+    ['/integrations/mcp', 'MCP server', false],
   ]],
   ['Company', [
     ['/about', 'About', false],

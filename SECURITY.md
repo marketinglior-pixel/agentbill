@@ -36,6 +36,8 @@ versions above. Upgrade to get them.
 In scope:
 
 - The API and the pages at agentbill.dev, including the console at /app.
+- The remote MCP server at https://agentbill.dev/mcp and the OAuth endpoints
+  behind it (/.well-known/oauth-*, /oauth/*, /app/oauth/authorize).
 - The clients in this repository: `sdk/python`, `sdk/node`, `mcp`,
   `plugins/openclaw`.
 

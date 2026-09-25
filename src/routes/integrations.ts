@@ -8,6 +8,7 @@ import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { SDK_VERSIONS } from '../lib/llms.js'
 import { cleanSource } from '../lib/source.js'
+import { mcpConnectBody, MCP_CONNECT_CSS, MCP_SCRIPTS, MCP_URL } from '../ui/mcp-connect.js'
 
 // /integrations and the pages under it, 2026-09-23.
 //
@@ -36,8 +37,11 @@ import { cleanSource } from '../lib/source.js'
 //     the refusal to OpenClaw, and the MCP server returns it as a value. Nothing
 //     here says AgentBill ends a run, because nothing here can.
 //
-// n8n and Claude Code have no page: nothing we ship installs into either, so a
-// page would be a claim. The [integrations] gate fails if one is named here.
+// n8n has no page: nothing we ship installs into it, so a page would be a
+// claim. The [integrations] gate fails if it is named here. Claude Code was in
+// the same sentence until 2026-09-25, when the remote MCP endpoint made it a
+// client that connects to something we run; it is named on /integrations/mcp
+// alone, beside a command checked against its current documentation.
 
 const num = (n: number) => n.toLocaleString('en-US')
 
@@ -81,17 +85,20 @@ const RELATED: ReadonlyArray<readonly [path: string, label: string]> = [
   ['/integrations/langchain', 'LangChain, one ceiling per job in middleware'],
   ['/integrations/openai-agents-sdk', 'OpenAI Agents SDK, one ceiling per job in RunHooks'],
   ['/integrations/crewai', 'CrewAI, one ceiling per crew run in model-call hooks'],
-  ['/integrations/mcp', 'MCP server, a ceiling the agent can consult'],
+  ['/integrations/mcp', 'MCP, connect Claude, ChatGPT, Cursor and more'],
   ['/docs/task-budgets', 'Task budgets, one ceiling for the whole job'],
 ]
 
-function page(path: string, title: string, description: string, body: string, opts: { rail?: boolean; css?: string } = {}) {
+function page(path: string, title: string, description: string, body: string,
+              opts: { rail?: boolean; css?: string; current?: string; scripts?: Parameters<typeof docsShell>[0]['scripts'] } = {}) {
   const meta = byPath.get(path)
   return docsShell({
     title: `${title} · AgentBill`,
     description,
     path,
     rail: opts.rail,
+    current: opts.current,
+    scripts: opts.scripts,
     css: `${CONTENT_CSS}${INTEGRATIONS_CSS}${opts.css ?? ''}`,
     // The same TechArticle the guides emit, with dates from the registry, which
     // is also what the sitemap's lastmod reads.
@@ -126,8 +133,9 @@ type Row = { name: string; version?: string; kind: string; install: string; regi
 const HUB_ROWS: readonly Row[] = [
   { name: '@agentbill/openclaw', version: SDK_VERSIONS.openclaw, kind: 'Plugin', install: 'openclaw plugins install clawhub:@agentbill/openclaw',
     registry: [CLAWHUB, 'ClawHub'], page: ['/integrations/openclaw', 'OpenClaw'] },
-  { name: 'agentbill-mcp', version: SDK_VERSIONS.mcp, kind: 'Package, MCP server', install: 'uvx agentbill-mcp',
-    registry: ['https://pypi.org/project/agentbill-mcp/', 'PyPI'], page: ['/integrations/mcp', 'MCP server'] },
+  { name: 'AgentBill MCP', kind: 'Remote MCP server', install: MCP_URL, page: ['/integrations/mcp', 'Connect'] },
+  { name: 'agentbill-mcp', version: SDK_VERSIONS.mcp, kind: 'Package, local MCP server', install: 'uvx agentbill-mcp',
+    registry: ['https://pypi.org/project/agentbill-mcp/', 'PyPI'], page: ['/integrations/mcp#other', 'Run it locally'] },
   { name: 'agentbill-sdk', version: SDK_VERSIONS.python, kind: 'Package, Python SDK', install: 'pip install agentbill-sdk',
     registry: ['https://pypi.org/project/agentbill-sdk/', 'PyPI'], page: ['/docs', 'Quick start'] },
   { name: 'agentbill', version: SDK_VERSIONS.node, kind: 'Package, Node SDK', install: 'npm install agentbill',
@@ -180,8 +188,11 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <p><b>Your agent is code you own.</b> Put preflight and record where your code, or your
   framework, calls the model. The guides show where that is in LangChain, the OpenAI Agents SDK and
   CrewAI, with samples that were run against the framework versions in the table.</p>
-  <p><b>Your agent host speaks MCP.</b> The MCP server gives the model a preflight tool it can
-  consult. The model decides whether to call it, and it does not limit the host's own model calls.</p>
+  <p><b>Your agent host speaks MCP.</b> Connect it to <span class="inline">${MCP_URL}</span>: Claude and
+  ChatGPT with a sign-in, Cursor and VS Code in one click, the rest with one command or a few lines
+  of config, on the <a href="/integrations/mcp">MCP page</a>. The model gets a preflight tool it can
+  consult and read tools for where the units went. The model decides whether to call preflight, and it
+  does not limit the host's own model calls.</p>
   <p><b>Anything else.</b> <span class="inline">POST /preflight</span> with a Bearer key, before
   the call; <span class="inline">POST /events</span> after it. The whole contract is in the
   <a href="/docs#api-reference">API reference</a>.</p>
@@ -814,88 +825,19 @@ except HookAborted as e:
     ))
   })
 
-  // The MCP page states its limit in its own body, because the limit is the
-  // page's integrity: record_event takes no task_ref, so an MCP-only setup can
-  // reserve against a job's ceiling and cannot settle it. Checked against a
-  // local server with agentbill-mcp 0.2.2 before it was written.
+  // The MCP connect page, 2026-09-25: the remote endpoint at /mcp, one tab per
+  // client, each snippet checked against that client's current docs (the
+  // sources are beside each one in src/ui/mcp-connect.ts). The local stdio
+  // package keeps its README blocks under Other, byte for byte.
   app.get('/integrations/mcp', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       '/integrations/mcp',
-      'MCP server for spend ceilings: preflight as a tool the agent can call',
-      'agentbill-mcp gives an MCP host two tools, preflight and record_event, and the host\'s model decides whether to call them. What it bounds, what it does not, and why a job\'s units are settled through the SDK or POST /events.',
-      `
-  <h1>MCP server, a ceiling the agent can consult</h1>
-  <span class="badge">MCP</span><span class="badge">PyPI ${SDK_VERSIONS.mcp}</span>
-  <p class="lede"><span class="inline">agentbill-mcp</span> is an MCP server with two tools,
-  <span class="inline">preflight</span> and <span class="inline">record_event</span>. Add it to an
-  agent host and the model can ask a job's ceiling before it starts work, and read the answer. It is
-  a ceiling the agent consults. It is not a gate on the host's own model calls.</p>
-
-  <h2>Install</h2>
-  <div class="code"><pre>uvx agentbill-mcp</pre></div>
-  <p><span class="inline">uvx</span> runs it without an install step. Add it to your host's MCP
-  servers:</p>
-  <div class="code"><pre>{
-  "mcpServers": {
-    "agentbill": {
-      "command": "uvx",
-      "args": ["agentbill-mcp"],
-      "env": {
-        "AGENTBILL_API_KEY": "agb_your_key_here"
-      }
-    }
-  }
-}</pre></div>
-  <p>Put your key where <span class="inline">agb_your_key_here</span> is.
-  <span class="inline">AGENTBILL_BASE_URL</span>, set beside it in <span class="inline">env</span>,
-  points the server at another host.</p>
-
-  <h2>The two tools</h2>
-  <table>
-    <thead><tr><th>Tool</th><th>Takes</th><th>Answers</th></tr></thead>
-    <tbody>
-      <tr><td>preflight</td><td>agent_id, customer_id, estimated_units, ceiling, task_ref, task_ceiling, idempotency_key</td><td><span class="inline">approved: true</span> with what remains, or <span class="inline">approved: false</span> with a reason and a sentence the model can read. A refusal is a value, not an error.</td></tr>
-      <tr><td>record_event</td><td>agent_id, units, customer_id, metadata</td><td>Records units against a customer's balance. It takes no task_ref.</td></tr>
-    </tbody>
-  </table>
-
-  <h2>The host decides</h2>
-  <p>Nothing forces the call. The model decides whether to call preflight and what to do with
-  <span class="inline">approved: false</span>. The server never sees the host's own model requests,
-  so it does not limit what the host itself spends. Tell the agent in its instructions to call
-  preflight before expensive work, and what to do when the answer is no.</p>
-
-  <h2>Settling a job: record_event takes no task_ref</h2>
-  <p>preflight with a task_ref reserves units against that job's ceiling. record_event cannot settle
-  that reservation, because it takes no task_ref. So with the MCP server alone, every reservation
-  is held until it expires, ${RESERVATION_TTL_MINUTES} minutes by default, and its units then come
-  back to the job. The ceiling bounds what is reserved at any one time, not what the whole job
-  spends.</p>
-  <p>To count a job's spend against its ceiling, settle from code with the same task_ref:
-  <span class="inline">record()</span> in the Python or Node SDK, or
-  <span class="inline">POST /events</span>:</p>
-  <div class="code"><pre>curl -X POST https://agentbill.dev/events \\
-  -H "Authorization: Bearer $AGENTBILL_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{"customer_id":"default","event_type":"researcher","idempotency_key":"job-142-step-3","units":12,"task_ref":"job-142"}'</pre></div>
-  <p><span class="inline">customer_id</span> is <span class="inline">default</span> because that is
-  what the preflight tool sends when the model passes none, and a settle matches on the customer and
-  the task_ref together.</p>
-
-  <h2>When to use the SDK instead</h2>
-  <p>When the calls are in code you own, put preflight and record in that code, next to the model
-  call: the <a href="/docs">quick start</a>, or a guide from <a href="/integrations">the
-  integrations list</a>. The SDK raises on a ceiling refusal, so the refusal reaches your except
-  clause instead of depending on what a model chooses to do.</p>
-
-  <h2>Source and listing</h2>
-  <p>agentbill-mcp is on PyPI at
-  <a href="https://pypi.org/project/agentbill-mcp/" rel="noopener">pypi.org/project/agentbill-mcp</a>,
-  built from the <a href="${REPO}/tree/main/mcp" rel="noopener">mcp</a> directory of the AgentBill
-  repository.</p>
-
+      'Connect AgentBill over MCP: Claude, ChatGPT, Claude Code, Codex, Cursor, Antigravity',
+      'One URL, https://agentbill.dev/mcp. Connect Claude and ChatGPT with a sign-in, Cursor and VS Code in one click, Claude Code and Codex with one command. Tools for preflight, recording usage, and where the units went.',
+      `${mcpConnectBody()}
   ${cta('integrations-mcp')}
 `,
+      { rail: false, css: MCP_CONNECT_CSS, current: '/integrations/mcp', scripts: MCP_SCRIPTS },
     ))
   })
 

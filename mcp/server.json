@@ -3,7 +3,14 @@
   "name": "io.github.marketinglior-pixel/agentbill-mcp",
   "title": "AgentBill",
   "description": "One spend ceiling for one agent job, exposed as MCP tools. Bound to a task_ref you pass, not to a calendar month.",
-  "version": "0.2.2",
+  "version": "0.3.0",
+  "websiteUrl": "https://agentbill.dev/integrations/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agentbill.dev/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "pypi",

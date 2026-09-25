@@ -771,7 +771,7 @@ await record({ agentId: 'researcher', taskRef: 'job-142', units: 12 })</pre></di
     <a href="/integrations/langchain">LangChain, one ceiling per job in middleware</a>
     <a href="/integrations/openai-agents-sdk">OpenAI Agents SDK, one ceiling per job in RunHooks</a>
     <a href="/integrations/crewai">CrewAI, one ceiling per crew run in model-call hooks</a>
-    <a href="/integrations/mcp">MCP server, a ceiling the agent can consult</a>
+    <a href="/integrations/mcp">MCP, connect Claude, ChatGPT, Cursor and more</a>
   </div>
 
   <div class="end"><a href="/register" class="btn btn-lg">${KEY_CTA}</a></div>

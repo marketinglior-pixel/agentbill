@@ -112,7 +112,7 @@ const BLOG = ['Blog', '/blog'] as const
 const INTEGRATIONS = ['Integrations', '/integrations'] as const
 
 export const PAGES: readonly PageMeta[] = [
-  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-23', priority: 1.0, changefreq: 'weekly' },
+  { path: '/', section: 'marketing', crumbs: [], crumb: 'Home', og: 'default', index: true, updated: '2026-09-25', priority: 1.0, changefreq: 'weekly' },
   { path: '/pricing', section: 'marketing', crumbs: [HOME], crumb: 'Pricing', og: 'pricing', index: true, updated: '2026-09-09', priority: 0.8, changefreq: 'monthly' },
   { path: '/register', section: 'marketing', crumbs: [HOME], crumb: 'Get an API key', og: 'register', index: true, updated: '2026-09-25', priority: 0.8, changefreq: 'monthly' },
   // noindex and NOT disallowed, for the same reason as /app and /thanks: a real
@@ -147,12 +147,13 @@ export const PAGES: readonly PageMeta[] = [
   // What we publish and the frameworks the plain SDK slots into. The hub sits
   // under Docs in the trail because /docs is where a reader arrives from; the
   // path is top-level so each page's URL names its integration and nothing else.
-  { path: '/integrations', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Integrations', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
+  { path: '/integrations', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Integrations', og: 'docs', index: true, updated: '2026-09-25', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
   { path: '/integrations/openclaw', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenClaw', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
   { path: '/integrations/langchain', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
   { path: '/integrations/openai-agents-sdk', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenAI Agents SDK', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
   { path: '/integrations/crewai', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'CrewAI', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
-  { path: '/integrations/mcp', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'MCP server', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.6, changefreq: 'monthly' },
+  // The MCP connect page since 2026-09-25: the remote endpoint, one tab per client.
+  { path: '/integrations/mcp', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'MCP', og: 'docs', index: true, updated: '2026-09-25', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
 
   { path: '/blog', section: 'blog', crumbs: [HOME], crumb: 'Blog', og: 'blog', index: true, updated: '2026-09-05', priority: 0.6, changefreq: 'monthly' },
   { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },

@@ -1,12 +1,20 @@
+# The remote server, 2026-09-25: https://agentbill.dev/mcp, inside the main
+# AgentBill server. The old hosted copy at agentbill-mcp.fly.dev was taken down
+# the same day (no authentication in HTTP mode, a key from the environment) and
+# must not come back; nothing here points at it.
+#
+# The endpoint authenticates each request: OAuth 2.1 (clients that follow the
+# MCP authorization spec discover it from the 401), or an AgentBill API key as
+# Authorization: Bearer. Smithery's config below carries the key for the second.
 startCommand:
   type: http
-  url: https://agentbill-mcp.fly.dev/mcp
+  url: https://agentbill.dev/mcp
   configSchema:
     type: object
     properties:
       apiKey:
         type: string
-        description: "AgentBill API key. Get yours free at agentbill.dev/register"
+        description: "AgentBill API key, sent as Authorization: Bearer. Make one in the console at agentbill.dev/app after signing up at agentbill.dev/register."
     required:
       - apiKey
   exampleConfig:
