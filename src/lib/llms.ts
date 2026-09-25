@@ -36,7 +36,7 @@ const num = (n: number) => n.toLocaleString('en-US')
 export const SDK_VERSIONS = {
   python: '0.8.0',   // pypi.org/pypi/agentbill-sdk/json info.version; 0.8.0 adds dollar ceilings and the https-only base URL. MERGE ONLY AFTER PyPI SERVES IT
   node: '0.6.0',     // registry.npmjs.org/agentbill dist-tags.latest; 0.6.0 adds dollar ceilings, https-only, the 10s timeout. MERGE ONLY AFTER npm SERVES IT
-  mcp: '0.3.0',      // pypi.org/pypi/agentbill-mcp/json info.version; 0.3.0 binds loopback in HTTP mode. MERGE ONLY AFTER PyPI SERVES IT
+  mcp: '0.3.1',      // pypi.org/pypi/agentbill-mcp/json info.version; 0.3.1 declares Python >=3.10 (0.3.0 binds loopback in HTTP mode). MERGE ONLY AFTER PyPI SERVES IT
   openclaw: '0.2.0', // clawhub.ai/agentbill/plugins/openclaw, the version its page shows (v0.2.0), checked 2026-09-25
 } as const
 
