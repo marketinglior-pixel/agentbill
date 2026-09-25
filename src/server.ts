@@ -18,6 +18,7 @@ import compress from '@fastify/compress'
 import etag from '@fastify/etag'
 import { constants as zlibConstants } from 'node:zlib'
 import { webhooksRoute } from './routes/webhooks.js'
+import { inboundMailRoute } from './routes/inbound-mail.js'
 import { guidesRoute } from './routes/guides.js'
 import { integrationsRoute } from './routes/integrations.js'
 import { blogRoute } from './routes/blog.js'
@@ -270,6 +271,7 @@ app.register(appRoute)
 app.register(preflightRoute)
 app.register(pulseRoute)
 app.register(webhooksRoute)
+app.register(inboundMailRoute)
 app.register(legalRoute)
 app.register(faqRoute)
 app.register(aboutRoute)
