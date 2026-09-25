@@ -4752,6 +4752,10 @@ const { usdGates } = await import('./usd-gates.mjs')
 await usdGates({ API, sql, ok, legacyKey: KEY })
 
 // ------------------------------------------------ [mcp] the remote MCP endpoint (2026-09-25), in its own file
+// ------------------------------------------------ [openclaw] and [connect-marks] (2026-09-25), in their own file
+const { openclawGates } = await import('./openclaw-gates.mjs')
+await openclawGates({ API, ok })
+
 const { mcpGates } = await import('./mcp-gates.mjs')
 await mcpGates({
   API, sql, ok, bootS, stopS, portS: PORT_S,
