@@ -11,6 +11,9 @@
 //                an account id in a URL.
 //   [S17 logout] logging out of a key session ends it on the server
 //                (migration 030): a copy of the cookie is dead after it.
+//   [migration tls] scripts/db/apply-migration.mjs verifies the database
+//                certificate by the server's own rule; the only opt-out is
+//                DATABASE_SSL=disable on this machine.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
@@ -25,7 +28,7 @@ import { createServer } from 'node:http'
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -526,4 +529,92 @@ async function logoutGates({ API, sql, ok, bootS, stopS, portS }) {
        before && pout.status === 303 && !(await signedIn(pcopy, PB)), `${before} ${pout.status}`)
   } finally { await stopS(prod) }
   await sql`DELETE FROM accounts WHERE id = ${K}`
+}
+
+// ------------------------------------------------------------------ migration runner TLS
+async function migrationTlsGates({ ok, sql }) {
+  const { tlsFor, applyMigration } = await import('../db/apply-migration.mjs')
+  const { SUPABASE_ROOT_2021_CA } = await import('../../dist/db/tls.js')
+  const tls = await import('node:tls')
+  const net = await import('node:net')
+  const PROD = 'postgres://postgres.x:pw@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres'
+  const v = await tlsFor(PROD, {})
+  ok('[migration tls] by default the runner verifies: rejectUnauthorized true, the server\'s embedded Supabase root among the CAs',
+     v && v.rejectUnauthorized === true && Array.isArray(v.ca) && v.ca.includes(SUPABASE_ROOT_2021_CA), JSON.stringify(v && { r: v.rejectUnauthorized, n: v.ca?.length }))
+  const refuse = async (url, env) => tlsFor(url, env, () => {}).then(() => 'accepted', (e) => e.message)
+  const req = await refuse(PROD, { DATABASE_SSL: 'require' })
+  const remote = await refuse(PROD, { DATABASE_SSL: 'disable' })
+  const warned = []
+  const local = await tlsFor('postgres://u@localhost:5432/x', { DATABASE_SSL: 'disable' }, (m) => warned.push(m))
+  const local6 = await tlsFor('postgres://u@[::1]:5432/x', { DATABASE_SSL: 'disable' }, (m) => warned.push(m))
+  ok('[migration tls] DATABASE_SSL=require is refused, disable is refused for a remote host, and disable for localhost / ::1 is allowed with a WARNING every time',
+     /not accepted here/.test(req) && /this machine only/.test(remote) && local === false && local6 === false && warned.length === 2 && warned.every((m) => /WARNING.*WITHOUT TLS/.test(m)),
+     JSON.stringify({ req, remote, local, local6, warned }))
+
+  // A local stand-in for a TLS Postgres: answers the SSLRequest with 'S' and
+  // then does the TLS handshake with a certificate of our making. What tells
+  // "verified and accepted" from "refused" is whether the runner then SENDS
+  // anything over it (its startup message, user name first): the server side
+  // sees the handshake complete in both cases under TLS 1.3, because the
+  // client checks the certificate after the server has finished.
+  const dir = mkdtempSync(`${tmpdir()}/bc-migtls-`)
+  const mk = (name, san) => {
+    spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', `${dir}/${name}.key`, '-out', `${dir}/${name}.pem`, '-days', '1',
+      '-subj', `/CN=${name}`, '-addext', `subjectAltName=${san}`], { stdio: 'ignore' })
+    return { key: readFileSync(`${dir}/${name}.key`), cert: readFileSync(`${dir}/${name}.pem`), file: `${dir}/${name}.pem` }
+  }
+  const good = mk('localhost', 'DNS:localhost,IP:127.0.0.1')
+  const wrong = mk('db.other.example', 'DNS:db.other.example')
+  const listen = (cert) => new Promise((resolve) => {
+    const seen = { startup: 0 }
+    const srv = net.createServer((sock) => {
+      sock.once('data', () => {
+        sock.write('S')
+        const t = new tls.TLSSocket(sock, { isServer: true, key: cert.key, cert: cert.cert })
+        // Answer the startup with a Postgres ErrorResponse (FATAL 28000), so
+        // the client ends cleanly instead of waiting on a dropped socket.
+        t.on('data', () => {
+          if (seen.startup++ > 0) return
+          const f = Buffer.from('SFATAL\0C28000\0Mbatchc fake server\0\0', 'utf8')
+          const head = Buffer.alloc(5); head.write('E', 0); head.writeInt32BE(f.length + 4, 1)
+          t.end(Buffer.concat([head, f]))
+        })
+        t.on('error', () => t.destroy())
+      })
+    }).listen(0, '127.0.0.1', () => resolve({ srv, port: srv.address().port, seen }))
+  })
+  writeFileSync(`${dir}/probe.sql`, 'SELECT 1;')
+  const attempt = async (port, env) => {
+    const before = { ...process.env }
+    Object.assign(process.env, { DATABASE_SSL: '', DATABASE_SSL_CA_FILE: '' }, env)
+    if (!env.DATABASE_SSL_CA_FILE) delete process.env.DATABASE_SSL_CA_FILE
+    try {
+      await applyMigration(`postgres://u:p@localhost:${port}/x`, `${dir}/probe.sql`, { attempts: 1, log: () => {} })
+      return 'applied'
+    } catch (e) { return e?.code ?? e?.message } finally {
+      for (const k of ['DATABASE_SSL', 'DATABASE_SSL_CA_FILE']) { if (before[k] === undefined) delete process.env[k]; else process.env[k] = before[k] }
+    }
+  }
+  const g1 = await listen(good), g2 = await listen(good), w = await listen(wrong)
+  const selfSigned = await attempt(g1.port, {})
+  const trusted = await attempt(g2.port, { DATABASE_SSL_CA_FILE: good.file })
+  const misnamed = await attempt(w.port, { DATABASE_SSL_CA_FILE: wrong.file })
+  g1.srv.close(); g2.srv.close(); w.srv.close()
+  ok('[migration tls] against a TLS server whose root it was not given, the runner refuses the certificate (self-signed) and sends nothing over the connection',
+     /SELF_SIGNED|UNABLE_TO_VERIFY|unable to verify/i.test(String(selfSigned)) && g1.seen.startup === 0, `${selfSigned} startup=${g1.seen.startup}`)
+  ok('[migration tls] given that root (DATABASE_SSL_CA_FILE), the same kind of server is accepted and the runner sends its startup message',
+     g2.seen.startup > 0 && String(trusted) === '28000', `${trusted} startup=${g2.seen.startup}`)
+  ok('[migration tls] a trusted certificate for another host name is refused and nothing is sent (the host name is checked, not only the chain)',
+     /ALTNAME|does not match|Hostname\/IP/i.test(String(misnamed)) && w.seen.startup === 0, `${misnamed} startup=${w.seen.startup}`)
+
+  // And it still applies to the local harness database, the explicit way.
+  writeFileSync(`${dir}/local.sql`, 'CREATE TABLE IF NOT EXISTS batchc_migration_tls_probe (x int);')
+  const before = process.env.DATABASE_SSL
+  process.env.DATABASE_SSL = 'disable'
+  let applied
+  try { applied = await applyMigration(process.env.DATABASE_URL, `${dir}/local.sql`, { attempts: 1, log: () => {} }) } catch (e) { applied = e?.message }
+  finally { if (before === undefined) delete process.env.DATABASE_SSL; else process.env.DATABASE_SSL = before }
+  const [t] = await sql`SELECT count(*)::int AS n FROM pg_tables WHERE tablename = 'batchc_migration_tls_probe'`
+  ok('[migration tls] with DATABASE_SSL=disable on localhost it applies to the local harness database', applied?.attempts === 1 && t.n === 1, JSON.stringify(applied))
+  await sql`DROP TABLE IF EXISTS batchc_migration_tls_probe`
 }
