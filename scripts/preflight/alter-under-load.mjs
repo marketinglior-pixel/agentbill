@@ -20,7 +20,7 @@ import { applyMigration } from '../db/apply-migration.mjs'
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const PORT = Number(process.env.PORT ?? 3996)
 const API = `http://localhost:${PORT}`
-const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
+const KEY = process.env.API_KEY ?? 'agb_7e5700000000000000000000000000000000000000000001'
 const ACCT = process.env.ACCOUNT_ID ?? '00000000-0000-0000-0000-0000000000aa'
 const ALTER_FILE = process.env.ALTER_FILE
 const PLANT = process.env.PLANT_SKIP_WINDOW === '1'

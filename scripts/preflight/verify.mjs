@@ -16,12 +16,32 @@
 // applies the full migration chain and starts the server against it.
 
 import postgres from 'postgres'
+import { createHash as createHashK } from 'node:crypto'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { ipOrigin } from '../../dist/lib/ip-origin.js'
 import { int8Type, parseInt8 } from '../../dist/db/int8.js'
 
 const API = process.env.API_BASE ?? 'http://localhost:3999'
-const KEY = process.env.API_KEY ?? 'agb_testkey_local_verification_0001'
+// Every key the harness plants is shaped like a real one (agb_ and 48 hex),
+// because since 2026-09-25 auth.ts answers any other shape 401 before it
+// reaches the database. The tag makes each one distinct and reproducible.
+const shapedKey = (tag) => 'agb_' + createHashK('sha256').update(String(tag)).digest('hex').slice(0, 48)
+// /admin is read the way the owner reads it since 2026-09-25: sign in through
+// the form, then carry the session cookie. The raw secret as a Bearer header
+// is no longer accepted anywhere. One login per run, from its own network so
+// the per-network login limit never meets the gates that test it.
+let adminCookieV = null
+const adminCookie = async () => {
+  if (adminCookieV) return adminCookieV
+  const r = await fetch(`${API}/admin/login`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', 'fly-client-ip': '203.0.113.250' },
+    body: `secret=${encodeURIComponent(process.env.ADMIN_SECRET ?? '')}`,
+  })
+  adminCookieV = (r.headers.get('set-cookie') ?? '').split(';')[0]
+  return adminCookieV
+}
+const KEY = process.env.API_KEY ?? 'agb_7e5700000000000000000000000000000000000000000001'
 const ACCT = process.env.ACCOUNT_ID ?? '00000000-0000-0000-0000-0000000000aa'
 // The same int8 parser the server uses. Migration 016 makes every unit column
 // BIGINT, and without it this harness's own reads (c.reservedUnits === 12)
@@ -577,7 +597,10 @@ ok('the harness key survived the wildcard prefix', await alive(KEY) === 200, `go
 // carrying a NUL reached the UPDATE and 500ed.
 const badUrl = await post('/webhook-config', { url: `https://example.com/a${NUL}b` })
 ok('a control character inside a valid https URL is 422', badUrl.status === 422, JSON.stringify(badUrl.body).slice(0, 140))
-const goodUrl = await post('/webhook-config', { url: 'https://example.com/hook' })
+// A public address literal rather than a name: since 2026-09-25 a saved URL's
+// host is resolved and every address checked ([secfix] S4), and a literal
+// keeps this gate independent of the runner's DNS.
+const goodUrl = await post('/webhook-config', { url: 'https://1.1.1.1/hook' })
 ok('an ordinary https URL is still accepted', goodUrl.status === 200, JSON.stringify(goodUrl.body).slice(0, 140))
 
 // Polar signs with Standard Webhooks: HMAC-SHA256 over
@@ -639,14 +662,16 @@ const oldStamp = new Date(Date.now() - 10 * 60_000)
 const stale = await postHook(oldBody, signHeaders(oldBody, { date: oldStamp }))
 ok('a valid signature with a stale timestamp is refused', stale.status === 401, `got ${stale.status}`)
 
-// The path a paying customer actually takes, which has never worked.
-const upgraded = await hook({ type: 'subscription.active', data: { customer_id: 'cus_verify', product_id: 'unknown-product', metadata: { agentbill_account_id: ACCT } } })
+// The path a paying customer actually takes, which has never worked. Since
+// 2026-09-25 it has to be a live subscription for a product this server sells:
+// an unknown product used to map to the unlimited 'paid' plan ([secfix] S5).
+const upgraded = await hook({ type: 'subscription.active', data: { status: 'active', customer_id: 'cus_verify', product_id: process.env.POLAR_PRODUCT_ID_BUILDER, metadata: { agentbill_account_id: ACCT } } })
 ok('a correctly signed upgrade is accepted', upgraded.status === 200, `${upgraded.status} ${upgraded.body.slice(0, 120)}`)
 const planRow = (await sql`SELECT plan, polar_customer_id FROM accounts WHERE id = ${ACCT}`)[0]
-ok('and it actually moved the account off free', planRow.plan !== 'free' && planRow.polarCustomerId === 'cus_verify', JSON.stringify(planRow))
+ok('and it actually moved the account off free, to the plan the product buys', planRow.plan === 'builder' && planRow.polarCustomerId === 'cus_verify', JSON.stringify(planRow))
 await sql`UPDATE accounts SET plan = 'free', polar_customer_id = NULL, monthly_calls = 0 WHERE id = ${ACCT}`
 
-const badHook = await hook({ type: 'subscription.active', data: { customer_id: 'polar_1', metadata: { agentbill_account_id: 'not-a-uuid' } } })
+const badHook = await hook({ type: 'subscription.active', data: { status: 'active', product_id: process.env.POLAR_PRODUCT_ID_BUILDER, customer_id: 'polar_1', metadata: { agentbill_account_id: 'not-a-uuid' } } })
 ok('a malformed account id in a Polar webhook is 200, not 500',
    badHook.status === 200 && !/invalid input syntax|22P02/i.test(badHook.body), `${badHook.status} ${badHook.body.slice(0, 140)}`)
 
@@ -696,7 +721,7 @@ ok('the key prefix every key shares is too short to accept', shortPrefix.status 
 ok('the harness key survived that too', await alive(KEY) === 200, `got ${await alive(KEY)}`)
 
 // The Polar customer id is caller input as much as the account id is.
-const hookCtrl = await hook({ type: 'subscription.active', data: { customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } })
+const hookCtrl = await hook({ type: 'subscription.active', data: { status: 'active', product_id: process.env.POLAR_PRODUCT_ID_BUILDER, customer_id: `c${NUL}`, metadata: { agentbill_account_id: ACCT } } })
 ok('a control character in the Polar customer id is 200, not 500',
    hookCtrl.status === 200 && !/invalid byte sequence|22021/i.test(hookCtrl.body), `${hookCtrl.status} ${hookCtrl.body.slice(0, 120)}`)
 
@@ -720,7 +745,7 @@ ok('and none of them leaked an alert or a stack into the body',
 // keep answering 200 (a 500 would be retried forever) while the account stays
 // on the plan it had.
 const beforePlan = (await sql`SELECT plan FROM accounts WHERE id = ${ACCT}`)[0]?.plan
-const unusable = await hook({ type: 'subscription.active', data: { customer_id: 'alert-probe', metadata: { agentbill_account_id: 'still-not-a-uuid' } } })
+const unusable = await hook({ type: 'subscription.active', data: { status: 'active', product_id: process.env.POLAR_PRODUCT_ID_BUILDER, customer_id: 'alert-probe', metadata: { agentbill_account_id: 'still-not-a-uuid' } } })
 ok('a signed webhook with an unusable account id is 200, not a retry loop', unusable.status === 200, `${unusable.status} ${unusable.body.slice(0, 100)}`)
 const afterPlan = (await sql`SELECT plan FROM accounts WHERE id = ${ACCT}`)[0]?.plan
 ok('and it changed no plan', beforePlan === afterPlan, `${beforePlan} -> ${afterPlan}`)
@@ -1196,7 +1221,7 @@ ok('a replayed preflight answers its decision-time ceiling and reserves nothing 
 const OTHER8 = '00000000-0000-0000-0000-0000000000cc'
 await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
           VALUES (${OTHER8}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
-const OTHERKEY8 = 'agb_testkey_other_account_00000002'
+const OTHERKEY8 = shapedKey('other-account-8')
 await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHER8}, ${OTHERKEY8}, 'other') ON CONFLICT DO NOTHING`
 await putCeil('job-iso', { ceiling_units: 80, agent_id: 'r' })   // job-c was cleared by reset() above
 const foreign8 = await putCeil('job-iso', { ceiling_units: 7 }, OTHERKEY8)
@@ -1720,7 +1745,10 @@ ok('[register] docs and the questions page are an aside under the button, not a 
      && register8.indexOf('class="btn-go"') < register8.indexOf('class="aside"')
      && register8.slice(register8.indexOf('class="aside"')).includes('href="/docs"'))
 const email8 = `harness-register-${Date.now()}@example.invalid`
-const reg8 = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+// Sec-Fetch-Site: same-origin, as the page's own fetch sends it. Since
+// 2026-09-25 the session cookie is set only on a request the browser said is
+// same-origin; a headerless client gets its key and no cookie ([secfix] S11).
+const reg8 = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
   body: JSON.stringify({ email: email8 }) })
 const regBody8 = await reg8.json()
 const regCookie8 = reg8.headers.get('set-cookie') ?? ''
@@ -2170,7 +2198,7 @@ ok('[pulse] the homepage fires page_view once per load, after the helper and bef
 const pvSrc9 = `pv${Date.now().toString(36)}`
 await post9({ event: 'page_view', view_id: `${view9}pv1`, source: pvSrc9 })
 await post9({ event: 'page_view', view_id: `${view9}pv2`, source: pvSrc9 })
-const adminPv9 = await fetch(`${API}/admin`, { headers: { Authorization: `Bearer ${process.env.ADMIN_SECRET}` } })
+const adminPv9 = await fetch(`${API}/admin`, { headers: { cookie: await adminCookie() } })
   .then((r) => r.text()).catch(() => '')
 const srcRow9 = adminPv9.match(new RegExp(`<td><code>${pvSrc9}</code></td>\\s*<td[^>]*>(\\d+) <span class="muted">/ (\\d+)</span></td>`)) ?? []
 ok('[pulse] /admin reports page loads for a tagged surface, 30 days and 7 days, and the tiles carry the week',
@@ -2303,7 +2331,7 @@ ok('[source] a junk or over-long label costs the row its source, never the row i
 // tiles. The paragraph above those tiles read "no source column exists yet"
 // until this commit: a claim about our own data, on our own surface, goes
 // stale in the same commit that makes it false or it does not go at all.
-const adminSrc9 = await fetch(`${API}/admin`, { headers: { Authorization: `Bearer ${process.env.ADMIN_SECRET}` } })
+const adminSrc9 = await fetch(`${API}/admin`, { headers: { cookie: await adminCookie() } })
   .then((r) => r.text()).catch(() => '')
 ok('[source] /admin shows the tagged slice and no longer claims the column does not exist',
    adminSrc9.includes('Tagged surfaces') && adminSrc9.includes(SRC9) && !adminSrc9.includes('no source column exists yet'),
@@ -2510,7 +2538,7 @@ ok('[meter] a reservation_id that is not a uuid is a 422, never a 500', garbled.
 
 // Another account's handle is not a handle here, even for the same names.
 const ACCT_BM = '00000000-0000-0000-0000-0000000000bd'
-const KEY_BM = `agb_meter_b_${Date.now().toString(16)}`
+const KEY_BM = shapedKey(`meter-b-${Date.now()}`)
 await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_BM}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
 await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_BM}, ${KEY_BM}, 'harness-meter-b')`
 const bP = await preM({ agent_id: 'meter', task_ref: 'meter-x', task_ceiling: 1_000, estimated_units: 40 }, KEY_BM)
@@ -3143,7 +3171,7 @@ if (nodeSdk) {
   // 2026-09-24 before the fix: 10 calls sent, 0 refused, 12,000 used against a
   // 3,000 ceiling, one warning. On its own account, so the rest keep their quota.
   const ACCT_Q = '00000000-0000-0000-0000-0000000000be'
-  const KEY_Q = `agb_wrap_quota_${runW}`
+  const KEY_Q = shapedKey(`wrap-quota-${runW}`)
   await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_Q}, 'free', 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 0, plan = 'free'`
   await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_Q}, ${KEY_Q}, 'harness-wrap-quota')`
   const refQ = `wrap-quota-${runW}`
@@ -3264,7 +3292,7 @@ const sdkPyW = new URL('../../sdk/python', import.meta.url).pathname
 const e2eW = new URL('./wrap_e2e.py', import.meta.url).pathname
 // Scenario C needs an account whose monthly quota is spent, planted here.
 const ACCT_QP = '00000000-0000-0000-0000-0000000000bf'
-const KEY_QP = `agb_wrap_quota_py_${runW}`
+const KEY_QP = shapedKey(`wrap-quota-py-${runW}`)
 await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_QP}, 'free', 1000, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO UPDATE SET monthly_calls = 1000, plan = 'free', billing_period_start = date_trunc('month', CURRENT_DATE)::date`
 await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_QP}, ${KEY_QP}, 'harness-wrap-quota-py')`
 const pyRun = PYW ? spawnW(PYW, [e2eW, runW], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PYTHONPATH: sdkPyW, AGENTBILL_BASE_URL: API, AGENTBILL_API_KEY: KEYW, AGENTBILL_QUOTA_KEY: KEY_QP } }) : null
@@ -3871,7 +3899,7 @@ await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
 const KEYJ = (await post('/keys/generate', { label: 'harness-jobs' })).body.api_key
 if (typeof KEYJ !== 'string' || !KEYJ.startsWith('agb_')) throw new Error('[jobs] could not mint its key')
 const OTHERJ = '00000000-0000-0000-0000-0000000000dd'
-const OTHERKEYJ = 'agb_testkey_other_account_jobs_0003'
+const OTHERKEYJ = shapedKey('other-account-jobs')
 await sql`INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
           VALUES (${OTHERJ}, 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date) ON CONFLICT (id) DO NOTHING`
 await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${OTHERJ}, ${OTHERKEYJ}, 'other-jobs') ON CONFLICT DO NOTHING`
@@ -4162,6 +4190,458 @@ const prefixesJ = (readFileSync9(`${ROOT9}/src/server.ts`, 'utf8').match(/const 
 ok('[jobs] /usage is on the API prefix list, so the canonical-host redirect never strips its bearer header',
    /'\/usage'/.test(prefixesJ), prefixesJ.replace(/\s+/g, ' '))
 await sql`DELETE FROM accounts WHERE id = ${OTHERJ}`
+
+// ---------------------------------------------------------------- [secfix] security batch A, 2026-09-25
+// Each gate below is one finding of the OWASP audit of 2026-09-25
+// (O-output/2026-09-25-security-audit-owasp.md in the vault), and each was
+// shown red on a planted break before it was trusted. Several need the
+// production values of limits the main harness server raises, so they run
+// against a SECOND server started here, on the next port, on the same DB.
+console.log('\n[secfix] security batch A')
+const { readFileSync: readS, mkdtempSync: mkdtempS, writeFileSync: writeS } = await import('node:fs')
+const { spawn: spawnS, spawnSync: spawnSyncS } = await import('node:child_process')
+const { createHash: hashS, createHmac: hmacS, randomBytes: rndS } = await import('node:crypto')
+const { tmpdir: tmpdirS } = await import('node:os')
+const ROOT_S = new URL('../../', import.meta.url).pathname
+const settleS = (ms) => new Promise((r) => setTimeout(r, ms))
+const PORT_S = Number(new URL(API).port) + 1
+const API_S = `http://localhost:${PORT_S}`
+const bearerS = (k, extra = {}) => ({ Authorization: `Bearer ${k}`, 'Content-Type': 'application/json', ...extra })
+const getSX = (base, path, key, extra = {}) => fetch(`${base}${path}`, { headers: bearerS(key, extra) })
+  .then(async (r) => ({ status: r.status, headers: r.headers, body: await r.json().catch(() => null) }))
+const postS = (base, path, body, key, extra = {}) => fetch(`${base}${path}`, { method: 'POST', headers: bearerS(key, extra), body: JSON.stringify(body) })
+  .then(async (r) => ({ status: r.status, headers: r.headers, body: await r.json().catch(() => null) }))
+
+// Start a server with the env given, and either wait for /health or for it to exit.
+const bootS = (env, port) => new Promise((resolve) => {
+  let out = ''
+  const child = spawnS(process.execPath, [`${ROOT_S}dist/server.js`], {
+    env: { PATH: process.env.PATH, DATABASE_URL: process.env.DATABASE_URL, PORT: String(port), ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stdout.on('data', (d) => { out += d })
+  child.stderr.on('data', (d) => { out += d })
+  let done = false
+  const finish = (v) => { if (!done) { done = true; resolve(v) } }
+  child.on('exit', (code) => finish({ child, exited: true, code, out: () => out }))
+  ;(async () => {
+    for (let i = 0; i < 60 && !done; i++) {
+      await settleS(250)
+      const up = await fetch(`http://localhost:${port}/health`).then((r) => r.ok).catch(() => false)
+      if (up) return finish({ child, exited: false, code: null, out: () => out })
+    }
+    finish({ child, exited: false, code: null, out: () => out, timedOut: true })
+  })()
+})
+const stopS = async (b) => { if (b && !b.exited) { b.child.kill('SIGTERM'); await new Promise((r) => b.child.once('exit', r)) } }
+
+// ------------------------------------------------ S1: the seeded key is gone and revoked
+const multitenancyS = readS(`${ROOT_S}src/db/migrate-multitenancy.sql`, 'utf8')
+ok('[secfix S1] migrate-multitenancy.sql no longer inserts any API key', !/INSERT\s+INTO\s+developer_api_keys/i.test(multitenancyS))
+const LEGACY_HASH_S = 'aa759fef4307b14170837d3c226ac284414ff2c7c7e41ce8a2194faa5a2c8b42'
+const [legacyLiveS] = await sql`
+  SELECT count(*)::int AS n FROM developer_api_keys
+  WHERE (label = 'legacy-hardcoded-key' OR encode(sha256(convert_to(api_key, 'UTF8')), 'hex') = ${LEGACY_HASH_S})
+    AND (revoked_at IS NULL OR revoked_at > NOW())`
+ok('[secfix S1] after the schema chain, no live row carries the seeded key or its label', legacyLiveS.n === 0, `${legacyLiveS.n} live`)
+// A database built from an older checkout still has the row: plant one and apply 019 to it.
+const plantedS = shapedKey(`legacy-plant-${Date.now()}`)
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT}, ${plantedS}, 'legacy-hardcoded-key')`
+const beforeS1 = await getSX(API, '/keys', plantedS)
+const mig019 = readS(`${ROOT_S}src/db/migrations/019_revoke_legacy_hardcoded_key.sql`, 'utf8')
+await sql.unsafe(mig019)
+const afterS1 = await getSX(API, '/keys', plantedS)
+ok('[secfix S1] migration 019 revokes a planted legacy row: it authenticated before, key_revoked after',
+   beforeS1.status === 200 && afterS1.status === 401 && afterS1.body?.error === 'key_revoked', `${beforeS1.status} -> ${afterS1.status} ${JSON.stringify(afterS1.body)}`)
+const [rev1S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE api_key = ${plantedS}`
+await settleS(20)
+await sql.unsafe(mig019)
+const [rev2S] = await sql`SELECT revoked_at FROM developer_api_keys WHERE api_key = ${plantedS}`
+ok('[secfix S1] and 019 is idempotent: a second run leaves revoked_at as it was', rev1S?.revokedAt != null && rev1S.revokedAt.getTime() === rev2S?.revokedAt?.getTime(), `${rev1S?.revokedAt} ${rev2S?.revokedAt}`)
+await sql`DELETE FROM developer_api_keys WHERE api_key = ${plantedS}`
+
+// ------------------------------------------------ S2: shape before counters, bounded counters
+const { createLimiter, authFailureLimiter } = await import('../../dist/lib/rate-limiter.js')
+const capS = createLimiter({ max: 3, windowMs: 60_000, maxEntries: 500 })
+for (let i = 0; i < 20_000; i++) capS.hit(`fake-${i}`)
+ok('[secfix S2] 20,000 distinct keys never grow a counter past its ceiling', capS.size() <= 500, `size ${capS.size()}`)
+const expS = createLimiter({ max: 3, windowMs: 30, maxEntries: 10_000 })
+for (let i = 0; i < 300; i++) expS.hit(`e-${i}`)
+await settleS(60)
+expS.hit('after')
+ok('[secfix S2] expired windows are evicted, not kept', expS.size() === 1, `size ${expS.size()}`)
+ok('[secfix S2] the counters on the auth path are bounded', Number.isFinite(authFailureLimiter.maxEntries) && authFailureLimiter.maxEntries <= 20_000)
+const malformedS = []
+for (let i = 0; i < 20; i++) {
+  malformedS.push(...await Promise.all(Array.from({ length: 100 }, (_, j) =>
+    fetch(`${API}/keys`, { headers: { Authorization: `Bearer fake-${i}-${j}-${rndS(6).toString('hex')}` } }).then(async (r) => ({ status: r.status, body: await r.json() })))))
+}
+ok('[secfix S2] 2,000 distinct malformed tokens are each a 401 unauthorized, none a 429 or a 500',
+   malformedS.length === 2000 && malformedS.every((r) => r.status === 401 && r.body?.error === 'unauthorized'),
+   JSON.stringify([...new Set(malformedS.map((r) => r.status))]))
+ok('[secfix S2] the real key still works after them', await alive(KEY) === 200)
+const authSrcS = readS(`${ROOT_S}src/middleware/auth.ts`, 'utf8')
+const iShape = authSrcS.indexOf('if (!isKeyShaped(token))'), iBlocked = authSrcS.indexOf('authFailureLimiter.blocked(network)')
+const iLookup = authSrcS.indexOf('WHERE k.api_key = ${token}'), iKeyRate = authSrcS.indexOf('checkRateLimit(rows[0].id')
+ok('[secfix S2] auth.ts order: shape, then the network failure check, then the lookup, then the per-key limit by key id',
+   iShape > 0 && iShape < iBlocked && iBlocked < iLookup && iLookup < iKeyRate, `${iShape} ${iBlocked} ${iLookup} ${iKeyRate}`)
+
+// A second server with the production failure limit and small per-key/account limits.
+const ACCT_S16 = '00000000-0000-0000-0000-00000000516a'
+await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_S16}, 'free', ${`secfix-s16-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
+const keysS16 = [1, 2, 3].map((n) => shapedKey(`s16-${n}-${Date.now()}`))
+for (const k of keysS16) await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_S16}, ${k}, 'secfix-s16')`
+const srvS = await bootS({ NODE_ENV: 'test', DATABASE_SSL: 'disable', AUTH_FAILURES_PER_MINUTE: '10', RATE_LIMIT_PER_MINUTE: '5', RATE_LIMIT_ACCOUNT_PER_MINUTE: '8' }, PORT_S)
+ok('[secfix] a second server with production-shaped limits started', !srvS.exited && !srvS.timedOut, srvS.out().slice(-300))
+const netA = { 'fly-client-ip': '198.51.100.21' }, netB = { 'fly-client-ip': '198.51.100.22' }
+const guessesS = []
+for (let i = 0; i < 12; i++) guessesS.push((await getSX(API_S, '/keys', shapedKey(`guess-${i}-${Date.now()}`), netA)).status)
+ok('[secfix S2] unknown keys from one network: ten 401s, then 429 before the database is asked again',
+   guessesS.slice(0, 10).every((s) => s === 401) && guessesS.slice(10).every((s) => s === 429), guessesS.join(','))
+const netC = { 'fly-client-ip': '198.51.100.23' }
+const malformedC = []
+for (let i = 0; i < 15; i++) malformedC.push((await getSX(API_S, '/keys', `not-a-key-${i}-${Date.now()}`, netC)).status)
+ok('[secfix S2] malformed tokens are answered before any counter: fifteen from one network on the production-limit server are all 401, none 429',
+   malformedC.every((s) => s === 401), malformedC.join(','))
+const realFromB = await getSX(API_S, '/keys', keysS16[2], netB)
+ok('[secfix S2] a real key from another network is unaffected', realFromB.status === 200, `${realFromB.status}`)
+const manyNetsS = await Promise.all(Array.from({ length: 1500 }, (_, i) =>
+  getSX(API_S, '/budget?customer_id=x', shapedKey(`spray-${i}`), { 'fly-client-ip': `100.${(i >> 8) & 255}.${i & 255}.9` }).then((r) => r.status)))
+ok('[secfix S2] 1,500 well-formed fake keys from 1,500 networks are each a 401, and the server stays up',
+   manyNetsS.every((s) => s === 401) && (await fetch(`${API_S}/health`).then((r) => r.status)) === 200, JSON.stringify([...new Set(manyNetsS)]))
+
+// ------------------------------------------------ S16: per-account limit, paging
+const k1S = []
+for (let i = 0; i < 6; i++) k1S.push((await getSX(API_S, '/keys', keysS16[0], netB)).status)
+ok('[secfix S16] per key: 5 a minute, then 429', k1S.slice(0, 5).every((s) => s === 200) && k1S[5] === 429, k1S.join(','))
+const k2S = []
+for (let i = 0; i < 5; i++) k2S.push(await getSX(API_S, '/keys', keysS16[1], netB))
+// key 3 spent 1 above, key 1 spent 5 (its 6th was refused by the per-key limit
+// before the account was counted), so the account has 8 - 6 = 2 left for key 2.
+ok('[secfix S16] per account: a second key gets only what the account has left, then 429 naming the account',
+   k2S.slice(0, 2).every((r) => r.status === 200) && k2S.slice(2).every((r) => r.status === 429 && /account/.test(r.body?.message ?? '')),
+   k2S.map((r) => r.status).join(','))
+await stopS(srvS)
+
+const ACCT_PG = '00000000-0000-0000-0000-0000000005a9'
+await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_PG}, 'free', ${`secfix-pg-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
+const KEY_PG = shapedKey(`pg-${Date.now()}`)
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_PG}, ${KEY_PG}, 'pg-1')`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_PG}, ${shapedKey(`pg2-${Date.now()}`)}, 'pg-2'), (${ACCT_PG}, ${shapedKey(`pg3-${Date.now()}`)}, 'pg-3')`
+await sql`INSERT INTO customers (account_id, customer_ref, created_at)
+          SELECT ${ACCT_PG}, 'c-' || g, now() - (g || ' seconds')::interval FROM generate_series(1, 205) g`
+const c1S = await getSX(API, '/customers', KEY_PG)
+const cur1 = c1S.headers.get('x-next-cursor')
+const c2S = await getSX(API, `/customers?cursor=${cur1}`, KEY_PG)
+// The body's keys are what postgres.camel made of the SELECT's aliases
+// (customerId, isBlocked, createdAt) and always have been; unchanged here.
+const idsS = [...(c1S.body ?? []), ...(c2S.body ?? [])].map((r) => r.customerId)
+ok('[secfix S16] GET /customers: 200 by default, the next page named in X-Next-Cursor and Link, the last page with neither',
+   Array.isArray(c1S.body) && c1S.body.length === 200 && !!cur1 && /rel="next"/.test(c1S.headers.get('link') ?? '')
+     && c2S.body?.length === 5 && !c2S.headers.get('x-next-cursor'), `${c1S.body?.length} ${cur1} ${c2S.body?.length}`)
+ok('[secfix S16] and the two pages are all 205 customers once each, newest first, in the shape callers already read',
+   new Set(idsS).size === 205 && idsS[0] === 'c-1' && idsS[204] === 'c-205' && !('rowId' in c1S.body[0]) && Object.keys(c1S.body[0]).sort().join(',') === 'createdAt,customerId,isBlocked,limit,remaining,used', `${new Set(idsS).size} ${idsS[0]} ${idsS[204]}`)
+const kp1 = await getSX(API, '/keys?limit=2', KEY_PG)
+const kp2 = await getSX(API, `/keys?limit=2&cursor=${kp1.body?.next_cursor}`, KEY_PG)
+ok('[secfix S16] GET /keys pages too: next_cursor, then null on the last page',
+   kp1.body?.keys?.length === 2 && typeof kp1.body.next_cursor === 'string' && kp2.body?.keys?.length === 1 && kp2.body.next_cursor === null
+     && kp1.body.keys[0].label === 'pg-1', JSON.stringify([kp1.body?.keys?.map((k) => k.label), kp2.body?.keys?.map((k) => k.label)]))
+const kDefault = await getSX(API, '/keys', KEY_PG)
+ok('[secfix S16] an unpaged /keys is every key plus next_cursor null, as before', kDefault.body?.keys?.length === 3 && kDefault.body.next_cursor === null)
+const badPg = await Promise.all([getSX(API, '/customers?limit=0', KEY_PG), getSX(API, '/customers?limit=501', KEY_PG), getSX(API, '/customers?cursor=nope', KEY_PG)])
+ok('[secfix S16] limit 0, limit 501 and a cursor this endpoint never returned are each a 422', badPg.every((r) => r.status === 422), badPg.map((r) => r.status).join(','))
+
+// ------------------------------------------------ S4: webhook targets
+const refusedS4 = {}
+for (const u of ['https://169.254.169.254/', 'https://127.0.0.1/', 'https://[fdaa::3]/', 'https://x.internal/', 'https://[::ffff:127.0.0.1]/',
+                 'https://[::ffff:a9fe:a9fe]/', 'https://10.0.0.1/', 'https://172.16.5.4/', 'https://192.168.1.1/', 'https://100.64.0.1/',
+                 'https://0.0.0.0/', 'https://[fe80::1]/', 'https://[::1]/', 'https://localhost/', 'https://printer.local/', 'https://app.flycast/',
+                 'https://intranet/', 'https://user:pw@1.1.1.1/', 'https://2130706433/']) {
+  refusedS4[u] = (await post('/webhook-config', { url: u })).status
+}
+ok('[secfix S4] every loopback, private, link-local, ULA, Fly-internal, mapped and single-label target is refused at save time',
+   Object.values(refusedS4).every((s) => s === 422), JSON.stringify(Object.entries(refusedS4).filter(([, s]) => s !== 422)))
+const goodS4 = await post('/webhook-config', { url: 'https://1.1.1.1/agentbill-hook' })
+const [rowS4] = await sql`SELECT webhook_url, webhook_secret_nonce FROM accounts WHERE id = ${ACCT}`
+ok('[secfix S4] a public target is saved and its signing secret is returned once, never stored',
+   goodS4.status === 200 && /^whsec_[0-9a-f]{64}$/.test(goodS4.body?.signing_secret ?? '') && /^[0-9a-f]{48}$/.test(rowS4.webhookSecretNonce ?? '')
+     && !JSON.stringify(await sql`SELECT * FROM accounts WHERE id = ${ACCT}`).includes(goodS4.body.signing_secret), JSON.stringify(goodS4.body).slice(0, 120))
+const wt = await import('../../dist/lib/webhook-target.js')
+const privS = ['169.254.169.254', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', 'fdaa::3', 'fd00::1', 'fc00::1', '64:ff9b::a00:1', '2002:7f00:1::', '::', '::1', '100.127.255.254', '0.1.2.3', '::7f00:1']
+const pubS = ['1.1.1.1', '8.8.8.8', '2606:4700:4700::1111', '100.128.0.1', '172.32.0.1', '::ffff:1.1.1.1']
+ok('[secfix S4] the address classifier: every private form private, every public form public',
+   privS.every((a) => wt.isPrivateAddress(a)) && pubS.every((a) => !wt.isPrivateAddress(a)),
+   JSON.stringify({ missed: privS.filter((a) => !wt.isPrivateAddress(a)), wrong: pubS.filter((a) => wt.isPrivateAddress(a)) }))
+const guardedS = await new Promise((r) => wt.guardedLookup('localhost', {}, (err) => r(err?.code ?? 'no error')))
+ok('[secfix S4] at send time the connect-time resolver refuses a name that resolves to loopback', guardedS === 'EWEBHOOKPRIVATE', guardedS)
+ok('[secfix S4] the send timeout is five seconds', wt.WEBHOOK_TIMEOUT_MS === 5000)
+// The transport never follows a redirect: a local https server answers 302 to a
+// second listener, and the second listener must never be asked.
+const tlsDirS = mkdtempS(`${tmpdirS()}/agentbill-secfix-`)
+spawnSyncS('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', `${tlsDirS}/k.pem`, '-out', `${tlsDirS}/c.pem`, '-days', '1',
+  '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'], { stdio: 'ignore' })
+const certS = readS(`${tlsDirS}/c.pem`), keyPemS = readS(`${tlsDirS}/k.pem`)
+const { createServer: httpsServerS } = await import('node:https')
+const { createServer: httpServerS } = await import('node:http')
+let landedS = 0, seenS = null
+const landS = httpServerS((q, a) => { landedS++; a.end('landed') }).listen(0, '127.0.0.1')
+await new Promise((r) => landS.once('listening', r))
+const hopS = httpsServerS({ key: keyPemS, cert: certS }, (q, a) => {
+  let b = ''; q.on('data', (d) => { b += d }); q.on('end', () => {
+    seenS = { headers: q.headers, body: b }
+    if (q.url === '/slow') return
+    a.writeHead(302, { Location: `http://127.0.0.1:${landS.address().port}/landed` }); a.end()
+  })
+}).listen(0, '127.0.0.1')
+await new Promise((r) => hopS.once('listening', r))
+const secretS = 'whsec_' + 'ab'.repeat(32)
+const bodyS = JSON.stringify({ event: 'anomaly.detected', units: 9 })
+const sigS = wt.signatureHeader(secretS, bodyS)
+const hopRes = await wt.postOnce(`https://127.0.0.1:${hopS.address().port}/hook`, bodyS, { 'Content-Type': 'application/json', 'X-AgentBill-Signature': sigS },
+  { lookup: (await import('node:dns')).lookup, ca: certS })
+await settleS(200)
+ok('[secfix S4] a 302 is the answer, recorded as not delivered, and its Location is never requested',
+   hopRes.delivered === false && hopRes.status === 302 && landedS === 0, `${JSON.stringify(hopRes)} landed=${landedS}`)
+const [, tS, vS] = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(seenS?.headers?.['x-agentbill-signature'] ?? '') ?? []
+ok('[secfix S4] the delivery carries X-AgentBill-Signature, an HMAC-SHA256 of "<t>.<body>" a receiver can check',
+   !!vS && vS === hmacS('sha256', secretS).update(`${tS}.${seenS.body}`).digest('hex'), seenS?.headers?.['x-agentbill-signature'])
+const t0S = Date.now()
+const slowRes = await wt.postOnce(`https://127.0.0.1:${hopS.address().port}/slow`, bodyS, {}, { lookup: (await import('node:dns')).lookup, ca: certS, timeoutMs: 300 })
+ok('[secfix S4] a target that never answers is abandoned at the timeout', slowRes.delivered === false && slowRes.reason === 'timed out' && Date.now() - t0S < 3000, `${JSON.stringify(slowRes)} ${Date.now() - t0S}ms`)
+// Send time, end to end: a row that points at loopback (saved before the rule,
+// or a name whose DNS changed) is never dialled when /step flags an anomaly.
+let dialledS = 0
+const trapS = (await import('node:net')).createServer((c) => { dialledS++; c.destroy() }).listen(0, '127.0.0.1')
+await new Promise((r) => trapS.once('listening', r))
+await sql`UPDATE accounts SET webhook_url = ${`https://127.0.0.1:${trapS.address().port}/hook`} WHERE id = ${ACCT}`
+for (let i = 0; i < 6; i++) await post('/step', { agent_id: 'secfix-s4', step_name: 'hop', units: 10 })
+const anomS = await post('/step', { agent_id: 'secfix-s4', step_name: 'hop', units: 500 })
+await sql`UPDATE accounts SET webhook_url = 'https://localhost/hook' WHERE id = ${ACCT}`
+await post('/step', { agent_id: 'secfix-s4', step_name: 'hop', units: 900 })
+await settleS(500)
+ok('[secfix S4] at send time, an anomaly for a loopback webhook row is flagged and nothing is dialled',
+   anomS.body?.anomaly === true && dialledS === 0, `anomaly=${anomS.body?.anomaly} dialled=${dialledS}`)
+await sql`UPDATE accounts SET webhook_url = NULL, webhook_secret_nonce = NULL WHERE id = ${ACCT}`
+hopS.close(); landS.close(); trapS.close()
+
+// ------------------------------------------------ S5 + S24: Polar upgrades only on a paid event for a sold product, once
+const planOfS = async () => (await sql`SELECT plan FROM accounts WHERE id = ${ACCT}`)[0].plan
+const toFreeS = () => sql`UPDATE accounts SET plan = 'free', polar_customer_id = NULL WHERE id = ${ACCT}`
+const md = { agentbill_account_id: ACCT }
+const B = process.env.POLAR_PRODUCT_ID_BUILDER, T = process.env.POLAR_PRODUCT_ID_TEAM
+await toFreeS()
+const s5 = {}
+s5.pendingOrder = [(await hook({ type: 'order.created', data: { status: 'pending', product_id: B, customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+s5.createdOrderPaid = [(await hook({ type: 'order.created', data: { status: 'paid', product_id: B, customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+s5.unknownProduct = [(await hook({ type: 'order.paid', data: { status: 'paid', product_id: 'prod_nobody_sells_this', customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+s5.noProduct = [(await hook({ type: 'order.paid', data: { status: 'paid', customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+s5.incompleteSub = [(await hook({ type: 'subscription.created', data: { status: 'incomplete', product_id: T, customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+s5.activeNoStatus = [(await hook({ type: 'subscription.active', data: { product_id: T, customer_id: 'cus_s5', metadata: md } })).status, await planOfS()]
+ok('[secfix S5] a pending order, order.created, an unknown product, no product, an incomplete subscription: each 200, none upgrades',
+   Object.values(s5).every(([st, pl]) => st === 200 && pl === 'free'), JSON.stringify(s5))
+const paidS = await hook({ type: 'order.paid', data: { status: 'paid', product_id: B, customer_id: 'cus_s5', metadata: md } })
+const planPaid = await planOfS()
+await toFreeS()
+const subS = await hook({ type: 'subscription.created', data: { status: 'active', product_id: T, customer_id: 'cus_s5', metadata: md } })
+const planSub = await planOfS()
+ok('[secfix S5] order.paid for a sold product upgrades to that product\'s plan, and so does an active subscription',
+   paidS.status === 200 && planPaid === 'builder' && subS.status === 200 && planSub === 'team', `${planPaid} ${planSub}`)
+// Replay: the same delivery (same webhook-id, same body, fresh signature window) twice.
+await toFreeS()
+const replayBody = JSON.stringify({ type: 'order.paid', data: { status: 'paid', product_id: B, customer_id: 'cus_s5r', metadata: md } })
+const replayHdr = signHeaders(replayBody)
+const r1S = await postHook(replayBody, replayHdr)
+const planR1 = await planOfS()
+await toFreeS()
+const r2S = await postHook(replayBody, replayHdr)
+const planR2 = await planOfS()
+const [claimS] = await sql`SELECT count(*)::int AS n FROM polar_webhook_deliveries WHERE webhook_id = ${replayHdr['webhook-id']}`
+ok('[secfix S24] one delivery acts once: a replay of the same webhook-id is 200, acknowledged as a duplicate, and changes nothing',
+   r1S.status === 200 && planR1 === 'builder' && r2S.status === 200 && /"duplicate":true/.test(r2S.body) && planR2 === 'free' && claimS.n === 1,
+   `${planR1} ${r2S.body} ${planR2} claims=${claimS.n}`)
+await toFreeS()
+
+// ------------------------------------------------ S7: metadata bounds
+const recS = (metadata, extra = {}) => rec({ customer_id: 'secfix-s7', event_type: 'run', idempotency_key: `s7-${rndS(6).toString('hex')}`, units: 1, metadata, ...extra })
+const pad = (n) => ({ blob: 'x'.repeat(n - '{"blob":""}'.length) })
+const at8k = await recS(pad(8192)), over8k = await recS(pad(8193))
+const keys32 = await recS(Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`k${i}`, i])))
+const keys33 = await recS(Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, i])))
+ok('[secfix S7] metadata of exactly 8,192 bytes and of 32 keys records; 8,193 bytes and 33 keys are each a 422 that says why',
+   at8k.status === 200 && keys32.status === 200 && over8k.status === 422 && /8193 bytes/.test(over8k.body?.message) && keys33.status === 422 && /33 keys/.test(keys33.body?.message),
+   JSON.stringify([at8k.status, keys32.status, over8k.body, keys33.body]))
+const wrapShape = { provider: 'openai', model: 'gpt-4o-mini-2024-07-18', duration_ms: 1234, requested_model: 'gpt-4o-mini', step: 'draft', stream: true, service_tier: 'default',
+                    tokens: { input: 1200, output: 300, cached_input: 100, reasoning: 0 } }
+ok('[secfix S7] the metadata wrap() writes is well under both bounds', Object.keys(wrapShape).length <= 8 && JSON.stringify(wrapShape).length < 1024 && (await recS(wrapShape)).status === 200)
+const hugeS = await fetch(`${API}/events`, { method: 'POST', headers: bearerS(KEY), body: JSON.stringify({ customer_id: 'x', event_type: 'run', idempotency_key: 'huge', metadata: { a: 'x'.repeat(70_000) } }) })
+ok('[secfix S7] a body over 64 KB is refused before it is parsed (413)', hugeS.status === 413, `${hugeS.status}`)
+
+// ------------------------------------------------ S8: the owner's usage alert, escaped and capped
+const { usageAlertMail } = await import('../../dist/routes/events.js')
+const evilRef = '<img src=x onerror=alert(1)>"&'
+const mailS8 = usageAlertMail(ACCT, evilRef, 900)
+ok('[secfix S8] a customer_id carrying markup is escaped in the alert body and stripped from the subject',
+   !mailS8.html.includes('<img') && mailS8.html.includes('&lt;img src=x onerror=alert(1)&gt;&quot;&amp;') && !/[<>"&]/.test(mailS8.subject.replace(/^AgentBill: customer "/, '').replace(/" has used 900 units$/, '')),
+   mailS8.subject)
+const ACCT_S8 = '00000000-0000-0000-0000-0000000005e8'
+await sql`INSERT INTO accounts (id, plan, email) VALUES (${ACCT_S8}, 'free', ${`secfix-s8-${Date.now()}@example.invalid`}) ON CONFLICT (id) DO NOTHING`
+const KEY_S8 = shapedKey(`s8-${Date.now()}`)
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_S8}, ${KEY_S8}, 's8')`
+for (let i = 0; i < 6; i++) {
+  await postS(API, '/events', { customer_id: `s8-${i}-${evilRef}`, event_type: 'run', idempotency_key: `s8-${i}-${Date.now()}`, units: 900 }, KEY_S8)
+}
+await postS(API, '/events', { customer_id: 's8-0-' + evilRef, event_type: 'run', idempotency_key: `s8-again-${Date.now()}`, units: 900 }, KEY_S8)
+await settleS(500)
+const claimsS8 = (await sql`SELECT customer_ref FROM customer_usage_alerts WHERE account_id = ${ACCT_S8} ORDER BY id`).map((r) => r.customerRef)
+let logS8 = ''
+try { logS8 = readS(process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log', 'utf8') } catch {}
+const suppressedS8 = logS8.split('\n').filter((l) => l.includes('usage alert suppressed') && l.includes(ACCT_S8)).length
+ok('[secfix S8] six customers crossing 800 on one account: six claims, one each, and all but the daily three suppressed',
+   claimsS8.length === 6 && new Set(claimsS8).size === 6 && suppressedS8 === 3, `claims=${claimsS8.length} suppressed=${suppressedS8}`)
+
+// ------------------------------------------------ S9: admin
+const loginS9 = (secret, extra = {}) => fetch(`${API}/admin/login`, {
+  method: 'POST', redirect: 'manual',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', 'fly-client-ip': '198.51.100.90', ...extra },
+  body: `secret=${encodeURIComponent(secret)}`,
+})
+const WRONG_S9 = `wrong-${rndS(8).toString('hex')}`
+const triesS9 = []
+for (let i = 0; i < 11; i++) triesS9.push((await loginS9(WRONG_S9)).status)
+ok('[secfix S9] /admin/login: ten attempts a network, then 429', triesS9.slice(0, 10).every((s) => s === 401) && triesS9[10] === 429, triesS9.join(','))
+const rightBlocked = await loginS9(process.env.ADMIN_SECRET)
+ok('[secfix S9] and the limit holds for the right secret from that network too', rightBlocked.status === 429)
+const crossS9 = await loginS9(process.env.ADMIN_SECRET, { 'Sec-Fetch-Site': 'cross-site', 'fly-client-ip': '198.51.100.91' })
+ok('[secfix S9] a cross-site login POST is refused', crossS9.status === 403)
+const goodS9 = await loginS9(process.env.ADMIN_SECRET, { 'fly-client-ip': '198.51.100.92' })
+const setS9 = goodS9.headers.get('set-cookie') ?? ''
+const tokS9 = /agentbill_admin=([^;]+)/.exec(setS9)?.[1] ?? ''
+const [, iatS9, expS9] = /^(\d{10})\.(\d{10})\.[0-9a-f]{64}$/.exec(tokS9) ?? []
+ok('[secfix S9] a good login sets a token that carries its issue time and a twelve-hour expiry',
+   goodS9.status === 303 && Number(expS9) - Number(iatS9) === 43200 && /Max-Age=43200/.test(setS9) && /HttpOnly/.test(setS9) && /SameSite=Strict/.test(setS9), setS9.replace(/=[0-9a-f.]{40,}/, '=...'))
+const pageS9 = (cookie, extra = {}) => fetch(`${API}/admin`, { headers: { ...(cookie ? { cookie: `agentbill_admin=${cookie}` } : {}), ...extra } }).then((r) => r.text())
+const DASH = 'Page loads (30d / 7d)'
+const macS9 = (iat, exp) => hmacS('sha256', process.env.ADMIN_SECRET).update(`agentbill-admin-session-v2.${iat}.${exp}`).digest('hex')
+const nowS9 = Math.floor(Date.now() / 1000)
+const expiredTok = `${nowS9 - 50000}.${nowS9 - 50000 + 43200}.${macS9(nowS9 - 50000, nowS9 - 50000 + 43200)}`
+const legacyTok = hmacS('sha256', process.env.ADMIN_SECRET).update('agentbill-admin-session').digest('hex')
+const tamperedTok = tokS9.replace(/.$/, (c) => (c === '0' ? '1' : '0'))
+const viewsS9 = {
+  fresh: (await pageS9(tokS9)).includes(DASH),
+  expired: (await pageS9(expiredTok)).includes(DASH),
+  legacyConstant: (await pageS9(legacyTok)).includes(DASH),
+  tampered: (await pageS9(tamperedTok)).includes(DASH),
+  bearerSecret: (await pageS9('', { Authorization: `Bearer ${process.env.ADMIN_SECRET}` })).includes(DASH),
+}
+ok('[secfix S9] only the fresh token opens /admin: an expired one, the old constant one, a tampered one and the raw secret as Bearer do not',
+   viewsS9.fresh && !viewsS9.expired && !viewsS9.legacyConstant && !viewsS9.tampered && !viewsS9.bearerSecret, JSON.stringify(viewsS9))
+const acctsBearer = await fetch(`${API}/admin/accounts`, { headers: { Authorization: `Bearer ${process.env.ADMIN_SECRET}` } })
+const acctsCookie = await fetch(`${API}/admin/accounts`, { headers: { cookie: `agentbill_admin=${tokS9}` } })
+ok('[secfix S9] /admin/accounts: 401 to the raw secret as Bearer, 200 to the session', acctsBearer.status === 401 && acctsCookie.status === 200, `${acctsBearer.status} ${acctsCookie.status}`)
+const outS9 = await fetch(`${API}/admin/logout`, { method: 'POST', redirect: 'manual', headers: { 'Sec-Fetch-Site': 'same-origin', cookie: `agentbill_admin=${tokS9}` } })
+ok('[secfix S9] POST /admin/logout clears the cookie', outS9.status === 303 && /agentbill_admin=;.*Max-Age=0/.test(outS9.headers.get('set-cookie') ?? ''), outS9.headers.get('set-cookie'))
+let logS9 = ''
+try { logS9 = readS(process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log', 'utf8') } catch {}
+ok('[secfix S9] failed logins are logged as warnings, and the value typed is not',
+   logS9.split('\n').filter((l) => l.includes('admin login failed') && l.includes('"level":40')).length >= 10 && !logS9.includes(WRONG_S9))
+
+// ------------------------------------------------ S11: /register is same-origin only for browsers
+const regS11 = (extra) => fetch(`${API}/register`, { method: 'POST', redirect: 'manual',
+  headers: { 'Content-Type': 'application/json', 'fly-client-ip': `198.51.100.${110 + Math.floor(Math.random() * 100)}`, ...extra },
+  body: JSON.stringify({ email: `secfix-s11-${rndS(5).toString('hex')}@example.invalid` }) })
+const crossForm = await fetch(`${API}/register`, { method: 'POST', redirect: 'manual',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'cross-site', Origin: 'https://evil.example', 'fly-client-ip': '198.51.100.101' },
+  body: `email=${encodeURIComponent(`secfix-s11-x-${Date.now()}@example.invalid`)}` })
+const crossOrigin = await regS11({ Origin: 'https://evil.example' })
+const sameS11 = await regS11({ 'Sec-Fetch-Site': 'same-origin' })
+const bareS11 = await regS11({})
+ok('[secfix S11] a cross-site form POST to /register is 403, and so is a foreign Origin without Sec-Fetch-Site',
+   crossForm.status === 403 && crossOrigin.status === 403, `${crossForm.status} ${crossOrigin.status}`)
+ok('[secfix S11] same-origin gets 201 and the console cookie; a headerless client (curl, the SDKs) gets 201 and no cookie',
+   sameS11.status === 201 && /^agentbill_app=/.test(sameS11.headers.get('set-cookie') ?? '') && bareS11.status === 201 && !bareS11.headers.get('set-cookie'),
+   `${sameS11.status} ${bareS11.status} ${bareS11.headers.get('set-cookie')}`)
+const [crossRow] = await sql`SELECT count(*)::int AS n FROM accounts WHERE email LIKE 'secfix-s11-x-%'`
+ok('[secfix S11] and the refused cross-site POST created no account', crossRow.n === 0)
+
+// ------------------------------------------------ S21: no form can put the email in a URL
+const regHtmlS = await fetch(`${API}/register`).then((r) => r.text())
+const formTagS = (id) => (regHtmlS.match(new RegExp(`<form[^>]*id="${id}"[^>]*>`)) ?? [''])[0]
+ok('[secfix S21] the signup and profile forms both say method="post"',
+   /method="post"/i.test(formTagS('reg-form')) && /method="post"/i.test(formTagS('profile-form')), `${formTagS('reg-form')} ${formTagS('profile-form')}`)
+
+// ------------------------------------------------ S14: tokens and query strings stay out of the log
+const tokS14 = rndS(32).toString('base64url')
+await sql`INSERT INTO account_recovery_tokens (account_id, token_hash, expires_at) VALUES (${ACCT}, ${hashS('sha256').update(tokS14).digest('hex')}, NOW() + INTERVAL '10 minutes')`
+const QS14 = `q${rndS(6).toString('hex')}`
+await fetch(`${API}/recover/${tokS14}?src=${QS14}`)
+await fetch(`${API}/recover/${tokS14}`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }, body: 'action=noop' })
+await fetch(`${API}/pricing?utm_campaign=${QS14}`)
+await settleS(300)
+let logS14 = ''
+try { logS14 = readS(process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log', 'utf8') } catch {}
+ok('[secfix S14] the log never holds a recovery token or a query string, and says /recover/[redacted] instead',
+   logS14.length > 0 && !logS14.includes(tokS14) && !logS14.includes(revealToken) && !logS14.includes(QS14) && logS14.includes('/recover/[redacted]'),
+   `token=${logS14.includes(tokS14)} reveal=${logS14.includes(revealToken)} query=${logS14.includes(QS14)}`)
+ok('[secfix S14] and no signup or recovery log line carries an email address',
+   !logS14.split('\n').some((l) => /"msg":"(new signup|recovery email was not accepted by Resend)"/.test(l) && /@example\.invalid/.test(l)))
+
+// ------------------------------------------------ S10, S15, S18: production boot rules
+const { dbSsl } = await import('../../dist/db/tls.js')
+let prodSsl = { mode: 'threw', ssl: {} }
+try { prodSsl = dbSsl({ NODE_ENV: 'production' }) } catch {}
+ok('[secfix S10] in production the default is verify: rejectUnauthorized, with the Supabase root among the CAs',
+   prodSsl.mode === 'verify' && prodSsl.ssl.rejectUnauthorized === true && (prodSsl.ssl.ca ?? []).some((c) => c.includes('MIIDxDCCAqygAwIBAgIUbLxMod62P2ktCiAkxnKJwtE9VPYw')))
+const throwsS = (env) => { try { dbSsl(env); return false } catch { return true } }
+ok('[secfix S10] require and disable refuse in production without the override, and are allowed elsewhere',
+   throwsS({ NODE_ENV: 'production', DATABASE_SSL: 'require' }) && throwsS({ NODE_ENV: 'production', DATABASE_SSL: 'disable' })
+     && dbSsl({ NODE_ENV: 'production', DATABASE_SSL: 'require', DATABASE_SSL_INSECURE_OK: '1' }).notice?.includes('NOT verified')
+     && dbSsl({}).mode === 'require' && dbSsl({ DATABASE_SSL: 'disable' }).ssl === false && throwsS({ DATABASE_SSL: 'bogus' }))
+const LONG = 'x'.repeat(40)
+const prodDisable = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', APP_SESSION_SECRET: LONG }, PORT_S)
+ok('[secfix S10] a production boot with DATABASE_SSL=disable and no override exits instead of serving',
+   prodDisable.exited && prodDisable.code !== 0 && /Refusing to start/.test(prodDisable.out()), `exited=${prodDisable.exited} code=${prodDisable.code}`)
+await stopS(prodDisable)
+const shortSecret = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: 'short' }, PORT_S)
+ok('[secfix S18] a production boot with a 5-byte APP_SESSION_SECRET exits and says which secret',
+   shortSecret.exited && shortSecret.code === 1 && /APP_SESSION_SECRET is 5 bytes/.test(shortSecret.out()), shortSecret.out().slice(-200))
+await stopS(shortSecret)
+const shortAdmin = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG, ADMIN_SECRET: 'tiny' }, PORT_S)
+ok('[secfix S18] and so does one with a short ADMIN_SECRET', shortAdmin.exited && shortAdmin.code === 1 && /ADMIN_SECRET is 4 bytes/.test(shortAdmin.out()))
+await stopS(shortAdmin)
+// verify mode against this harness's plain, TLS-less Postgres: it starts, the
+// probe fails, and /health/db says down without the driver's words.
+const prodVerify = await bootS({ NODE_ENV: 'production', APP_SESSION_SECRET: LONG }, PORT_S)
+const hdbRes = await fetch(`${API_S}/health/db`).catch(() => null)
+const hdb = hdbRes ? await hdbRes.json().catch(() => ({})) : {}
+ok('[secfix S15] /health/db when the database is unreachable: 503 {status:"down"} and no driver message',
+   hdbRes?.status === 503 && hdb.status === 'down' && hdb.db === 'down' && !('error' in hdb) && Object.keys(hdb).sort().join(',') === 'db,latency_ms,status', JSON.stringify(hdb))
+ok('[secfix S15] and the detail went to the log instead', /database probe failed/.test(prodVerify.out()))
+await stopS(prodVerify)
+const insecureOk = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG }, PORT_S)
+ok('[secfix S10] with the explicit override it serves, and says so loudly', !insecureOk.exited && /WARNING DATABASE_SSL=disable/.test(insecureOk.out()))
+await stopS(insecureOk)
+
+// ------------------------------------------------ S23, S24: the published words, the image
+const secMd = readS(`${ROOT_S}SECURITY.md`, 'utf8')
+ok('[secfix S23] SECURITY.md names the supported versions, the contacts, and what the clients send',
+   ['agentbill-sdk', '0.7.x', '0.5.x', 'agentbill-mcp', '0.2.x', '@agentbill/openclaw', 'hello@agentbill.dev', 'private vulnerability reporting',
+    'requested_model', 'service_tier', 'response id', 'never'].every((w) => secMd.includes(w)) && !secMd.includes('gmail') && !secMd.includes('0.3.x'),
+   ['agentbill-sdk', '0.7.x', '0.5.x', 'agentbill-mcp', '0.2.x', '@agentbill/openclaw', 'hello@agentbill.dev', 'private vulnerability reporting', 'requested_model', 'service_tier', 'response id'].filter((w) => !secMd.includes(w)).join(','))
+const secPage = await fetch(`${API}/security`)
+const secHtml = await secPage.text()
+const secText = visible8(secHtml).replace(/\s+/g, ' ')
+const sitemapSX = await fetch(`${API}/sitemap.xml`).then((r) => r.text())
+const homeS = await fetch(`${API}/`).then((r) => r.text())
+const docsSX = await fetch(`${API}/docs`).then((r) => r.text())
+ok('[secfix S23] /security is a public page, in the sitemap, linked from the footer and from /docs',
+   secPage.status === 200 && sitemapSX.includes('<loc>https://agentbill.dev/security</loc>') && /<footer[\s\S]*href="\/security"[\s\S]*<\/footer>/.test(homeS)
+     && /<main[\s\S]*href="\/security"[\s\S]*<\/main>/.test(docsSX), `${secPage.status}`)
+ok('[secfix S23] /security says how to report and how to revoke, and claims no key hashing',
+   secText.includes('hello@agentbill.dev') && secText.includes('/keys/revoke') && !/\bhash(ed|es)? (API )?keys\b|keys are (stored )?hashed/i.test(secText) && /plain text/i.test(secText),
+   secText.slice(0, 160))
+ok('[secfix S23] and none of its copy says stop, block or kill, or carries an em dash',
+   !/\b(stops|blocks|kills)\b/i.test(secText) && !secHtml.includes('—'))
+ok('[secfix S24] the runtime image runs as the node user', /^USER node$/m.test(readS(`${ROOT_S}Dockerfile`, 'utf8')))
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()
