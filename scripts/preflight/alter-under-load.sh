@@ -29,6 +29,15 @@
 # every key the old build ever minted must authenticate on it.
 # PLANT_NO_TRIGGER=1 applies 026 without its fill trigger, and must be red: a
 # key the old build mints after the migration would have no hash.
+#
+# ALTER_MIGRATION=028_*, 029_* or 030_* (security batch C, 2026-09-25): the
+# additive columns of batch C (accounts.monthly_events, accounts.plan_ends_at
+# and polar_subscription_id, developer_api_keys.session_epoch). Same shape as
+# 026: the previous build serves with prepared statements ON while the ADD
+# COLUMN runs, then the new build is started as the deploy. PLANT_SELECT_STAR=1
+# makes the previous build's quota UPDATE return * inside the preflight
+# transaction, which a prepared statement cannot survive an ADD COLUMN under,
+# and must be red.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-docker}"
@@ -94,12 +103,21 @@ SQL
 # up. The new build is only started afterwards, as the deploy.
 OLD_SERVER_JS="${OLD_SERVER_JS:-}"
 case "$ALTER_MIGRATION" in
-  026_*)
+  026_*|028_*|029_*|030_*)
     if [ -z "$OLD_SERVER_JS" ]; then
       OLD_REF="${OLD_REF:-origin/main}"
       OLD_DIR="$ROOT/.rehearsal/old"
       rm -rf "$OLD_DIR" && mkdir -p "$OLD_DIR"
       git -C "$ROOT" archive "$OLD_REF" src tsconfig.json package.json | tar -x -C "$OLD_DIR"
+      if [ "${PLANT_SELECT_STAR:-}" = "1" ]; then
+        # The planted break: the previous build's quota UPDATE, inside the
+        # preflight transaction, returns *. Outside a transaction postgres.js
+        # re-prepares a statement whose result type changed (its
+        # RevalidateCachedQuery retry); inside one the error aborts the
+        # transaction first, so this is the shape an ADD COLUMN can break.
+        perl -0pi -e 's/RETURNING monthly_calls\n/RETURNING *\n/' "$OLD_DIR/src/routes/preflight.ts"
+        grep -q 'RETURNING \*' "$OLD_DIR/src/routes/preflight.ts" || { echo "PLANT_SELECT_STAR found nothing to plant" >&2; exit 2; }
+      fi
       (cd "$OLD_DIR" && "$ROOT/node_modules/.bin/tsc" -p tsconfig.json)
       OLD_SERVER_JS="$OLD_DIR/dist/server.js"
       echo "previous build: $OLD_REF ($(git -C "$ROOT" rev-parse --short "$OLD_REF")) at $OLD_SERVER_JS"
@@ -110,4 +128,5 @@ esac
 DATABASE_SSL=disable PORT="$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
   ALTER_FILE="$TARGET" PLANT_SKIP_WINDOW="${PLANT_SKIP_WINDOW:-}" \
   OLD_SERVER_JS="$OLD_SERVER_JS" PLANT_NO_TRIGGER="${PLANT_NO_TRIGGER:-}" \
+  PLANT_SELECT_STAR="${PLANT_SELECT_STAR:-}" \
   node "$ROOT/scripts/preflight/alter-under-load.mjs"

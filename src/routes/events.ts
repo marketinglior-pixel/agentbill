@@ -10,6 +10,7 @@ import { jsonbSafe } from '../lib/jsonb.js'
 import { priceEvent, PRICE_VERSION } from '../lib/prices.js'
 import { microsFromListPrice, usdOf } from '../lib/task-ceiling.js'
 import { usdEstimate } from '../lib/usd-estimate.js'
+import { lockAccountForEvents, claimEvent, eventLimitFor, eventQuotaRefusal, EVENT_QUOTA_STATUS } from '../lib/event-quota.js'
 
 const ALERT_THRESHOLD = 800
 
@@ -180,6 +181,16 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
 
     try {
       const result = await sql.begin(async (tx) => {
+        // ----------------------------------------------------------------
+        // 0. A record that may store an event takes the account row first,
+        //    before any customer row: the order preflight takes them in, so a
+        //    record and a preflight on one account cannot deadlock. It is what
+        //    makes the allowance check at 4a exact (src/lib/event-quota.ts).
+        //    A release (success false) stores nothing and is never counted,
+        //    so it takes no account lock and runs exactly as before.
+        // ----------------------------------------------------------------
+        const holder = success ? await lockAccountForEvents(tx, accountId) : null
+
         // ----------------------------------------------------------------
         // 1. Lazy-create customer if unknown.
         //    ON CONFLICT DO NOTHING so we never overwrite an existing row.
@@ -363,6 +374,46 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
         const priceNote = usd && usd.unpriced
           ? `${price.note ?? 'no model named in the record'}; charged at the ${usd.basis === 'reservation' ? 'reservation it settled' : "job's estimate"}, never $0`
           : price.note
+        // ----------------------------------------------------------------
+        // 4a. The records-and-steps allowance (migration 028, S7). A key
+        //     already stored is a duplicate and costs nothing: the check is
+        //     exact because every record that can store an event holds the
+        //     account row (step 0), so a concurrent one with the same key has
+        //     committed or not started. Then one conditional UPDATE claims
+        //     one of the month's records, or refuses. A refusal returns
+        //     before anything is stored; the only write it keeps is the lazy
+        //     customer row, as budget_exhausted does.
+        // ----------------------------------------------------------------
+        const [seen] = await tx`
+          SELECT 1 AS x FROM events WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key}
+        `
+        if (seen) {
+          return {
+            type: 'duplicate' as const,
+            customerCreated,
+            remainingUnits: lockedLimit !== null ? lockedLimit - lockedUsed - lockedReserved : null,
+          }
+        }
+        // A record that settles the open reservation its own preflight made
+        // (reservation_id, found open under the lock above) was paid for by
+        // that preflight's call: it is never refused and takes nothing from
+        // the allowance. That is the record wrap() makes after every approved
+        // call, and refusing it would leave the call's spend off the job and
+        // its reservation to the sweeper, a ceiling looser than the truth.
+        // One preflight covers one such record: this settle closes the
+        // reservation whole, so the next record naming it finds it closed.
+        const covered = found?.state === 'open'
+        let claimed = false
+        if (!covered) {
+          const plan = holder?.plan ?? 'free'
+          const eventLimit = eventLimitFor(plan)
+          const claim = await claimEvent(tx, accountId, eventLimit)
+          if (!claim.ok) {
+            return { type: 'event_quota' as const, plan, monthlyEvents: claim.monthlyEvents, limit: eventLimit as number }
+          }
+          claimed = true
+        }
+
         const [event] = await tx`
           INSERT INTO events (account_id, customer_id, event_type, units, idempotency_key, metadata,
                               task_ref, price_version, list_price_usd, price_note)
@@ -374,7 +425,10 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
 
         if (!event) {
           // Duplicate, row already exists, budget untouched. The first
-          // request with this key already settled whatever it named.
+          // request with this key already settled whatever it named. Not
+          // reachable past 4a while every writer holds the account row; if
+          // it ever is, the record claimed at 4a is given back.
+          if (claimed) await tx`UPDATE accounts SET monthly_events = GREATEST(0, monthly_events - 1) WHERE id = ${accountId}`
           return {
             type: 'duplicate' as const,
             customerCreated,
@@ -489,6 +543,10 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
           reason: body.error, estimatedUnits: reportedUnits, snapshot: body,
         })
         return { status: 402, body }
+      }
+
+      if (result.type === 'event_quota') {
+        return { status: EVENT_QUOTA_STATUS, body: eventQuotaRefusal(accountId, result.plan, result.monthlyEvents, result.limit) }
       }
 
       if (result.type === 'duplicate') {

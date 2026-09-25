@@ -169,6 +169,7 @@ export async function webhooksRoute(app: FastifyInstance) {
             plan                = ${plan},
             polar_customer_id   = ${polarCustomerId},
             monthly_calls       = 0,
+            monthly_events      = 0,
             billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
           WHERE id = ${accountId}
         `
@@ -180,6 +181,7 @@ export async function webhooksRoute(app: FastifyInstance) {
           plan              = 'free',
           polar_customer_id = NULL,
           monthly_calls     = 0,
+          monthly_events    = 0,
           billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
         WHERE id = ${accountId}
       `

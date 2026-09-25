@@ -19,6 +19,15 @@ export async function reportUsage(polarCustomerId: string, units = 1): Promise<v
   })
 }
 
+/**
+ * Where a quota refusal sends the reader: the preflight refusal and, since
+ * 2026-09-25, the records-and-steps refusal (src/lib/event-quota.ts). One
+ * function, so the two refusals cannot point at different pages.
+ */
+export function upgradeUrlFor(accountId: string): string {
+  return `https://agentbill.dev/pricing?account_id=${accountId}`
+}
+
 // The buy button points at OUR server, never at buy.polar.sh directly. A Polar
 // checkout LINK silently drops a `?metadata[...]` query parameter (verified
 // against their API on 2026-09-07: the created checkout came back with empty

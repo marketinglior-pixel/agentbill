@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { sessionSecret, hmacHex, readCookie, safeEqual } from '../lib/session-secret.js'
 import { sql } from '../db/index.js'
 import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
+import { eventLimitFor } from '../lib/event-quota.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
 import { publicRoute, isKeyShaped } from '../middleware/auth.js'
@@ -111,6 +112,8 @@ export type Viewer = {
   email: string | null
   plan: string
   monthlyCalls: number
+  /** Records and steps stored this billing month (migration 028). */
+  monthlyEvents: number
   /** The balance every new customer of this account is born with. NULL = no limit. */
   defaultBudgetUnits: number | null
   /** How this browser signed in: a pasted key (the legacy login) or as a person. */
@@ -501,7 +504,7 @@ function verifyToken(token: string, secret: string): string | null {
 async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Viewer | null> {
   const [row] = await sql`
     SELECT u.id AS user_id, u.email AS user_email, u.session_epoch,
-           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.default_budget_units
+           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.monthly_events, a.default_budget_units
     FROM users u JOIN accounts a ON a.owner_user_id = u.id
     WHERE u.id = ${u.userId}
   `
@@ -521,6 +524,7 @@ async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Vie
     email: (row.email as string | null) ?? null,
     plan: (row.plan as string) ?? 'free',
     monthlyCalls: Number(row.monthlyCalls ?? 0),
+    monthlyEvents: Number(row.monthlyEvents ?? 0),
     defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
     via: 'user',
     userId: row.userId as string,
@@ -551,7 +555,7 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
     SELECT k.id AS key_id, k.key_prefix, k.key_last4, k.label,
            (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
            (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired,
-           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.default_budget_units
+           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.monthly_events, a.default_budget_units
     FROM developer_api_keys k
     JOIN accounts a ON a.id = k.account_id
     WHERE k.id = ${keyId}
@@ -570,6 +574,7 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
     email: (row.email as string | null) ?? null,
     plan: (row.plan as string) ?? 'free',
     monthlyCalls: Number(row.monthlyCalls ?? 0),
+    monthlyEvents: Number(row.monthlyEvents ?? 0),
     defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
     via: 'key',
     userId: null,
@@ -1143,6 +1148,7 @@ const DEMO_VIEWER: Viewer = {
   email: null,
   plan: 'builder',
   monthlyCalls: 12480,
+  monthlyEvents: 13022,
   defaultBudgetUnits: 5000,
   via: 'key',
   userId: null,
@@ -2343,6 +2349,11 @@ function accountCard(p: Page): string {
     ? `<b>${num(plan.monthlyCalls)}</b> calls this month · metered, no cap`
     : `<b>${num(plan.monthlyCalls)}</b> / ${num(limit)} calls · this billing month${pct >= 75
         ? ` · <a href="/pricing?account_id=${encodeURIComponent(p.v.accountId)}">raise the ceiling</a>` : ''}`
+  // The records-and-steps allowance (src/lib/event-quota.ts), one line under
+  // the calls, and only where it is a cap.
+  const eventLimit = eventLimitFor(plan.plan)
+  const events = eventLimit === null ? null
+    : `<b>${num(plan.monthlyEvents)}</b> / ${num(eventLimit)} records and steps`
   // The plan's end is a ceiling, so it is the kit's meter with the tick. The
   // share is the meter's own arithmetic from the two numbers; the state class
   // is planOf's, so the colour and the percentage cannot disagree.
@@ -2352,6 +2363,7 @@ function accountCard(p: Page): string {
         <div class="acct-row">${tag(esc(plan.plan))}<span title="${p.v.keyLabel ? esc(p.v.keyLabel) : 'key'}">${esc(keyTail)}</span></div>
         ${limit === null ? '' : `<div class="acct-m${cls ? ` is-${cls}` : ''}">${meter(plan.monthlyCalls, limit)}</div>`}
         <div class="acct-q">${quota}</div>
+        ${events === null ? '' : `<div class="acct-q">${events}</div>`}
       </div>`
 }
 
