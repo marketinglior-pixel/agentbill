@@ -3,6 +3,11 @@ import { head } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { publicRoute } from '../middleware/auth.js'
 import { byPath } from '../ui/site.js'
+import { RETENTION, retentionMode } from '../lib/retention.js'
+import { OAUTH_PRUNE_AFTER_EXPIRY } from '../lib/mcp-oauth.js'
+import { WRAP_SENDS, WRAP_NEVER, plaintextKeysStored } from '../lib/privacy-facts.js'
+import { PIXEL_PATHS, configuredPixels } from '../lib/pixel.js'
+import { METADATA_MAX_BYTES } from './events.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
 // and Meta ad review checks destination pages for both. Plain, honest, short.
@@ -113,48 +118,128 @@ export async function legalRoute(app: FastifyInstance) {
 
   app.get('/privacy', publicRoute(), async (_, reply) => {
     reply.type('text/html')
-    return reply.send(legalShell('Privacy Policy', '/privacy', `
+    return reply.send(legalShell('Privacy Policy', '/privacy', await privacyBody()))
+  })
+}
+
+const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const codes = (xs: readonly string[]) => xs.map((x) => `<code>${x}</code>`).join(', ')
+
+/**
+ * /privacy, rewritten 2026-09-25 (security batch C, S22) to say what the code
+ * does and nothing it does not. Every fact that is a property of the code is
+ * rendered from where the code keeps it, and the [privacy] gates in
+ * scripts/preflight/batchc-gates.mjs check the rest against the running code:
+ *   - the retention periods: RETENTION (src/lib/retention.ts) and
+ *     OAUTH_PRUNE_AFTER_EXPIRY, labelled "once retention is on" unless this
+ *     server runs RETENTION_MODE=enforce;
+ *   - what wrap() sends and never sends: WRAP_SENDS / WRAP_NEVER
+ *     (src/lib/privacy-facts.ts), gated against both SDKs on the wire;
+ *   - the ad pixels: named only when configured, on PIXEL_PATHS only;
+ *   - whether keys are still stored in plain text: read from the database.
+ */
+async function privacyBody(): Promise<string> {
+  const enforced = retentionMode() === 'enforce'
+  const pixels = configuredPixels()
+  const plaintext = await plaintextKeysStored()
+  const pixelPages = PIXEL_PATHS.map((p) => `<code>${p}</code>`).join(', ')
+  const retentionRows = RETENTION.map((c) =>
+    `<li><strong>${esc(c.what)}</strong>: ${c.action} ${c.days} days after ${esc(c.from)}.</li>`).join('\n      ')
+  const o = OAUTH_PRUNE_AFTER_EXPIRY
+  return `
     <h1>Privacy Policy</h1>
     <p class="updated">Last updated: ${PRIVACY_UPDATED}</p>
 
-    <h2>1. What we collect</h2>
+    <h2>1. What we collect, and why</h2>
     <ul>
-      <li><strong>Account data</strong>: email, optional name, optional answers about your use case
-      and stack, collected when you register. If you sign in with Google or GitHub, also the account
-      id that provider gives us for you and the verified email address it returns; we ask Google for
-      your email and basic profile and GitHub for your profile and email addresses, and keep only the
-      id and the one verified address.</li>
-      <li><strong>Usage data</strong>: API calls your integration makes to AgentBill (agent ids,
-      budgets, costs, timestamps, and the IP address a key is used from, used for security
-      alerts).</li>
-      <li><strong>Site analytics</strong>: our marketing pages may use the Meta Pixel to measure ad
-      performance (page views and registrations). This involves cookies set by Meta. We do not run
-      the pixel inside the product dashboard or API. Our marketing pages also record a few
-      page-level events in our own database (the demo being run, a click to the demo or through
-      to the sign-up page, the sign-up page loading), with no cookie, no IP address and no identifier that
-      outlives the tab.</li>
+      <li><strong>Your account</strong>: your email address, and, if you give them, a name, a use case and a stack.
+      If you sign in with Google or GitHub, also the account id that provider gives us for you and the verified
+      address it returns: we ask Google for your email and basic profile and GitHub for your profile and email
+      addresses, and keep only the id and the one verified address. Used to run your account, sign you in and
+      email you (section 5).</li>
+      <li><strong>Your API keys</strong>: we look a key up by a SHA-256 hash of it and show only its first and last
+      characters. ${plaintext
+        ? 'The key itself is also still stored in plain text beside the hash, until a pending database step empties that column.'
+        : 'The key itself is not stored.'}
+      With each key we keep its label, the address it was last used from, and each network it has been used
+      from (for IPv6 the /64, for IPv4 the address itself), to email you when a key is used from a network it has
+      not been seen from before.</li>
+      <li><strong>What your code sends</strong>: the preflight calls, usage records and steps your integration
+      makes, with the ids you choose (agent, customer, job), the numbers (estimates, ceilings, units, tokens) and
+      any metadata you attach to a record (at most ${(METADATA_MAX_BYTES / 1024).toLocaleString('en-US')} KB each).
+      And the answer each refused call got. This is the service itself: the ceilings, the console and your usage.</li>
+      <li><strong>Page events</strong>: our marketing pages record a few page-level events in our own database
+      (the demo being run, a click to the demo or through to the sign-up page, the sign-up page loading),
+      stored with no cookie, no IP address and no identifier that outlives the tab.</li>
+      <li><strong>The request log</strong>: like any web server, ours logs each request with the IP address it
+      came from, the path (never the query string, and never a sign-in or recovery token) and the time. The log
+      is kept by our host, Fly.io, under its own retention; this service sets none.</li>
+      <li><strong>Cookies</strong>: signing in sets a session cookie for the console (<code>/app</code>), and a
+      short-lived one while a Google or GitHub sign-in is in progress. The marketing pages set no cookie of their own.${pixels.length ? ' The ad pixels in section 3 set theirs.' : ''}</li>
     </ul>
 
-    <h2>2. What we use it for</h2>
-    <p>Running the service (metering, budget enforcement, key security), emailing you
-    security alerts about your own keys, and measuring whether our marketing works. We do not sell
-    your data, and we do not send marketing email.</p>
+    <h2>2. What the SDKs' wrap() sends, and never sends</h2>
+    <p><code>wrap()</code> in the Python and Node SDKs measures the model calls of a client you wrap. The call
+    itself goes from your process straight to your provider. Around it, wrap() sends AgentBill two requests,
+    and only these fields:</p>
+    <ul>
+      <li><strong>Before the call</strong>, a preflight: ${codes(WRAP_SENDS.preflight)}.</li>
+      <li><strong>After it</strong>, a record: ${codes(WRAP_SENDS.record)}. The <code>idempotency_key</code> is the
+      provider's response id (a hash of it when it is longer than 128 characters, and a random key on a
+      compatible endpoint), and <code>units</code> is the token total.</li>
+      <li><strong>In the record's metadata</strong>: ${codes(WRAP_SENDS.metadata)}. <code>tokens</code> is the counts
+      the provider reported: input, cache reads and writes, output, and reasoning where the provider says.</li>
+    </ul>
+    <p>It never sends ${WRAP_NEVER.join(', ').replace(/, ([^,]*)$/, ', or $1')}. The requests carry your AgentBill
+    key, as every call to the API does.</p>
 
     <h2>3. Who processes it</h2>
-    <p>Infrastructure and subprocessors: Fly.io (hosting), Supabase (database), Resend
-    (transactional email), Polar (payments, we never see your card details), and Meta (pixel
-    analytics on marketing pages only).</p>
+    <ul>
+      <li><strong>Fly.io</strong> hosts the service and keeps its request log.</li>
+      <li><strong>Supabase</strong> hosts the database.</li>
+      <li><strong>Resend</strong> sends the emails in section 5.</li>
+      <li><strong>Polar</strong> takes payments on its own checkout page; we never see card details.</li>
+      <li><strong>Google and GitHub</strong>, only if you sign in with them.</li>
+      <li><strong>Google Fonts</strong>: our pages load their typefaces from fonts.googleapis.com and
+      fonts.gstatic.com, so your browser sends Google its IP address when a page loads.</li>
+      ${pixels.length
+        ? `<li><strong>${pixels.join(' and ')}</strong>, on ${pixelPages} only, to measure our ads (page views and
+      sign-ups), with cookies set by ${pixels.length > 1 ? 'those companies' : 'that company'}. Never inside the console or the API.</li>`
+        : ''}
+      <li><strong>Your own webhook</strong>, if you set one: an anomaly alert for your account is sent to the URL
+      you gave.</li>
+    </ul>
 
-    <h2>4. Retention and deletion</h2>
-    <p>We keep account and usage data while your account is active. Email us to delete your account
-    and its data: <a href="mailto:${CONTACT}">${CONTACT}</a>. Backups roll off within 30 days.</p>
+    <h2>4. How long it is kept</h2>
+    <p>${enforced
+      ? 'A daily job removes each of these when its period ends:'
+      : '<strong>Once retention is on</strong>, a daily job removes each of these when its period ends. It is built and not yet switched on, so until then they are kept:'}</p>
+    <ul>
+      ${retentionRows}
+    </ul>
+    <p>Always, already: an MCP connection's authorization request is deleted ${o.requests} after it expires, and its
+    codes and tokens ${o.codes} after they expire.</p>
+    <p>Kept while your account exists, and deleted with it: the account, your sign-in identities, your live keys and
+    the networks they have been used from, your customers, jobs and usage records. Kept on purpose, because they
+    are the record of what was bought and paid: the plan and its history with Polar, the payment events Polar sent
+    us, and the record of each quota email.</p>
 
-    <h2>5. Your rights</h2>
-    <p>You can request a copy of your data, correct it, or delete it at any time by emailing us. If
-    you are in the EU/EEA or UK, these rights are backed by GDPR.</p>
+    <h2>5. Email</h2>
+    <p>We email you: a welcome when a sign-in creates your account, sign-in links you ask for, recovery links you
+    ask for, an alert when one of your keys is used from a new network, and alerts when your account reaches 75%
+    and 90% of its monthly quota and when the quota is spent. We, the operator, are emailed when an account is
+    created (with its address), a periodic summary of accounts and their usage, and a note when one of your
+    customer ids passes 800 units.</p>
 
-    <h2>6. Contact</h2>
+    <h2>6. Deleting your account, and your rights</h2>
+    <p>Email <a href="mailto:${CONTACT}">${CONTACT}</a> from the address on the account and we delete the account
+    and everything stored under it: keys, customers, jobs, usage records, refusals, and your sign-in identity.
+    Polar keeps its own records of any payment. The database host keeps backups on its own schedule, and a
+    deleted account stays in those until they expire.</p>
+    <p>You can also ask for a copy of your data or to correct it, the same way. If you are in the EU/EEA or UK,
+    these rights are backed by the GDPR.</p>
+
+    <h2>7. Contact</h2>
     <p><a href="mailto:${CONTACT}">${CONTACT}</a></p>
-    `))
-  })
+    `
 }
