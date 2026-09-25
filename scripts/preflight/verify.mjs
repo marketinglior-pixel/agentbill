@@ -4800,6 +4800,8 @@ const { dashGates } = await import('./dash-gates.mjs')
 await dashGates({ API, sql, ok })
 const { reportGates } = await import('./report-gates.mjs')
 await reportGates({ API, sql, ok })
+const { spikeGates } = await import('./spike-gates.mjs')
+await spikeGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
 // ------------------------------------------------ [capi] Meta Conversions API (2026-09-26), in its own file
 const { capiGates } = await import('./capi-gates.mjs')
 await capiGates({ API, sql, ok, bootS, stopS, portS: PORT_S })

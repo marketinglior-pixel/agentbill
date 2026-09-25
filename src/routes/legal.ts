@@ -8,6 +8,7 @@ import { OAUTH_PRUNE_AFTER_EXPIRY } from '../lib/mcp-oauth.js'
 import { WRAP_SENDS, WRAP_NEVER, plaintextKeysStored } from '../lib/privacy-facts.js'
 import { PIXEL_PATHS, configuredPixels } from '../lib/pixel.js'
 import { capiConfigured } from '../lib/capi.js'
+import { spikesOn } from '../lib/spike.js'
 import { METADATA_MAX_BYTES } from './events.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
@@ -237,7 +238,7 @@ async function privacyBody(): Promise<string> {
     <h2>5. Email</h2>
     <p>We email you: a welcome when a sign-in creates your account, sign-in links you ask for, recovery links you
     ask for, an alert when one of your keys is used from a new network, and alerts when your account reaches 75%
-    and 90% of its monthly quota and when the quota is spent. We, the operator, are emailed when an account is
+    and 90% of its monthly quota and when the quota is spent${spikesOn() ? ', and an alert when one of your agents or customers spends three times its usual day, once per agent or customer per day' : ''}. We, the operator, are emailed when an account is
     created (with its address), a periodic summary of accounts and their usage, and a note when one of your
     customer ids passes 800 units.</p>
 
