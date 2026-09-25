@@ -402,6 +402,11 @@ export const MCP_CONNECT_CSS = `${COPY_CSS}
   .mcp.is-tabs .mcp-ptop { display: flex; }
   .mcp-mark { flex: none; width: 18px; height: 18px; }
   .mcp-tab .mcp-mark { margin-inline-end: var(--s2); }
+  /* A mark whose own file carries clear space: a bigger box, pulled back by the
+     same amount, so the tab keeps its height and the mark reads at the size of
+     its neighbours. See OPENAI_BLOSSOM in connect-marks.ts. */
+  .mcp-mark[data-mark="roomy"] { width: 30px; height: 30px; margin-block: -6px; margin-inline-start: -6px; }
+  .mcp-tab .mcp-mark[data-mark="roomy"] { margin-inline-end: calc(var(--s2) - 6px); }
   .mcp-panel > * { min-width: 0; }
   .mcp-for { color: var(--muted); max-width: 62ch; margin: 0; line-height: 1.55; }
   .mcp-act { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }

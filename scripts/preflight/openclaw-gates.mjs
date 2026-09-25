@@ -93,4 +93,10 @@ async function gates({ API, ok }) {
   const officialUnrecorded = Object.entries(CONNECT_MARKS).filter(([id, m]) => m.kind === 'official' && !/decision: +(use|official)/.test(entries.find((e) => e.includes(`//   ${id}`)) ?? ''))
   ok('[connect-marks] every tab\'s mark has its record in connect-marks.ts: the source looked at, the guideline read, the decision; and an official mark only where the decision says so',
      missing.length === 0 && officialUnrecorded.length === 0 && recorded.size >= MCP_TAB_IDS.length, `missing ${missing.join(',')} official ${officialUnrecorded.map(([i]) => i).join(',')}`)
+  // An owner's mark is used as provided: OpenAI's guidelines say "exactly as
+  // provided" and "DON'T add any colors". An official mark that took the page's
+  // ink (currentColor) or gained a stroke has been altered, whatever it looks like.
+  const altered = Object.entries(CONNECT_MARKS).filter(([, m]) => m.kind === 'official' && (/currentColor/.test(m.svg) || /\sstroke=/.test(m.svg) || !/\sfill="(black|#[0-9a-fA-F]{6})"/.test(m.svg)))
+  ok('[connect-marks] an official mark keeps its owner\'s own fill, is never recoloured to the page ink, and gains no stroke',
+     altered.length === 0 && Object.values(CONNECT_MARKS).some((m) => m.kind === 'official'), altered.map(([i]) => i).join(','))
 }
