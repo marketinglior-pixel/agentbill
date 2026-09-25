@@ -1676,8 +1676,11 @@ ok('[fold] the hero carries the one link to #estimate, the retired demo link is 
 ok('[register] the lede is setup language and nothing under the form pitches',
    register8.includes('Key once.') && register8.includes('Your code decides.') && !register8.includes('One decorator')
      && !register8.includes('class="facts"') && !register8.includes('the entire integration surface'))
-ok('[register] the key screen signs the key into the start screen, same origin, this tab',
-   register8.includes('action="/app/session"') && register8.includes('name="next" value="/app?view=start"') && register8.includes('id="key-field"'))
+// 2026-09-25: /register shows no key. It is the sign-in block, and the key is
+// made in the console by a person whose address is verified ([auth] gates).
+ok('[register] the page is the sign-in block and hands out no key: no key screen, no key field, the email form posts to /auth/email',
+   register8.includes('action="/auth/email"') && !register8.includes('id="key-field"') && !register8.includes('id="key-display"')
+     && !register8.includes('id="success-state"'))
 const toStart8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dstart` })
 ok('[register] /app/session honours next=/app?view=start', toStart8.status === 303 && toStart8.headers.get('location') === '/app?view=start', `${toStart8.headers.get('location')}`)
 const toElse8 = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY8}&next=%2Fapp%3Fview%3Dkeys` })
@@ -1688,14 +1691,16 @@ ok('[register] and drops any other view', toElse8.status === 303 && toElse8.head
 // the 201 sets. Four things this holds: the form asks for one thing; the key
 // screen asks for the rest; the endpoint writes only what was given, to the
 // signed-in account, from this origin only; and a blank is not a value.
-const formHtmlP = register8.slice(register8.indexOf('id="form-state"'), register8.indexOf('id="success-state"'))
-const doneHtmlP = register8.slice(register8.indexOf('id="success-state"'))
-const formFieldsP = (formHtmlP.match(/<(input|select)\b/g) ?? []).length
+// The email form's visible fields, hidden inputs aside (it carries `from`).
+const formHtmlP = (register8.match(/<form class="signin-email"[\s\S]*?<\/form>/) ?? [''])[0]
+const formFieldsP = (formHtmlP.match(/<(input|select)\b(?![^>]*type="hidden")/g) ?? []).length
 ok('[profile] the signup form asks for the email and nothing else',
    formFieldsP === 1 && formHtmlP.includes('type="email"'), `${formFieldsP} fields in the form`)
-ok('[profile] the key screen carries the three optional fields and saves them by fetch to /app/profile',
-   doneHtmlP.includes('id="profile-form"') && doneHtmlP.includes('id="name"') && doneHtmlP.includes('id="use_case"')
-     && doneHtmlP.includes('id="stack"') && register8.includes("fetch('/app/profile'"))
+// The optional three left with the key screen (2026-09-25): no account exists
+// when /register answers, so there is nothing yet to attach them to. The
+// endpoint stays, and is held below.
+ok('[profile] and /register asks none of the optional three before an account exists',
+   !register8.includes('id="use_case"') && !register8.includes('id="stack"') && !register8.includes("fetch('/app/profile'"))
 const JSONP = { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' }
 const anonP = await nav8('/app/profile', { method: 'POST', headers: JSONP, body: JSON.stringify({ name: 'Nobody' }) })
 ok('[profile] no session: 401, nothing written', anonP.status === 401, `${anonP.status}`)
@@ -1726,9 +1731,10 @@ ok('[onboarding] /register teaches no sequence: no install command, no numbered 
    !register8.includes('pip install agentbill-sdk') && !register8.includes('Three steps')
      && !register8.includes('Keep these two') && !register8.includes('class="ns-pre"')
      && !register8.includes('Name this job'))
-ok('[onboarding] /register keeps the key, the export line it fills, and one action',
-   register8.includes('id="key-display"') && register8.includes('id="key-export"')
-     && register8.includes('Open the console'))
+// The key and the line that sets it moved to the console's first-key page,
+// which the [auth] gates read; /register carries neither.
+ok('[onboarding] /register carries no key and no export line: both are on the console\'s first-key page now',
+   !register8.includes('id="key-export"') && !register8.includes('export AGENTBILL_API_KEY='))
 // P0 of 2026-09-12, from Alex's re-verify on 9fa5718. Two failures, one cause:
 // nothing on the register path touched the console session. A browser that
 // had signed into another account earlier showed THAT account when the new
@@ -1737,28 +1743,46 @@ ok('[onboarding] /register keeps the key, the export line it fills, and one acti
 // does nothing. Now a 201 from POST /register carries the same Set-Cookie
 // /app/session mints, name and path identical so it overwrites whatever sat
 // there, and the button moves this tab.
-const goForm8 = (register8.match(/<form[^>]*id="go-form"[^>]*>/) ?? [''])[0]
-ok('[register] the key screen\'s form moves this tab: it has no target',
-   goForm8.includes('action="/app/session"') && !/\btarget=/.test(goForm8), goForm8)
-ok('[register] docs and the questions page are an aside under the button, not a second action',
-   !/<a[^>]*class="btn-go"/.test(register8) && !register8.includes('Docs</a>, or')
-     && register8.indexOf('class="btn-go"') < register8.indexOf('class="aside"')
-     && register8.slice(register8.indexOf('class="aside"')).includes('href="/docs"'))
+// 2026-09-25: the key screen and its console button left /register with
+// sign-in, so the two gates on that button are retired rather than weakened:
+// what they held (one action, this tab, no key in a URL) is the first-key page
+// now, a 200 with the key and a link to the start screen ([auth] gates).
+ok('[register] the key screen and its hand-off form are gone, not hidden',
+   !register8.includes('id="go-form"') && !register8.includes('class="btn-go"') && !register8.includes('action="/app/session"'))
+// An account now exists only after a verified sign-in. The JSON POST mails a
+// link; spending the link makes the account and signs the browser in as its
+// owner, and that session opens the start screen as the account just created.
+const OUTBOX8 = process.env.MAIL_TEST_OUTBOX
+const linkFor8 = async (email) => {
+  const { readFileSync } = await import('node:fs')
+  for (let i = 0; i < 60; i++) {
+    let mails = []
+    try { mails = readFileSync(OUTBOX8, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch {}
+    const m = mails.find((x) => x.to === email && x.reason === 'signin')
+    const t = (m?.html.match(/\/auth\/email\/([A-Za-z0-9_-]{43})/) ?? [])[1]
+    if (t) return t
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return ''
+}
+const signUp8 = async (email, net) => {
+  const r = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin', 'fly-client-ip': net },
+    body: JSON.stringify({ email }) })
+  const body = await r.json()
+  const token = await linkFor8(email)
+  const spent = await fetch(`${API}/auth/email/${token}`, { method: 'POST', redirect: 'manual', headers: { 'Sec-Fetch-Site': 'same-origin' } })
+  return { r, body, spent, cookie: (spent.headers.getSetCookie().find((c) => c.startsWith('agentbill_user=')) ?? '') }
+}
 const email8 = `harness-register-${Date.now()}@example.invalid`
-// Sec-Fetch-Site: same-origin, as the page's own fetch sends it. Since
-// 2026-09-25 the session cookie is set only on a request the browser said is
-// same-origin; a headerless client gets its key and no cookie ([secfix] S11).
-const reg8 = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
-  body: JSON.stringify({ email: email8 }) })
-const regBody8 = await reg8.json()
-const regCookie8 = reg8.headers.get('set-cookie') ?? ''
-ok('[register] a 201 carries the console session for the key it minted, on the login cookie\'s name and path',
-   reg8.status === 201 && typeof regBody8.api_key === 'string' && regCookie8.startsWith('agentbill_app=')
-     && /;\s*Path=\/app(;|$)/.test(regCookie8) && /HttpOnly/.test(regCookie8), `${reg8.status} ${regCookie8.slice(0, 40)}`)
-const attrs8 = (c) => c.split(';').slice(1).map((s) => s.trim()).sort().join('|')
-ok('[register] register and login mint the cookie from one recipe, or the second could not overwrite the first',
-   attrs8(regCookie8) === attrs8(login8.headers.get('set-cookie') ?? ''), `${regCookie8} vs ${login8.headers.get('set-cookie')}`)
-const asNew8 = await nav8('/app?view=start', { headers: { cookie: regCookie8.split(';')[0] } }).then(r => r.text())
+const up8 = await signUp8(email8, '203.0.113.81')
+ok('[register] POST /register answers 202 check_email with no key and no cookie; the emailed link makes the account and signs this browser in as its owner',
+   up8.r.status === 202 && up8.body.status === 'check_email' && !('api_key' in up8.body) && !up8.r.headers.get('set-cookie')
+     && up8.spent.status === 303 && up8.spent.headers.get('location') === '/app?view=start' && /;\s*Path=\/app(;|$)/.test(up8.cookie) && /HttpOnly/.test(up8.cookie),
+   `${up8.r.status} ${up8.spent.status} ${up8.cookie.slice(0, 30)}`)
+const attrs8 = (c) => c.split(';').slice(1).map((s) => s.trim()).filter((a) => !a.startsWith('Max-Age')).sort().join('|')
+ok('[register] the person\'s session and the key session share name-independent attributes (HttpOnly, Secure, SameSite=Lax, Path=/app), so each can clear the other',
+   attrs8(up8.cookie) === attrs8(login8.headers.getSetCookie()[0] ?? ''), `${attrs8(up8.cookie)} vs ${attrs8(login8.headers.getSetCookie()[0] ?? '')}`)
+const asNew8 = await nav8('/app?view=start', { headers: { cookie: up8.cookie.split(';')[0] } }).then(r => r.text())
 ok('[register] and that cookie opens the start screen as the account just created, not another',
    asNew8.includes('Three steps to your first refusal') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
    'the new session did not render the new account')
@@ -1778,10 +1802,9 @@ const rankOf8 = async (email) => (await sql`
              AND created_at < (SELECT created_at FROM accounts WHERE email = ${email})) AS rank
 `)[0].rank
 const email8b = `harness-register-${Date.now()}b@example.invalid`
-const reg8b = await fetch(`${API}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: email8b }) })
-ok('[signup-alert] a second signup still gets its key: telling the owner cannot hold up a register',
-   reg8b.status === 201 && typeof (await reg8b.clone().json()).api_key === 'string', `${reg8b.status}`)
+const up8b = await signUp8(email8b, '203.0.113.82')
+ok('[signup-alert] a second signup still lands in its console: telling the owner cannot hold up a sign-in',
+   up8b.spent.status === 303 && up8b.cookie.startsWith('agentbill_user='), `${up8b.spent.status}`)
 const [rank8, rank8b] = [await rankOf8(email8), await rankOf8(email8b)]
 ok('[signup-alert] two signups on one day own two different ranks, and the later one is higher',
    Number.isInteger(rank8) && rank8b === rank8 + 1, `${rank8} then ${rank8b}`)
@@ -1853,9 +1876,12 @@ ok('[mail] the seeded rows are gone again',
 // A row written while verifying is not data.
 for (const e of [email8, email8b]) {
   const [acct] = await sql`SELECT id FROM accounts WHERE email = ${e}`
-  if (!acct) continue
-  await sql`DELETE FROM developer_api_keys WHERE account_id = ${acct.id}`
-  await sql`DELETE FROM accounts WHERE id = ${acct.id}`
+  if (acct) {
+    await sql`DELETE FROM developer_api_keys WHERE account_id = ${acct.id}`
+    await sql`DELETE FROM accounts WHERE id = ${acct.id}`
+  }
+  await sql`DELETE FROM users WHERE email = ${e}`
+  await sql`DELETE FROM email_sign_in_tokens WHERE email = ${e}`
 }
 ok('[register] the harness accounts are gone again',
    (await sql`SELECT count(*)::int AS n FROM accounts WHERE email IN (${email8}, ${email8b})`)[0].n === 0)
@@ -2143,17 +2169,17 @@ ok('[pulse] estimate_use fires once per load, from the estimator\'s own inputs, 
 ok('[pulse] the Meta pixel is still on / (the ads measure the landing through it)',
    home9.includes("fbq('init', '1234567890')"))
 const regJs9 = scripts9(register9).join('\n')
-// On /register the order is load-bearing: helper, then the submit listener,
-// then the beacon. Placed above the listener, a helper that failed to arrive
-// would throw before the form was wired, and the form's native fallback is a
-// GET with the address in the URL. Review caught that on 2026-09-18.
+// On /register the beacon comes after the helper and is the last thing the
+// script does. Since 2026-09-25 the form needs no script at all: it is a native
+// POST to /auth/email (method="post", so a failed script can never turn it
+// into a GET with the address in the URL), and the script wires nothing.
 const regHelper9 = regJs9.indexOf('function pulse(')
-const regForm9 = regJs9.indexOf("getElementById('reg-form').addEventListener")
 const regBeacon9 = regJs9.indexOf("pulse('register_view')")
-ok('[pulse] /register defines pulse(), wires the form, and only then fires register_view, once',
+ok('[pulse] /register defines pulse() and only then fires register_view, once, and its form works with no script',
    (regJs9.match(/pulse\('register_view'\)/g) ?? []).length === 1
-     && regHelper9 > -1 && regForm9 > -1 && regHelper9 < regForm9 && regForm9 < regBeacon9,
-   `helper@${regHelper9} form@${regForm9} beacon@${regBeacon9}`)
+     && regHelper9 > -1 && regHelper9 < regBeacon9 && !regJs9.includes('addEventListener(\'submit\'')
+     && /<form class="signin-email" id="email-form" method="post" action="\/auth\/email">/.test(register9),
+   `helper@${regHelper9} beacon@${regBeacon9}`)
 // The write itself, end to end, plus the closed list. The handler awaits the
 // insert before it answers, so the row is there when the 204 is.
 const view9 = `verify9${Date.now()}`
@@ -2268,9 +2294,10 @@ const clientRe9 = (readFileSync9(`${ROOT9}/src/ui/pulse-client.ts`, 'utf8').matc
 ok('[source] the page and the handler apply the same pattern, character for character',
    serverRe9 === clientRe9 && serverRe9 !== 'server?', `server ${serverRe9} vs client ${clientRe9}`)
 
-// 2. The page tags its own links to /register. Seven of them on the homepage
-// since 2026-09-23 (nav, sticky bar, hero, the estimator's card, the Free tier
-// card, the close, the footer), from shared components and the page, which is why the rewrite is
+// 2. The page tags its own links to /register. Eight of them on the homepage
+// since 2026-09-25 (the nav's button, the nav menu's Sign up, the sticky bar,
+// the hero, the estimator's card, the Free tier card, the close, the footer;
+// Sign up joined the menu with sign-in), from shared components and the page, which is why the rewrite is
 // one loop where the beacon already lives rather than a parameter threaded
 // through nav, the tier card and the footer.
 //
@@ -2280,9 +2307,9 @@ ok('[source] the page and the handler apply the same pattern, character for char
 const taggedJs9 = scripts9(homeTagged9).join('\n')
 const anchors9 = (homeTagged9.match(/<a [^>]*href="\/register"/g) ?? []).length
 ok('[source] the homepage carries the /register links the rewrite is written against, and the loop that rewrites them',
-   anchors9 === 7 && taggedJs9.includes("querySelectorAll('a[href=\"/register\"]')")
+   anchors9 === 8 && taggedJs9.includes("querySelectorAll('a[href=\"/register\"]')")
      && taggedJs9.includes("setAttribute('href', '/register?src='"),
-   `${anchors9} anchors (expected 7)`)
+   `${anchors9} anchors (expected 8)`)
 
 // 3. And the click beacon still matches them AFTER the rewrite. An exact
 // attribute selector matches nothing once the href gains a query string: the
@@ -4557,8 +4584,10 @@ const sameS11 = await regS11({ 'Sec-Fetch-Site': 'same-origin' })
 const bareS11 = await regS11({})
 ok('[secfix S11] a cross-site form POST to /register is 403, and so is a foreign Origin without Sec-Fetch-Site',
    crossForm.status === 403 && crossOrigin.status === 403, `${crossForm.status} ${crossOrigin.status}`)
-ok('[secfix S11] same-origin gets 201 and the console cookie; a headerless client (curl, the SDKs) gets 201 and no cookie',
-   sameS11.status === 201 && /^agentbill_app=/.test(sameS11.headers.get('set-cookie') ?? '') && bareS11.status === 201 && !bareS11.headers.get('set-cookie'),
+// 2026-09-25: /register makes no account and signs nobody in, so neither
+// answer carries a cookie now; both mail a link and say so.
+ok('[secfix S11] same-origin and a headerless client (curl, the SDKs) both get 202 check_email, and neither gets a cookie',
+   sameS11.status === 202 && !sameS11.headers.get('set-cookie') && bareS11.status === 202 && !bareS11.headers.get('set-cookie'),
    `${sameS11.status} ${bareS11.status} ${bareS11.headers.get('set-cookie')}`)
 const [crossRow] = await sql`SELECT count(*)::int AS n FROM accounts WHERE email LIKE 'secfix-s11-x-%'`
 ok('[secfix S11] and the refused cross-site POST created no account', crossRow.n === 0)
@@ -4566,8 +4595,10 @@ ok('[secfix S11] and the refused cross-site POST created no account', crossRow.n
 // ------------------------------------------------ S21: no form can put the email in a URL
 const regHtmlS = await fetch(`${API}/register`).then((r) => r.text())
 const formTagS = (id) => (regHtmlS.match(new RegExp(`<form[^>]*id="${id}"[^>]*>`)) ?? [''])[0]
-ok('[secfix S21] the signup and profile forms both say method="post"',
-   /method="post"/i.test(formTagS('reg-form')) && /method="post"/i.test(formTagS('profile-form')), `${formTagS('reg-form')} ${formTagS('profile-form')}`)
+// The signup form is the sign-in block's email form since 2026-09-25; the
+// profile form left /register with the key screen.
+ok('[secfix S21] the signup form says method="post"',
+   /method="post"/i.test(formTagS('email-form')) && !regHtmlS.includes('id="profile-form"'), formTagS('email-form'))
 
 // ------------------------------------------------ S14: tokens and query strings stay out of the log
 const tokS14 = rndS(32).toString('base64url')
@@ -4642,6 +4673,15 @@ ok('[secfix S23] /security says how to report and how to revoke, and claims no k
 ok('[secfix S23] and none of its copy says stop, block or kill, or carries an em dash',
    !/\b(stops|blocks|kills)\b/i.test(secText) && !secHtml.includes('\u2014'))
 ok('[secfix S24] the runtime image runs as the node user', /^USER node$/m.test(readS(`${ROOT_S}Dockerfile`, 'utf8')))
+
+// ------------------------------------------------ [auth] sign-in (2026-09-25), in its own file
+const { authGates } = await import('./auth-gates.mjs')
+await authGates({
+  API, sql, ok, bootS, stopS, portS: PORT_S,
+  fakeBase: process.env.OAUTH_TEST_BASE, outbox: process.env.MAIL_TEST_OUTBOX,
+  serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
+  legacyKey: KEY, legacyAccount: ACCT,
+})
 
 console.log(`\n${pass} passed, ${fail} failed`)
 await sql.end()

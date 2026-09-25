@@ -19,6 +19,8 @@ ADMIN_SECRET="preflight-verify-admin-secret"
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
+  [ -n "${FAKE_OAUTH_PID:-}" ] && kill "$FAKE_OAUTH_PID" 2>/dev/null || true
+  [ -n "${AUTH_TMP:-}" ] && rm -rf "$AUTH_TMP" || true
   [ "$MODE" = "docker" ] && docker rm -f agentbill-preflight-test >/dev/null 2>&1 || true
   [ -n "${WRAP_VENV:-}" ] && rm -rf "$(dirname "$WRAP_VENV")" || true
 }
@@ -82,6 +84,19 @@ export WRAP_PYTHON="$WRAP_VENV/bin/python"
 # nothing here talks to Meta.
 # The server's log is read by the last gate in verify.mjs (every answer sent once).
 SERVER_LOG="${SERVER_LOG:-/tmp/agentbill-verify-server.log}"
+# The [auth] gates, 2026-09-25: a local fake of Google's and GitHub's OAuth
+# endpoints (fake-oauth.mjs) on an ephemeral port, both providers configured
+# against it, and a mail outbox the gates read the sign-in link from. The
+# server honours OAUTH_TEST_BASE and MAIL_TEST_OUTBOX only outside production.
+AUTH_TMP="$(mktemp -d)"
+export GOOGLE_CLIENT_ID=fake-google-client GOOGLE_CLIENT_SECRET=fake-google-secret
+export GITHUB_CLIENT_ID=fake-github-client GITHUB_CLIENT_SECRET=fake-github-secret
+node "$ROOT/scripts/preflight/fake-oauth.mjs" "$AUTH_TMP/port" >"$AUTH_TMP/fake.log" 2>&1 &
+FAKE_OAUTH_PID=$!
+for _ in $(seq 1 50); do [ -s "$AUTH_TMP/port" ] && break; sleep 0.1; done
+export OAUTH_TEST_BASE="http://127.0.0.1:$(cat "$AUTH_TMP/port")"
+export MAIL_TEST_OUTBOX="$AUTH_TMP/outbox.jsonl"
+: > "$MAIL_TEST_OUTBOX"
 # POLAR_PRODUCT_ID_*: since 2026-09-25 only a configured product upgrades an
 # account, so the harness configures three and signs webhooks for them.
 # AUTH_FAILURES_PER_MINUTE: raised for the same reason as the rate limit; the
@@ -96,4 +111,5 @@ done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
   WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" SERVER_LOG="$SERVER_LOG" \
+  OAUTH_TEST_BASE="$OAUTH_TEST_BASE" MAIL_TEST_OUTBOX="$MAIL_TEST_OUTBOX" \
   node "$ROOT/scripts/preflight/verify.mjs"

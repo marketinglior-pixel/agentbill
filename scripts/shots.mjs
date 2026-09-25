@@ -35,16 +35,13 @@ const PAGES = [
   ['int-openai-agents', '/integrations/openai-agents-sdk'],
   ['int-crewai', '/integrations/crewai'],
   ['int-mcp', '/integrations/mcp'],
+  // Sign-in, 2026-09-25. /register and /login are one page with two sets of
+  // words: Continue with Google, Continue with GitHub, and an email field.
+  // The post-key screen that used to be a second entry here left /register
+  // with the key: the key is made in the console now, for a verified person.
   ['register', '/register'],
-  // The same route twice, on purpose. /register ships the signup form and the
-  // post-key screen as two siblings in one response, and the second is hidden
-  // by CSS until the submit handler reveals it, so a reader spends their first
-  // minute on a screen this gate had never seen: history.replaceState writes
-  // the #done in the URL and nothing reads it back, and the clipping detector
-  // skips a display:none subtree. A second entry measures BOTH. Revealing it
-  // on the first entry instead would hide the form and swap the coverage
-  // rather than add to it, which looks identical in this output.
-  ['register-done', '/register'],
+  ['login', '/login'],
+  ['register-sent', '/register?sent=1'],
   ['console-demo', '/app?demo=1'],
   // The two views the jobs-by-spend lane (2026-09-23) added to: the tasks
   // view under its Most used order, where every row carries a second foot line
@@ -91,30 +88,6 @@ const PAGES = [
 // appears on a tall screen, a sticky element that needs short content to show
 // itself. That is the trade, and it is worth ten fewer captures on every run.
 // The name stays `desktop` because every past record and filename uses it.
-// How far below the fold the key screen's ONE action may sit, per viewport.
-//
-// Two different claims, because they are not equally negotiable.
-//
-// The ANSWER to "where does the key go" (.where) must be ABOVE the fold on
-// every viewport, with no budget at all. That is the sentence dogfood run 4
-// went looking for and did not find, and a reader who cannot see it does not
-// know there is anything below to scroll to. Measured 2026-09-15 it clears with
-// room everywhere: 320px of margin at desktop, 420 at mobile, 98 at narrow.
-//
-// The ACTION (.btn-go) is allowed below the fold, within one short scroll,
-// because it cannot be lifted above 735 without deleting something the reader
-// needs. Measured today it is +44 at desktop and +9 at mobile. The state that
-// blocked run 4 was +312, so a 150px budget passes what ships and catches what
-// shipped.
-//
-// `narrow` has no action budget, and that is an argument rather than an
-// exemption of convenience. At 320x568 the viewport is 568px tall and the key
-// panel alone, heading through export line, is taller than that; no arrangement
-// puts a fourth element above the fold. A budget there would either be loose
-// enough to catch nothing or force deleting content to satisfy a number. It is
-// measured and printed on every run, so a regression is still visible; it is
-// just not a build failure. Today it sits at +418.
-const FOLD_ACTION_BUDGET = { desktop: 150, mobile: 150 }
 
 // The signup form's one action, against the fold, on the viewports where it
 // must be visible without a scroll. No budget: unlike the key screen, nothing
@@ -129,7 +102,11 @@ const FOLD_ACTION_BUDGET = { desktop: 150, mobile: 150 }
 // by deleting the lede is not a gate. The BOTTOM edge is what is compared,
 // not the top: a button whose top clears the fold by ten pixels is a button
 // cut in half.
-const FORM_ACTION_VISIBLE = new Set(['desktop', 'mobile'])
+//
+// 2026-09-25: the form's actions are three, Continue with Google, Continue with
+// GitHub and the email button, and all three are held above the fold on the
+// same viewports, on /register and on /login.
+const FORM_ACTION_VISIBLE = new Set(['desktop', 'laptop', 'mobile'])
 
 // The homepage hero's one button, against the fold, 2026-09-22. The sub under
 // the h1 became a locked three-sentence paragraph, longer than the one it
@@ -142,8 +119,11 @@ const FORM_ACTION_VISIBLE = new Set(['desktop', 'mobile'])
 // number that can only be met by deleting the sentence is not a gate.
 const HERO_ACTION_VISIBLE = new Set(['desktop'])
 
+// `laptop`, 2026-09-25: 1280 wide at the same 735 the desktop gate holds, the
+// narrowest desktop width in common use, asked for with the sign-in pages.
 const VIEWPORTS = [
   ['desktop', 1440, 735, false],
+  ['laptop', 1280, 735, false],
   ['mobile', 390, 844, true],
   ['narrow', 320, 568, true],
 ]
@@ -183,47 +163,28 @@ const browser = await chromium.launch({ executablePath: exe })
 const failures = []
 const rows = []
 
+// Signed-in screens, when a session is handed in (never against production:
+// this script does not sign in anywhere, and a screenshot is not worth a
+// session there). SHOTS_COOKIE is a Cookie header for a person's session on a
+// local server, e.g. from the harness's fake OAuth provider; with it the run
+// adds the start screen with its first-key step and the keys view with the
+// ways in, and SHOTS_KEY_COOKIE adds the keys view as a key session sees it.
+const SIGNED_IN = [
+  ...(process.env.SHOTS_COOKIE ? [['console-start', '/app?view=start', process.env.SHOTS_COOKIE], ['console-keys', '/app?view=keys', process.env.SHOTS_COOKIE]] : []),
+  ...(process.env.SHOTS_KEY_COOKIE ? [['console-keysess', '/app?view=keys', process.env.SHOTS_KEY_COOKIE]] : []),
+]
+
 for (const [vp, width, height, isMobile] of VIEWPORTS) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile })
-  for (const [name, route] of PAGES) {
+  for (const [name, route, cookie] of [...PAGES, ...SIGNED_IN]) {
     const page = await ctx.newPage()
+    if (cookie) await page.setExtraHTTPHeaders({ cookie })
     const errs = []
     page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()) })
     page.on('pageerror', (e) => errs.push('pageerror: ' + e.message))
     try {
       const res = await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: 45000 })
       const status = res ? res.status() : 0
-      // The post-key screen has never been in this gate, and it is the screen
-      // a new account spends its first minute on. It is not addressable: it is
-      // one div in every /register response, hidden by CSS, and revealed only
-      // by the submit handler; the #done in the URL is written by
-      // history.replaceState and read by nothing. So loading /register#done
-      // shows the empty form, and the clipping detector below skips a
-      // display:none subtree, which is why a 320px regression there would ship
-      // unseen.
-      //
-      // Revealed here the way the page reveals it, with a key-shaped string
-      // that is not a key. Nothing signs in and nothing is registered: this
-      // script's default BASE_URL is production, and a screenshot is not worth
-      // a session there.
-      // The post-key screen, revealed the way the page reveals it. Nothing
-      // signs in and nothing registers: this script's default BASE_URL is
-      // production and a screenshot is not worth a session there, so the key
-      // is key-shaped and is not a key.
-      if (name === 'register-done') {
-        await page.evaluate(() => {
-          const k = 'agb_' + '0'.repeat(48)
-          document.getElementById('key-display').textContent = k
-          document.getElementById('key-export').textContent = 'export AGENTBILL_API_KEY=' + k
-          document.getElementById('form-state').style.display = 'none'
-          document.getElementById('success-state').style.display = 'flex'
-          // The class the page itself adds on reveal. Without it this gate
-          // photographs a layout production never serves: the pitch above the
-          // key stays, and the geometry that made dogfood run 4 ask where the
-          // key goes is exactly what this script exists to catch.
-          document.querySelector('.reg').classList.add('done')
-        })
-      }
       await page.waitForTimeout(600)
       const file = `${OUT}/${vp}-${name}.png`
       await page.screenshot({ path: file, fullPage: true })
@@ -245,21 +206,18 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         // The signup form's button, where the form is the visible state.
         // Same offsetParent rule as the key screen below: a hidden subtree
         // measures as zeros, and zero is above every fold.
+        // The sign-in block's three actions, on /register and /login. Keyed on
+        // the email form, which every configuration of the block draws; a
+        // provider button that is missing where the form exists is reported,
+        // not skipped, so a renamed class cannot turn this gate off.
         form: (() => {
-          const f = document.getElementById('form-state')
+          const f = document.getElementById('email-form')
           if (!f || f.offsetParent === null) return null
-          const b = document.getElementById('submit-btn')
-          if (!b || b.offsetParent === null) return { vh: window.innerHeight, bottom: null }
-          return { vh: window.innerHeight, bottom: Math.round(b.getBoundingClientRect().bottom + window.scrollY) }
-        })(),
-        fold: (() => {
-          const s = document.getElementById('success-state')
-          if (!s || s.offsetParent === null) return null
-          const top = (sel) => {
+          const bottom = (sel) => {
             const e = document.querySelector(sel)
-            return e && e.offsetParent !== null ? Math.round(e.getBoundingClientRect().top + window.scrollY) : null
+            return e && e.offsetParent !== null ? Math.round(e.getBoundingClientRect().bottom + window.scrollY) : null
           }
-          return { vh: window.innerHeight, answer: top('.where'), line: top('#key-export'), action: top('.btn-go') }
+          return { vh: window.innerHeight, google: bottom('.pbtn.is-google'), github: bottom('.pbtn.is-github'), email: bottom('.btn-email') }
         })(),
         // How the hero's locked sentence actually breaks. Only a browser can
         // answer this: the served HTML is one string and says nothing about
@@ -386,27 +344,14 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         })(),
       }))
       if (m.form) {
-        // As with the key screen: a renamed button is a failure, not a skip.
-        if (m.form.bottom === null) {
-          failures.push(`${vp} ${name}: no #submit-btn on the signup form, so the fold check measured nothing`)
-        } else if (FORM_ACTION_VISIBLE.has(vp) && m.form.bottom > m.form.vh) {
-          failures.push(`${vp} ${name}: the signup button's bottom edge is ${m.form.bottom - m.form.vh}px BELOW the fold`)
-        }
-      }
-      if (m.fold) {
-        // A missing element is a failure, not a skip. If .where or .btn-go is
-        // renamed away, every check below it silently stops running and this
-        // gate goes quiet on the exact screen it was added for.
-        if (m.fold.answer === null) {
-          failures.push(`${vp} ${name}: no .where on the key screen, so the fold check measured nothing`)
-        } else if (m.fold.answer >= m.fold.vh) {
-          failures.push(`${vp} ${name}: the answer to "where does the key go" is ${m.fold.answer - m.fold.vh}px BELOW the fold`)
-        }
-        const budget = FOLD_ACTION_BUDGET[vp]
-        if (budget !== undefined) {
-          if (m.fold.action === null) failures.push(`${vp} ${name}: no .btn-go on the key screen, so the action budget measured nothing`)
-          else if (m.fold.action > m.fold.vh + budget) {
-            failures.push(`${vp} ${name}: the one action is ${m.fold.action - m.fold.vh}px below the fold, past the ${budget}px budget`)
+        // A renamed button is a failure, not a skip. SHOTS_NO_PROVIDERS=1 is for
+        // a server with no client pair set, where the two buttons are
+        // correctly absent and only the email button is held.
+        const want = process.env.SHOTS_NO_PROVIDERS === '1' ? ['email'] : ['google', 'github', 'email']
+        for (const k of want) {
+          if (m.form[k] === null) failures.push(`${vp} ${name}: no ${k} button in the sign-in block, so the fold check measured nothing`)
+          else if (FORM_ACTION_VISIBLE.has(vp) && m.form[k] > m.form.vh) {
+            failures.push(`${vp} ${name}: the ${k} button's bottom edge is ${m.form[k] - m.form.vh}px BELOW the fold`)
           }
         }
       }
@@ -445,12 +390,8 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.hero.vh}  hero-button-bottom ${b}${b <= m.hero.vh ? '' : ` (+${b - m.hero.vh} BELOW)`}`)
       }
       if (m.form) {
-        const b = m.form.bottom
-        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.form.vh}  submit-bottom ${b === null ? '?' : `${b}${b <= m.form.vh ? '' : ` (+${b - m.form.vh} BELOW)`}`}`)
-      }
-      if (m.fold) {
-        const d = (v) => v === null ? '?' : `${v}${v < m.fold.vh ? '' : ` (+${v - m.fold.vh} BELOW)`}`
-        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.fold.vh}  answer ${d(m.fold.answer)}  line ${d(m.fold.line)}  action ${d(m.fold.action)}`)
+        const d = (v) => v === null ? '?' : `${v}${v <= m.form.vh ? '' : ` (+${v - m.form.vh} BELOW)`}`
+        rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.form.vh}  google ${d(m.form.google)}  github ${d(m.form.github)}  email ${d(m.form.email)}`)
       }
       rows.push(`${vp.padEnd(8)} ${name.padEnd(13)} ${status} ${String(m.h).padStart(6)}px${m.overflowX ? '  OVERFLOW-X' : ''}${errs.length ? `  ERRS:${errs.length}` : ''}${m.clipped.length ? `  CLIPPED:${m.clipped.length}` : ''}`)
     } catch (e) {
@@ -463,7 +404,7 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
 }
 // ---------------------------------------------------------------- the ?src= rewrite, in a browser
 //
-// The only check that can prove this one. The homepage's seven links to
+// The only check that can prove this one. The homepage's eight links to
 // /register (six until 2026-09-23; the redesign's estimator card added one) are tagged by script at load, so the served HTML says /register
 // and the DOM the visitor clicks says /register?src=x. Every grep, every
 // string-presence gate in verify.mjs and every curl reads the FIRST of those
@@ -491,10 +432,11 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
     failures.push(`page-view: ${pv.length} page_view beacon(s) on a tagged load, first ${JSON.stringify(pv[0] ?? null)}; expected exactly one carrying source shotsgate`)
   }
 
+  // Eight since 2026-09-25: the nav menu's Sign up joined the seven.
   const hrefs = await page.$$eval('a[href^="/register"]', (as) => as.map((a) => a.getAttribute('href')))
   const tagged = hrefs.filter((h) => h === '/register?src=shotsgate').length
-  if (hrefs.length !== 7 || tagged !== 7) {
-    failures.push(`src-rewrite: ${tagged}/${hrefs.length} /register links tagged after load (expected 7/7) -> ${JSON.stringify(hrefs)}`)
+  if (hrefs.length !== 8 || tagged !== 8) {
+    failures.push(`src-rewrite: ${tagged}/${hrefs.length} /register links tagged after load (expected 8/8) -> ${JSON.stringify(hrefs)}`)
   }
 
   // And the click itself: the listener still fires on the rewritten href, and
@@ -525,7 +467,7 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   if (plainPv.length !== 1 || 'source' in plainPv[0]) {
     failures.push(`page-view: ${plainPv.length} page_view beacon(s) on an untagged load, first ${JSON.stringify(plainPv[0] ?? null)}; expected exactly one with no source`)
   }
-  rows.push(`browser  src-rewrite   ${tagged}/7 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
+  rows.push(`browser  src-rewrite   ${tagged}/8 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
   rows.push(`browser  page-view     tagged load ${pv.length} beacon(s) src ${pv[0]?.source ?? 'none'}, plain load ${plainPv.length} beacon(s) src ${plainPv[0]?.source ?? 'none'}`)
   await ctx.close()
 }
@@ -534,7 +476,7 @@ await browser.close()
 
 console.log(`\n${BASE}\n`)
 console.log(rows.join('\n'))
-console.log(`\n${PAGES.length * VIEWPORTS.length} captures in ${OUT}/`)
+console.log(`\n${(PAGES.length + SIGNED_IN.length) * VIEWPORTS.length} captures in ${OUT}/`)
 
 if (failures.length) {
   console.error(`\n${failures.length} failure(s):`)
