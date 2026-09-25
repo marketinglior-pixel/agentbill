@@ -3,7 +3,16 @@
 Versions published to PyPI as `agentbill-mcp`. Earlier releases are described
 in the commit history of this repository.
 
-## 0.3.0 (unreleased)
+## 0.3.1 (unreleased)
+
+### Fixed
+
+- **`requires-python` is `>=3.10`** (0.3.0 declared `>=3.9`). The dependency
+  `mcp>=1.10.0` needs Python 3.10 or later, so on Python 3.9 pip selected
+  0.3.0 and then failed on its dependency. pip on 3.9 now passes over 0.3.1
+  up front, on its declared Python. No code changed.
+
+## 0.3.0 (2026-09-25)
 
 ### Breaking
 
