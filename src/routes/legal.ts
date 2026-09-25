@@ -7,6 +7,7 @@ import { RETENTION, retentionMode } from '../lib/retention.js'
 import { OAUTH_PRUNE_AFTER_EXPIRY } from '../lib/mcp-oauth.js'
 import { WRAP_SENDS, WRAP_NEVER, plaintextKeysStored } from '../lib/privacy-facts.js'
 import { PIXEL_PATHS, configuredPixels } from '../lib/pixel.js'
+import { capiConfigured } from '../lib/capi.js'
 import { METADATA_MAX_BYTES } from './events.js'
 
 // Terms + Privacy. The register form points here ("you agree to our Terms"),
@@ -141,6 +142,7 @@ const codes = (xs: readonly string[]) => xs.map((x) => `<code>${x}</code>`).join
 async function privacyBody(): Promise<string> {
   const enforced = retentionMode() === 'enforce'
   const pixels = configuredPixels()
+  const capi = pixels.includes('Meta Pixel') && capiConfigured()
   const plaintext = await plaintextKeysStored()
   const pixelPages = PIXEL_PATHS.map((p) => `<code>${p}</code>`).join(', ')
   const retentionRows = RETENTION.map((c) =>
@@ -197,7 +199,8 @@ async function privacyBody(): Promise<string> {
     <ul>
       <li><strong>Fly.io</strong> hosts the service and keeps its request log.</li>
       <li><strong>Supabase</strong> hosts the database.</li>
-      <li><strong>Resend</strong> sends the emails in section 5.</li>
+      <li><strong>Resend</strong> sends the emails in section 5, and receives mail sent to hello@agentbill.dev,
+      which is forwarded to our own inbox.</li>
       <li><strong>Polar</strong> takes payments on its own checkout page; we never see card details.</li>
       <li><strong>Google and GitHub</strong>, only if you sign in with them.</li>
       <li><strong>Google Fonts</strong>: our pages load their typefaces from fonts.googleapis.com and
@@ -205,6 +208,13 @@ async function privacyBody(): Promise<string> {
       ${pixels.length
         ? `<li><strong>${pixels.join(' and ')}</strong>, on ${pixelPages} only, to measure our ads (page views and
       sign-ups), with cookies set by ${pixels.length > 1 ? 'those companies' : 'that company'}. Never inside the console or the API.</li>`
+        : ''}
+      ${capi
+        ? `<li><strong>Meta's Conversions API</strong>: when you create an account in a browser that already carries
+      the Meta Pixel's cookie (<code>_fbp</code>, or <code>_fbc</code> after an ad click), our server tells Meta a
+      sign-up happened, with a SHA-256 hash of your email address and of your account id, the IP address and
+      browser user agent of that request, and those cookie values. If your browser blocked the pixel, the server
+      sends nothing.</li>`
         : ''}
       <li><strong>Your own webhook</strong>, if you set one: an anomaly alert for your account is sent to the URL
       you gave.</li>

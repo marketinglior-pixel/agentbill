@@ -4794,6 +4794,9 @@ await batchcGates({
 // ------------------------------------------------ [inbound] hello@agentbill.dev forwarding (2026-09-25), in its own file
 const { inboundGates } = await import('./inbound-gates.mjs')
 await inboundGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
+// ------------------------------------------------ [capi] Meta Conversions API (2026-09-26), in its own file
+const { capiGates } = await import('./capi-gates.mjs')
+await capiGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
 // Last, so every mail and every log line of the run is in what they read.
 await new Promise((r) => setTimeout(r, 500))
 keyhashFinalGates({ ok, serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log', outbox: process.env.MAIL_TEST_OUTBOX })
