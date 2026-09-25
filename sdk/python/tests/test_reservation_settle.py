@@ -283,3 +283,27 @@ def test_checkpoint_approved_is_true_only_on_a_json_true(monkeypatch, approved, 
 
     monkeypatch.setattr(client_module.requests, "post", fake_post)
     assert AgentBillClient(api_key=FAKE_KEY).checkpoint("researcher", units_so_far=3).approved is expected
+
+
+# 2026-09-25: a job whose ceiling is in dollars. GET /tasks/<task_ref> answers
+# unit "usd" with every *_units field in micro-dollars, plus ceiling_usd,
+# used_usd, reserved_usd, remaining_usd, unpriced_calls and list_price_label
+# (src/routes/tasks.ts serialize()). 0.7.0 kept the unit and dropped the rest.
+def test_get_task_on_a_job_in_dollars_says_usd_and_carries_the_dollar_figures(monkeypatch):
+    usd = {"task_ref": "job-usd", "agent_id": "r", "ceiling_units": 100000, "used_units": 99000, "reserved_units": 0,
+           "remaining_units": 1000, "exceeded": False, "unit": "usd", "usage_missing_calls": 0, "ceiling_usd": 0.1,
+           "used_usd": 0.099, "reserved_usd": 0, "remaining_usd": 0.001, "unpriced_calls": 1,
+           "list_price_label": "An estimate at public list price."}
+    tokens = {"task_ref": "job-142", "agent_id": "r", "ceiling_units": 5, "used_units": 1, "reserved_units": 0,
+              "remaining_units": 4, "exceeded": False, "unit": "token"}
+    answers = [usd, tokens]
+    monkeypatch.setattr(client_module.requests, "get", lambda url, headers=None, timeout=None: _Resp(200, answers.pop(0)))
+    client = AgentBillClient(api_key=FAKE_KEY)
+    t = client.get_task("job-usd")
+    assert t.unit == "usd"
+    assert (t.ceiling_usd, t.used_usd, t.reserved_usd, t.remaining_usd, t.unpriced_calls, t.list_price_label) == (
+        0.1, 0.099, 0, 0.001, 1, "An estimate at public list price.")
+    assert t.used_units == 99000                                   # micro-dollars, as sent
+    k = client.get_task("job-142")
+    assert k.unit == "token"
+    assert (k.ceiling_usd, k.used_usd, k.reserved_usd, k.remaining_usd, k.unpriced_calls, k.list_price_label) == (None,) * 6

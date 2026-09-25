@@ -37,6 +37,10 @@ in the commit history of this repository.
   - `Refusal.unit` is `"usd"` on a dollar job, and `TaskCeilingExceededError`
     has `task_unit`. Both messages then say dollars:
     `Refused (task_ceiling_exceeded): ... is at $X of $Y at list price, and $Z remaining is not enough for the $E this call asked to reserve.`
+  - `get_task()` on a dollar job keeps `unit == "usd"` and now carries
+    `ceiling_usd`, `used_usd`, `reserved_usd`, `remaining_usd`,
+    `unpriced_calls` and `list_price_label` (`None` on other jobs). Its
+    `*_units` fields are micro-dollars there.
 
 ### Changed
 

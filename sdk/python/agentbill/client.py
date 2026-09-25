@@ -109,7 +109,9 @@ class TaskStatus:
     reserved_units: int
     remaining_units: int
     exceeded: bool
-    # What the numbers count: "unit" (yours) or "token". Fixed when the job opens.
+    # What the numbers count: "unit" (yours), "token", or "usd" (a job whose
+    # ceiling is in dollars: every *_units field is then micro-dollars,
+    # 1,000,000 is $1). Fixed when the job opens.
     unit: str = "unit"
     # Calls recorded with usage_missing=True, charged at least the reservation
     # they settled (at the units sent when none was open).
@@ -118,6 +120,17 @@ class TaskStatus:
     # estimate at public list price (list price, your invoice may differ), as
     # GET /tasks/<task_ref> returns it. None from a server that predates it.
     breakdown: Optional[dict] = None
+    # On a job in dollars only (unit "usd"): the same figures in dollars, as
+    # GET /tasks/<task_ref> returns them, list-price estimates; unpriced_calls
+    # counts calls that could not be priced (charged their reservation or the
+    # job's estimate, never $0), and list_price_label is the server's sentence
+    # for what "list price" means. None on a job in units or tokens.
+    ceiling_usd: Optional[float] = None
+    used_usd: Optional[float] = None
+    reserved_usd: Optional[float] = None
+    remaining_usd: Optional[float] = None
+    unpriced_calls: Optional[int] = None
+    list_price_label: Optional[str] = None
 
 @dataclass
 class StepResult:
@@ -491,6 +504,12 @@ class AgentBillClient:
             unit=data.get("unit", "unit"),
             usage_missing_calls=data.get("usage_missing_calls", 0),
             breakdown=data.get("breakdown"),
+            ceiling_usd=data.get("ceiling_usd"),
+            used_usd=data.get("used_usd"),
+            reserved_usd=data.get("reserved_usd"),
+            remaining_usd=data.get("remaining_usd"),
+            unpriced_calls=data.get("unpriced_calls"),
+            list_price_label=data.get("list_price_label"),
         )
 
     def checkpoint(

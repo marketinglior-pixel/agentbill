@@ -155,3 +155,27 @@ test('approved is true only on a JSON true, never on a truthy value', async () =
   const ok = await sdk.preflight({ agentId: 'researcher', estimatedUnits: 5, taskRef: 'job-142' })
   assert.equal(ok.approved, true)
 })
+
+// 2026-09-25: a job whose ceiling is in dollars. GET /tasks/:task_ref answers
+// unit 'usd' with every *_units field in micro-dollars, plus ceiling_usd,
+// used_usd, reserved_usd, remaining_usd, unpriced_calls and list_price_label
+// (src/routes/tasks.ts serialize()). 0.5.0 read the unit as 'unit' and
+// dropped the dollar figures.
+test('getTask on a job in dollars says usd and carries the dollar figures', async () => {
+  const usd = {
+    task_ref: 'job-usd', agent_id: 'r', ceiling_units: 100000, used_units: 99000, reserved_units: 0, remaining_units: 1000,
+    exceeded: false, unit: 'usd', usage_missing_calls: 0, ceiling_usd: 0.1, used_usd: 0.099, reserved_usd: 0, remaining_usd: 0.001,
+    unpriced_calls: 1, list_price_label: 'An estimate at public list price.',
+  }
+  reset({ '/tasks/job-usd': usd })
+  const t = await sdk.getTask('job-usd')
+  assert.equal(t.unit, 'usd')
+  assert.deepEqual([t.ceilingUsd, t.usedUsd, t.reservedUsd, t.remainingUsd, t.unpricedCalls, t.listPriceLabel],
+    [0.1, 0.099, 0, 0.001, 1, 'An estimate at public list price.'])
+  assert.equal(t.usedUnits, 99000)                                  // micro-dollars, as sent
+  // A job in tokens carries none of them.
+  reset({ '/tasks/job-142': { task_ref: 'job-142', agent_id: 'r', ceiling_units: 5, used_units: 1, reserved_units: 0, remaining_units: 4, exceeded: false, unit: 'token' } })
+  const k = await sdk.getTask('job-142')
+  assert.equal(k.unit, 'token')
+  for (const f of ['ceilingUsd', 'usedUsd', 'reservedUsd', 'remainingUsd', 'unpricedCalls', 'listPriceLabel']) assert.equal(f in k, false, f)
+})
