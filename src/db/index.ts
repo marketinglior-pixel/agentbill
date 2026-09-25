@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { int8Type } from './int8.js'
+import { dbSsl } from './tls.js'
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required')
@@ -27,13 +28,18 @@ if (!prepare) {
   console.log('[db] prepared statements OFF (DATABASE_PREPARE=false): the ALTER ... TYPE window is open. Unset it once the migration is verified.')
 }
 
+// Throws, and so stops the boot, on an insecure mode in production without the
+// explicit override. See ./tls.ts for the modes and the measurement.
+const tls = dbSsl()
+if (tls.notice) console.error(tls.notice)
+
 export const sql = postgres(process.env.DATABASE_URL, {
   max: 10,
   idle_timeout: 30,
   connect_timeout: 10,
-  // Local verification runs against a plain container with no TLS. Production
-  // is unchanged: without the flag this stays 'require'.
-  ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require',
+  // verify in production (chain and host name checked), require elsewhere,
+  // disable for a local container. ./tls.ts.
+  ssl: tls.ssl,
   transform: postgres.camel,
   prepare,
   // int8 as an exact number, or a loud error; never a string. Must ship

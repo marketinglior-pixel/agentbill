@@ -38,6 +38,7 @@ import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
 import { recoverRoute } from './routes/recover.js'
 import { statusRoute } from './routes/status.js'
+import { securityRoute } from './routes/security.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
 import { startReservationSweeper } from './lib/reservation-sweeper.js'
 import { sql } from './db/index.js'
@@ -50,9 +51,18 @@ import { HERO_LOOP_MP4, HERO_POSTER_JPG } from './lib/hero-video.js'
 import { BRAND } from './ui/theme.js'
 import { PAGES, indexable, abs, ORIGIN } from './ui/site.js'
 import { llmsTxt, llmsFullTxt } from './lib/llms.js'
+import { redactUrl, serializeRequest } from './lib/log-redact.js'
+import { assertProductionSecrets } from './lib/secrets.js'
+
+// Refuses to start in production with a session or admin secret short enough
+// to guess. Before anything listens. See ./lib/secrets.ts.
+assertProductionSecrets()
 
 const app = Fastify({
-  logger: true,
+  // The request line in every log entry is the path alone, with a recovery
+  // token replaced (./lib/log-redact.ts). The default wrote req.url whole,
+  // so each click on a recovery link left a live token in the log.
+  logger: { serializers: { req: serializeRequest as never } },
   // A malformed percent-encoding in the path (/%) fails inside the router,
   // before any hook or setErrorHandler this app registers can see it, and
   // Fastify's default answer is a JSON body that echoes the URL back to the
@@ -120,7 +130,7 @@ app.setErrorHandler((error, request, reply) => {
     // Fastify's own 4xx bodies carry a `code` (FST_ERR_CTP_INVALID_MEDIA_TYPE
     // and friends) and its default handler logs them. Dropping either would
     // make the comment above this function false.
-    request.log.warn({ err: error, url: request.url }, 'request error')
+    request.log.warn({ err: error, url: redactUrl(request.url) }, 'request error')
     return reply.code(status).send({
       statusCode: status,
       error: STATUS_CODES[status] ?? 'Error',
@@ -128,7 +138,7 @@ app.setErrorHandler((error, request, reply) => {
       ...(code ? { code } : {}),
     })
   }
-  request.log.error({ err: error, url: request.url }, 'unhandled error')
+  request.log.error({ err: error, url: redactUrl(request.url) }, 'unhandled error')
   return reply.code(500).send({ error: 'internal_error', message: 'Unexpected server error' })
 })
 
@@ -255,6 +265,7 @@ app.register(aboutRoute)
 app.register(thanksRoute)
 app.register(recoverRoute)
 app.register(statusRoute)
+app.register(securityRoute)
 app.register(heCostPerClientRoute)
 registerAuth(app)
 // Registered next to registerAuth because they are two halves of one decision.
@@ -354,10 +365,15 @@ app.get('/health', publicRoute(), async () => ({ status: 'ok', commit: COMMIT })
 // Deep health: touches the database. Returns 503 when the DB is unreachable,
 // point external monitors here. The May-Aug 2026 outage hid behind the
 // DB-less /health for months; this endpoint exists so that can't recur.
-app.get('/health/db', publicRoute(), async (_, reply) => {
+//
+// The driver's message goes to the log, not the body: it named the host, the
+// port and the reason (ECONNREFUSED 10.x.x.x:5432, a TLS error, a password
+// failure), and this route is public.
+app.get('/health/db', publicRoute(), async (request, reply) => {
   const probe = await probeDb()
   if (!probe.ok) {
-    return reply.code(503).send({ status: 'degraded', db: 'down', latency_ms: probe.latencyMs, error: probe.error })
+    request.log.error({ dbError: probe.error, latencyMs: probe.latencyMs }, '/health/db: database probe failed')
+    return reply.code(503).send({ status: 'down', db: 'down', latency_ms: probe.latencyMs })
   }
   return reply.send({ status: 'ok', db: 'ok', latency_ms: probe.latencyMs })
 })
