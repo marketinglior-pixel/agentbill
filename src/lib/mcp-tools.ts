@@ -54,7 +54,8 @@ const INSTRUCTIONS =
   'Call preflight before starting agent work to check whether the job and the customer have units left; ' +
   'approved: false is the answer, with a reason and a sentence saying why, and the host decides what happens next. ' +
   'Call record_event after the work to record what it used; pass the same task_ref and the reservation_id preflight returned to settle that reservation. ' +
-  'task_status, top_jobs and recent_refusals read where the units went. Dollar figures are estimates at public list price, never an invoice.'
+  'task_status, top_jobs and recent_refusals read what each job used, its tokens and its cost at public list price. Dollar figures are estimates, never an invoice. ' +
+  'Nothing meters the tokens of the conversation you are in: a call is recorded only when record_event records it.'
 
 const id = (what: string) => z.string().min(1).max(ID_MAX).describe(what)
 const units = (what: string) => z.number().int().positive().max(INT4_MAX).describe(what)
@@ -210,7 +211,10 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
         agent_id: id('Identifier for this agent or task type. Recorded as the event type.'),
         units: z.number().int().min(0).max(INT4_MAX).default(1).describe('Units this call used. 0 is allowed.'),
         customer_id: id('Your customer identifier. Defaults to "default".').default('default'),
-        metadata: z.record(z.unknown()).optional().describe('Optional key-value pairs stored with the event, e.g. model and tokens. At most 8 KB.'),
+        metadata: z.record(z.unknown()).optional().describe(
+          'Optional key-value pairs stored with the event. At most 8 KB. A model call is priced at public list price when it names ' +
+          'provider ("openai", "anthropic" or "gemini"), model, and tokens as whole numbers, e.g. ' +
+          '{"provider": "anthropic", "model": "claude-sonnet-4-5", "tokens": {"input": 1200, "output": 300}, "step": "test"}.'),
         task_ref: id('The job this call belongs to, the same task_ref preflight was given.').optional(),
         reservation_id: z.string().uuid().optional().describe('The reservation_id preflight returned for this call.'),
         idempotency_key: id('Your key for this record. Generated when omitted, which makes a retry record twice.').optional(),

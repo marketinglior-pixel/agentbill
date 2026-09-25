@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { usageByEventType } from '../lib/usage.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 
 const UsageQuery = z.object({
   // The one split there is. Required, so a request says what it groups by and
@@ -35,6 +36,13 @@ export async function usageRoute(app: FastifyInstance) {
       total_units: u.totalUnits,
       total_events: u.totalEvents,
       group_count: u.groupCount,
+      // Additive, 2026-09-25: the console's activity view leads with these.
+      // An estimate at public list price over the priced records only; null
+      // when none is priced, never 0 for "unpriced". tokens is what the
+      // providers reported, from the metadata wrap() writes.
+      list_price_usd_estimate: u.totalUsd,
+      priced_events: u.totalPriced,
+      list_price_label: LIST_PRICE_LABEL,
       groups: u.groups.map((g) => ({
         event_type: g.eventType,
         units: g.units,
@@ -42,6 +50,9 @@ export async function usageRoute(app: FastifyInstance) {
         // A fraction of total_units, to four places. total_units covers every
         // group in the window, including any past the limit.
         share: u.totalUnits > 0 ? Math.round((g.units / u.totalUnits) * 10_000) / 10_000 : 0,
+        list_price_usd_estimate: g.usd,
+        priced_events: g.pricedEvents,
+        tokens: g.tokens,
       })),
     })
   })
