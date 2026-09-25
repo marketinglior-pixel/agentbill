@@ -20,6 +20,7 @@ import {
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
 import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
+import { loadSetup, markOfficeSeen, hideSetup, SETUP_STEPS, type Setup, type SetupKey } from '../lib/setup.js'
 import { loadOffice, demoOffice, officeJson, shareText, WORKING_MINUTES, OFFICE_MAX, type Office } from '../lib/office.js'
 import { OFFICE_JS, OFFICE_SPRITES_PNG } from '../ui/office-engine.js'
 import { agentRows, demoAgentRows, monthlyReport, demoReport, reportCsv, asMonth, thisMonth, recentMonths, type AgentRow, type Report } from '../lib/report.js'
@@ -202,10 +203,14 @@ export async function appRoute(app: FastifyInstance) {
     const month = asMonth(q?.month) ?? thisMonth()
     const report = view !== 'customers' ? null : demo ? demoReport(month) : await monthlyReport(viewer.accountId, month)
     const office = view !== 'office' ? null : demo ? demoOffice() : await loadOffice(viewer.accountId)
+    // The guide reads the account's rows; the office step is the one it marks,
+    // on the first visit, after reading, so that visit still shows its step.
+    const setup = demo ? null : await loadSetup(viewer.accountId)
+    if (setup && view === 'office' && !setup.done.office) await markOfficeSeen(viewer.accountId)
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office, setup,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -388,6 +393,15 @@ export async function appRoute(app: FastifyInstance) {
   // it ended only in this browser. The key's epoch is per key, so this ends
   // every console session opened with that key. Conditional on the epoch the
   // cookie carries, so a stale cookie's logout cannot end a newer session.
+  // The setup guide's one write: hide it, for good, for this account.
+  app.post('/app/setup/hide', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    await hideSetup(viewer.accountId)
+    return reply.redirect('/app', 303)
+  })
+
   app.post('/app/logout', publicRoute(), async (request, reply) => {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     const u = readUserSession(request.headers.cookie)
@@ -2238,6 +2252,21 @@ const LOGIN_CSS = `${CHROME_CSS}${SIGNIN_CSS}${COPY_CSS}
   }
 `
 
+const SETUP_CSS = `
+  .su { margin: 0 0 var(--s5); }
+  .su-h { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+  .su-h b { font-weight: 500; }
+  .su-m { flex: 1; min-width: 120px; max-width: 240px; height: 6px; border-radius: var(--r-pill); background: var(--meter-track); overflow: hidden; }
+  .su-m i { display: block; height: 100%; background: var(--meter-fill); border-radius: var(--r-pill); }
+  .su-next { font-weight: 500; }
+  .su-h form { margin-left: auto; }
+  .su-steps { list-style: none; display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0; margin: var(--s3) 0 0; }
+  .su-steps a { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-pill); border: 1px solid var(--border); color: var(--muted); text-decoration: none; font-size: var(--fs-micro); background: var(--surface); }
+  .su-steps .is-done a { color: var(--text); border-color: var(--border2); }
+  .su-steps .is-cur a { color: var(--text); border-color: var(--text); font-weight: 500; }
+  .su-n { font: 500 var(--fs-micro) var(--mono); }
+  .su-help { margin: var(--s3) 0 0; font-size: var(--fs-small); }
+`
 const OFFICE_CSS = `
   .of-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); margin: var(--s5) 0 var(--s4); }
   .of-card { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner); padding: var(--s3) var(--s4); }
@@ -2260,7 +2289,7 @@ const REPORT_CSS = `
   .cv-table tfoot td { font-weight: 500; border-top: 1px solid var(--row-line); }
   h2 .cv-seg { margin-left: var(--s3); vertical-align: middle; }
 `
-const HEAD = (title: string, css = CSS + DASH_CSS + REPORT_CSS + OFFICE_CSS) => head({
+const HEAD = (title: string, css = CSS + DASH_CSS + REPORT_CSS + OFFICE_CSS + SETUP_CSS) => head({
   title: `${esc(title)} · AgentBill`,
   description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
@@ -2442,7 +2471,9 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** The customers view's monthly report, for ?month= (this UTC month by default). */
   report?: Report | null
   /** The office view's staff (src/lib/office.ts). */
-  office?: Office | null }
+  office?: Office | null
+  /** The setup guide (src/lib/setup.ts): a signed-in account's own, never the sample's. */
+  setup?: Setup | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -3709,6 +3740,36 @@ function monthLabel(m: string): string {
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
+/** Where each step is done, and the one thing to do there. Inline code only:
+ *  a <pre> here would be picked up by the snippet harness as a sample to run. */
+const SETUP_HELP: Record<SetupKey, string> = {
+  connect: 'Pick how you connect below: an MCP client, Python or Node. Connecting with Claude, Cursor or Codex needs no key; the SDKs need one, made on this screen.',
+  first_call: 'Make one model call through AgentBill. It is done when a call lands with a model, its tokens and a list-price estimate.',
+  customers: 'Pass a <code>customer_id</code> on each call and every customer gets its own line here and its own monthly report. Python: <code>wrap(client, customer_id="acme")</code>. Node: <code>wrap(client, { customerId: \'acme\' })</code>. MCP: ask your assistant to record the call with <code>customer_id</code> set. Done when a call with a customer other than <code>default</code> is recorded.',
+  ceiling: 'Give one job a ceiling in dollars with the form below: a <code>task_ref</code> such as <code>first-ceiling</code>, In dollars, 1. Or from code: <code>wrap(client, task_ref="first-ceiling", task_ceiling_usd=1)</code>. Done when a job has a ceiling.',
+  refusal: 'Ask for more than a ceiling once, on purpose. From code: <code>wrap(client, task_ref="see-a-refusal", task_ceiling_usd=0.000001)</code>, then make one call through that client. It is refused before it reaches your provider, and lands here with the exact answer your code got. From MCP: give <code>see-a-refusal</code> a $1 ceiling on Task budgets, then ask your assistant to call preflight for it with an estimate of $5. Done when one call is refused.',
+  office: 'The last step: this is your office. Every agent is here with what it cost you this month, at a desk while it works, sent home when a ceiling refuses it. You are set: the guide goes away from here.',
+}
+
+function setupBar(p: Page): string {
+  const su = p.setup
+  if (!su || su.hidden || su.count === SETUP_STEPS.length || p.demo || p.anon) return ''
+  const steps = SETUP_STEPS.map((st, i) => {
+    const done = su.done[st.key], cur = st.key === su.next
+    return `<li class="${done ? 'is-done' : cur ? 'is-cur' : ''}"><a href="${href(p, st.view as ViewKey)}"><span class="su-n">${done ? '✓' : i + 1}</span>${esc(st.title)}</a></li>`
+  }).join('')
+  const next = SETUP_STEPS.find((st) => st.key === su.next)!
+  const here = next.view === p.view
+  return `<section class="su cv-callout" aria-label="Setup">
+      <div class="su-h">${label('Setup')}<b>${su.count} of ${SETUP_STEPS.length} done</b>
+        <span class="su-m" aria-hidden="true"><i style="width:${Math.round((su.count / SETUP_STEPS.length) * 100)}%"></i></span>
+        ${here ? '' : `<a class="su-next" href="${href(p, next.view as ViewKey)}">Next: ${esc(next.title)} &rarr;</a>`}
+        <form method="POST" action="/app/setup/hide"><button class="btn-ghost su-hide" type="submit">Hide the guide</button></form></div>
+      <ol class="su-steps">${steps}</ol>
+      ${here ? `<p class="su-help"><b>Step ${SETUP_STEPS.indexOf(next) + 1}: ${esc(next.title)}.</b> ${SETUP_HELP[next.key]}</p>` : ''}
+    </section>`
+}
+
 /** Salary as the office's cards print it. */
 function salary(v: number | null): string {
   return v == null ? '<span class="dim">unpriced</span>' : usd(Math.round(v * 100) / 100)
@@ -3952,6 +4013,7 @@ function consolePage(p: Page): string {
         </header>
         ${banner}
         ${nudge}
+        ${setupBar(p)}
         ${body}
         <div class="foot">
           Every number on this page is on the API too${exceptions.length ? `, except ${exceptions.join(', and ')}` : ''}:

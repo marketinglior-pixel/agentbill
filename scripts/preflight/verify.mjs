@@ -4802,6 +4802,8 @@ const { reportGates } = await import('./report-gates.mjs')
 await reportGates({ API, sql, ok })
 const { officeGates } = await import('./office-gates.mjs')
 await officeGates({ API, sql, ok })
+const { setupGates } = await import('./setup-gates.mjs')
+await setupGates({ API, sql, ok })
 const { spikeGates } = await import('./spike-gates.mjs')
 await spikeGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
 // ------------------------------------------------ [capi] Meta Conversions API (2026-09-26), in its own file
