@@ -427,7 +427,12 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
     throw new AgentBillError(`AgentBill /preflight returned ${res.status}${why}`)
   }
 
-  if (!data.approved) {
+  // Approved only on an explicit JSON true. A 200 whose approved is missing,
+  // a string, a number or anything else (a proxy page, a truncated body, a
+  // future shape) is not a verdict, so it is read as refused, never as
+  // permission. Same rule as the Python SDK and the MCP server.
+  const approved = data.approved === true
+  if (!approved) {
     // Each thrown error carries the answer as the server sent it (.answer),
     // which is how wrap() turns the same refusal into a returned Refusal.
     let refused: TaskCeilingExceededError | BudgetExhaustedError | CeilingExceededError | null = null
@@ -461,7 +466,7 @@ export async function preflight(options: PreflightOptions): Promise<Preflight> {
   }
 
   const result: PreflightResult = {
-    approved: Boolean(data.approved),
+    approved,
     reason: data.reason ?? null,
     estimatedUnits: data.estimated_units ?? null,
     remainingUnits: data.remaining_units ?? null,

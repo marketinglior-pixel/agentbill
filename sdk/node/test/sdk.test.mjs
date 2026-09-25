@@ -138,3 +138,20 @@ test('meter: a units function may return 0, which records nothing instead of thr
   const bad = sdk.meter(async () => ({}), { event: 'ticket', customerId: 'c1', units: () => -1 })
   await assert.rejects(() => bad({}), /non-negative integer/)
 })
+
+// S19 follow-up, 2026-09-25: approved is read as a boolean, never as a truthy
+// value. A 200 whose approved is the string "true", "yes", 1, an object or
+// absent (a proxy page, a truncated body, a future shape) is not a verdict,
+// so preflight() answers approved: false and never hands back a reservation
+// to spend. Before this, `!data.approved` and `Boolean(data.approved)` read
+// every one of those as permission.
+test('approved is true only on a JSON true, never on a truthy value', async () => {
+  for (const approved of ['true', 'yes', 1, {}, [], undefined]) {
+    reset({ '/preflight': { ...APPROVED, approved } })
+    const pf = await sdk.preflight({ agentId: 'researcher', estimatedUnits: 5, taskRef: 'job-142' })
+    assert.equal(pf.approved, false, `approved: ${JSON.stringify(approved)} must not be approved`)
+  }
+  reset({ '/preflight': APPROVED })
+  const ok = await sdk.preflight({ agentId: 'researcher', estimatedUnits: 5, taskRef: 'job-142' })
+  assert.equal(ok.approved, true)
+})

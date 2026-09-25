@@ -251,3 +251,35 @@ def test_get_task_reads_unit_and_usage_missing_calls_and_defaults_them_for_an_ol
     b = client.get_task("job-142")
     assert (a.unit, a.usage_missing_calls) == ("token", 2)
     assert (b.unit, b.usage_missing_calls) == ("unit", 0)
+
+
+# S19 follow-up, 2026-09-25: approved is read as a boolean, never as a truthy
+# value. A 200 whose approved is the string "true", "yes", 1, an object or
+# absent (a proxy page, a truncated body, a future shape) is not a verdict, so
+# preflight() and checkpoint() answer approved=False. Before this, both passed
+# data["approved"] through as it came, so "yes" was approved, and a missing
+# key raised KeyError.
+@pytest.mark.parametrize("approved", ["true", "yes", 1, {"x": 1}, [1], None, "missing"])
+def test_approved_is_true_only_on_a_json_true(monkeypatch, approved):
+    body = dict(APPROVED)
+    if approved == "missing":
+        del body["approved"]
+    else:
+        body["approved"] = approved
+    _server(monkeypatch, preflight_body=body)
+    result = AgentBillClient(api_key=FAKE_KEY).preflight("researcher", estimated_units=5, task_ref="job-142")
+    assert result.approved is False
+
+
+def test_approved_true_is_still_approved(monkeypatch):
+    _server(monkeypatch)
+    assert AgentBillClient(api_key=FAKE_KEY).preflight("researcher", estimated_units=5, task_ref="job-142").approved is True
+
+
+@pytest.mark.parametrize("approved,expected", [(True, True), ("true", False), (1, False), (False, False)])
+def test_checkpoint_approved_is_true_only_on_a_json_true(monkeypatch, approved, expected):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _Resp(200, {"approved": approved, "reason": None, "units_so_far": 3, "remaining_units": 7})
+
+    monkeypatch.setattr(client_module.requests, "post", fake_post)
+    assert AgentBillClient(api_key=FAKE_KEY).checkpoint("researcher", units_so_far=3).approved is expected

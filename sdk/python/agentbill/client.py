@@ -354,7 +354,12 @@ class AgentBillClient:
         data = resp.json()
 
         result = PreflightResult(
-            approved=data["approved"],
+            # Approved only on an explicit JSON true. A 200 whose approved is
+            # missing, a string, a number or anything else (a proxy page, a
+            # truncated body, a future shape) is not a verdict, so it is read
+            # as refused, never as permission. Same rule as the Node SDK and
+            # the MCP server.
+            approved=data.get("approved") is True,
             reason=data.get("reason"),
             estimated_units=data.get("estimated_units"),
             remaining_units=data.get("remaining_units"),
@@ -511,7 +516,7 @@ class AgentBillClient:
         data = resp.json()
 
         return CheckpointResult(
-            approved=data["approved"],
+            approved=data.get("approved") is True,  # only an explicit JSON true, as in preflight()
             reason=data.get("reason"),
             units_so_far=data["units_so_far"],
             remaining_units=data.get("remaining_units"),

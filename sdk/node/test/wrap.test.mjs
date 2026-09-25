@@ -679,3 +679,17 @@ test('preflight() carries the dollar fields both ways', async () => {
   assert.equal(pf.task_ceiling_usd, 5); assert.equal(pf.estimated_usd, 0.02)
   assert.equal(res.taskUnit, 'usd'); assert.equal(res.estimatedUsd, 0.1); assert.equal(res.taskRemainingUsd, 4.9); assert.equal(res.estimateSource, 'default')
 })
+
+// S19 follow-up, 2026-09-25: a preflight answer whose approved is truthy but
+// not true is not permission. The wrapped call is refused and not sent, and
+// nothing is recorded.
+test('a truthy approved that is not true refuses the call and sends nothing', async () => {
+  for (const approved of ['true', 1, 'yes']) {
+    reset({ '/preflight': { ...APPROVED, approved } })
+    const oa = new FakeOpenAI()
+    const r = await sdk.wrap(oa, { taskRef: 'job-7', agentId: 'researcher' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+    assert.ok(sdk.isRefusal(r), `approved: ${JSON.stringify(approved)} must be a refusal`)
+    assert.equal(oa.sent.length, 0)
+    assert.equal(events().length, 0)
+  }
+})

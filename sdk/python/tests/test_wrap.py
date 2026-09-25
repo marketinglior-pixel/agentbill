@@ -1042,3 +1042,17 @@ def test_the_client_preflight_carries_the_dollar_fields(server):
     pre = server["preflights"]()[0]
     assert pre["task_ceiling_usd"] == 5 and pre["estimated_usd"] == 0.02
     assert res.task_unit == "usd" and res.estimated_usd == 0.1 and res.task_remaining_usd == 4.9 and res.estimate_source == "default"
+
+
+# S19 follow-up, 2026-09-25: a preflight answer whose approved is truthy but
+# not True is not permission. The wrapped call is refused and not sent, and
+# nothing is recorded.
+@pytest.mark.parametrize("approved", ["true", 1, "yes"])
+def test_a_truthy_approved_that_is_not_true_refuses_and_sends_nothing(server, approved):
+    server["preflight"] = {**APPROVED, "approved": approved}
+    oa = FakeOpenAI()
+    r = wrap(oa, task_ref="job-7", agent_id="researcher", agentbill_client=AB).chat.completions.create(
+        model="gpt-4o-mini", messages=[])
+    assert isinstance(r, Refusal) and not r
+    assert oa.sent == []
+    assert server["events"]() == []
