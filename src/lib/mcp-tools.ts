@@ -10,7 +10,8 @@ import { runRecord } from '../routes/events.js'
 import { taskStatus, serialize } from '../routes/tasks.js'
 import { listDecisions } from '../routes/decisions.js'
 import { LIST_PRICE_LABEL } from './prices.js'
-import { TASK_UNITS } from './task-ceiling.js'
+import { TASK_UNITS, amountText } from './task-ceiling.js'
+import { rankOrderSql, rankUsdSql, RANK_RULE } from './task-rank.js'
 import { COMMIT } from './version.js'
 import type { Scope } from './mcp-oauth.js'
 
@@ -136,7 +137,7 @@ type Sort = 'units' | 'list_price'
 async function topJobs(accountId: string, sort: Sort, limit: number, agentId?: string) {
   const rows = await sql`
     SELECT t.task_ref, t.agent_id, t.ceiling_units, t.used_units, t.reserved_units, t.unit, t.usage_missing_calls, t.unpriced_calls,
-           t.created_at, t.updated_at, e.usd, e.priced, e.calls
+           t.created_at, t.updated_at, e.usd, e.priced, e.calls, ${sql.unsafe(rankUsdSql('t'))}::text AS rank_usd
     FROM task_budgets t
     LEFT JOIN LATERAL (
       SELECT sum(list_price_usd) AS usd, count(list_price_usd) AS priced, count(*) AS calls
@@ -144,16 +145,27 @@ async function topJobs(accountId: string, sort: Sort, limit: number, agentId?: s
     ) e ON true
     WHERE t.account_id = ${accountId}
       ${agentId ? sql`AND t.agent_id = ${agentId}` : sql``}
-    ORDER BY ${sort === 'list_price' ? sql`e.usd DESC NULLS LAST, t.used_units DESC` : sql`t.used_units DESC, t.created_at DESC`}
+    ORDER BY ${sort === 'list_price'
+      ? sql.unsafe(`e.usd DESC NULLS LAST, CASE t.unit WHEN 'token' THEN 0 WHEN 'unit' THEN 1 ELSE 2 END, t.used_units DESC, t.created_at DESC`)
+      : sql.unsafe(rankOrderSql('t'))}
     LIMIT ${limit}
   `
   return rows.map((r) => {
     const job = serialize(r as never)
     const priced = Number(r.priced ?? 0)
+    // Each job says in words what its numbers count, so a reader never
+    // quotes micro-dollars as units or tokens as dollars (2026-09-25).
+    const counts = job.unit === 'usd'
+      ? 'micro-dollars at public list price (1,000,000 is $1.00); the *_usd fields are the same numbers in dollars'
+      : job.unit === 'token' ? 'tokens the provider reported' : 'units the developer defines, not money and not tokens'
     return {
       task_ref: job.task_ref,
       agent_id: job.agent_id,
       unit: job.unit,
+      units_count: counts,
+      used: `${amountText(job.unit, job.used_units)} of ${amountText(job.unit, job.ceiling_units)}${job.unit === 'usd' ? ' at list price' : ''}`,
+      // The dollar figure this job was ranked by (see order), or null when it has none.
+      rank_usd: r.rankUsd == null ? null : Number(r.rankUsd),
       used_units: job.used_units,
       ceiling_units: job.ceiling_units,
       remaining_units: job.remaining_units,
@@ -276,17 +288,19 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
     server.registerTool('top_jobs', {
       title: 'Jobs ranked by what they used',
       description:
-        'This account\'s jobs ranked by what they used: by units (the numbers your code reported) or by the list-price estimate in dollars. ' +
-        'Dollars are an estimate at public list price for calls recorded with a model named, never an invoice; a job with no priced call shows null, not 0.',
+        'This account\'s jobs ranked by what they used. Jobs count different things (unit: "usd" micro-dollars, "token" tokens, "unit" the developer\'s own count), ' +
+        'so each job carries units_count and a used sentence in its own unit, and numbers in different units are never ranked against each other: ' +
+        'jobs with a dollar figure come first, dearest first, then tokens, then units. Quote a job in its own unit. ' +
+        'Dollars are an estimate at public list price, never an invoice; a job with no priced call shows null, not 0.',
       inputSchema: {
-        sort: z.enum(['units', 'list_price']).default('units').describe('units: most used units first. list_price: highest dollar estimate first.'),
+        sort: z.enum(['units', 'list_price']).default('units').describe('units: most used first, by dollars where a job has them (a dollar job by its ledger), then tokens, then units. list_price: by the list-price estimate of priced calls only, then the rest by unit.'),
         agent_id: id('Only this agent\'s jobs.').optional(),
         limit: z.number().int().min(1).max(50).default(10).describe('How many jobs, 1 to 50.'),
       },
       annotations: { title: 'Jobs ranked by what they used', readOnlyHint: true, openWorldHint: false },
     }, async (a) => {
       const jobs = await topJobs(ctx.accountId, a.sort, a.limit, a.agent_id)
-      return result({ sort: a.sort, jobs, list_price_label: LIST_PRICE_LABEL })
+      return result({ sort: a.sort, order: a.sort === 'units' ? RANK_RULE : 'Ranked by list_price_usd_estimate, the list price of the priced calls only, dearest first; then the jobs with none, tokens before units, each by its own count.', jobs, list_price_label: LIST_PRICE_LABEL })
     })
   }
 

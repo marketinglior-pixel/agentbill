@@ -299,9 +299,11 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
             ? await settleNamedReservation(tx, found)
             : await consumeReservations(tx, locked.id, taskRef,
                 usdJob ? Math.max(1, await oldestOpenReservationUnits(tx, locked.id, taskRef)) : reportedUnits)
+          // A dollar job's reservation was never on the customer's balance
+          // (preflight.ts), so releasing it leaves that balance alone.
           await tx`
             UPDATE customers
-            SET reserved_units = GREATEST(0, reserved_units - ${consumed}),
+            SET reserved_units = GREATEST(0, reserved_units - ${usdJob ? 0 : consumed}),
                 updated_at     = now()
             WHERE id = ${locked.id}
           `
@@ -322,7 +324,9 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
         //     raw row values: once these columns are BIGINT a driver that
         //     hands back strings turns this + into concatenation.
         // ----------------------------------------------------------------
-        if (lockedLimit !== null && lockedUsed + units > lockedLimit) {
+        // A dollar job draws nothing from the customer's unit balance, so it
+        // is not checked against that balance's unit limit either.
+        if (!usdJob && lockedLimit !== null && lockedUsed + units > lockedLimit) {
           return { type: 'budget_exhausted' as const, customerRef }
         }
 
@@ -404,10 +408,17 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
           ? await settleNamedReservation(tx, found)
           : await consumeReservations(tx, customer.id, taskRef, units)
 
+        // The customer's balance moves by what the code reported, in units
+        // or tokens, and never by a dollar job's micro-dollars: its used,
+        // limit and left stay one kind of number, and the usage alert below
+        // reads them. The customer's dollar spend is read from events
+        // (list_price_usd), where every priced call already is.
+        const customerUnits = usdJob ? 0 : units
+        const customerConsumed = usdJob ? 0 : consumed
         const [updated] = await tx`
           UPDATE customers
-          SET used_units     = used_units + ${units},
-              reserved_units = GREATEST(0, reserved_units - ${consumed}),
+          SET used_units     = used_units + ${customerUnits},
+              reserved_units = GREATEST(0, reserved_units - ${customerConsumed}),
               updated_at     = now()
           WHERE id = ${customer.id}
           RETURNING used_units, limit_units, reserved_units
@@ -446,7 +457,7 @@ export async function runRecord(accountId: string, input: unknown, log: FastifyB
           eventId: event.id as string,
           customerCreated,
           remainingUnits,
-          prevUsedUnits: updatedUsed - units,
+          prevUsedUnits: updatedUsed - customerUnits,
           usedUnits: updatedUsed,
           customerRef,
           taskRow,

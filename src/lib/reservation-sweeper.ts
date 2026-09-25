@@ -43,9 +43,16 @@ export async function sweepExpiredReservations(): Promise<number> {
     `
 
     for (const row of claimed) {
+      // A dollar job's reservation (migration 025) was never added to the
+      // customer's balance, which counts units and tokens only, so it is
+      // not taken off it either. A job's unit is fixed when it opens, so the
+      // task row read here says what the reservation was in.
+      const [job] = row.taskRef
+        ? await tx`SELECT unit FROM task_budgets WHERE account_id = ${row.accountId} AND task_ref = ${row.taskRef}`
+        : []
       await tx`
         UPDATE customers
-        SET reserved_units = GREATEST(0, reserved_units - ${row.units}),
+        SET reserved_units = GREATEST(0, reserved_units - ${job?.unit === 'usd' ? 0 : row.units}),
             updated_at     = now()
         WHERE id = ${row.customerId}
       `

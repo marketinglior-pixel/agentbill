@@ -6,6 +6,7 @@ import { setTaskCeiling, TASK_UNITS, asTaskUnit, unitWord, unitMismatchMessage, 
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { unitsOf } from '../db/int8.js'
 import { taskBreakdown } from '../lib/task-breakdown.js'
+import { rankOrderSql } from '../lib/task-rank.js'
 
 const TaskParams = z.object({ task_ref: zId() })
 
@@ -125,7 +126,7 @@ export async function tasksRoute(app: FastifyInstance) {
       FROM task_budgets
       WHERE account_id = ${accountId}
         ${agent_id ? sql`AND agent_id = ${agent_id}` : sql``}
-      ORDER BY ${sort === 'used' ? sql`used_units DESC, created_at DESC` : sql`created_at DESC`}
+      ORDER BY ${sort === 'used' ? sql.unsafe(rankOrderSql('task_budgets')) : sql`created_at DESC`}
       LIMIT ${limit}
     `
 

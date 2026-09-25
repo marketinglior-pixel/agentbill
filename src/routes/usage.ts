@@ -12,7 +12,7 @@ const UsageQuery = z.object({
   limit: z.coerce.number().int().positive().max(200).default(50),
 })
 
-// What the units went to: the account's recorded units over a window, split
+// The account's recorded units over a window, and what they cost at list price where priced, split
 // by the event_type each record carried. Bearer-authenticated like every other
 // API route (no publicRoute here), and listed in server.ts API_PREFIXES so the
 // canonical-host redirect never strips the Authorization header off it.

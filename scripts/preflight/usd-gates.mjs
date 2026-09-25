@@ -304,6 +304,149 @@ print(json.dumps(out))
        && evs.length === 4 && evs.every((e) => e.units === 45_000 && e.usd === '0.045000000000' && e.priceVersion === PV),
      PY ? `${run?.status} ${(run?.stdout ?? '').slice(-300)} ${(run?.stderr ?? '').slice(-400)} ${JSON.stringify(js)}` : 'WRAP_PYTHON is not set')
 
+  // ---- customer balances never mix units (2026-09-25)
+  // A customer's used / limit / left and the 800-unit owner alert count the
+  // units and tokens the code reported, never a dollar job's micro-dollars.
+  const cust = async (ref, acct = A) => (await sql`SELECT used_units, reserved_units, limit_units FROM customers WHERE account_id = ${acct} AND customer_ref = ${ref}`)[0]
+  await call('PUT', '/budget', { customer_id: 'cust-mix', limit_units: 800 })
+  await call('PUT', '/tasks/cust-usd-job/ceiling', { ceiling_usd: 10 })
+  const pc = await pre({ task_ref: 'cust-usd-job', customer_id: 'cust-mix' })
+  const midC = await cust('cust-mix')
+  await rec({ task_ref: 'cust-usd-job', customer_id: 'cust-mix', reservation_id: pc.body.reservation_id, metadata: gpt4o(100_000, 10_000) })
+  const afterC = await cust('cust-mix')
+  const jc = await job('cust-usd-job')
+  ok('[usd] a dollar job\'s spend never moves the customer\'s unit balance: $0.35 recorded, the customer still at 0 used and 0 reserved, during the call and after it',
+     pc.body?.approved === true && midC.usedUnits === 0 && midC.reservedUnits === 0 && afterC.usedUnits === 0 && afterC.reservedUnits === 0 && jc.usedUnits === 350_000,
+     JSON.stringify({ midC, afterC, jc }))
+  // The same customer spends its 800 units on a unit job: it is then at its
+  // unit limit. A unit call is refused; the dollar job, bounded by its own
+  // ceiling and never drawing on the unit balance, is not.
+  const pu = await pre({ task_ref: 'cust-unit-job', task_ceiling: 5000, customer_id: 'cust-mix', estimated_units: 800 })
+  await rec({ task_ref: 'cust-unit-job', customer_id: 'cust-mix', reservation_id: pu.body.reservation_id, units: 800 })
+  const puNo = await pre({ task_ref: 'cust-unit-job', customer_id: 'cust-mix', estimated_units: 1 })
+  const pcYes = await pre({ task_ref: 'cust-usd-job', customer_id: 'cust-mix' })
+  await rec({ task_ref: 'cust-usd-job', customer_id: 'cust-mix', reservation_id: pcYes.body.reservation_id, success: false, units: 0 })
+  ok('[usd] the customer\'s unit limit governs unit work only: at 800 of 800 units a unit call is budget_exhausted, a call on its dollar job is approved, and its balance reads 800',
+     puNo.body?.approved === false && puNo.body.reason === 'budget_exhausted' && pcYes.body?.approved === true && (await cust('cust-mix')).usedUnits === 800
+       && (await cust('cust-mix')).reservedUnits === 0, JSON.stringify([puNo.body, pcYes.body?.approved, await cust('cust-mix')]))
+  // The 800-unit alert: $0.001 is 1,000 micro-dollars, past 800 if it were read as units.
+  await call('PUT', '/tasks/cust-alert-job/ceiling', { ceiling_usd: 1 })
+  const pa1 = await pre({ task_ref: 'cust-alert-job', customer_id: 'cust-alert-usd' })
+  await rec({ task_ref: 'cust-alert-job', customer_id: 'cust-alert-usd', reservation_id: pa1.body.reservation_id, metadata: gpt4o(400, 0) })
+  const pa2 = await pre({ task_ref: 'cust-alert-units', task_ceiling: 5000, customer_id: 'cust-alert-units', estimated_units: 900 })
+  await rec({ task_ref: 'cust-alert-units', customer_id: 'cust-alert-units', reservation_id: pa2.body.reservation_id, units: 900 })
+  const alertsFor = async () => {
+    for (let i = 0; i < 40; i++) {
+      const rows = await sql`SELECT customer_ref FROM customer_usage_alerts WHERE account_id = ${A}`
+      if (rows.some((r) => r.customerRef === 'cust-alert-units')) return rows.map((r) => r.customerRef)
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return (await sql`SELECT customer_ref FROM customer_usage_alerts WHERE account_id = ${A}`).map((r) => r.customerRef)
+  }
+  const claimed = await alertsFor()
+  ok('[usd] the customer usage alert never fires on dollar spend: 1,000 micro-dollars claim nothing, while 900 units on another customer do',
+     claimed.includes('cust-alert-units') && !claimed.includes('cust-alert-usd') && (await cust('cust-alert-usd')).usedUnits === 0 && (await job('cust-alert-job')).usedUnits === 1_000,
+     JSON.stringify({ claimed, usd: await cust('cust-alert-usd') }))
+  // The sweeper: an expired dollar reservation must not be taken off the
+  // customer's unit reservations still in flight.
+  const pInflight = await pre({ task_ref: 'cust-sweep-units', task_ceiling: 5000, customer_id: 'cust-sweep', estimated_units: 50 })
+  await call('PUT', '/tasks/cust-sweep-usd/ceiling', { ceiling_usd: 1 })
+  const pExp = await pre({ task_ref: 'cust-sweep-usd', customer_id: 'cust-sweep' })
+  await sql`UPDATE reservations SET expires_at = now() - interval '1 minute' WHERE public_id = ${pExp.body.reservation_id}`
+  const { sweepExpiredReservations } = await import('../../dist/lib/reservation-sweeper.js')
+  await sweepExpiredReservations()
+  const cs = await cust('cust-sweep')
+  ok('[usd] the sweeper reclaims an expired dollar reservation from its job and leaves the customer\'s 50 units in flight alone',
+     pInflight.body?.approved === true && cs.reservedUnits === 50 && (await job('cust-sweep-usd')).reservedUnits === 0 && (await job('cust-sweep-units')).reservedUnits === 50,
+     JSON.stringify({ cs, usd: await job('cust-sweep-usd') }))
+  await rec({ task_ref: 'cust-sweep-units', customer_id: 'cust-sweep', reservation_id: pInflight.body.reservation_id, success: false, units: 0 })
+
+  // /customers: units and dollars, side by side, never summed.
+  const custList = await call('GET', '/customers')
+  const cm = (custList.body ?? []).find((c) => c.customerId === 'cust-mix')
+  const [cmUsd] = await sql`SELECT sum(e.list_price_usd)::text AS usd FROM events e JOIN customers c ON c.id = e.customer_id WHERE c.account_id = ${A} AND c.customer_ref = 'cust-mix'`
+  ok('[usd] GET /customers: used and remaining stay units (800, 0 left), and the dollar spend is a separate estimate, equal to the priced events, labelled',
+     cm?.used === 800 && cm.limit === 800 && cm.remaining === 0 && cm.isBlocked === true && cm.listPriceUsdEstimate === Number(cmUsd.usd) && cm.listPriceUsdEstimate === 0.35
+       && cm.pricedCalls === 1 && /list price/.test(cm.listPriceLabel ?? ''), JSON.stringify(cm))
+  const custPage = await page('view=customers')
+  const cmRow = (custPage.match(/<tr[^>]*>\s*<td class="id lead" title="cust-mix">[\s\S]*?<\/tr>/) ?? [''])[0]
+  ok('[usd] the customers view shows Est. cost and Units used as two columns: $0.35 beside 800, never 350,800',
+     custPage.includes('<th class="num">Est. cost</th><th class="num">Units used</th>') && cmRow.includes('>$0.35</td>') && cmRow.includes('title="units and tokens your code reported, never dollars">800</td>')
+       && !custPage.includes('350,800') && !custPage.includes('350800'), cmRow.replace(/\s+/g, ' ').slice(0, 400))
+
+  // An account that never used dollars or a priced call: /customers and
+  // GET /tasks?sort=used byte for byte as before T3 (keys, order, values).
+  const C = '00000000-0000-0000-0000-0000000000d3', KC = key('usd-c')
+  await sql`DELETE FROM accounts WHERE id = ${C}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${C}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
+  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${C}, ${KC}, 'harness-usd-old')`
+  await call('PUT', '/budget', { customer_id: 'old-a', limit_units: 100 }, KC)
+  for (const [c, t, u] of [['old-a', 'old-j1', 30], ['old-b', 'old-j2', 70], ['old-a', 'old-j3', 5], ['old-c', 'old-j2', 1]]) {
+    const p = await pre({ task_ref: t, task_ceiling: 1000, customer_id: c, estimated_units: u }, KC)
+    await rec({ task_ref: t, customer_id: c, reservation_id: p.body.reservation_id, units: u }, KC)
+  }
+  const rawCust = await fetch(`${API}/customers`, { headers: { Authorization: `Bearer ${KC}` } }).then((r) => r.text())
+  const oldRows = await sql`SELECT customer_ref, limit_units, used_units, created_at FROM customers WHERE account_id = ${C} ORDER BY created_at DESC, id DESC`
+  const expectCust = JSON.stringify(oldRows.map((r) => ({ customerId: r.customerRef, limit: r.limitUnits, used: r.usedUnits,
+    remaining: r.limitUnits == null ? null : r.limitUnits - r.usedUnits, isBlocked: r.limitUnits != null && r.usedUnits >= r.limitUnits, createdAt: r.createdAt })))
+  const rawTasks = await fetch(`${API}/tasks?sort=used`, { headers: { Authorization: `Bearer ${KC}` } }).then((r) => r.json())
+  const oldTaskOrder = (await sql`SELECT task_ref FROM task_budgets WHERE account_id = ${C} ORDER BY used_units DESC, created_at DESC`).map((r) => r.taskRef).join(',')
+  ok('[usd] an account with no dollar job and no priced call: GET /customers is byte for byte the pre-T3 shape and values, and GET /tasks?sort=used keeps the pre-T3 order',
+     oldRows.length === 3 && rawCust === expectCust && rawTasks.tasks.map((t) => t.task_ref).join(',') === oldTaskOrder && oldTaskOrder === 'old-j2,old-j1,old-j3'
+       && !/usd|price/i.test(rawCust), `${rawCust.slice(0, 300)} | expected ${expectCust.slice(0, 300)} | ${oldTaskOrder}`)
+  await sql`DELETE FROM accounts WHERE id = ${C}`
+
+  // ---- ranking never compares numbers in different units
+  const R = '00000000-0000-0000-0000-0000000000d4', KR = key('usd-r')
+  await sql`DELETE FROM accounts WHERE id = ${R}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${R}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
+  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${R}, ${KR}, 'harness-usd-rank')`
+  const gpt4oOut = (output) => ({ provider: 'openai', model: 'gpt-4o', tokens: { input: 0, output } })
+  // $0.50 on a dollar job (500,000 micro-dollars), $2.00 on a token job that
+  // used 200,000 tokens, $0.30 on a $5 dollar job (300,000), a 400,000-token
+  // job with no price, and a unit job at 9,999,999 of its own units.
+  await call('PUT', '/tasks/rank-usd-050/ceiling', { ceiling_usd: 1 }, KR)
+  await call('PUT', '/tasks/rank-usd-5/ceiling', { ceiling_usd: 5 }, KR)
+  const steps = [
+    ['rank-usd-050', {}, { metadata: gpt4o(200_000, 0) }],
+    ['rank-tok-200', { task_ceiling: 1_000_000, unit: 'token', estimated_units: 1000 }, { units: 200_000, metadata: gpt4oOut(200_000) }],
+    ['rank-usd-5', {}, { metadata: gpt4o(120_000, 0) }],
+    ['rank-tok-400k', { task_ceiling: 1_000_000, unit: 'token', estimated_units: 1000 }, { units: 400_000 }],
+    ['rank-unit-big', { task_ceiling: 20_000_000, estimated_units: 9_999_999 }, { units: 9_999_999 }],
+  ]
+  for (const [ref, pb, rb] of steps) {
+    const p = await pre({ task_ref: ref, ...pb }, KR)
+    await rec({ task_ref: ref, reservation_id: p.body.reservation_id, ...rb }, KR)
+  }
+  const WANT = 'rank-tok-200,rank-usd-050,rank-usd-5,rank-tok-400k,rank-unit-big'
+  const RAW_ORDER = (await sql`SELECT task_ref FROM task_budgets WHERE account_id = ${R} ORDER BY used_units DESC`).map((r) => r.taskRef).join(',')
+  const apiRank = await call('GET', '/tasks?sort=used', null, KR)
+  ok('[usd] GET /tasks?sort=used: $2.00 before $0.50 though it counts fewer, the $0.30 job before 400,000 unpriced tokens, and the 9,999,999 units last, where raw numbers would put them first',
+     apiRank.body?.tasks?.map((t) => t.task_ref).join(',') === WANT && RAW_ORDER === 'rank-unit-big,rank-usd-050,rank-tok-400k,rank-usd-5,rank-tok-200',
+     `${apiRank.body?.tasks?.map((t) => `${t.task_ref}:${t.used_units}`).join(',')} raw ${RAW_ORDER}`)
+  const mcpTop = async (sort) => {
+    const r = await fetch(`${API}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${KR}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'top_jobs', arguments: { sort, limit: 10 } } }) })
+    const t = await r.text()
+    try { return JSON.parse(t.startsWith('{') ? t : (t.match(/^data: (.*)$/m) ?? [])[1]).result?.structuredContent } catch { return { raw: t.slice(0, 300) } }
+  }
+  const topU = await mcpTop('units'), topL = await mcpTop('list_price')
+  const byRef = (o, ref) => (o?.jobs ?? []).find((j) => j.task_ref === ref) ?? {}
+  ok('[usd] MCP top_jobs over a key ranks the same way on both sorts, and states the rule',
+     (topU?.jobs ?? []).map((j) => j.task_ref).join(',') === WANT && (topL?.jobs ?? []).map((j) => j.task_ref).join(',') === WANT
+       && /never compared/.test(topU.order ?? ''), JSON.stringify(topU).slice(0, 400))
+  ok('[usd] and every job says in words what its numbers count, so an assistant cannot quote micro-dollars as units',
+     byRef(topU, 'rank-usd-050').used === '$0.50 of $1.00 at list price' && /micro-dollars/.test(byRef(topU, 'rank-usd-050').units_count) && byRef(topU, 'rank-usd-050').rank_usd === 0.5
+       && byRef(topU, 'rank-tok-200').used === '200,000 tokens of 1,000,000 tokens' && byRef(topU, 'rank-tok-200').rank_usd === 2
+       && byRef(topU, 'rank-tok-400k').rank_usd === null && byRef(topU, 'rank-unit-big').used === '9,999,999 units of 20,000,000 units'
+       && /not money/.test(byRef(topU, 'rank-unit-big').units_count), JSON.stringify((topU?.jobs ?? []).map((j) => [j.task_ref, j.used, j.rank_usd])))
+  const loginR = await fetch(`${API}/app/session`, { method: 'POST', redirect: 'manual', headers: FORM, body: `api_key=${KR}` })
+  const cookieR = (loginR.headers.get('set-cookie') ?? '').split(';')[0]
+  const mostR = await fetch(`${API}/app?view=tasks&sort=used`, { headers: { cookie: cookieR } }).then((r) => r.text())
+  const rowsR = [...mostR.matchAll(/<div class="tk-n"><a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1]).join(',')
+  ok('[usd] and the console\'s Most used lists them in the same order', rowsR === WANT, rowsR)
+  await sql`DELETE FROM accounts WHERE id = ${R}`
+
   // ---- the legacy key's account is untouched by all of it
   const legacy = await fetch(`${API}/tasks?limit=200`, { headers: { Authorization: `Bearer ${legacyKey}` } }).then((r) => r.json())
   ok('[usd] the harness\'s main account lists none of these jobs', !(legacy.tasks ?? []).some((t) => String(t.task_ref).startsWith('usd-')), '')

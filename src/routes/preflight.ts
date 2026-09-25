@@ -345,7 +345,23 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
         // Atomic reserve: only succeeds when budget allows it. Under concurrent
         // load a plain read-check-approve lets several requests see the same
         // remaining balance and all get approved; the conditional UPDATE cannot.
-        const reserved = await tx`
+        //
+        // A job in dollars never touches the customer's balance (2026-09-25).
+        // That balance counts units and tokens, the numbers the code reports,
+        // and a limit on it is in the same numbers; micro-dollars added to it
+        // would make its used, limit and left three different kinds of number
+        // and could fire the customer usage alert on $0.0008. So a dollar job
+        // is bounded by its own dollar ceiling, draws nothing from the
+        // customer's unit balance and is not checked against its unit limit.
+        // Its reservation row still names the customer (reservations.customer_id
+        // is NOT NULL), and every settle path, and the sweeper, leave the
+        // customer's counters alone for a dollar job's rows.
+        const reserved = jobUnit === 'usd'
+          ? await tx`
+              SELECT id, limit_units, used_units, reserved_units FROM customers
+              WHERE account_id = ${accountId} AND customer_ref = ${customerRef}
+            `
+          : await tx`
           UPDATE customers
           SET reserved_units = reserved_units + ${reserveUnits}
           WHERE account_id = ${accountId}

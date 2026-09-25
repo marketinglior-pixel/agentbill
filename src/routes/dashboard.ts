@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from '../db/index.js'
 import { readPage } from '../lib/page.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 
 // /customers, the JSON balance list. The HTML page that used to live here
 // was unreachable for its whole life: /dashboard was registered but never
@@ -30,8 +31,14 @@ export async function dashboardRoute(app: FastifyInstance) {
              ELSE c.limit_units - c.used_units END AS remaining,
         CASE WHEN c.limit_units IS NOT NULL AND c.used_units >= c.limit_units
              THEN true ELSE false END AS is_blocked,
-        c.created_at
+        c.created_at,
+        e.usd::text      AS usd,
+        coalesce(e.priced, 0) AS priced
       FROM customers c
+      LEFT JOIN LATERAL (
+        SELECT sum(list_price_usd) AS usd, count(list_price_usd) AS priced
+        FROM events WHERE customer_id = c.id AND list_price_usd IS NOT NULL
+      ) e ON true
       WHERE c.account_id = ${accountId}
         ${cursor ? sql`AND (c.created_at, c.id) < (SELECT created_at, id FROM customers WHERE id = ${cursor} AND account_id = ${accountId})` : sql``}
       ORDER BY c.created_at DESC, c.id DESC
@@ -44,6 +51,16 @@ export async function dashboardRoute(app: FastifyInstance) {
       reply.header('X-Next-Cursor', next)
       reply.header('Link', `</customers?limit=${limit}&cursor=${next}>; rel="next"`)
     }
-    return reply.send(page.map(({ rowId: _drop, ...rest }) => rest))
+    // The keys follow the camelCase this route has always answered in.
+    // limit, used and remaining are the customer's balance in the numbers the
+    // code reported, units and tokens, and never a dollar job's micro-dollars
+    // (2026-09-25, see preflight.ts). A customer with priced calls also gets
+    // what they cost at public list price, over the priced calls only, as
+    // separate fields; a customer with none gets exactly the object it always
+    // did, key for key. There is no dollar limit on a customer: a dollar job
+    // is bounded by its own ceiling, so "remaining" stays a unit figure.
+    return reply.send(page.map(({ rowId: _drop, usd, priced, ...rest }) => Number(priced) > 0
+      ? { ...rest, listPriceUsdEstimate: Number(usd), pricedCalls: Number(priced), listPriceLabel: LIST_PRICE_LABEL }
+      : rest))
   })
 }
