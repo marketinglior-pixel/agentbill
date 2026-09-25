@@ -9,17 +9,13 @@ const ListQuery = z.object({
   limit: z.coerce.number().int().positive().max(200).default(50),
 })
 
-// The receipt, machine-readable: every block this account's agents hit,
-// newest first, with the literal response body each one received.
-export async function decisionsRoute(app: FastifyInstance) {
-  app.get('/decisions', async (request, reply) => {
-    const parse = ListQuery.safeParse(request.query ?? {})
-    if (!parse.success) {
-      return reply.code(422).send({ error: 'validation_error', details: parse.error.issues })
-    }
-    const { agent_id, task_ref, limit } = parse.data
-    const accountId = (request as any).accountId
+export type DecisionQuery = { agent_id?: string; task_ref?: string; limit: number }
 
+/**
+ * GET /decisions for one account. Shared with the remote MCP endpoint's
+ * recent_refusals tool, so the receipt reads the same through either door.
+ */
+export async function listDecisions(accountId: string, { agent_id, task_ref, limit }: DecisionQuery) {
     const rows = await sql`
       SELECT agent_id, customer_ref, task_ref, reason, source, blocked,
              estimated_units, ceiling_units, used_units, snapshot::text AS snapshot, created_at
@@ -38,7 +34,7 @@ export async function decisionsRoute(app: FastifyInstance) {
       WHERE account_id = ${accountId}
     `
 
-    return reply.send({
+    return {
       blocked_total: Number(totals?.blocked ?? 0),
       overrun_total: Number(totals?.overruns ?? 0),
       // No id in the payload: it is a global BIGSERIAL and would leak
@@ -57,6 +53,17 @@ export async function decisionsRoute(app: FastifyInstance) {
         response: JSON.parse(r.snapshot),
         created_at: r.createdAt,
       })),
-    })
+    }
+}
+
+// The receipt, machine-readable: every block this account's agents hit,
+// newest first, with the literal response body each one received.
+export async function decisionsRoute(app: FastifyInstance) {
+  app.get('/decisions', async (request, reply) => {
+    const parse = ListQuery.safeParse(request.query ?? {})
+    if (!parse.success) {
+      return reply.code(422).send({ error: 'validation_error', details: parse.error.issues })
+    }
+    return reply.send(await listDecisions(request.accountId, parse.data))
   })
 }

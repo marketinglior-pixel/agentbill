@@ -29,7 +29,7 @@ const ListQuery = z.object({
   sort: z.enum(['created', 'used']).default('created'),
 })
 
-function serialize(t: {
+export function serialize(t: {
   taskRef: string
   agentId: string
   ceilingUnits: unknown
@@ -62,6 +62,34 @@ function serialize(t: {
     created_at: t.createdAt,
     updated_at: t.updatedAt,
   }
+}
+
+/** The 404 body for a task_ref this account has no job under. */
+export const taskNotFound = (taskRef: string) => ({
+  error: 'task_not_found',
+  message: `No task with task_ref "${taskRef}". A job is opened in the console or by PUT /tasks/:task_ref/ceiling, or by a first preflight that passes task_ref + task_ceiling.`,
+})
+
+/**
+ * One job as GET /tasks/:task_ref answers it, or null when this account has no
+ * job under that task_ref. Shared with the remote MCP endpoint's task_status
+ * tool (src/lib/mcp-tools.ts), so the two can never describe a job differently.
+ *
+ * Additive: every key serialize() writes is unchanged, and breakdown is the
+ * job's recorded calls by model and by step, with tokens and an estimate at
+ * public list price labelled as one. Only on this single-task read, not on the
+ * list: it costs three aggregates over the job's events.
+ */
+export async function taskStatus(accountId: string, taskRef: string) {
+  const [row] = await sql`
+    SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
+    FROM task_budgets
+    WHERE account_id = ${accountId} AND task_ref = ${taskRef}
+  `
+  if (!row) return null
+  const task = serialize(row as any)
+  const breakdown = await taskBreakdown(accountId, taskRef, task.used_units)
+  return { ...task, breakdown }
 }
 
 export async function tasksRoute(app: FastifyInstance) {
@@ -98,26 +126,9 @@ export async function tasksRoute(app: FastifyInstance) {
     const taskRef = params.data.task_ref
     const accountId = (request as any).accountId
 
-    const [row] = await sql`
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, created_at, updated_at
-      FROM task_budgets
-      WHERE account_id = ${accountId} AND task_ref = ${taskRef}
-    `
-
-    if (!row) {
-      return reply.code(404).send({
-        error: 'task_not_found',
-        message: `No task with task_ref "${taskRef}". A job is opened in the console or by PUT /tasks/:task_ref/ceiling, or by a first preflight that passes task_ref + task_ceiling.`,
-      })
-    }
-
-    // Additive: every key above is unchanged, and breakdown is the job's
-    // recorded calls by model and by step, with tokens and an estimate at
-    // public list price labelled as one. Only on this single-task read, not
-    // on the list: it costs three aggregates over the job's events.
-    const task = serialize(row as any)
-    const breakdown = await taskBreakdown(accountId, taskRef, task.used_units)
-    return reply.send({ ...task, breakdown })
+    const task = await taskStatus(accountId, taskRef)
+    if (!task) return reply.code(404).send(taskNotFound(taskRef))
+    return reply.send(task)
   })
 
   // Set a job's ceiling from outside the calling code.
