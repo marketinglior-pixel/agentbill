@@ -18,8 +18,8 @@ import { KIT_CSS } from './kit.js'
 // without importing a second stylesheet.
 //
 // The nav is three sections: wordmark left, the destinations centred, and the
-// account pair right (Console, then the one primary action). Under 720px the
-// destinations and Console fold into a native <details> menu, no script, so
+// account pair right (Log in, then the one primary action). Under 720px the
+// destinations, Log in and Sign up fold into a native <details> menu, no script, so
 // the same markup works on pages that ship no JS. The bar is solid rather than
 // frosted-on-scroll: a scroll handler on every page is motion for mood.
 
@@ -205,7 +205,12 @@ export function siteNav(
 ): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
   const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
-  const menu = [...LINKS, ['/app', 'Console'] as const]
+  // Log in and Sign up, 2026-09-25, when the site got accounts. On a desktop
+  // the pair is the "Log in" link and the one primary button, whose words stay
+  // KEY_CTA because that is what sign-up ends in. /login sends a browser that
+  // is already signed in straight to the console, so it is also the way back
+  // to it; the footer keeps a plain Console link.
+  const menu = [...LINKS, ['/login', 'Log in'] as const, ['/register', 'Sign up'] as const]
     .map(([href, label]) => `<li><a href="${href}"${at(href)}>${label}</a></li>`).join('\n            ')
   return `  <nav class="site-nav" aria-label="Primary">
     <div class="nav-inner">
@@ -214,7 +219,7 @@ export function siteNav(
         ${center}
       </div>
       <div class="nav-right">
-        <a class="console" href="/app">Console</a>
+        <a class="console" href="/login"${at('/login')}>Log in</a>
         <details class="nav-menu">
           <summary>Menu</summary>
           <ul>

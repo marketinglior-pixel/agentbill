@@ -13,7 +13,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const SIZE_EXEMPT = new Set(['src/ui/theme.ts'])   // the scale itself
-const HEX_EXEMPT = new Set(['src/ui/theme.ts', 'src/ui/mark.ts', 'src/lib/icons.ts'])
+// provider-marks.ts, 2026-09-25: Google's "G" and its sign-in button colours
+// are fixed by Google's brand rules, not by our scale, so they are drawn
+// verbatim in one file and nowhere else, the way the AgentBill mark is.
+const HEX_EXEMPT = new Set(['src/ui/theme.ts', 'src/ui/mark.ts', 'src/lib/icons.ts', 'src/ui/provider-marks.ts'])
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {

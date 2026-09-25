@@ -37,6 +37,7 @@ import { faqRoute } from './routes/faq.js'
 import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
 import { recoverRoute } from './routes/recover.js'
+import { authRoute } from './routes/auth.js'
 import { statusRoute } from './routes/status.js'
 import { securityRoute } from './routes/security.js'
 import { probeDb, startDbWatchdog } from './lib/db-watchdog.js'
@@ -264,6 +265,7 @@ app.register(faqRoute)
 app.register(aboutRoute)
 app.register(thanksRoute)
 app.register(recoverRoute)
+app.register(authRoute)
 app.register(statusRoute)
 app.register(securityRoute)
 app.register(heCostPerClientRoute)
