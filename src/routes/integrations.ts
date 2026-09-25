@@ -191,7 +191,8 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <p><b>Your agent host speaks MCP.</b> Connect it to <span class="inline">${MCP_URL}</span>: Claude and
   ChatGPT with a sign-in, Cursor and VS Code in one click, the rest with one command or a few lines
   of config, on the <a href="/integrations/mcp">MCP page</a>. The model gets a preflight tool it can
-  consult and read tools for where the units went. The model decides whether to call preflight, and it
+  consult and read tools for jobs, refusals and spend, in dollars at list price where a call was priced
+  and in the job's own unit where it counts units or tokens. The model decides whether to call preflight, and it
   does not limit the host's own model calls.</p>
   <p><b>Anything else.</b> <span class="inline">POST /preflight</span> with a Bearer key, before
   the call; <span class="inline">POST /events</span> after it. The whole contract is in the
@@ -833,7 +834,7 @@ except HookAborted as e:
     return reply.type('text/html').send(page(
       '/integrations/mcp',
       'Connect AgentBill over MCP: Claude, ChatGPT, Claude Code, Codex, Cursor, Antigravity',
-      'One URL, https://agentbill.dev/mcp. Connect Claude and ChatGPT with a sign-in, Cursor and VS Code in one click, Claude Code and Codex with one command. Tools for preflight, recording usage, and where the units went.',
+      'One URL, https://agentbill.dev/mcp. Connect Claude and ChatGPT with a sign-in, Cursor and VS Code in one click, Claude Code and Codex with one command. Tools for preflight, recording usage, and reading jobs, refusals and spend: dollars where priced, units where the job counts units.',
       `${mcpConnectBody()}
   ${cta('integrations-mcp')}
 `,

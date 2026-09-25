@@ -17,6 +17,7 @@ import {
   INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
 } from '../ui/steps.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
+import { rankOrderSql } from '../lib/task-rank.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
 import { usageByEventType, EVENT_TOKENS_SQL, type EventTypeUsage } from '../lib/usage.js'
@@ -820,7 +821,10 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; unit?: string; usageMissingCalls?: number; updatedAt: Date
                  firstSeen: Date | null; lastSeen: Date | null; preflights: number
                  usd?: number | null; pricedCalls?: number; calls?: number; tokens?: number; unpricedCalls?: number }
-type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
+// usedUnits and limitUnits count units and tokens, never a dollar job's
+// micro-dollars; usd is what the customer's priced calls cost at list price,
+// null when none is priced (2026-09-25).
+type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number; usd?: number | null; pricedCalls?: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
 // unit is the job's (task_budgets.unit, joined on task_ref), so a refusal on a
 // job counted in tokens says tokens. Absent for a call that named no job.
@@ -831,7 +835,7 @@ type DecisionRow = { agentId: string | null; taskRef: string | null; reason: str
 type FirstCall = { model: string; step: string | null; taskRef: string | null; tokens: number; usd: number | null; note: string | null; createdAt: Date }
 
 // Everything a page shows is here or derived from here. The in-period counts
-// (blocked, units metered, units refused) are sums over `series`, so a tile and
+// (blocked, units recorded, units refused) are sums over `series`, so a tile and
 // the chart beside it cannot disagree. `byReason` is the same window split by
 // rule. `overruns` is all time, because a leak does not stop mattering when
 // the window moves.
@@ -937,10 +941,15 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
   // leaves no per-task timestamp (events carry no task_ref; only a record
   // that lands past the ceiling leaves a decision row, with source 'events'),
   // which is why the row counts preflights and says preflight, not call.
-  const order = () => sort === 'used' ? sql`used_units DESC, updated_at DESC` : sql`updated_at DESC`
+  // Most used is the ranking GET /tasks?sort=used gives (src/lib/task-rank.ts):
+  // dollars first where a job has them, then tokens, then units, never one
+  // unit's number against another's. The outer query orders the page by the
+  // position the inner one gave it.
+  const order = () => sort === 'used' ? sql.unsafe(`${rankOrderSql('task_budgets')}, updated_at DESC`) : sql`updated_at DESC`
   const tasks = await sql`
     WITH page AS (
-      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls, updated_at
+      SELECT task_ref, agent_id, ceiling_units, used_units, reserved_units, unit, usage_missing_calls, unpriced_calls, updated_at,
+             row_number() OVER (ORDER BY ${order()}) AS pos
       FROM task_budgets
       WHERE account_id = ${accountId}
       ORDER BY ${order()}
@@ -968,13 +977,20 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
            cost.usd, coalesce(cost.priced_calls, 0) AS priced_calls, coalesce(cost.calls, 0) AS calls, coalesce(cost.tokens, 0) AS tokens
     FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
               LEFT JOIN cost ON cost.task_ref = page.task_ref
-    ORDER BY ${order()}
+    ORDER BY page.pos
   `
+  // Heaviest first by the list-price estimate where a customer has priced
+  // calls, then by units: the same honest order the tasks view uses, so a
+  // customer's micro-dollars never compete with another's tokens.
   const customers = await sql`
-    SELECT customer_ref, limit_units, used_units, reserved_units
-    FROM customers
-    WHERE account_id = ${accountId}
-    ORDER BY used_units DESC, created_at DESC
+    SELECT c.customer_ref, c.limit_units, c.used_units, c.reserved_units, e.usd::text AS usd, coalesce(e.priced, 0) AS priced_calls
+    FROM customers c
+    LEFT JOIN LATERAL (
+      SELECT sum(list_price_usd) AS usd, count(list_price_usd) AS priced
+      FROM events WHERE customer_id = c.id AND list_price_usd IS NOT NULL
+    ) e ON true
+    WHERE c.account_id = ${accountId}
+    ORDER BY e.usd DESC NULLS LAST, c.used_units DESC, c.created_at DESC
     LIMIT 20
   `
   const [ctotal] = await sql`
@@ -1052,7 +1068,7 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     taskCount: Number(ttotal?.n ?? 0),
     taskLive: Number(ttotal?.live ?? 0),
     taskNear: Number(ttotal?.near ?? 0),
-    customers: customers as unknown as CustomerRow[],
+    customers: (customers as unknown as CustomerRow[]).map((c) => ({ ...c, usd: Number(c.pricedCalls) > 0 ? Number(c.usd) : null, pricedCalls: Number(c.pricedCalls) })),
     customerCount: Number(ctotal?.n ?? 0),
     customerWithLimit: Number(ctotal?.withLimit ?? 0),
     customerTotal: Number(ctotal?.total ?? 0),
@@ -3002,6 +3018,12 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
     return `<div class="cv-empty"><p class="nothing">No customers yet. Pass <code>customer_id</code> on a preflight or record call and each of your end users gets an independent balance here.</p></div>`
   }
   const maxUsed = Math.max(1, ...rows.map((c) => Number(c.usedUnits)))
+  // Two kinds of number, two columns, never one sum (2026-09-25). Used, limit
+  // and left are the customer's balance in the units and tokens the code
+  // reported; a dollar job never moves them. Est. cost is what the customer's
+  // priced calls cost at list price, and it has no limit and no "left": a
+  // dollar job is bounded by its own ceiling, on the tasks view.
+  const priced = rows.some((c) => c.usd != null)
   const body = rows.map((c) => {
     const used = Number(c.usedUnits)
     const limit = c.limitUnits == null ? null : Number(c.limitUnits)
@@ -3015,15 +3037,16 @@ function customersTable(p: Page, rows: CustomerRow[], total: number, compact = f
     const status = atLimit ? '<span class="chip-no">at limit</span>' : tag('ok')
     return `<tr${atLimit ? ' class="is-no"' : ''}>
       <td class="id lead" title="${esc(c.customerRef)}">${esc(c.customerRef)}</td>
-      <td class="wide"><div class="share"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${Math.max(2, fill)}%"></i></div><span>${share}% of spend</span></div></td>
-      <td class="num" data-l="used">${num(used)}</td>
+      <td class="wide"><div class="share"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${Math.max(2, fill)}%"></i></div><span>${share}% of units</span></div></td>${priced ? `
+      <td class="num" data-l="est. cost"${c.usd != null ? ` title="${esc(LIST_PRICE_LABEL)}"` : ''}>${c.usd != null ? usd(c.usd) : '<span class="dim">no price</span>'}</td>` : ''}
+      <td class="num" data-l="units used" title="units and tokens your code reported, never dollars">${num(used)}</td>
       <td class="num" data-l="limit">${limit == null ? '<span class="dim">no limit</span>' : num(limit)}</td>
       <td class="num" data-l="left">${limit == null ? '<span class="dim">no limit</span>' : num(Math.max(0, limit - used))}</td>
       <td class="state">${status}</td>
     </tr>`
   }).join('')
   return frame(p, barOf('customer_id', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards">
-    <thead><tr><th>Customer</th><th>Share of spend${compact ? '' : ' · all customers'}</th><th class="num">Used</th><th class="num">Limit</th><th class="num">Left</th><th>State</th></tr></thead>
+    <thead><tr><th>Customer</th><th>Share of units${compact ? '' : ' · all customers'}</th>${priced ? '<th class="num">Est. cost</th>' : ''}<th class="num">Units used</th><th class="num">Limit</th><th class="num">Left</th><th>State</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`)
 }
@@ -3365,7 +3388,7 @@ function refusalsView(p: Page): string {
 
 function customersView(p: Page): string {
   return `${customersTable(p, p.d.customers, p.d.customerTotal)}
-    <p class="note">${p.d.customerCount > p.d.customers.length ? `The ${num(p.d.customers.length)} heaviest of ${num(p.d.customerCount)} customers.` : `${num(p.d.customerCount)} ${p.d.customerCount === 1 ? 'customer' : 'customers'}, heaviest first.`} Share is of every customer's lifetime spend on this account, including any not listed. The full list is on <code>GET /customers</code>.</p>`
+    <p class="note">${p.d.customerCount > p.d.customers.length ? `The ${num(p.d.customers.length)} heaviest of ${num(p.d.customerCount)} customers.` : `${num(p.d.customerCount)} ${p.d.customerCount === 1 ? 'customer' : 'customers'}, heaviest first.`} Heaviest is the list-price estimate where a customer has priced calls, then units. Units used, limit and left are each customer's lifetime balance in the units and tokens your code reported, and share is of every customer's units on this account, including any not listed. A job whose ceiling is in dollars never moves that balance: its spend is in Est. cost, at public list price over priced calls only, and it is bounded by its own ceiling, not by a customer limit. The full list is on <code>GET /customers</code>.</p>`
 }
 
 /** Every way into this account, and a button for each one it does not have. */

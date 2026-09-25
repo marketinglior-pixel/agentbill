@@ -624,7 +624,10 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
   (no model named, a model with no list price, usage missing) is never counted as $0: it is charged its
   reservation, or with none open the job's estimate, and counted in
   <span class="inline">unpriced_calls</span>. The reservation is exact, the estimate is not: a call bigger
-  than its estimate can land past the ceiling by the difference, and the next preflight is refused.</p>
+  than its estimate can land past the ceiling by the difference, and the next preflight is refused.
+  A dollar job never draws on a customer's balance: that balance, its limit and what is left of it
+  count the units and tokens your code reports, and a customer's unit limit does not refuse its dollar
+  job's calls. What a customer's calls cost is reported beside the balance, at list price, not in it.</p>
 
   <p>A ceiling cannot go under what the job has already spent plus what is reserved by calls in
   flight. That answers <span class="inline">409 ceiling_below_committed</span> with
@@ -642,7 +645,7 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td>agent_id</td><td>string <span class="tag">optional</span></td><td>Only the jobs that carry this agent label.</td></tr>
     <tr><td>limit</td><td>int <span class="tag">optional</span></td><td>1 to 200. Default: 50.</td></tr>
-    <tr><td>sort</td><td>string <span class="tag">optional</span></td><td><span class="inline">created</span> (the default): newest job first. <span class="inline">used</span>: the most <span class="inline">used_units</span> first, ties newest first, in the units your code reported. Any other value is a 422.</td></tr>
+    <tr><td>sort</td><td>string <span class="tag">optional</span></td><td><span class="inline">created</span> (the default): newest job first. <span class="inline">used</span>: most used first, and never one unit's number against another's. Jobs with a dollar figure come first, dearest first: a job in dollars by its own ledger, any other job by the list price of its priced calls. Then the jobs with none, tokens before units, each by its own <span class="inline">used_units</span>, ties newest first. An account whose jobs are all in units gets the order it always had. Any other value is a 422.</td></tr>
   </table>
 
   <div class="code"><pre>

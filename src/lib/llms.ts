@@ -624,8 +624,9 @@ as an overrun rather than as a save.
 
 Current state of a task budget: task_ref, agent_id, ceiling_units, used_units, reserved_units,
 remaining_units, exceeded, unit ("unit" or "token"), usage_missing_calls, created_at, updated_at. The list accepts agent_id, limit (default 50,
-max 200) and sort: created (the default, newest job first) or used (most used_units first, ties
-newest first). The single-task read also carries breakdown: calls, units and tokens by type, by_model and
+max 200) and sort: created (the default, newest job first) or used (most used first: jobs with a
+dollar figure at list price first, dearest first, then tokens, then units, each by its own used_units,
+ties newest first; numbers in different units are never compared). The single-task read also carries breakdown: calls, units and tokens by type, by_model and
 by_step, list_price_usd_estimate (the sum of the priced calls, null when none is priced, never 0),
 priced_calls and unpriced_calls with unpriced_reasons ("no list price for <model>"),
 price_versions, list_price_label ("list price, your invoice may differ"), and unattributed_units

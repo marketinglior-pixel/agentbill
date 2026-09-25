@@ -4267,9 +4267,13 @@ ok('[jobs] /docs documents GET /tasks?sort and GET /usage', docsNewJ.includes('<
 // list-price estimate of a job's priced calls, which is what the console
 // prints beside a job. That one phrase is allowed; any other money is not.
 const ALLOWED_MONEY_J = 'a dollar figure is the list-price estimate of the job\'s priced calls'
-const moneyCopyJ = newCopyJ.split(ALLOWED_MONEY_J).join(' ')
+// T3 follow-up, 2026-09-25: GET /tasks?sort=used ranks by dollars where a job
+// has them, and /docs says so in exactly this sentence; it is allowed, and
+// taken out before the check, like the tasks note's.
+const ALLOWED_RANK_J = "Jobs with a dollar figure come first, dearest first: a job in dollars by its own ledger, any other job by the list price of its priced calls."
+const moneyCopyJ = newCopyJ.split(ALLOWED_MONEY_J).join(' ').split(ALLOWED_RANK_J).join(' ')
 ok('[jobs] the new copy never says stop, block, kill, halt or cut off, and names money only as the list-price estimate',
-   newCopyJ.length > 400 && newCopyJ.includes(ALLOWED_MONEY_J) && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(moneyCopyJ),
+   newCopyJ.length > 400 && newCopyJ.includes(ALLOWED_MONEY_J) && newCopyJ.replace(/\s+/g, ' ').includes(ALLOWED_RANK_J) && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(moneyCopyJ),
    (moneyCopyJ.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/gi) ?? []).join(', '))
 // server.ts: the canonical-host redirect skips only paths on this list, and a cross-host
 // 301 drops the Authorization header, so a bearer GET missing from it breaks on the old host.

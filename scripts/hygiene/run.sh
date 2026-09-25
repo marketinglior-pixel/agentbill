@@ -132,6 +132,18 @@ n=$(node scripts/hygiene/start-samples.mjs)
 gate "start samples open the job the start screen describes" 0 "$n"
 
 
+# Retired copy, 2026-09-25. "Where the units went" shipped on /integrations/mcp's
+# meta description and JSON-LD after the console had moved to dollars, because
+# every sweep read the page body and none read the head. These phrases describe
+# a console that no longer exists (units as the headline, the three-step start
+# screen), so they may not appear in any source file a page is built from, nor,
+# when a server is up, anywhere in the RENDERED bytes of a public page: head,
+# meta, JSON-LD and body alike. Checked against a deliberate violation: the
+# phrase planted back into integrations.ts makes both gates fail.
+RETIRED='units went|where the units|units metered|how many units is this job worth|say what the job is worth, in units|three steps to your first refusal'
+n=$(grep -rniE "$RETIRED" src README.md mcp/README.md sdk/python/README.md sdk/node/README.md 2>/dev/null | wc -l | tr -d ' ')
+gate "no retired units copy in the sources" 0 "$n" "$(grep -rniE "$RETIRED" src README.md mcp/README.md sdk/python/README.md sdk/node/README.md 2>/dev/null | head -5)"
+
 # Every inline script the site emits must PARSE.
 #
 # This exists because /register's script did not, for one deploy. Lifting it
@@ -158,6 +170,17 @@ if curl -sf "$B/health" >/dev/null 2>&1; then
       printf "  FAIL  %-46s no inline script found\n" "$path"; fail=1
     fi
   done
+  # The same retired phrases, in what the server actually sends: every page on
+  # the sitemap, the two llms files and the sample console, raw, head included.
+  paths="$(curl -s "$B/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*>//g; s#^https://agentbill.dev##; s#^$#/#') /llms.txt /llms-full.txt /app?demo=1 /app?demo=1&view=activity"
+  hits=""; count=0
+  for p in $paths; do
+    h=$(curl -s "$B$p" | grep -oiE "$RETIRED" | head -1)
+    [ -n "$h" ] && { hits="$hits $p:\"$h\""; count=$((count+1)); }
+  done
+  pages=$(printf '%s\n' $paths | wc -l | tr -d ' ')
+  if [ "$pages" -lt 20 ]; then printf "  FAIL  %-46s only %s pages read\n" "no retired units copy, rendered" "$pages"; fail=1
+  else gate "no retired units copy, rendered ($pages pages)" 0 "$count" "$hits"; fi
 elif [ -n "${HYGIENE_BASE:-}" ]; then
   # A base was named and is not answering: in CI that is a broken job, not a skip.
   printf "  FAIL  %-46s no server on %s\n" "inline script parse check" "$B"; fail=1
