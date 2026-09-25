@@ -46,7 +46,21 @@ fi
 # Dependency order matters: the numbered migrations build on the loose ones.
 # The list lives in schema-files.sh, shared with alter-under-load.sh.
 SCHEMA_FILES="$("$ROOT/scripts/preflight/schema-files.sh")"
+# A key that exists BEFORE 026, 2026-09-25 (security batch B): seeded in the
+# old shape (api_key alone) just before 026 is applied, the way every key in
+# production exists when 026 runs, so 026's backfill is what gives it a hash.
+# The [keyhash pre] gates then log in with it on every path.
+PRE_026_ACCOUNT="00000000-0000-0000-0000-00000000026a"
+PRE_026_KEY="agb_026a026a026a026a026a026a026a026a026a026a026a026a"
 while IFS= read -r f; do
+  if [ "$(basename "$f")" = "026_add_api_key_hash.sql" ]; then
+    psql <<SQL >/dev/null
+INSERT INTO accounts (id, plan, email, monthly_calls, billing_period_start)
+VALUES ('$PRE_026_ACCOUNT', 'free', 'keyhash-before-026@example.invalid', 0, date_trunc('month', CURRENT_DATE)::date)
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO developer_api_keys (account_id, api_key, label) VALUES ('$PRE_026_ACCOUNT', '$PRE_026_KEY', 'before-026');
+SQL
+  fi
   psql < "$f" >/dev/null
 done <<< "$SCHEMA_FILES"
 echo "schema + migrations applied ($(printf '%s\n' "$SCHEMA_FILES" | wc -l | tr -d ' ') files)"
@@ -55,10 +69,22 @@ psql <<SQL >/dev/null
 INSERT INTO accounts (id, plan, default_budget_units, monthly_calls, billing_period_start)
 VALUES ('$ACCOUNT_ID', 'free', NULL, 0, date_trunc('month', CURRENT_DATE)::date)
 ON CONFLICT (id) DO UPDATE SET plan='free', monthly_calls=0, default_budget_units=NULL;
-INSERT INTO developer_api_keys (account_id, api_key, label)
-VALUES ('$ACCOUNT_ID', '$API_KEY', 'preflight-verify')
+INSERT INTO developer_api_keys (account_id, api_key, key_hash, key_prefix, key_last4, label)
+VALUES ('$ACCOUNT_ID', '$API_KEY', encode(sha256(convert_to('$API_KEY', 'UTF8')), 'hex'), left('$API_KEY', 8), right('$API_KEY', 4), 'preflight-verify')
 ON CONFLICT DO NOTHING;
 SQL
+
+# The second pass, 2026-09-25 (security batch B): APPLY_LATER=1 also applies
+# src/db/migrations-later/ (027, which scrubs the plaintext api_key), after the
+# seed so the seeded row is one 027 has to scrub, and the whole suite runs
+# against a table with no plaintext in it. Those files are never part of the
+# chain above: each needs its own approval on production.
+if [ "${APPLY_LATER:-}" = "1" ]; then
+  for f in "$ROOT"/src/db/migrations-later/*.sql; do
+    psql < "$f" >/dev/null
+  done
+  echo "later migrations applied too: $(cd "$ROOT/src/db/migrations-later" && ls *.sql | tr '\n' ' ')"
+fi
 
 (cd "$ROOT" && npm run build --silent)
 
@@ -113,6 +139,7 @@ for _ in $(seq 1 30); do
 done
 
 DATABASE_SSL=disable API_BASE="http://localhost:$PORT" API_KEY="$API_KEY" ACCOUNT_ID="$ACCOUNT_ID" \
-  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" SERVER_LOG="$SERVER_LOG" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" ADMIN_SECRET="$ADMIN_SECRET" SERVER_LOG="$SERVER_LOG" APPLY_LATER="${APPLY_LATER:-}" \
+  PRE_026_KEY="$PRE_026_KEY" PRE_026_ACCOUNT="$PRE_026_ACCOUNT" \
   OAUTH_TEST_BASE="$OAUTH_TEST_BASE" MAIL_TEST_OUTBOX="$MAIL_TEST_OUTBOX" \
   node "$ROOT/scripts/preflight/verify.mjs"

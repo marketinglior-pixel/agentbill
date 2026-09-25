@@ -13,7 +13,9 @@
 // reserved counter equals the sum of its open reservation rows.
 import postgres from 'postgres'
 import { spawn } from 'node:child_process'
-import { openSync } from 'node:fs'
+import { openSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { applyMigration } from '../db/apply-migration.mjs'
 
@@ -34,6 +36,16 @@ const ALTER_WORKERS = Number(process.env.ALTER_WORKERS ?? 6)
 const REQUEST_TIMEOUT_MS = 10_000
 const SERVER_LOG = '/tmp/agentbill-alter-server.log'
 if (!process.env.DATABASE_URL || !ALTER_FILE) throw new Error('DATABASE_URL and ALTER_FILE are required; run alter-under-load.sh')
+// 'bigint' is 016's rehearsal (the ALTER ... TYPE window). 'keyhash' is 026's,
+// 2026-09-25: the previous build serves while it runs and keeps minting keys,
+// and the new build is started afterwards as the deploy.
+const PROFILE = /\/026_[^/]*$/.test(ALTER_FILE) ? 'keyhash' : 'bigint'
+const NEW_JS = `${ROOT}dist/server.js`
+const OLD_JS = process.env.OLD_SERVER_JS || null
+if (PROFILE === 'keyhash' && !OLD_JS) throw new Error('026 is rehearsed with the previous build serving: set OLD_SERVER_JS (alter-under-load.sh does)')
+const PLANT_NO_TRIGGER = process.env.PLANT_NO_TRIGGER === '1'
+const sha = (k) => createHash('sha256').update(k, 'utf8').digest('hex')
+const MINTED = []
 
 let pass = 0, fail = 0
 const ok = (name, cond, detail = '') => {
@@ -44,14 +56,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // ---------------------------------------------------------------- the server
 const logFd = openSync(SERVER_LOG, 'a')
 const running = new Set()
-async function startServer(extraEnv) {
+async function startServer(extraEnv, js = NEW_JS) {
   // Nothing may already answer on the port. A server left over from an
   // earlier run answers /health too, against ITS database, and the whole
   // rehearsal would pass against the wrong server (it did once, 2026-09-23:
   // 0 event rows here for 1,986 records answered).
   const stale = await fetch(`${API}/health`).then(() => true).catch(() => false)
   if (stale) throw new Error(`something already answers on ${API}; stop it first (lsof -nP -iTCP:${PORT} -sTCP:LISTEN)`)
-  const child = spawn(process.execPath, [`${ROOT}dist/server.js`], {
+  const child = spawn(process.execPath, [js], {
     env: {
       ...process.env, PORT: String(PORT), NODE_ENV: 'test', DATABASE_SSL: 'disable',
       RATE_LIMIT_PER_MINUTE: '1000000', APP_SESSION_SECRET: 'alter-under-load-session-secret',
@@ -100,6 +112,7 @@ const call = async (kind, method, path, body, want) => {
 }
 
 let seq = 0
+let phase = 'warm'
 // One unit of work: the calls a real client makes around one job step, and
 // the reads a console makes. Every route that reads or writes a unit column.
 async function cycle(w) {
@@ -130,6 +143,13 @@ async function cycle(w) {
     () => call('task-put', 'PUT', `/tasks/${job}/ceiling`, { ceiling_units: 1_000_000_000 }, [200]),
   ]
   out.push(await reads[n % reads.length]())
+  // 026: a key minted by whichever build is serving, every eighth cycle. Before
+  // the deploy that is the previous build, which writes only api_key.
+  if (PROFILE === 'keyhash' && n % 8 === 0) {
+    const g = await call('keys-generate', 'POST', '/keys/generate', { label: `alter-mint-${n}` }, [200])
+    if (typeof g.json?.api_key === 'string') MINTED.push({ key: g.json.api_key, at: phase })
+    out.push(g)
+  }
   return out
 }
 
@@ -165,7 +185,9 @@ process.on('exit', () => { for (const c of running) if (c.exitCode === null) c.k
 process.on('uncaughtException', (e) => { console.error(e); process.exit(1) })
 process.on('unhandledRejection', (e) => { console.error(e); process.exit(1) })
 const windowEnv = PLANT ? {} : { DATABASE_PREPARE: 'false' }
-console.log(`\n[alter] ${ALTER_FILE.split('/').pop()} under load (${ALTER_WORKERS} workers during, ${WORKERS} around it), window ${PLANT ? 'SKIPPED (planted break: prepared statements kept across the ALTER)' : 'open (DATABASE_PREPARE=false)'}`)
+console.log(PROFILE === 'keyhash'
+  ? `\n[alter 026] ${ALTER_FILE.split('/').pop()} under load (${ALTER_WORKERS} workers during, ${WORKERS} around it), the PREVIOUS build serving with prepared statements ON, no window${PLANT_NO_TRIGGER ? '  (planted break: 026 without its fill trigger)' : ''}`
+  : `\n[alter] ${ALTER_FILE.split('/').pop()} under load (${ALTER_WORKERS} workers during, ${WORKERS} around it), window ${PLANT ? 'SKIPPED (planted break: prepared statements kept across the ALTER)' : 'open (DATABASE_PREPARE=false)'}`)
 
 const db = postgres(process.env.DATABASE_URL, { ssl: false, max: 1, onnotice: () => {} })
 const UNIT_COLUMNS = [
@@ -179,12 +201,22 @@ const columnTypes = async () => {
     WHERE table_schema = current_schema()`
   return UNIT_COLUMNS.map(([t, c]) => rows.find((r) => r.table_name === t && r.column_name === c)?.data_type)
 }
-ok('[alter] before: the unit columns are still INTEGER (the rehearsal starts from production\'s state)', (await columnTypes()).every((t) => t === 'integer'), JSON.stringify(await columnTypes()))
+const keyColumns = async () => (await db`
+  SELECT column_name, is_nullable FROM information_schema.columns
+  WHERE table_schema = current_schema() AND table_name = 'developer_api_keys' AND column_name IN ('key_hash', 'key_prefix', 'key_last4')
+  ORDER BY column_name`)
+if (PROFILE === 'bigint') {
+  ok('[alter] before: the unit columns are still INTEGER (the rehearsal starts from production\'s state)', (await columnTypes()).every((t) => t === 'integer'), JSON.stringify(await columnTypes()))
+} else {
+  ok('[alter 026] before: developer_api_keys has no key_hash column yet (the rehearsal starts from production\'s state)', (await keyColumns()).length === 0, JSON.stringify(await keyColumns()))
+}
 
-let server = await startServer(windowEnv)
+// 026 needs no window: the previous build serves, with prepared statements on.
+let server = PROFILE === 'keyhash' ? await startServer({}, OLD_JS) : await startServer(windowEnv)
 const warm = await burst(3)
 ok('[alter] warm: the pool serves the mix before the ALTER', summary(warm).bad === 0, JSON.stringify(summary(warm)))
 
+phase = 'during'
 const load = loadUntil(ALTER_WORKERS)
 await sleep(1_000)
 let migrated = null
@@ -192,7 +224,15 @@ const alterStarted = Date.now()
 const retries = []
 try {
   // The runner the deploy step uses, retrying when its locks are busy.
-  const r = await applyMigration(process.env.DATABASE_URL, ALTER_FILE, { log: (m) => retries.push(m) })
+  // The planted break for 026: the same file without its fill trigger.
+  let file = ALTER_FILE
+  if (PLANT_NO_TRIGGER) {
+    const text = readFileSync(ALTER_FILE, 'utf8').replace(/DROP TRIGGER IF EXISTS developer_api_keys_fill_hash[\s\S]*?EXECUTE FUNCTION developer_api_keys_fill_hash\(\);/, '-- planted: no trigger')
+    if (text === readFileSync(ALTER_FILE, 'utf8')) throw new Error('PLANT_NO_TRIGGER found no trigger to strip')
+    file = `${mkdtempSync(`${tmpdir()}/alter-plant-`)}/026_planted.sql`
+    writeFileSync(file, text)
+  }
+  const r = await applyMigration(process.env.DATABASE_URL, file, { log: (m) => retries.push(m) })
   migrated = { ms: Date.now() - alterStarted, attempts: r.attempts }
 } catch (e) {
   migrated = { error: `${e.code ?? ''} ${e.message}` }
@@ -205,16 +245,48 @@ for (const m of retries.slice(0, -1)) console.log(`        ${m}`)
 ok('[alter] the migration commits under load (retrying only lock_timeout / deadlock, which change nothing)', !migrated.error, migrated.error ?? '')
 ok('[alter] during: every request made while the ALTER ran was answered, none 5xx, none left open', summary(during).bad === 0 && during.length > ALTER_WORKERS * 3,
    JSON.stringify(summary(during)))
+const slowest = during.reduce((m, r) => Math.max(m, r.ms), 0)
+console.log(`        slowest request during the migration: ${slowest} ms`)
+phase = 'after'
 const after = await burst(2)
 ok('[alter] after: the same pool, once the ALTER committed, answers every request', summary(after).bad === 0, JSON.stringify(summary(after)))
-ok('[alter] every unit column is BIGINT', (await columnTypes()).every((t) => t === 'bigint'), JSON.stringify(await columnTypes()))
+if (PROFILE === 'bigint') {
+  ok('[alter] every unit column is BIGINT', (await columnTypes()).every((t) => t === 'bigint'), JSON.stringify(await columnTypes()))
+} else {
+  const cols = await keyColumns()
+  ok('[alter 026] key_hash, key_prefix and key_last4 exist and are NOT NULL', cols.length === 3 && cols.every((c) => c.is_nullable === 'NO'), JSON.stringify(cols))
+  const [bad] = await db`
+    SELECT count(*)::int AS n FROM developer_api_keys
+    WHERE key_hash IS DISTINCT FROM encode(sha256(convert_to(api_key, 'UTF8')), 'hex')
+       OR key_prefix IS DISTINCT FROM left(api_key, 8) OR key_last4 IS DISTINCT FROM right(api_key, 4)`
+  ok('[alter 026] every row, the ones the previous build minted during and after the migration too, has the hash of its own key', bad.n === 0, `${bad.n} rows`)
+  ok('[alter 026] no request waited on the migration for more than 2 s', slowest < 2_000, `${slowest} ms`)
+}
 
 // The window closes: the secret is unset, the machines restart, and prepared
-// statements are back, prepared against the new types.
+// statements are back, prepared against the new types. For 026 this is the
+// deploy: the new build replaces the previous one.
 await stopServer(server)
+phase = 'closed'
 server = await startServer({})
 const closed = await burst(2)
-ok('[alter] closed: restarted with prepared statements on, every request is answered', summary(closed).bad === 0, JSON.stringify(summary(closed)))
+ok(`[alter] closed: ${PROFILE === 'keyhash' ? 'the new build deployed' : 'restarted with prepared statements on'}, every request is answered`, summary(closed).bad === 0, JSON.stringify(summary(closed)))
+if (PROFILE === 'keyhash') {
+  const oldMints = MINTED.filter((m) => m.at !== 'closed')
+  const statuses = []
+  for (const m of oldMints) {
+    const r = await fetch(`${API}/keys`, { headers: { Authorization: `Bearer ${m.key}` } }).catch(() => null)
+    statuses.push(r ? r.status : 'network')
+    const body = r ? await r.json().catch(() => ({})) : {}
+    if (JSON.stringify(body).match(/agb_[0-9a-f]{48}/)) statuses.push('LEAK')
+  }
+  const byPhase = oldMints.reduce((a, m) => ({ ...a, [m.at]: (a[m.at] ?? 0) + 1 }), {})
+  console.log(`        keys the previous build minted: ${JSON.stringify(byPhase)}`)
+  ok('[alter 026] on the new build, every key the previous build minted (before, during and after the migration) authenticates, and GET /keys shows none of them',
+     oldMints.length > 0 && (byPhase.during ?? 0) > 0 && (byPhase.after ?? 0) > 0 && statuses.every((s) => s === 200), `${JSON.stringify(byPhase)} ${JSON.stringify([...new Set(statuses)])}`)
+  const seed = await fetch(`${API}/keys`, { headers: { Authorization: `Bearer ${KEY}` } }).then((r) => r.status)
+  ok('[alter 026] and so does the key that existed before the migration', seed === 200, `${seed}`)
+}
 
 const custDrift = await db`
   SELECT c.customer_ref, c.reserved_units::text AS counter, COALESCE(SUM(r.units), 0)::text AS open_rows
@@ -234,5 +306,5 @@ ok('[alter] and every record that answered 200 is one event row', stray === reco
 
 await stopServer(server)
 await db.end()
-console.log(`\n${pass} passed, ${fail} failed${PLANT ? '  (planted break: this run is expected to fail)' : ''}`)
+console.log(`\n${pass} passed, ${fail} failed${PLANT || PLANT_NO_TRIGGER ? '  (planted break: this run is expected to fail)' : ''}`)
 process.exit(fail === 0 ? 0 : 1)

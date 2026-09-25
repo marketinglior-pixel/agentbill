@@ -11,6 +11,7 @@
 // Called from verify.mjs with its `ok`, its database handle and its boot
 // helpers. Every network is its own fly-client-ip, so the per-network limits
 // under test never meet each other or the rest of the harness.
+import { keyHash, insertKeyRow } from './key-fixture.mjs'
 import { readFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
@@ -146,7 +147,7 @@ async function gates({ API, sql, ok, bootS, stopS, portS, serverLog, legacyKey, 
        && (bad.headers.get('www-authenticate') ?? '').includes('error="invalid_token"'),
      [bad, junk, fakeAt].map((r) => r.status).join(','))
   const revokedKey = 'agb_' + createHash('sha256').update('mcp-revoked-' + rnd()).digest('hex').slice(0, 48)
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label, revoked_at) VALUES (${legacyAccount}, ${revokedKey}, 'mcp-revoked', now() - INTERVAL '1 minute')`
+  await insertKeyRow(sql, legacyAccount, revokedKey, 'mcp-revoked', { revokedAt: sql`now() - INTERVAL '1 minute'` })
   const rk = await rpc(revokedKey, 'tools/list')
   ok('[mcp] a revoked API key is refused: 401 key_revoked, through the same function the REST API uses',
      rk.status === 401 && rk.json?.error === 'key_revoked', `${rk.status} ${rk.text.slice(0, 80)}`)
@@ -395,7 +396,7 @@ async function gates({ API, sql, ok, bootS, stopS, portS, serverLog, legacyKey, 
   const job = `mcp-job-${rnd()}`
   const open = await call(tA.access_token, 'preflight', { agent_id: 'gate', task_ref: job, task_ceiling: 10, estimated_units: 8 })
   const restKey = 'agb_' + createHash('sha256').update('mcp-rest-' + rnd()).digest('hex').slice(0, 48)
-  await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${personA.accountId}, ${restKey}, 'mcp-parity')`
+  await insertKeyRow(sql, personA.accountId, restKey, 'mcp-parity')
   const rest = await fetch(`${API}/preflight`, { method: 'POST', headers: { Authorization: `Bearer ${restKey}`, 'Content-Type': 'application/json', ...newNet() },
     body: JSON.stringify({ agent_id: 'gate', task_ref: job, estimated_units: 5 }) }).then((r) => r.json())
   const [heldBefore] = await sql`SELECT reserved_units, used_units FROM task_budgets WHERE account_id = ${personA.accountId} AND task_ref = ${job}`
