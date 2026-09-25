@@ -443,7 +443,7 @@ async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, 
   const kl = await fetch(`${API}/app/session`, { method: 'POST', redirect: 'manual', headers: { ...FORM, cookie: back.user }, body: `api_key=${legacyKey}` })
   const klHome = await console_(cookieVal(kl, 'agentbill_app'))
   ok('[auth] the legacy key login still works: 303 to /app, the key cookie set, any person\'s session in that browser cleared, and the console reads as the key',
-     kl.status === 303 && kl.headers.get('location') === '/app' && /^agentbill_app=[0-9a-f-]{36}\./.test(cookieVal(kl, 'agentbill_app'))
+     kl.status === 303 && kl.headers.get('location') === '/app' && /^agentbill_app=v2\.[0-9a-f-]{36}\.\d+\.\d+\.[0-9a-f]{64}$/.test(cookieVal(kl, 'agentbill_app'))
        && cookiesOf(kl).some((c) => /^agentbill_user=;.*Max-Age=0/.test(c)) && klHome.includes('Signed in with a key'))
   const klLogin = await fetch(`${API}/app`).then((r) => r.text())
   ok('[auth] and the console\'s sign-in card still offers it, beside the ways in', klLogin.includes('action="/app/session"') && klLogin.includes('name="api_key"') && klLogin.includes('action="/auth/email"'))

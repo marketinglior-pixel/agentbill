@@ -9,11 +9,14 @@
 //                (migration 029, src/lib/plan-period.ts); the checkout is
 //                minted for the signed-in session's account only, never for
 //                an account id in a URL.
+//   [S17 logout] logging out of a key session ends it on the server
+//                (migration 030): a copy of the cookie is dead after it.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
 import { insertKeyRow } from './key-fixture.mjs'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -22,7 +25,7 @@ import { createServer } from 'node:http'
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -454,4 +457,73 @@ async function paymentsGates({ API, sql, ok, bootS, stopS, portS }) {
   const pf = await pre()
   ok('[S24 payments] a quota refusal\'s upgrade_url is /pricing, with no account id in it', pf.upgrade_url === 'https://agentbill.dev/pricing', JSON.stringify(pf))
   await sql`DELETE FROM accounts WHERE id = ${P}`
+}
+
+// ------------------------------------------------------------------ S17
+async function logoutGates({ API, sql, ok, bootS, stopS, portS }) {
+  const K = '00000000-0000-0000-0000-0000000017a1'
+  const KK = shaped('batchc-logout')
+  const NET = { 'fly-client-ip': '198.18.17.1' }
+  await sql`DELETE FROM accounts WHERE id = ${K}`
+  await sql`INSERT INTO accounts (id, plan) VALUES (${K}, 'free')`
+  await insertKeyRow(sql, K, KK, 'harness-batchc-logout')
+  const [{ id: keyId }] = await sql`SELECT id FROM developer_api_keys WHERE account_id = ${K}`
+  const FORM = { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', ...NET }
+  const login = async (base = API) => {
+    const r = await fetch(`${base}/app/session`, { method: 'POST', redirect: 'manual', headers: FORM, body: `api_key=${KK}` })
+    return (r.headers.getSetCookie().find((c) => c.startsWith('agentbill_app=')) ?? '').split(';')[0]
+  }
+  const signedIn = async (cookie, base = API) => (await fetch(`${base}/app`, { headers: { cookie } }).then((r) => r.text())).includes('Signed in with a key')
+  const logout = (cookie, base = API) => fetch(`${base}/app/logout`, { method: 'POST', redirect: 'manual', headers: { ...FORM, cookie } })
+  const epoch = async () => (await sql`SELECT session_epoch FROM developer_api_keys WHERE id = ${keyId}`)[0].sessionEpoch
+
+  const c1 = await login()
+  const copy = c1   // the same cookie, taken to another device before the logout
+  const other = await login()   // a second browser, same key
+  ok('[S17 logout] a key login mints a v2 cookie carrying the key\'s epoch (0), and it opens the console',
+     /^agentbill_app=v2\.[0-9a-f-]{36}\.0\.\d+\.[0-9a-f]{64}$/.test(c1) && await signedIn(c1) && await signedIn(other), c1.slice(0, 60))
+  const out = await logout(c1)
+  ok('[S17 logout] logout: 303, both cookies cleared in this browser, and the key\'s session_epoch moves to 1',
+     out.status === 303 && out.headers.getSetCookie().some((c) => /^agentbill_app=;.*Max-Age=0/.test(c)) && await epoch() === 1, `${out.status} epoch ${await epoch()}`)
+  ok('[S17 logout] a COPY of the cookie taken before the logout opens nothing, and neither does the other browser signed in with the same key',
+     !(await signedIn(copy)) && !(await signedIn(other)))
+  const c2 = await login()
+  ok('[S17 logout] signing in again works (a cookie at epoch 1), and the old copy stays dead', c2.includes('.1.') && await signedIn(c2) && !(await signedIn(copy)))
+  await logout(copy)
+  ok('[S17 logout] a logout sent with the dead copy changes nothing: the epoch stays 1 and the new session stays open', await epoch() === 1 && await signedIn(c2), `epoch ${await epoch()}`)
+
+  // A cookie in the old shape (<keyId>.<exp>.<mac>), minted before this
+  // commit with the harness server's secret: epoch 0, until the next logout.
+  const secret = (readFileSync(new URL('./run.sh', import.meta.url), 'utf8').match(/APP_SESSION_SECRET="([^"]+)"/) ?? [])[1]
+  const exp = Math.floor(Date.now() / 1000) + 3600
+  const legacy = (id) => `agentbill_app=${id}.${exp}.${createHmac('sha256', secret).update(`${id}.${exp}`).digest('hex')}`
+  await sql`UPDATE developer_api_keys SET session_epoch = 0 WHERE id = ${keyId}`
+  const old = legacy(keyId)
+  const oldBefore = await signedIn(old)
+  await logout(await login())
+  ok('[S17 logout] a cookie in the pre-030 shape is read as epoch 0: it opened the console, and after the key\'s next logout it is dead',
+     Boolean(secret) && oldBefore === true && !(await signedIn(old)), `secret ${Boolean(secret)} before ${oldBefore}`)
+  // The attack a MAC without the epoch would allow: keep a copy, let its
+  // owner log out, then edit the copy's epoch forward to the row's new value.
+  const kept = await login()
+  const keptEpoch = Number((kept.match(/^agentbill_app=v2\.[0-9a-f-]{36}\.(\d+)\./) ?? [])[1])
+  await logout(kept)
+  const forged = kept.replace(/^(agentbill_app=v2\.[0-9a-f-]{36}\.)\d+/, `$1${keptEpoch + 1}`)
+  const fresh = await login()
+  ok('[S17 logout] a dead copy with its epoch edited forward to the key\'s new epoch is refused (the MAC covers the epoch), while a real new session opens',
+     Number.isInteger(keptEpoch) && await epoch() === keptEpoch + 1 && forged !== kept && !(await signedIn(forged)) && await signedIn(fresh), `kept at ${keptEpoch}, row ${await epoch()}`)
+
+  // The production path: NODE_ENV=production, no harness setting in play.
+  const LONG = 'batchc-production-session-secret-0123456789'
+  const prod = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG }, portS)
+  const PB = `http://localhost:${portS}`
+  try {
+    const p1 = await login(PB)
+    const pcopy = p1
+    const before = await signedIn(p1, PB)
+    const pout = await logout(p1, PB)
+    ok('[S17 logout] production: sign in with the key, log out, and the copied cookie opens nothing',
+       before && pout.status === 303 && !(await signedIn(pcopy, PB)), `${before} ${pout.status}`)
+  } finally { await stopS(prod) }
+  await sql`DELETE FROM accounts WHERE id = ${K}`
 }
