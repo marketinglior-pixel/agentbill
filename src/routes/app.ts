@@ -171,7 +171,7 @@ export async function appRoute(app: FastifyInstance) {
 
     // The same 100/min bucket the API applies to this key, so the console is
     // not a less-limited path to the same table than the endpoint.
-    if (!checkRateLimit(viewer.apiKey).allowed) return fail('rate')
+    if (!checkRateLimit(viewer.keyId).allowed) return fail('rate')
     if (!isId(ref)) return fail('ref')
     if (agent && !isId(agent)) return fail('agent')
     // Digits only, then the int4 bound the column and the API both enforce.
@@ -199,7 +199,7 @@ export async function appRoute(app: FastifyInstance) {
     if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
     const viewer = await loadSession(request)
     if (!viewer) return reply.code(401).send({ error: 'unauthorized', message: 'Sign in to the console first.' })
-    if (!checkRateLimit(viewer.apiKey).allowed) return reply.code(429).send({ error: 'rate_limited' })
+    if (!checkRateLimit(viewer.keyId).allowed) return reply.code(429).send({ error: 'rate_limited' })
     const parsed = ProfileBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(422).send({
@@ -433,6 +433,21 @@ export function sameOrigin(request: FastifyRequest): boolean {
     try { return new URL(origin).host === request.host } catch { return false }
   }
   return true
+}
+
+/**
+ * Stricter than sameOrigin(): true only when the browser SAID the request is
+ * same-origin, by Sec-Fetch-Site or by an Origin that matches this host. A
+ * request with neither header (curl, an SDK) is allowed through sameOrigin()
+ * because it cannot be a cross-site form, but it is not proven to come from
+ * our own page either, so nothing that signs a browser in is handed to it.
+ */
+export function provenSameOrigin(request: FastifyRequest): boolean {
+  const sfs = request.headers['sec-fetch-site']
+  if (typeof sfs === 'string') return sfs === 'same-origin'
+  const origin = request.headers.origin
+  if (typeof origin !== 'string') return false
+  try { return new URL(origin).host === request.host } catch { return false }
 }
 
 function allowLogin(ip: string): boolean {
