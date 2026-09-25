@@ -200,7 +200,7 @@ ${UPGRADE_JS}`}
          invoice. Four other surfaces say so in as many words (/ "units refused is not money",
          /about, /docs, /faq), so the sentence directly under the checkout box contradicted
          the rest of the site. Retired 2026-09-14. Do not replace it with another dollar line. -->
-    <p class="note">No key yet? <a href="/register">Create a free API key</a> in 30 seconds.</p>
+    <p class="note">No key yet? <a href="/register">Create a free account</a>: sign up, and the console makes your key.</p>
   </div>
 </main>
 ${siteFooter()}

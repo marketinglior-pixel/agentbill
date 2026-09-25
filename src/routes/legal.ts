@@ -120,7 +120,10 @@ export async function legalRoute(app: FastifyInstance) {
     <h2>1. What we collect</h2>
     <ul>
       <li><strong>Account data</strong>: email, optional name, optional answers about your use case
-      and stack, collected when you register.</li>
+      and stack, collected when you register. If you sign in with Google or GitHub, also the account
+      id that provider gives us for you and the verified email address it returns; we ask Google for
+      your email and basic profile and GitHub for your profile and email addresses, and keep only the
+      id and the one verified address.</li>
       <li><strong>Usage data</strong>: API calls your integration makes to AgentBill (agent ids,
       budgets, costs, timestamps, and the IP address a key is used from, used for security
       alerts).</li>

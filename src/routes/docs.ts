@@ -66,7 +66,7 @@ const quickStartLd = {
       '@type': 'HowToStep',
       position: 1,
       name: 'Step 1, Get your API key',
-      text: 'Register at agentbill.dev/register, free, no credit card. Your key starts with agb_, it is shown once and never emailed, and the screen hands you a filled-in export AGENTBILL_API_KEY= line to copy.',
+      text: 'Sign up at agentbill.dev/register with Google, GitHub or an email link, free, no credit card. The console makes your key on its start screen. It starts with agb_, it is shown once and never emailed, and the screen hands you a filled-in export AGENTBILL_API_KEY= line to copy.',
       url: `${ORIGIN}/docs#step-api-key`,
     },
     {
@@ -114,11 +114,11 @@ export async function docsRoute(app: FastifyInstance) {
   <h2>Quick Start, 2 minutes</h2>
 
   <h3 id="step-api-key">Step 1, Get your API key</h3>
-  <p>Register at <a href="/register">agentbill.dev/register</a>, free, no credit card. Your key starts
-  with <span class="inline">agb_</span>, it is shown once and never emailed, and the screen hands you
-  a filled-in <span class="inline">export AGENTBILL_API_KEY=</span> line to copy. The button under it
-  signs this tab into <a href="/app">the console</a>. Lost it? <a href="/recover">/recover</a> shows
-  that line again to whoever can read the email you registered with.</p>
+  <p>Sign up at <a href="/register">agentbill.dev/register</a> with Google, GitHub or a one-time link
+  by email, free, no credit card. Signing in opens <a href="/app">the console</a>, and its start screen
+  makes your key: it starts with <span class="inline">agb_</span>, it is shown once and never emailed,
+  and the screen hands you a filled-in <span class="inline">export AGENTBILL_API_KEY=</span> line to
+  copy. No key is issued before your address is verified.</p>
 
   <h3 id="step-ceiling">Step 2, Give the job a ceiling</h3>
   <p>Name the job and say what it is worth, on the console's start screen or with

@@ -76,7 +76,7 @@ def test_invalid_key_raises_authentication_error_with_the_servers_message(monkey
     assert "Invalid API key." in text            # the server's sentence, verbatim
     assert "(unauthorized)" in text              # the server's reason enum
     assert "agb_" in text                        # what a real key looks like
-    assert "agentbill.dev/register" in text      # where it was shown
+    assert "agentbill.dev/login" in text         # where the console is
     assert "agentbill.dev/recover" in text       # the way back in
     assert isinstance(e, AgentBillError)         # an existing except clause still catches it
     assert "blocked" not in text and "Refused" not in text   # a 401 is not a refusal
