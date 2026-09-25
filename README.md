@@ -50,7 +50,7 @@ pip install agentbill-sdk
 npm install agentbill
 ```
 
-Get an API key: https://agentbill.dev/register. Free, no card. Both SDKs default to `https://agentbill.dev`. `https://agentbill.fly.dev` serves the same application and keeps working, which is what SDKs published before 2026-09-15 still call.
+Get an API key: https://agentbill.dev/register. Sign up with Google, GitHub or an email link, and the console makes the key and shows it once. Free, no card. Both SDKs default to `https://agentbill.dev`. `https://agentbill.fly.dev` serves the same application and keeps working, which is what SDKs published before 2026-09-15 still call.
 
 ## Quick Start
 

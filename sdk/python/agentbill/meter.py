@@ -77,7 +77,7 @@ class AuthenticationError(AgentBillError):
 
         AuthenticationError: AgentBill rejected the API key (unauthorized):
         Invalid API key. Check the key you are sending: it starts with agb_
-        and was shown once at https://agentbill.dev/register. ...
+        and was shown once, when it was made. ...
 
     `error` is the server's reason: unauthorized, key_revoked or key_expired.
     `message` is the server's sentence, verbatim. Subclasses AgentBillError,
@@ -92,8 +92,9 @@ class AuthenticationError(AgentBillError):
             # The server's sentence for a revoked or expired key already says
             # what to do next; for a plain bad key it does not.
             text += (
-                " Check the key you are sending: it starts with agb_ and was shown once at "
-                "https://agentbill.dev/register. Lost it? https://agentbill.dev/recover gets you back in."
+                " Check the key you are sending: it starts with agb_ and was shown once, when it was made."
+                " Your console is at https://agentbill.dev/login. Lost the key? https://agentbill.dev/recover"
+                " gets you back in."
             )
         super().__init__(text)
 

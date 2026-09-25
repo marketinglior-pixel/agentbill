@@ -85,8 +85,15 @@ curl -X POST https://agentbill.dev/keys/revoke \\
         exist are limited per network before our database is asked.</li>
     <li>Recovery links are single-use, expire after an hour, and are stored only as a hash. They are
         kept out of our logs, and so are query strings.</li>
-    <li>The console's session cookie is HttpOnly, Secure and SameSite, and ends the moment its key is
-        revoked. Its forms, and sign-up, refuse requests from other sites.</li>
+    <li>No API key is issued to an email address that has not been verified. Sign-in by email is a
+        link that works once, expires after fifteen minutes and is stored only as a hash; with Google
+        or GitHub we accept only an address the provider says is verified, and an existing account
+        is connected to one only by somebody already signed in to it, never because an address
+        matches.</li>
+    <li>The console's session cookie is HttpOnly, Secure and SameSite. A session opened with a key
+        ends the moment its key is revoked; a signed-in person's session also ends on our side when
+        they sign out, so a copy of the cookie no longer opens anything. Its forms, sign-in and sign-up refuse
+        requests from other sites.</li>
     <li>An alert webhook goes only to an https URL on a public address, checked when you save it and
         again when we send; it is signed, and a redirect is never followed.</li>
     <li>Payments are handled by Polar. We never see a card number. Polar's notifications are verified
