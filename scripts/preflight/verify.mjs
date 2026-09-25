@@ -3425,7 +3425,12 @@ const decode11 = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace
 const text11 = (h) => decode11(h.replace(/<[^>]+>/g, ' ')).replace(/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/gi, ' ')
 const WORDS11 = /\b(stop|stops|stopped|stopping|block|blocks|blocked|blocking|kill|kills|killed|killing|halt|halts|halted|halting)\b|\bcut(?:s|ting)? off\b/gi
 const FIRST11 = /\bfirst\b(?![\w-]*\.(?:mjs|cjs|js|ts|py)\b)/gi
-const NAMED11 = /\bn8n\b|\bclaude[\s_-]*code\b/gi
+// Claude Code left this pattern on 2026-09-25: the remote MCP endpoint is a
+// thing Claude Code connects to, and /integrations/mcp names it beside a
+// command checked against its current documentation. It is still banned on
+// every other page here, and n8n everywhere: nothing we ship installs into it.
+const NAMED11 = /\bn8n\b/gi
+const CLAUDE_CODE11 = /\bclaude[\s_-]*code\b/gi
 const DASH11 = /—|&mdash;|&#8212;|&#x2014;/gi
 const py11 = readFileSync9(`${ROOT9}/sdk/python/agentbill/client.py`, 'utf8')
 const claw11 = readFileSync9(`${ROOT9}/plugins/openclaw/src/ceiling.ts`, 'utf8')
@@ -3497,8 +3502,13 @@ const hits11 = (re, pick) => pages11.flatMap((p) => (pick(p).match(re) ?? []).ma
 }
 {
   const h = [...hits11(NAMED11, (p) => p.prose), ...hits11(NAMED11, (p) => p.main), ...hits11(NAMED11, (p) => p.code)]
-  ok('[integrations] n8n and Claude Code are named nowhere on these pages: nothing we ship installs into either',
+  ok('[integrations] n8n is named nowhere on these pages: nothing we ship installs into it',
      pages11.length > 0 && h.length === 0, [...new Set(h)].join('; '))
+  const cc = pages11.filter((p) => p.path !== '/integrations/mcp')
+    .flatMap((p) => [p.prose, p.main, p.code].flatMap((t) => (t.match(CLAUDE_CODE11) ?? []).map((w) => `${p.path}: ${w}`)))
+  const mcpMain = pages11.find((p) => p.path === '/integrations/mcp')?.main ?? ''
+  ok('[integrations] Claude Code is named on /integrations/mcp alone, and there beside the command its docs give',
+     cc.length === 0 && mcpMain.includes('claude mcp add --transport http agentbill https://agentbill.dev/mcp'), [...new Set(cc)].join('; '))
 }
 
 // The install line and the config a reader copies from /integrations/openclaw
@@ -4679,6 +4689,14 @@ const { authGates } = await import('./auth-gates.mjs')
 await authGates({
   API, sql, ok, bootS, stopS, portS: PORT_S,
   fakeBase: process.env.OAUTH_TEST_BASE, outbox: process.env.MAIL_TEST_OUTBOX,
+  serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
+  legacyKey: KEY, legacyAccount: ACCT,
+})
+
+// ------------------------------------------------ [mcp] the remote MCP endpoint (2026-09-25), in its own file
+const { mcpGates } = await import('./mcp-gates.mjs')
+await mcpGates({
+  API, sql, ok, bootS, stopS, portS: PORT_S,
   serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
   legacyKey: KEY, legacyAccount: ACCT,
 })
