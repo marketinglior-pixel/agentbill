@@ -624,3 +624,58 @@ test('gemini: a client without the per-round methods refuses a call that would l
   await llm.models.generateContent({ model: 'gemini-2.5-flash', contents: 'x', config: { tools: [{ functionDeclarations: [] }] } })
   assert.equal(g.sent.length, 2); assert.equal(events().length, 2)
 })
+
+// ------------------------------------------------------------- a job in dollars (server 2026-09-25)
+
+const USD_APPROVED = { ...APPROVED, estimated_units: 100000, task_ceiling: 5000000, task_remaining_units: 4900000, task_unit: 'usd',
+  estimate_source: 'default', estimated_usd: 0.1, task_ceiling_usd: 5, task_remaining_usd: 4.9 }
+const USD_REFUSED = { approved: false, reason: 'task_ceiling_exceeded', estimated_units: 100000, task_ref: 'job-usd', task_ceiling: 250000,
+  task_used_units: 200000, task_remaining_units: 50000, task_unit: 'usd', estimate_source: 'default', estimated_usd: 0.1,
+  task_ceiling_usd: 0.25, task_used_usd: 0.2, task_remaining_usd: 0.05 }
+
+test('taskCeilingUsd opens a dollar job and leaves the estimate to the server; the record carries what it prices', async () => {
+  reset({ '/preflight': USD_APPROVED })
+  const llm = sdk.wrap(new FakeOpenAI(), { taskRef: 'job-usd', agentId: 'researcher', taskCeilingUsd: 5 })
+  await llm.chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const [pf] = preflights()
+  assert.equal(pf.unit, 'usd'); assert.equal(pf.task_ceiling_usd, 5)
+  assert.equal('estimated_units' in pf, false); assert.equal('task_ceiling' in pf, false)
+  const [ev] = events()
+  assert.ok(ev.metadata.model && ev.metadata.tokens); assert.equal(ev.reservation_id, RID)
+})
+
+test("unit: 'usd' meters a dollar job opened elsewhere, and a re-wrap keeps it", async () => {
+  reset({ '/preflight': USD_APPROVED })
+  const llm = sdk.wrap(new FakeOpenAI(), { taskRef: 'job-usd', agentId: 'r', unit: 'usd' })
+  await sdk.wrap(llm, { step: 'draft' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const [pf] = preflights()
+  assert.equal(pf.unit, 'usd'); assert.equal('task_ceiling_usd' in pf, false); assert.equal('estimated_units' in pf, false)
+})
+
+test('a dollar refusal says dollars at list price, returned by wrap() and thrown by preflight()', async () => {
+  reset({ '/preflight': USD_REFUSED })
+  const oa = new FakeOpenAI()
+  const r = await sdk.wrap(oa, { taskRef: 'job-usd', agentId: 'r', unit: 'usd' }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  assert.ok(sdk.isRefusal(r)); assert.equal(r.unit, 'usd'); assert.equal(oa.sent.length, 0)
+  assert.match(String(r), /\$0\.2 of \$0\.25 at list price/); assert.match(String(r), /\$0\.1 this call asked/)
+  await assert.rejects(sdk.preflight({ agentId: 'r', taskRef: 'job-usd', unit: 'usd' }),
+    (e) => e instanceof sdk.TaskCeilingExceededError && e.taskUnit === 'usd' && /\$0\.05 remaining/.test(e.message))
+})
+
+test('dollar options are checked, and a token job is unchanged', async () => {
+  assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'j', agentId: 'r', taskCeilingUsd: 5, taskCeiling: 100 }), TypeError)
+  assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'j', agentId: 'r', taskCeilingUsd: 5, unit: 'token' }), TypeError)
+  assert.throws(() => sdk.wrap(new FakeOpenAI(), { taskRef: 'j', agentId: 'r', unit: 'dollars' }), TypeError)
+  reset()
+  await sdk.wrap(new FakeOpenAI(), { taskRef: 'job-7', agentId: 'r', taskCeiling: 100000 }).chat.completions.create({ model: 'gpt-4o-mini', messages: [] })
+  const [pf] = preflights()
+  assert.equal(pf.unit, 'token'); assert.equal(pf.task_ceiling, 100000); assert.equal('task_ceiling_usd' in pf, false); assert.ok('estimated_units' in pf)
+})
+
+test('preflight() carries the dollar fields both ways', async () => {
+  reset({ '/preflight': USD_APPROVED })
+  const res = await sdk.preflight({ agentId: 'r', taskRef: 'job-usd', taskCeilingUsd: 5, estimatedUsd: 0.02 })
+  const [pf] = preflights()
+  assert.equal(pf.task_ceiling_usd, 5); assert.equal(pf.estimated_usd, 0.02)
+  assert.equal(res.taskUnit, 'usd'); assert.equal(res.estimatedUsd, 0.1); assert.equal(res.taskRemainingUsd, 4.9); assert.equal(res.estimateSource, 'default')
+})

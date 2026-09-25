@@ -53,6 +53,15 @@ class PreflightResult:
     # reservation expires. None when nothing was reserved, or when the server
     # predates reservation_id; record() then settles the way it always has.
     reservation_id: Optional[str] = None
+    # A job whose ceiling is in dollars (server 2026-09-25): task_unit is "usd",
+    # estimated_units and task_remaining_units are micro-dollars (1,000,000 is
+    # $1), and these are the same figures in dollars, as list-price estimates.
+    # estimate_source says whose estimate was reserved: "caller", "job_median"
+    # or "default". None on a job in units or tokens.
+    task_unit: Optional[str] = None
+    estimated_usd: Optional[float] = None
+    task_remaining_usd: Optional[float] = None
+    estimate_source: Optional[str] = None
 
     def record(
         self,
@@ -200,11 +209,22 @@ class TaskCeilingExceededError(Exception):
         self.task_remaining_units = task_remaining_units
         # The preflight answer as the server sent it, when preflight() raised this.
         self.answer = answer
-        super().__init__(
-            f"Refused (task_ceiling_exceeded): task {task_ref!r} is at "
-            f"{task_used_units}/{task_ceiling} units and {task_remaining_units} remaining "
-            f"is not enough for this call."
-        )
+        # "usd" on a job whose ceiling is in dollars: the numbers above are
+        # then micro-dollars, and the sentence says dollars at list price.
+        a = answer if isinstance(answer, dict) else {}
+        self.task_unit = a.get("task_unit")
+        if self.task_unit == "usd":
+            super().__init__(
+                f"Refused (task_ceiling_exceeded): task {task_ref!r} is at ${a.get('task_used_usd')} of "
+                f"${a.get('task_ceiling_usd')} at list price, and ${a.get('task_remaining_usd')} remaining is not "
+                f"enough for the ${a.get('estimated_usd')} this call asked to reserve."
+            )
+        else:
+            super().__init__(
+                f"Refused (task_ceiling_exceeded): task {task_ref!r} is at "
+                f"{task_used_units}/{task_ceiling} units and {task_remaining_units} remaining "
+                f"is not enough for this call."
+            )
 
 class TaskCeilingRequiredError(Exception):
     """A task_ref that has not been opened yet needs task_ceiling on its first
@@ -263,6 +283,8 @@ class AgentBillClient:
         task_ceiling: Optional[int] = None,
         idempotency_key: Optional[str] = None,
         unit: Optional[str] = None,
+        task_ceiling_usd: Optional[float] = None,
+        estimated_usd: Optional[float] = None,
     ) -> PreflightResult:
         """Check every budget BEFORE the call runs.
 
@@ -278,8 +300,14 @@ class AgentBillClient:
         one consuming the budget. Same key, same decision, one reservation.
         Raises PreflightInProgressError if the original is still being decided.
 
-        unit says what the job's numbers count, "unit" (yours, the default) or
-        "token". It needs task_ref. It is read when this call opens the job and
+        unit says what the job's numbers count, "unit" (yours, the default),
+        "token", or "usd" (micro-dollars at public list price, which the server
+        works out from the tokens each record reports). It needs task_ref.
+
+        task_ceiling_usd opens a job whose ceiling is in dollars, and implies
+        unit "usd". estimated_usd is this call's own estimate in dollars; left
+        out, the server reserves the job's recent median call, or $0.10 before
+        its first priced call (result.estimate_source says which). It is read when this call opens the job and
         checked on a job that exists: a different unit is a 422, raised here as
         an HTTPError, never a relabel.
 
@@ -301,6 +329,10 @@ class AgentBillClient:
             payload["idempotency_key"] = idempotency_key
         if unit is not None:
             payload["unit"] = unit
+        if task_ceiling_usd is not None:
+            payload["task_ceiling_usd"] = task_ceiling_usd
+        if estimated_usd is not None:
+            payload["estimated_usd"] = estimated_usd
 
         resp = requests.post(
             f"{self.base_url}/preflight",
@@ -331,6 +363,10 @@ class AgentBillClient:
             task_remaining_units=data.get("task_remaining_units"),
             reservation_expires_at=data.get("reservation_expires_at"),
             reservation_id=data.get("reservation_id"),
+            task_unit=data.get("task_unit"),
+            estimated_usd=data.get("estimated_usd"),
+            task_remaining_usd=data.get("task_remaining_usd"),
+            estimate_source=data.get("estimate_source"),
         )
         # Not a dataclass field and not an attribute, on purpose: asdict(),
         # repr(), vars(), pickle and deepcopy of the result stay what they

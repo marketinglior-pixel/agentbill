@@ -137,6 +137,9 @@ class Refusal:
     remaining: Optional[int] = None
     upgrade_url: Optional[str] = None
     answer: Dict[str, Any] = field(default_factory=dict)
+    # "usd" on a job whose ceiling is in dollars: asked, used, ceiling and
+    # remaining are then micro-dollars, and str() says dollars at list price.
+    unit: str = "token"
     approved: bool = field(default=False, init=False)
 
     def __bool__(self) -> bool:
@@ -144,6 +147,11 @@ class Refusal:
 
     def __str__(self) -> str:
         r = self.reason
+        if r == "task_ceiling_exceeded" and self.unit == "usd":
+            a = self.answer
+            return (f"Refused (task_ceiling_exceeded): job {self.task_ref!r} is at ${a.get('task_used_usd')} of "
+                    f"${a.get('task_ceiling_usd')} at list price, and ${a.get('task_remaining_usd')} remaining is not "
+                    f"enough for the ${a.get('estimated_usd')} this call asked to reserve. The call was not sent.")
         if r == "task_ceiling_exceeded":
             return (f"Refused (task_ceiling_exceeded): job {self.task_ref!r} is at {self.used}/{self.ceiling} tokens "
                     f"and {self.remaining} remaining is not enough for the {self.asked} this call asked for. "
@@ -557,17 +565,19 @@ class _Meter:
     def __init__(self, *, ab: AgentBillClient, provider: str, endpoint: str, task_ref: str, agent_id: str,
                  customer_id: Optional[str], step: Optional[str], task_ceiling: Optional[int],
                  default_estimate: int, on_quota: str, averages: Dict[str, _Average], lock: threading.Lock,
-                 warned: Dict[str, bool]):
+                 warned: Dict[str, bool], unit: str = "token", task_ceiling_usd: Optional[float] = None):
         self.ab, self.provider, self.endpoint = ab, provider, endpoint
         self.task_ref, self.agent_id, self.customer_id, self.step = task_ref, agent_id, customer_id, step
         self.task_ceiling, self.default_estimate, self.on_quota = task_ceiling, default_estimate, on_quota
+        self.unit, self.task_ceiling_usd = unit, task_ceiling_usd
         self._averages, self._lock, self._warned = averages, lock, warned
 
     def replace(self, **changes: Any) -> "_Meter":
         fields = dict(ab=self.ab, provider=self.provider, endpoint=self.endpoint, task_ref=self.task_ref,
                       agent_id=self.agent_id, customer_id=self.customer_id, step=self.step,
                       task_ceiling=self.task_ceiling, default_estimate=self.default_estimate,
-                      on_quota=self.on_quota, averages=self._averages, lock=self._lock, warned=self._warned)
+                      on_quota=self.on_quota, averages=self._averages, lock=self._lock, warned=self._warned,
+                      unit=self.unit, task_ceiling_usd=self.task_ceiling_usd)
         fields.update({k: v for k, v in changes.items() if v is not None})
         return _Meter(**fields)
 
@@ -586,8 +596,15 @@ class _Meter:
         """The PreflightResult when approved (or sent unchecked), else a Refusal."""
         estimate = self.average.estimate(self.default_estimate, _max_tokens(kind, kwargs))
         try:
-            result = self.ab.preflight(self.agent_id, estimated_units=estimate, customer_id=self.customer_id,
-                                       task_ref=self.task_ref, task_ceiling=self.task_ceiling, unit="token")
+            if self.unit == "usd":
+                # A job in dollars: the server holds the price table, so it
+                # works out the reservation (the job's median call, or its
+                # default) and prices the record from the tokens reported.
+                result = self.ab.preflight(self.agent_id, customer_id=self.customer_id, task_ref=self.task_ref,
+                                           unit="usd", task_ceiling_usd=self.task_ceiling_usd)
+            else:
+                result = self.ab.preflight(self.agent_id, estimated_units=estimate, customer_id=self.customer_id,
+                                           task_ref=self.task_ref, task_ceiling=self.task_ceiling, unit="token")
         except _REFUSALS as refused:
             # Your spend rule refused the call: preflight() raises, and here
             # the same refusal is a value. Nothing was reserved.
@@ -622,7 +639,7 @@ class _Meter:
         if isinstance(e, TaskCeilingExceededError):
             return Refusal(reason="task_ceiling_exceeded", task_ref=e.task_ref or self.task_ref, asked=asked,
                            used=e.task_used_units, ceiling=e.task_ceiling, remaining=e.task_remaining_units,
-                           answer=answer)
+                           answer=answer, unit=self.unit)
         if isinstance(e, CeilingExceededError):
             return Refusal(reason="ceiling_exceeded", task_ref=self.task_ref, asked=asked,
                            ceiling=answer.get("ceiling", self.ab.ceiling), answer=answer)
@@ -1187,7 +1204,8 @@ def _endpoint(client: Any, provider: str) -> str:
 def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] = None,
          step: Optional[str] = None, customer_id: Optional[str] = None, task_ceiling: Optional[int] = None,
          default_estimate: Optional[int] = None, agentbill_client: Optional[AgentBillClient] = None,
-         provider: Optional[str] = None, on_quota: Optional[str] = None) -> T:
+         provider: Optional[str] = None, on_quota: Optional[str] = None,
+         task_ceiling_usd: Optional[float] = None, unit: Optional[str] = None) -> T:
     """Meter every call a model client makes through its create methods, in tokens.
 
     task_ref: the job every call is counted against. The job is counted in
@@ -1208,6 +1226,15 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
         AGENTBILL_API_KEY (and AGENTBILL_BASE_URL, when set).
     provider: "openai", "anthropic" or "gemini", when detection from the
         client cannot tell.
+    task_ceiling_usd: opens the job with a ceiling in DOLLARS at public list
+        price (server 2026-09-25) if it does not exist yet, and makes the job's
+        unit "usd". The server then reserves the job's recent median call
+        before each measured call (or $0.10 before its first priced one) and
+        charges each record the list price of the tokens the provider reported.
+        A call it cannot price is charged its reservation, never $0.
+    unit: "token" (the default) or "usd". Pass "usd" to meter a job whose
+        dollar ceiling was set elsewhere (the console, PUT /tasks/:task_ref/ceiling
+        with ceiling_usd); task_ceiling_usd implies it.
     on_quota: what a measured call does once this account's monthly preflight
         quota is spent (each measured call is one preflight), when no ceiling
         can be checked. "refuse", the default: the call returns a Refusal with
@@ -1222,6 +1249,12 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
     """
     if on_quota is not None and on_quota not in _ON_QUOTA:
         raise ValueError('on_quota is "refuse" or "send".')
+    if unit is not None and unit not in ("token", "usd"):
+        raise ValueError('unit is "token" or "usd".')
+    if task_ceiling_usd is not None and (unit == "token" or task_ceiling is not None):
+        raise ValueError("task_ceiling_usd opens a job in dollars: pass it without task_ceiling and without unit=\"token\".")
+    if task_ceiling_usd is not None:
+        unit = "usd"
     if isinstance(client, _Wrapped):
         target = object.__getattribute__(client, "_agentbill_target")
         base: _Meter = object.__getattribute__(client, "_agentbill_meter")
@@ -1232,7 +1265,8 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
         return _Wrapped(target, base.replace(task_ref=task_ref, agent_id=agent_id, step=step,
                                              customer_id=customer_id, task_ceiling=task_ceiling,
                                              default_estimate=default_estimate,
-                                             on_quota=on_quota))  # type: ignore[return-value]
+                                             on_quota=on_quota, unit=unit,
+                                             task_ceiling_usd=task_ceiling_usd))  # type: ignore[return-value]
 
     if not task_ref or not agent_id:
         raise TypeError("agentbill.wrap() needs task_ref and agent_id: the job to count against, and the label.")
@@ -1251,5 +1285,6 @@ def wrap(client: T, *, task_ref: Optional[str] = None, agent_id: Optional[str] =
     meter = _Meter(ab=agentbill_client, provider=kind, endpoint=_endpoint(client, kind), task_ref=task_ref,
                    agent_id=agent_id, customer_id=customer_id, step=step, task_ceiling=task_ceiling,
                    default_estimate=default_estimate or DEFAULT_ESTIMATE, on_quota=on_quota or "refuse",
-                   averages={}, lock=threading.Lock(), warned={})
+                   averages={}, lock=threading.Lock(), warned={}, unit=unit or "token",
+                   task_ceiling_usd=task_ceiling_usd)
     return _Wrapped(client, meter)  # type: ignore[return-value]

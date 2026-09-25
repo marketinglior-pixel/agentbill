@@ -256,7 +256,8 @@ except TaskCeilingExceededError as e:
   after ${RESERVATION_TTL_MINUTES} minutes and a sweep releases it. A job refused at its ceiling
   counts at what it spent. Jobs with the placeholder label
   <span class="inline">${CONSOLE_AGENT}</span>, the one a job carries until an approved call names
-  an agent, are left out.</p>
+  an agent, are left out. When every call of those jobs was priced, the figures are the jobs’ totals in dollars at
+  public list price instead, and a pick opens the next job in dollars; one unpriced job and the agent is suggested in its own unit.</p>
 
   <h3>Per-request ceiling</h3>
   <p>Refuse any single call that would consume more than a set number of units. Set <span class="inline">ceiling=N</span> on the client; if <span class="inline">estimated_units</span> exceeds it, the call is refused before it goes out and <span class="inline">CeilingExceededError</span> is raised. This one caps a call, not a job: it is a sanity check on a bad estimate, not the cross-call ceiling above.</p>
@@ -603,9 +604,27 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
 <span class="comment"># {"task_ref":"job-142","agent_id":"researcher","ceiling_units":500,"used_units":0,</span>
 <span class="comment">#  "reserved_units":0,"remaining_units":500,"exceeded":false,...,"task_created":true}</span></pre></div>
 
-  <p><span class="inline">ceiling_units</span> is a positive integer and is required.
+  <p>Send <span class="inline">ceiling_units</span>, a positive integer, or
+  <span class="inline">ceiling_usd</span>, a ceiling in dollars (below); exactly one of the two.
   <span class="inline">agent_id</span> is optional and is read only when this call opens the job; an
   existing job keeps the agent that opened it.</p>
+
+  <h4 id="ceiling-usd">A ceiling in dollars</h4>
+  <p><span class="inline">{"ceiling_usd": 5}</span> opens a job counted in dollars, unit
+  <span class="inline">usd</span> (so does <span class="inline">task_ceiling_usd</span> on a first
+  preflight, and the console's task budgets view). On such a job every <span class="inline">*_units</span>
+  number is micro-dollars (1,000,000 is $1.00) and each answer carries the same figures in dollars beside
+  them. What it counts is an estimate at public list price, not your invoice: before a call, preflight
+  reserves your own estimate when you send one (<span class="inline">estimated_usd</span>), otherwise
+  the median of the job's last 20 priced calls, or $0.10 before its first, and the answer's
+  <span class="inline">estimate_source</span> says which. After it, the record is charged the list price of
+  the tokens it reports (<span class="inline">provider</span>, <span class="inline">model</span> and
+  <span class="inline">tokens</span> in its metadata, the shape <span class="inline">wrap()</span> writes),
+  rounded up to the micro-dollar, and the reservation is settled to that. A call that cannot be priced
+  (no model named, a model with no list price, usage missing) is never counted as $0: it is charged its
+  reservation, or with none open the job's estimate, and counted in
+  <span class="inline">unpriced_calls</span>. The reservation is exact, the estimate is not: a call bigger
+  than its estimate can land past the ceiling by the difference, and the next preflight is refused.</p>
 
   <p>A ceiling cannot go under what the job has already spent plus what is reserved by calls in
   flight. That answers <span class="inline">409 ceiling_below_committed</span> with

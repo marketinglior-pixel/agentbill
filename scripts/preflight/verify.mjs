@@ -3924,10 +3924,15 @@ for (const [name, h] of [['tasks', pageS.html], ['tasks+pick', pickedS.html], ['
   const hit = shownS(h).match(OLD_S)
   if (hit) oldSaidS.push(`${name}: "${hit[0]}"`)
 }
+// T3, 2026-09-25: a suggestion is in dollars at list price when the history
+// is priced. That is the one money the suggestion may name, in these exact
+// words; the gate below takes them out and then asks for no money at all.
+const IN_USD_S = "in dollars at list price when every call of those jobs was priced, and in the jobs' own unit otherwise"
+const IN_USD_FOOT_S = 'or its breakdown.list_price_usd_estimate when every call was priced'
 ok('[suggest] the fine print is two lines, the click and the figures, and links to the /docs paragraph that holds every fact that left it: finished defined by column, the reservation that holds a job out and its TTL, a refused job counted at what it spent, the console label left out, and how many agents get a row',
-   footS.includes(`A suggested ceiling is one job's used_units, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
-     && fineS === `A pick fills the ceiling field with that agent's label; nothing is saved until you press Set ceiling. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total. How the suggestion is computed.`
-     && demoFineS === `A pick fills the ceiling field with that agent's label; sample data, so nothing here is saved. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total. How the suggestion is computed.`
+   footS.includes(`A suggested ceiling is one job's used_units, or its breakdown.list_price_usd_estimate when every call was priced, as GET /tasks/:task_ref returns it: the p50, p90 or max over one agent's ${JOBS_S} most recently updated finished jobs, worked out on this page.`)
+     && fineS === `A pick fills the ceiling field with that agent's label; nothing is saved until you press Set ceiling. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total, ${IN_USD_S}. How the suggestion is computed.`
+     && demoFineS === `A pick fills the ceiling field with that agent's label; sample data, so nothing here is saved. Each figure is the p50, p90 or max of that agent's last ${JOBS_S} finished jobs: one real job's total, ${IN_USD_S}. How the suggestion is computed.`
      && !MOVED_S.test(fineS) && !MOVED_S.test(demoFineS)
      && fineRawS.includes('<a href="/docs#ceiling-suggestion">How the suggestion is computed</a>')
      && /<h3 id="ceiling-suggestion">/.test(docsRawS)
@@ -3948,10 +3953,10 @@ ok('[suggest] the fine print is two lines, the click and the figures, and links 
 const docsParaS = (docsS.match(/How the suggestion is computed Not sure what a job needs\?[^]*?names an agent, are left out\./) ?? [''])[0]
 const newCopyS = [blockS, demoBlockS, pickLineS(pickedS.html), pickLineS(demoPickS.html), pickLineS(hostPickS.html), pickLineS(host2PickS.html),
   (demoS.html.match(/<a class="btn" href="\/register">[^<]*<\/a>/) ?? [''])[0], (footS.match(/A suggested ceiling is[^]*$/) ?? [''])[0]].map(shownS).join(' ') + ' ' + docsParaS
-const moneyS = newCopyS.match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
+const moneyS = newCopyS.split(IN_USD_S).join(' ').split(IN_USD_FOOT_S).join(' ').match(/\$|dollar|\bUSD\b|\bcents?\b|\brates?\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bbill(ed|ing)?\b|\binvoices?\b/gi) ?? []
 const bannedS = newCopyS.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\bfirst\b|\bonly one\b/gi) ?? []
-ok('[suggest] everything the suggestion prints is in units: no money word, and none of the banned house words',
-   newCopyS.length > 1500 && docsParaS.length > 900 && moneyS.length === 0 && bannedS.length === 0,
+ok('[suggest] everything the suggestion prints on a history with no priced job is in units: no money word but the one labelled clause, and none of the banned house words',
+   newCopyS.includes(IN_USD_S) && newCopyS.length > 1500 && docsParaS.length > 900 && moneyS.length === 0 && bannedS.length === 0,
    [...moneyS, ...bannedS].join(', ') || `${newCopyS.length} chars, docs paragraph ${docsParaS.length}`)
 await sql`DELETE FROM accounts WHERE id = ${OTHER_S}`
 
@@ -4737,6 +4742,10 @@ await authGates({
   serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
   legacyKey: KEY, legacyAccount: ACCT,
 })
+
+// ------------------------------------------------ [usd] a job whose ceiling is in dollars (T3, 2026-09-25), in its own file
+const { usdGates } = await import('./usd-gates.mjs')
+await usdGates({ API, sql, ok, legacyKey: KEY })
 
 // ------------------------------------------------ [mcp] the remote MCP endpoint (2026-09-25), in its own file
 const { mcpGates } = await import('./mcp-gates.mjs')

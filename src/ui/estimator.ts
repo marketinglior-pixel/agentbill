@@ -108,7 +108,7 @@ export function estimatorSection(cta: string): string {
         <div class="est-rule"></div>
         <div class="est-f est-f-ceil"><label for="est-ceil">Try a job ceiling (units)</label>
           <input id="est-ceil" type="text" inputmode="numeric" autocomplete="off" value="${int(d.ceiling)}" /></div>
-        <p class="est-note" id="est-rate">Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is ${rate(d.costPerCall)} a unit. AgentBill counts units, not dollars.</p>
+        <p class="est-note" id="est-rate">Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is ${rate(d.costPerCall)} a unit. In this example AgentBill counts units, not dollars.</p>
         <p class="est-js">The inputs need JavaScript. The math is calls in one run &times; your cost per call.</p>
       </div>
       <div class="est-out">
@@ -151,7 +151,7 @@ const ESTIMATOR_SRC = `
       // the inputs, so every derived line is cleared, not only the total.
       $('total').textContent = 'enter a number';
       $('cap').textContent = 'Calls, cost per call and the ceiling each need a number of 0 or more.';
-      $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. AgentBill counts units, not dollars.';
+      $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. In this example AgentBill counts units, not dollars.';
       $('ceil-line').textContent = '';
       $('after').textContent = '';
       return;
@@ -162,7 +162,7 @@ const ESTIMATOR_SRC = `
     $('cap').textContent = int(calls) + ' calls \\u00d7 ' + rate(cost)
       + (edited ? '.' : ': example inputs until you change them.') + ' An estimate, not a measurement.';
     $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is '
-      + rate(cost) + ' a unit. AgentBill counts units, not dollars.';
+      + rate(cost) + ' a unit. In this example AgentBill counts units, not dollars.';
     if (fits) {
       $('ceil-line').textContent = 'Every call fits under a ceiling of ' + int(ceil) + '.';
       $('after').textContent = 'The job never reaches its ceiling, so the ceiling approves all ' + int(calls)

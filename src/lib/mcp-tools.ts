@@ -85,6 +85,12 @@ export function refusalMessage(reason: string, data: Record<string, unknown>): s
   }
 }
 
+/** A dollar job's figures, as POST /preflight answered them, passed through unchanged. */
+const usdOfBody = (body: Record<string, unknown>) => body.task_unit === 'usd'
+  ? Object.fromEntries(['task_unit', 'estimate_source', 'estimated_usd', 'task_ceiling_usd', 'task_used_usd', 'task_remaining_usd', 'list_price_label']
+      .filter((k) => k in body).map((k) => [k, body[k]]))
+  : {}
+
 /** A preflight answer as the tool returns it, from the status and body POST /preflight would have sent. */
 export function preflightToolResult(status: number, body: Record<string, unknown>): Record<string, unknown> {
   if (status === 409) {
@@ -110,6 +116,7 @@ export function preflightToolResult(status: number, body: Record<string, unknown
       message: refusalMessage(reason, body),
       ...(body.task_ref ? { task_ref: body.task_ref, task_ceiling: body.task_ceiling ?? null,
                             task_used_units: body.task_used_units ?? null, task_remaining_units: body.task_remaining_units ?? null } : {}),
+      ...usdOfBody(body),
     }
   }
   return {
@@ -119,6 +126,7 @@ export function preflightToolResult(status: number, body: Record<string, unknown
     reservation_id: body.reservation_id,
     reservation_expires_at: body.reservation_expires_at,
     ...(body.task_ref ? { task_ref: body.task_ref, task_ceiling: body.task_ceiling, task_remaining_units: body.task_remaining_units } : {}),
+    ...usdOfBody(body),
   }
 }
 
@@ -127,7 +135,7 @@ type Sort = 'units' | 'list_price'
 /** Jobs ranked by what they used, each with its list-price estimate beside the units it counted. */
 async function topJobs(accountId: string, sort: Sort, limit: number, agentId?: string) {
   const rows = await sql`
-    SELECT t.task_ref, t.agent_id, t.ceiling_units, t.used_units, t.reserved_units, t.unit, t.usage_missing_calls,
+    SELECT t.task_ref, t.agent_id, t.ceiling_units, t.used_units, t.reserved_units, t.unit, t.usage_missing_calls, t.unpriced_calls,
            t.created_at, t.updated_at, e.usd, e.priced, e.calls
     FROM task_budgets t
     LEFT JOIN LATERAL (
@@ -150,6 +158,8 @@ async function topJobs(accountId: string, sort: Sort, limit: number, agentId?: s
       ceiling_units: job.ceiling_units,
       remaining_units: job.remaining_units,
       exceeded: job.exceeded,
+      // A job in dollars counts micro-dollars in the *_units above; here in dollars.
+      ...('used_usd' in job ? { used_usd: job.used_usd, ceiling_usd: job.ceiling_usd, remaining_usd: job.remaining_usd, unpriced_calls: job.unpriced_calls } : {}),
       recorded_calls: Number(r.calls ?? 0),
       list_price_usd_estimate: priced > 0 ? Number(r.usd) : null,
       priced_calls: priced,
@@ -178,7 +188,9 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
         'Check whether an agent may run before starting work. Returns approved: true when the job and the customer have units left, ' +
         'or approved: false with a reason (budget_exhausted, ceiling_exceeded, free_tier_exceeded, task_ceiling_exceeded, task_ceiling_required) ' +
         'and a message. This server does not end the run; the host decides what happens next. A unit is an integer you define; AgentBill reserves the number you ' +
-        'send and never converts units into money. An approved answer reserves estimated_units against the job; settle it with record_event and ' +
+        'send and never converts units into money. On a job in "usd" (micro-dollars at public list price) the server reserves the job\'s own estimate ' +
+        'unless unit "usd" is sent with estimated_units in micro-dollars, and record_event is charged the list price of the tokens in its metadata. ' +
+        'An approved answer reserves estimated_units against the job; settle it with record_event and ' +
         'the reservation_id, or it is released when it expires.',
       inputSchema: {
         agent_id: id('Identifier for this agent or task type, e.g. "research_agent".'),
@@ -188,12 +200,18 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
         task_ref: id('The job this call belongs to. Every call with the same task_ref shares one ceiling.').optional(),
         task_ceiling: units('Total units the whole job may use. Needed on the first preflight of a new task_ref; not applied later.').optional(),
         idempotency_key: id('Makes a retried preflight safe: same key, same decision, one reservation.').optional(),
-        unit: z.enum(TASK_UNITS).optional().describe('What the job counts, "unit" or "token". Read when this call opens the job.'),
+        unit: z.enum(TASK_UNITS).optional().describe('What the job counts, "unit", "token" or "usd" (micro-dollars at list price). Read when this call opens the job.'),
+        task_ceiling_usd: z.number().positive().max(1_000_000).optional().describe('Opens a new job with a ceiling in dollars at public list price, unit "usd". Not applied once the job exists.'),
+        estimated_usd: z.number().positive().max(1_000_000).optional().describe('On a job in dollars, this call\'s own estimate in dollars. Left out, the job\'s recent median call is reserved, or $0.10 before its first.'),
       },
       annotations: { title: 'Ask preflight before a call', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     }, async (a) => {
-      const input: Record<string, unknown> = { agent_id: a.agent_id, customer_id: a.customer_id, estimated_units: a.estimated_units }
-      for (const k of ['ceiling', 'task_ref', 'task_ceiling', 'idempotency_key', 'unit'] as const) if (a[k] !== undefined) input[k] = a[k]
+      // estimated_units has a default here, so on a dollar job it is never
+      // sent: a 1 the model did not choose must not become a one-micro-dollar
+      // reservation. The server reserves estimated_usd, or the job's own estimate.
+      const dollars = a.unit === 'usd' || a.task_ceiling_usd !== undefined
+      const input: Record<string, unknown> = { agent_id: a.agent_id, customer_id: a.customer_id, ...(dollars ? {} : { estimated_units: a.estimated_units }) }
+      for (const k of ['ceiling', 'task_ref', 'task_ceiling', 'idempotency_key', 'unit', 'task_ceiling_usd', 'estimated_usd'] as const) if (a[k] !== undefined) input[k] = a[k]
       const r = await runPreflight(ctx.accountId, input, ctx.log)
       const value = preflightToolResult(r.status, r.body as Record<string, unknown>)
       return result(value, r.status >= 500 || r.status === 401)
