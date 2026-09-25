@@ -36,4 +36,10 @@ ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 LABEL org.opencontainers.image.revision=$GIT_SHA
 EXPOSE 3000
+# Not root. The image's own `node` user (uid 1000, in every official node
+# image) is all the server needs: it listens on 3000, above the privileged
+# ports, writes nothing to disk, and every file above is readable by any user.
+# Until 2026-09-25 the process ran as root, so anything that reached code
+# execution inside it owned the whole container.
+USER node
 CMD ["node", "dist/server.js"]
