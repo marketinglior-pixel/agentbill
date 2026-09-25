@@ -326,7 +326,7 @@ export async function recoverRoute(app: FastifyInstance) {
           // state a degraded sending domain produces, silently locked the
           // address out of recovery for an hour.
           clearRecoveryMark(email)
-          request.log.error({ email }, 'recovery email was not accepted by Resend')
+          request.log.error({ accountId: account.id }, 'recovery email was not accepted by Resend')
         }
       } catch (err) {
         clearRecoveryMark(email)

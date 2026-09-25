@@ -16,7 +16,7 @@ import { inlineScript } from '../lib/csp.js'
 import { PULSE_CLIENT_SRC } from '../ui/pulse-client.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { sendRecoveryLink } from './recover.js'
-import { sessionCookieFor } from './app.js'
+import { sessionCookieFor, sameOrigin, provenSameOrigin } from './app.js'
 import { alertNewSignup } from '../lib/signup-alert.js'
 import { mailUser } from '../lib/mail.js'
 
@@ -476,7 +476,7 @@ ${siteNav('/register', { cta: false })}
         <h2>Get your API key</h2>
         <p>Takes 30 seconds. No setup call. No credit card.</p>
       </div>
-      <form class="form" id="reg-form">
+      <form class="form" id="reg-form" method="post" action="/register">
         <noscript><p class="msg-slot" style="display:block">This form needs JavaScript to submit. Without it, ask for a key
           from a terminal: <code>curl -X POST https://agentbill.dev/register -H 'Content-Type: application/json'
           -d '{"email":"you@company.com"}'</code></p></noscript>
@@ -598,7 +598,7 @@ ${siteNav('/register', { cta: false })}
            never navigated away from and never leaves this page. -->
       <div class="cv-card">
         <div class="cv-bar"><span class="cv-bar-t">${label('Optional')}</span>${tag('it can wait')}</div>
-        <form class="profile" id="profile-form">
+        <form class="profile" id="profile-form" method="post" action="/app/profile">
           <p>A little context, if you want to give it. Nothing here is required, and the console works the same without it.</p>
           <div class="field">
             <label class="cv-flabel" for="name">Your name <span class="opt">(optional)</span></label>
@@ -645,6 +645,14 @@ ${REGISTER_JS}${COPY_JS}
   // Register API, POST. New accounts get their key instantly (shown once);
   // existing emails get the key by email, never in the response.
   app.post('/register', publicRoute(), async (request, reply) => {
+    // Login CSRF, 2026-09-25. A form on another site could POST here, create
+    // an account and, through the Set-Cookie below, sign the visitor's browser
+    // into it, so whatever they did next in the console landed in an account
+    // somebody else holds the key to. The same guard the console's own forms
+    // use: a browser's cross-site request is refused, and curl and the SDKs,
+    // which send neither Sec-Fetch-Site nor Origin, are not affected.
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden', message: 'Cross-site requests to /register are refused.' })
+
     // Validate first: a malformed body leaks nothing, so it must not burn a
     // rate-limit slot (bot probes and typos were draining the bucket).
     const parsed = RegisterBody.safeParse(request.body)
@@ -753,7 +761,10 @@ ${REGISTER_JS}${COPY_JS}
       // Without it (re-verified 2026-09-11) a fresh register followed by the
       // header's Console link opened whichever account had signed in last on
       // that browser. curl gets the header too and ignores it.
-      const cookie = sessionCookieFor(result.keyId)
+      // Only for a request the browser said came from our own page. A client
+      // that sent neither header gets its key and no session: it has no
+      // console to open.
+      const cookie = provenSameOrigin(request) ? sessionCookieFor(result.keyId) : null
       if (cookie) reply.header('Set-Cookie', cookie)
       return reply.code(201).send({
         api_key: result.apiKey,
