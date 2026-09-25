@@ -20,6 +20,8 @@ import {
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
 import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
+import { loadOffice, demoOffice, officeJson, WORKING_MINUTES, OFFICE_MAX, type Office } from '../lib/office.js'
+import { OFFICE_JS, OFFICE_SPRITES_PNG } from '../ui/office-engine.js'
 import { agentRows, demoAgentRows, monthlyReport, demoReport, reportCsv, asMonth, thisMonth, recentMonths, type AgentRow, type Report } from '../lib/report.js'
 import { rankOrderSql } from '../lib/task-rank.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
@@ -153,6 +155,9 @@ export async function appRoute(app: FastifyInstance) {
     const demo = q?.demo === '1'
     const range = typeof q?.range === 'string' && Object.hasOwn(RANGES, q.range) ? q.range : DEFAULT_RANGE
     const view = typeof q?.view === 'string' && Object.hasOwn(VIEWS, q.view) ? (q.view as ViewKey) : DEFAULT_VIEW
+    // The office is the one view that runs a script: its engine, from this
+    // origin (/app/office.js), and nothing inline.
+    if (view === 'office') reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", "default-src 'none'; script-src 'self'"))
     const filter = readFilter(q)
     // The order belongs to the tasks view alone: the overview's "Recent tasks"
     // reads the same rows and must stay recent whatever the query says.
@@ -173,6 +178,7 @@ export async function appRoute(app: FastifyInstance) {
                                         dash: view === 'overview' ? demoDashboard(range as DashRange) : null,
                                         agents: view === 'agents' ? demoAgentRows(range as DashRange) : null,
                                         report: view === 'customers' ? demoReport(asMonth(q?.month) ?? thisMonth()) : null,
+                                        office: view === 'office' ? demoOffice() : null,
                                         suggest: view === 'tasks' ? readSuggest(demoHistory(sample.tasks), q) : null }))
       }
       return reply.send(loginPage(typeof q?.err === 'string' ? q.err : '', safeNext(q?.next)))
@@ -195,10 +201,11 @@ export async function appRoute(app: FastifyInstance) {
     const agents = view !== 'agents' ? null : demo ? demoAgentRows(range as DashRange) : await agentRows(viewer.accountId, range as DashRange)
     const month = asMonth(q?.month) ?? thisMonth()
     const report = view !== 'customers' ? null : demo ? demoReport(month) : await monthlyReport(viewer.accountId, month)
+    const office = view !== 'office' ? null : demo ? demoOffice() : await loadOffice(viewer.accountId)
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -296,6 +303,13 @@ export async function appRoute(app: FastifyInstance) {
 
   // The canonical-host redirect preserves a trailing slash; without this the
   // 404 handler's Bearer hook would answer /app/ with a JSON 401.
+  // The office's engine and its sprites (M3). Public and immutable: they
+  // carry no account data, which arrives in the page's own data block.
+  app.get('/app/office.js', publicRoute(), async (_request, reply) =>
+    reply.type('text/javascript; charset=utf-8').header('Cache-Control', 'public, max-age=300').header('X-Content-Type-Options', 'nosniff').send(OFFICE_JS))
+  app.get('/app/office-sprites.png', publicRoute(), async (_request, reply) =>
+    reply.type('image/png').header('Cache-Control', 'public, max-age=86400').header('X-Content-Type-Options', 'nosniff').send(OFFICE_SPRITES_PNG))
+
   // The monthly customer report (M2, 2026-09-26): the customers view's month
   // as a CSV to bill from, and as a page to print or save as PDF. Both read
   // the signed-in account only, or the sample under ?demo=1. Never cached.
@@ -768,6 +782,7 @@ const VIEWS = {
   // "overview" is two names for the same first screen.
   start:     { title: 'Start',        lede: 'Connect once, and your first recorded call shows up here with its tokens and what it cost at list price.', hidden: true },
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
+  office:    { title: 'Office',       lede: 'Your agents as staff. Each one\'s salary is what it cost you this month at list price.' },
   agents:    { title: 'Agents',       lede: 'Every agent that recorded a call in this window: what it cost at list price, how much it did, how fast, and what was refused.' },
   activity:  { title: 'Activity',     lede: 'What your calls cost at list price, the tokens they used and the calls refused, day by day, split by event_type.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
@@ -2223,12 +2238,25 @@ const LOGIN_CSS = `${CHROME_CSS}${SIGNIN_CSS}${COPY_CSS}
   }
 `
 
+const OFFICE_CSS = `
+  .of-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); margin: var(--s5) 0 var(--s4); }
+  .of-card { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-inner); padding: var(--s3) var(--s4); }
+  .of-card span { display: block; font-size: var(--fs-micro); color: var(--muted); }
+  .of-card b { font: 500 24px/1.2 var(--display); color: var(--text); }
+  .of-card.is-no b { color: var(--signal); }
+  .of-room canvas { display: block; width: 100%; height: auto; border-radius: var(--r-field); image-rendering: pixelated; background: var(--plate); }
+  .of-bar { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s3) 0 var(--s2); font-size: var(--fs-micro); }
+  .of-list { list-style: none; padding: 0; margin: 0 0 var(--s3); }
+  .of-list li { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--row-line); font-size: var(--fs-small); }
+  .of-list li span:first-of-type { font-weight: 500; }
+  @media (max-width: 720px) { .of-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+`
 const REPORT_CSS = `
   .rep-actions { display: flex; gap: var(--s2); flex-wrap: wrap; margin: var(--s3) 0 0; }
   .cv-table tfoot td { font-weight: 500; border-top: 1px solid var(--row-line); }
   h2 .cv-seg { margin-left: var(--s3); vertical-align: middle; }
 `
-const HEAD = (title: string, css = CSS + DASH_CSS + REPORT_CSS) => head({
+const HEAD = (title: string, css = CSS + DASH_CSS + REPORT_CSS + OFFICE_CSS) => head({
   title: `${esc(title)} · AgentBill`,
   description: 'Your AgentBill console: refusals, task budgets, keys and usage for one API key.',
   // noindex comes from the registry (index: false), which is the same entry
@@ -2408,7 +2436,9 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** The agents view's rows (src/lib/report.ts), for its window. */
   agents?: AgentRow[] | null
   /** The customers view's monthly report, for ?month= (this UTC month by default). */
-  report?: Report | null }
+  report?: Report | null
+  /** The office view's staff (src/lib/office.ts). */
+  office?: Office | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
@@ -3675,6 +3705,40 @@ function monthLabel(m: string): string {
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
+/** Salary as the office's cards print it. */
+function salary(v: number | null): string {
+  return v == null ? '<span class="dim">unpriced</span>' : usd(Math.round(v * 100) / 100)
+}
+
+function officeView(p: Page): string {
+  const o = p.office
+  if (!o || o.staff === 0) {
+    return `<div class="cv-empty"><p class="nothing">Nobody on staff yet. An agent joins the office with its first recorded call this month: its <code>event_type</code> is its name, and what it costs is its salary.</p></div>`
+  }
+  const card = (label: string, value: string, cls = '') => `<div class="of-card${cls ? ` ${cls}` : ''}"><span>${label}</span><b>${value}</b></div>`
+  const rows = o.agents.map((a) => {
+    const what = a.state === 'panic' ? '3× its usual day' : a.state === 'sent' ? 'sent home: a ceiling refused it today'
+      : a.state === 'new' ? 'new hire: first call today' : a.state === 'working' ? 'at a desk' : 'not working right now'
+    return `<li><code>${esc(a.name)}</code> <span>${salary(a.sal)}</span> <span class="dim">${esc(what)} · ${num(a.calls)} calls this month</span></li>`
+  }).join('')
+  return `<div class="of-cards">
+      ${card('Payroll this month', o.payroll == null ? '<span class="dim">unpriced</span>' : usd(Math.round(o.payroll * 100) / 100))}
+      ${card('Agents on staff', num(o.staff))}
+      ${card('At their desk', num(o.atDesk))}
+      ${card('Sent home today', num(o.sentHome), o.sentHome ? 'is-no' : '')}
+    </div>
+    ${frame(p, barOf('office'), `<div class="of-room">
+      <canvas id="office" width="1100" height="790" data-sprites="/app/office-sprites.png" role="img" aria-label="The office: ${num(o.agents.length)} agents, drawn from the list below">Your agents, as in the list below.</canvas>
+      <div class="of-bar"><button type="button" class="btn-ghost" id="office-labels">Hide salaries</button>
+        <span class="dim">${o.topEarner ? `Highest paid this month: <code>${esc(o.topEarner.name)}</code>, ${salary(o.topEarner.sal)}.` : ''}${o.staff > o.agents.length ? ` The room seats ${num(OFFICE_MAX)}; ${num(o.staff - o.agents.length)} more on staff are in the Agents view.` : ''}</span></div>
+    </div>`)}
+    <h2>Staff <a href="${href(p, 'agents')}">All agents &rarr;</a></h2>
+    <ul class="of-list">${rows}</ul>
+    <p class="note">Salary is what the agent cost this UTC month at public list price, over priced calls. At a desk: a call recorded in the last ${WORKING_MINUTES} minutes. Sent home: a ceiling (a job's, a call's or a customer's budget) refused it in the last 24 hours. New hire: its first call ever was in the last 24 hours. 3× its usual day: a spend spike was flagged for it today. Nothing in the room is invented${p.demo ? ', except here, where every agent is sample data' : ''}.</p>
+    <script type="application/json" id="office-data">${officeJson(o, p.demo)}</script>
+    <script src="/app/office.js" defer></script>`
+}
+
 /** Milliseconds as the agents table prints them. */
 function msText(ms: number | null): string {
   if (ms == null) return '<span class="dim">not timed</span>'
@@ -3836,6 +3900,7 @@ function consolePage(p: Page): string {
 
   const body = p.view === 'overview' || p.view === 'start' ? overviewView(p, rangeLabel)
     : p.view === 'agents' ? agentsView(p)
+    : p.view === 'office' ? officeView(p)
     : p.view === 'activity' ? activityView(p, rangeLabel)
     : p.view === 'tasks' ? tasksView(p)
     : p.view === 'refusals' ? refusalsView(p)
@@ -3854,6 +3919,7 @@ function consolePage(p: Page): string {
     ? "the dashboard's cuts by model, agent, customer and window and its latency"
     : p.view === 'agents' && (p.agents?.length ?? 0) > 0 ? "this view's latency, first seen and last seen"
     : p.view === 'customers' && (p.report?.customers.length ?? 0) > 0 ? 'the monthly report, which is also a CSV'
+    : p.view === 'office' && (p.office?.staff ?? 0) > 0 ? "the office's salaries and who is at a desk, sent home, new or at 3×"
     : ''
   const exceptions = [spanShown ? 'the preflight span on a task row, which the API does not return' : '',
     workedOut ? `${workedOut}, which this page works out from those same records` : ''].filter(Boolean)
