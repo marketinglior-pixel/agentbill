@@ -29,7 +29,10 @@ var DATA = JSON.parse(dataEl.textContent || '{}');
 var META = {"w": 16, "h": 26, "poses": [{"name": "front_idle", "start": 0, "frames": 2}, {"name": "front_walk", "start": 2, "frames": 4}, {"name": "side_walk", "start": 6, "frames": 4}, {"name": "desk_type", "start": 10, "frames": 2}, {"name": "sent_home", "start": 12, "frames": 2}, {"name": "panic", "start": 14, "frames": 2}, {"name": "wave", "start": 16, "frames": 2}, {"name": "back_walk", "start": 18, "frames": 4}, {"name": "sit_type", "start": 22, "frames": 2}], "chars": ["classic", "bun", "blond", "curly", "ponytail", "bald", "bob", "afro", "hijab", "mustache"]};
 var img = new Image();
 var g = cv.getContext('2d'); g.imageSmoothingEnabled = false;
-var W = cv.width, H = cv.height, TW = 64, TH = 32, GX = 12, GY = 10, OX = W / 2 + 40, OY = 150, SC = 2, FW = META.w, FH = META.h, WALL = 120;
+var W = cv.width, H = cv.height, TW = 64, TH = 32, GX = 12, GY = 10, OX = W / 2 + 40, OY = 150, SC = 2, FW = META.w, FH = META.h, WALL = 350;
+// The room fills the frame: floor to the bottom corners, walls to the top edge
+// and past the sides. Agents still walk the 12x10 grid; the rest is set.
+var FX = 20, FY = 20, WX = GX, WY = 13;
 var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 function P(n) { for (var i = 0; i < META.poses.length; i++) if (META.poses[i].name === n) return META.poses[i]; return META.poses[0]; }
 function iso(x, y) { return [OX + (x - y) * TW / 2, OY + (x + y) * TH / 2]; }
@@ -41,11 +44,11 @@ var DOOR = 7.6, T = 0, SHOW = true;
 var DESKS = [[2, 2], [5.2, 2], [8.4, 2], [2, 6.8], [8.4, 6.8], [5.2, 8.2]];
 var DESK_ON = DESKS.map(function () { return false; });
 function room() {
-  for (var y = 0; y < GY; y++) for (var x = 0; x < GX; x++) { var rug = x >= 4 && x <= 7 && y >= 4 && y <= 6; var c = rug ? ((x + y) % 2 ? '#7d5a8c' : '#8a669a') : ((x + y) % 2 ? '#c8a878' : '#d2b384'); poly([iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)], c);
+  for (var y = 0; y < FY; y++) for (var x = 0; x < FX; x++) { var rug = x >= 4 && x <= 7 && y >= 4 && y <= 6; var c = rug ? ((x + y) % 2 ? '#7d5a8c' : '#8a669a') : ((x + y) % 2 ? '#c8a878' : '#d2b384'); poly([iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)], c);
     if (!rug) { g.strokeStyle = 'rgba(90,60,30,.18)'; g.lineWidth = 1; g.beginPath(); var a = iso(x, y + .5), b = iso(x + 1, y + .5); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); } }
-  poly([iso(0, 0), iso(GX, 0), up(iso(GX, 0), WALL), up(iso(0, 0), WALL)], '#bfc7cf');
-  poly([iso(0, 0), iso(0, GY), up(iso(0, GY), WALL), up(iso(0, 0), WALL)], '#d7dde2');
-  poly([iso(0, 0), iso(GX, 0), up(iso(GX, 0), 8), up(iso(0, 0), 8)], '#8e8676'); poly([iso(0, 0), iso(0, GY), up(iso(0, GY), 8), up(iso(0, 0), 8)], '#a39a88');
+  poly([iso(0, 0), iso(WX, 0), up(iso(WX, 0), WALL), up(iso(0, 0), WALL)], '#bfc7cf');
+  poly([iso(0, 0), iso(0, WY), up(iso(0, WY), WALL), up(iso(0, 0), WALL)], '#d7dde2');
+  poly([iso(0, 0), iso(WX, 0), up(iso(WX, 0), 8), up(iso(0, 0), 8)], '#8e8676'); poly([iso(0, 0), iso(0, WY), up(iso(0, WY), 8), up(iso(0, 0), 8)], '#a39a88');
   [[1.2, 2.8], [4.6, 6.2], [8.8, 10.6]].forEach(function (w) { var a = w[0], b = w[1];
     poly([up(iso(a, 0), 30), up(iso(b, 0), 30), up(iso(b, 0), 100), up(iso(a, 0), 100)], '#7fa8c9');
     poly([up(iso(a + .15, 0), 36), up(iso(b - .15, 0), 36), up(iso(b - .15, 0), 94), up(iso(a + .15, 0), 94)], '#b9d6ec');
