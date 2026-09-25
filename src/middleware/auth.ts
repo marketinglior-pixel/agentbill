@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { sql } from '../db/index.js'
 import { isIP } from 'node:net'
 import { clientIp as resolveClientIp, limiterKey } from '../lib/client-ip.js'
@@ -184,14 +184,44 @@ export function registerAuth(app: FastifyInstance) {
     // Declared public at the route itself. See publicRoute() above.
     if (request.routeOptions.config?.public === true) return
 
-    const auth = request.headers.authorization ?? ''
-    const token = /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : ''
+    const token = bearerToken(request)
 
     if (!token) {
       return reply.code(401).send({
         error: 'unauthorized',
         message: 'Missing API key. Pass Authorization: Bearer <your_key>.',
       })
+    }
+
+    // A refusal has already been sent; returning the reply is what tells
+    // Fastify not to run the route after an async hook answered.
+    if (!(await authenticateKey(request, reply, token))) return reply
+  })
+}
+
+/** The bearer token on a request, or '' when there is none. */
+export function bearerToken(request: FastifyRequest): string {
+  const auth = request.headers.authorization ?? ''
+  return /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : ''
+}
+
+/**
+ * Authenticate `token` as an API key: the shape rule, the per-network failure
+ * limit, the lookup, the per-key and per-account limits, revocation, expiry,
+ * and the new-network alert. On success sets request.accountId and returns
+ * true. Otherwise it has already answered, and returns false.
+ *
+ * Exported 2026-09-25 so /mcp (src/routes/mcp.ts) runs exactly this for a
+ * Bearer key, limits and all, instead of a second copy that could drift.
+ * `challenge`, when given, is the WWW-Authenticate value a 401 carries: the
+ * MCP authorization spec wants every 401 on /mcp to point at the protected
+ * resource metadata, and the REST API has never sent one.
+ */
+export async function authenticateKey(request: FastifyRequest, reply: FastifyReply, token: string, challenge?: string): Promise<boolean> {
+    const deny = (body: Record<string, unknown>) => {
+      if (challenge) reply.header('WWW-Authenticate', challenge)
+      reply.code(401).send(body)
+      return false
     }
 
     // The one shape a key has: agb_ and 48 lowercase hex characters, which is
@@ -203,7 +233,7 @@ export function registerAuth(app: FastifyInstance) {
     // ones took the process past the machine's 256MB). Same body as a key
     // that matched nothing, so the shape rule tells a prober nothing new.
     if (!isKeyShaped(token)) {
-      return reply.code(401).send({
+      return deny({
         error: 'unauthorized',
         message: 'Invalid API key.',
       })
@@ -216,11 +246,12 @@ export function registerAuth(app: FastifyInstance) {
     const network = limiterKey(request)
     const failures = authFailureLimiter.blocked(network)
     if (!failures.allowed) {
-      return reply.code(429).send({
+      reply.code(429).send({
         error: 'rate_limit_exceeded',
         message: 'Too many requests with an unknown API key from this network. Wait a minute, then check the key you are sending.',
         reset_at: new Date(failures.resetAt).toISOString(),
       })
+      return false
     }
 
     // Look up key in DB: account, revocation, expiry, and IP tracking.
@@ -248,7 +279,7 @@ export function registerAuth(app: FastifyInstance) {
 
     if (rows.length === 0) {
       authFailureLimiter.hit(network)
-      return reply.code(401).send({
+      return deny({
         error: 'unauthorized',
         message: 'Invalid API key.',
       })
@@ -260,22 +291,23 @@ export function registerAuth(app: FastifyInstance) {
     // a live one.
     const rate = checkRateLimit(rows[0].id as string)
     if (!rate.allowed) {
-      return reply.code(429).send({
+      reply.code(429).send({
         error: 'rate_limit_exceeded',
         message: `Too many requests. Limit: ${MAX_REQUESTS} per minute.`,
         reset_at: new Date(rate.resetAt).toISOString(),
       })
+      return false
     }
     // revoked_at in the past = immediately revoked; in the future = grace period (rotation)
     if (rows[0].isRevoked) {
-      return reply.code(401).send({
+      return deny({
         error: 'key_revoked',
         message: 'This API key has been revoked. Generate a new one with POST /keys/generate.',
       })
     }
 
     if (rows[0].isExpired) {
-      return reply.code(401).send({
+      return deny({
         error: 'key_expired',
         message: 'This API key has expired. Generate a new one with POST /keys/generate.',
       })
@@ -287,11 +319,12 @@ export function registerAuth(app: FastifyInstance) {
     // keys.
     const accountRate = checkAccountRateLimit(rows[0].accountId as string)
     if (!accountRate.allowed) {
-      return reply.code(429).send({
+      reply.code(429).send({
         error: 'rate_limit_exceeded',
         message: `Too many requests for this account. Limit: ${MAX_ACCOUNT_REQUESTS} per minute across all of its keys.`,
         reset_at: new Date(accountRate.resetAt).toISOString(),
       })
+      return false
     }
 
     // fly-client-ip is authoritative; x-forwarded-for[0] is client-forgeable
@@ -320,5 +353,5 @@ export function registerAuth(app: FastifyInstance) {
     }
 
     request.accountId = rows[0].accountId as string
-  })
+    return true
 }

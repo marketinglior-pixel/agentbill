@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
@@ -48,11 +48,22 @@ class PreflightRejection extends Error {
 // time this is thrown the original's decision either exists or is one write away.
 class ReplayNeeded extends Error {}
 
-export async function preflightRoute(app: FastifyInstance) {
-  app.post('/preflight', async (request, reply) => {
-    const parse = PreflightBody.safeParse(request.body)
+/** A decision as the route sends it: the HTTP status and the JSON body. */
+export type ServiceResult = { status: number; body: unknown }
+
+/**
+ * The whole of POST /preflight for one account, without the HTTP around it.
+ *
+ * Lifted out of the route on 2026-09-25 so the remote MCP endpoint's preflight
+ * tool (src/lib/mcp-tools.ts) runs this same function, not a copy of it and not
+ * an HTTP call to this server: one reservation rule, one quota rule, one
+ * idempotency rule, whichever door the call came through. `log` is the
+ * request's logger. The route below is now three lines.
+ */
+export async function runPreflight(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<ServiceResult> {
+    const parse = PreflightBody.safeParse(input)
     if (!parse.success) {
-      return reply.status(422).send({ error: 'validation_error', details: parse.error.issues })
+      return { status: 422, body: { error: 'validation_error', details: parse.error.issues } }
     }
 
     const {
@@ -63,12 +74,11 @@ export async function preflightRoute(app: FastifyInstance) {
     // and a field the server silently ignores is how a caller comes to
     // believe a job is counted in tokens when no job was named.
     if (unit !== undefined && task_ref === undefined) {
-      return reply.status(422).send({
+      return { status: 422, body: {
         error: 'validation_error',
         message: 'unit describes a job, so it needs task_ref. Pass task_ref (and task_ceiling to open the job), or leave unit out.',
-      })
+      } }
     }
-    const accountId = (request as any).accountId
     const customerRef = customer_id || 'default'
     const taskRef = task_ref ?? null
 
@@ -92,35 +102,32 @@ export async function preflightRoute(app: FastifyInstance) {
     // once more. A stored body with an error and no approved key can only be
     // a 422 that an earlier build remembered, and it is answered as a 422.
     //
-    // It answers, and returns true when it did. Not the reply object: a
-    // Fastify reply is a thenable that resolves to undefined once sent, so
-    // `const replayed = await replay()` (the code until 2026-09-23) was
-    // always undefined, every replay fell through into the reserve
+    // It returns the remembered answer, or null when there is none. Until
+    // 2026-09-23 it returned the Fastify reply, a thenable that resolves to
+    // undefined once sent, so every replay fell through into the reserve
     // transaction, lost the claim, and sent twice more ("Reply was already
-    // sent" in the server log, once per replayed call). The claim kept it
-    // from reserving again; it still cost a transaction and two warnings.
-    const replay = async (): Promise<boolean> => {
+    // sent" in the server log). Since 2026-09-25 nothing in this function
+    // sends at all: the route and the MCP tool each send what it returns.
+    const replay = async (): Promise<ServiceResult | null> => {
       const [prior] = await sql`
         SELECT response::text AS response FROM preflight_requests
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key!}
       `
-      if (!prior) return false
+      if (!prior) return null
       if (prior.response == null) {
         // The deciding request committed but has not written its body yet.
         // Answering anything else here would either invent a decision or let
         // this retry reserve on top of one already held.
-        reply.status(409).send({
+        return { status: 409, body: {
           error: 'preflight_in_progress',
           message: `A preflight with idempotency_key "${idempotency_key}" is still being decided. Retry in a moment.`,
-        })
-        return true
+        } }
       }
       let stored: unknown = JSON.parse(prior.response)
       if (typeof stored === 'string') stored = JSON.parse(stored)
       const legacy422 = stored !== null && typeof stored === 'object'
         && typeof (stored as Record<string, unknown>).error === 'string' && !('approved' in stored)
-      reply.status(legacy422 ? 422 : 200).send(stored)
-      return true
+      return { status: legacy422 ? 422 : 200, body: stored }
     }
 
     // Remembers a decision reached outside the reserve transaction: the early
@@ -139,10 +146,13 @@ export async function preflightRoute(app: FastifyInstance) {
         INSERT INTO preflight_requests (account_id, idempotency_key, response)
         VALUES (${accountId}, ${idempotency_key}, ${JSON.stringify(body)}::text::json)
         ON CONFLICT (account_id, idempotency_key) DO NOTHING
-      `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
+      `.catch((err) => log.error({ err }, 'preflight idempotency write failed'))
     }
 
-    if (idempotency_key && await replay()) return reply
+    if (idempotency_key) {
+      const replayed = await replay()
+      if (replayed) return replayed
+    }
 
     // Every approved:false below is also written to preflight_decisions
     // (migration 005) so the account has a record of what it was saved from.
@@ -157,12 +167,12 @@ export async function preflightRoute(app: FastifyInstance) {
         ceiling,
         remaining_units: null,
       }
-      recordDecision(request.log, {
+      recordDecision(log, {
         accountId, agentId: agent_id, customerRef, taskRef,
         reason: body.reason, estimatedUnits: estimated_units, ceilingUnits: ceiling, snapshot: body,
       })
       await remember(body)
-      return reply.send(body)
+      return { status: 200, body }
     }
 
     // Load account: plan and per-customer default. The monthly counter is NOT
@@ -175,7 +185,7 @@ export async function preflightRoute(app: FastifyInstance) {
     `
 
     if (!account) {
-      return reply.status(401).send({ error: 'account_not_found' })
+      return { status: 401, body: { error: 'account_not_found' } }
     }
 
     // Monthly plan quota. Legacy 'paid' is unlimited (metered per call);
@@ -361,13 +371,14 @@ export async function preflightRoute(app: FastifyInstance) {
       })
     } catch (err) {
       if (err instanceof ReplayNeeded) {
-        if (await replay()) return reply
+        const replayed = await replay()
+        if (replayed) return replayed
         // The claiming transaction rolled back and freed the key. Nothing was
         // reserved under it, so the caller is safe to retry.
-        return reply.status(409).send({
+        return { status: 409, body: {
           error: 'preflight_in_progress',
           message: `A preflight with idempotency_key "${idempotency_key}" is still being decided. Retry in a moment.`,
-        })
+        } }
       }
 
       if (err instanceof PreflightRejection) {
@@ -380,7 +391,7 @@ export async function preflightRoute(app: FastifyInstance) {
             unit: jobUnit,
             declared_unit: unit,
           }
-          return reply.status(422).send(body)
+          return { status: 422, body }
         }
 
         if (err.reason === 'task_ceiling_required') {
@@ -388,7 +399,7 @@ export async function preflightRoute(app: FastifyInstance) {
             error: 'task_ceiling_required',
             message: `Unknown task_ref "${task_ref}". Pass task_ceiling on the first preflight of a new task, or open the job first with PUT /tasks/:task_ref/ceiling or in the console.`,
           }
-          return reply.status(422).send(body)
+          return { status: 422, body }
         }
 
         const body =
@@ -420,7 +431,7 @@ export async function preflightRoute(app: FastifyInstance) {
         // hear about, because the wire stays quiet on purpose. Once per period,
         // enforced in the database; see quota-alert.ts.
         if (err.reason === 'plan_limit_exceeded' && planLimit !== null) {
-          alertQuota(request.log, {
+          alertQuota(log, {
             accountId, plan: account.plan, limit: planLimit, threshold: 100,
             monthlyCalls: Number(err.detail.monthly_calls ?? planLimit),
           })
@@ -428,7 +439,7 @@ export async function preflightRoute(app: FastifyInstance) {
 
         // The transaction is already rolled back; these writes are outside it
         // on purpose, or the record of the refusal would roll back with it.
-        recordDecision(request.log, {
+        recordDecision(log, {
           accountId, agentId: agent_id, customerRef, taskRef,
           reason: body.reason as string,
           estimatedUnits: estimated_units ?? null,
@@ -437,7 +448,7 @@ export async function preflightRoute(app: FastifyInstance) {
           snapshot: body,
         })
         await remember(body)
-        return reply.send(body)
+        return { status: 200, body }
       }
 
       throw err
@@ -448,7 +459,7 @@ export async function preflightRoute(app: FastifyInstance) {
     if (planLimit !== null) {
       const crossed = thresholdCrossed(result.monthlyCalls, planLimit)
       if (crossed) {
-        alertQuota(request.log, {
+        alertQuota(log, {
           accountId, plan: account.plan, limit: planLimit, threshold: crossed,
           monthlyCalls: result.monthlyCalls,
         })
@@ -499,9 +510,15 @@ export async function preflightRoute(app: FastifyInstance) {
         UPDATE preflight_requests
         SET response = ${JSON.stringify(body)}::text::json
         WHERE account_id = ${accountId} AND idempotency_key = ${idempotency_key}
-      `.catch((err) => request.log.error({ err }, 'preflight idempotency write failed'))
+      `.catch((err) => log.error({ err }, 'preflight idempotency write failed'))
     }
 
-    return reply.send(body)
+    return { status: 200, body }
+}
+
+export async function preflightRoute(app: FastifyInstance) {
+  app.post('/preflight', async (request, reply) => {
+    const r = await runPreflight(request.accountId, request.body, request.log)
+    return reply.status(r.status).send(r.body)
   })
 }

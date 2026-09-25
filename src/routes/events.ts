@@ -115,16 +115,22 @@ type ReservationStatus = 'settled' | 'already_closed' | 'not_found'
 const statusOf = (r: NamedReservation | null): ReservationStatus | null =>
   r == null ? null : r.state === 'open' ? 'settled' : r.state
 
-export async function eventsRoute(app: FastifyInstance) {
-  // 64 KB for the whole body: metadata is capped at 8 KB below, and nothing
-  // else in a record is more than a few ids. Fastify's default was 1 MB.
-  app.post('/events', { bodyLimit: 64 * 1024 }, async (request, reply) => {
-    const parsed = EventBody.safeParse(request.body)
+/** A record as the route sends it: the HTTP status and the JSON body. */
+export type RecordResult = { status: number; body: unknown }
+
+/**
+ * The whole of POST /events for one account, without the HTTP around it.
+ * Lifted out of the route on 2026-09-25 for the same reason as runPreflight:
+ * the remote MCP endpoint's record_event tool runs this function, so a record
+ * made through MCP settles, prices and alerts exactly as one made over REST.
+ */
+export async function runRecord(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<RecordResult> {
+    const parsed = EventBody.safeParse(input)
     if (!parsed.success) {
-      return reply.code(422).send({
+      return { status: 422, body: {
         error: 'validation_error',
         message: parsed.error.issues[0]?.message ?? 'Invalid request body',
-      })
+      } }
     }
 
     const {
@@ -138,17 +144,17 @@ export async function eventsRoute(app: FastifyInstance) {
     if (metadata !== undefined) {
       const keys = Object.keys(metadata).length
       if (keys > METADATA_MAX_KEYS) {
-        return reply.code(422).send({
+        return { status: 422, body: {
           error: 'validation_error',
           message: `metadata has ${keys} keys; the limit is ${METADATA_MAX_KEYS}.`,
-        })
+        } }
       }
       const bytes = Buffer.byteLength(JSON.stringify(metadata), 'utf8')
       if (bytes > METADATA_MAX_BYTES) {
-        return reply.code(422).send({
+        return { status: 422, body: {
           error: 'validation_error',
           message: `metadata is ${bytes} bytes as JSON; the limit is ${METADATA_MAX_BYTES}.`,
-        })
+        } }
       }
     }
     const usageMissing = usage_missing === true
@@ -167,7 +173,6 @@ export async function eventsRoute(app: FastifyInstance) {
     // stores no figure and a sentence saying why, never 0. See lib/prices.ts
     // and migration 017.
     const price = priceEvent(safeMetadata, usageMissing)
-    const accountId = request.accountId
     const defaultBudget: number | null = null
     const taskRef = task_ref ?? null
 
@@ -402,13 +407,13 @@ export async function eventsRoute(app: FastifyInstance) {
       })
 
       if (result.type === 'released') {
-        return reply.code(200).send({
+        return { status: 200, body: {
           status: 'released',
           customer_created: result.customerCreated,
           ...(result.reservation
             ? { reservation_status: result.reservation, reservation_released_units: result.consumed }
             : {}),
-        })
+        } }
       }
 
       if (result.type === 'budget_exhausted') {
@@ -417,24 +422,24 @@ export async function eventsRoute(app: FastifyInstance) {
           message: `Customer ${result.customerRef} has 0 units remaining.`,
           customer_id: result.customerRef,
         }
-        recordDecision(request.log, {
+        recordDecision(log, {
           accountId, source: 'events', customerRef: result.customerRef, taskRef,
           reason: body.error, estimatedUnits: reportedUnits, snapshot: body,
         })
-        return reply.code(402).send(body)
+        return { status: 402, body }
       }
 
       if (result.type === 'duplicate') {
-        return reply.code(200).send({
+        return { status: 200, body: {
           event_id: null,
           status: 'duplicate_ignored',
           customer_created: result.customerCreated,
           customer_remaining_units: result.remainingUnits,
-        })
+        } }
       }
 
-      maybeSendThresholdAlert(request.log, accountId, result.customerRef, result.usedUnits, result.prevUsedUnits)
-        .catch((err) => request.log.warn({ err }, 'usage alert failed'))
+      maybeSendThresholdAlert(log, accountId, result.customerRef, result.usedUnits, result.prevUsedUnits)
+        .catch((err) => log.warn({ err }, 'usage alert failed'))
 
       const t = result.taskRow
       const body = {
@@ -466,18 +471,26 @@ export async function eventsRoute(app: FastifyInstance) {
       // actual exceeded the estimate it approved. Nothing stopped it. Recorded
       // with blocked=false, the honest half of the receipt (a leak, not a save).
       if (t && t.usedUnits > t.ceilingUnits) {
-        recordDecision(request.log, {
+        recordDecision(log, {
           accountId, source: 'events', blocked: false, agentId: t.agentId ?? null,
           customerRef: result.customerRef, taskRef,
           reason: 'task_overrun_recorded', estimatedUnits: result.units,
           ceilingUnits: t.ceilingUnits, usedUnits: t.usedUnits, snapshot: body,
         })
       }
-      return reply.code(200).send(body)
+      return { status: 200, body }
 
     } catch (err) {
-      request.log.error(err)
-      return reply.code(500).send({ error: 'internal_error', message: 'Unexpected server error' })
+      log.error(err)
+      return { status: 500, body: { error: 'internal_error', message: 'Unexpected server error' } }
     }
+}
+
+export async function eventsRoute(app: FastifyInstance) {
+  // 64 KB for the whole body: metadata is capped at 8 KB below, and nothing
+  // else in a record is more than a few ids. Fastify's default was 1 MB.
+  app.post('/events', { bodyLimit: 64 * 1024 }, async (request, reply) => {
+    const r = await runRecord(request.accountId, request.body, request.log)
+    return reply.code(r.status).send(r.body)
   })
 }
