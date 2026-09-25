@@ -169,9 +169,41 @@ const rows = []
 // local server, e.g. from the harness's fake OAuth provider; with it the run
 // adds the start screen with its first-key step and the keys view with the
 // ways in, and SHOTS_KEY_COOKIE adds the keys view as a key session sees it.
+// The MCP consent page and the console's connected apps, 2026-09-25. Only with
+// a session handed in, so only against a local server: the run registers an
+// OAuth client there, opens the consent page for it (that is the capture), and
+// completes one connection so the keys view has a connected app to show.
+let CONSENT_PATH = null
+if (process.env.SHOTS_COOKIE) {
+  const redirect = 'https://client.example/callback'
+  const reg = await fetch(`${BASE}/oauth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'Example MCP client', redirect_uris: [redirect], token_endpoint_auth_method: 'none' }) }).then((r) => r.json()).catch(() => ({}))
+  const pk = (await import('node:crypto'))
+  const authPath = (v) => `/app/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: reg.client_id ?? '', redirect_uri: redirect,
+    code_challenge: pk.createHash('sha256').update(v).digest('base64url'), code_challenge_method: 'S256', state: 'shots' })}`
+  if (reg.client_id) {
+    CONSENT_PATH = authPath(pk.randomBytes(32).toString('base64url'))
+    // One connection, approved the way the page's form does it.
+    const verifier = pk.randomBytes(32).toString('base64url')
+    const html = await fetch(`${BASE}${authPath(verifier)}`, { headers: { cookie: process.env.SHOTS_COOKIE } }).then((r) => r.text())
+    const rid = (html.match(/name="request_id" value="([^"]+)"/) ?? [])[1]
+    const csrf = (html.match(/name="csrf" value="([^"]+)"/) ?? [])[1]
+    const ok = await fetch(`${BASE}/app/oauth/authorize`, { method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', cookie: process.env.SHOTS_COOKIE },
+      body: new URLSearchParams({ request_id: rid ?? '', csrf: csrf ?? '', decision: 'approve' }).toString() })
+    const code = new URL(ok.headers.get('location') ?? 'http://none/').searchParams.get('code')
+    const tok = await fetch(`${BASE}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', client_id: reg.client_id, code: code ?? '', redirect_uri: redirect, code_verifier: verifier }).toString() })
+    if (tok.status !== 200) failures.push(`consent: could not complete a connection for the connected-apps capture (${tok.status})`)
+  } else {
+    failures.push('consent: could not register an OAuth client, so the consent page was not captured')
+  }
+}
+
 const SIGNED_IN = [
   ...(process.env.SHOTS_COOKIE ? [['console-start', '/app?view=start', process.env.SHOTS_COOKIE], ['console-keys', '/app?view=keys', process.env.SHOTS_COOKIE]] : []),
   ...(process.env.SHOTS_KEY_COOKIE ? [['console-keysess', '/app?view=keys', process.env.SHOTS_KEY_COOKIE]] : []),
+  ...(CONSENT_PATH ? [['mcp-consent', CONSENT_PATH, process.env.SHOTS_COOKIE]] : []),
 ]
 
 for (const [vp, width, height, isMobile] of VIEWPORTS) {
@@ -274,6 +306,23 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           if (!b || b.offsetParent === null) return null
           return { vh: window.innerHeight, bottom: Math.round(b.getBoundingClientRect().bottom + window.scrollY) }
         })(),
+        // The nav, 2026-09-25, when MCP joined it: every destination on one
+        // line, the bar at its 60px, and the MCP link reachable at every width
+        // (in the bar on a desktop, in the menu on a phone).
+        nav: (() => {
+          const inner = document.querySelector('.nav-inner')
+          if (!inner) return null
+          const links = [...document.querySelectorAll('.nav-center a')]
+          return {
+            h: Math.round(inner.getBoundingClientRect().height),
+            wrapped: links.filter((a) => a.offsetParent !== null && a.getClientRects().length > 1).map((a) => a.textContent),
+            mcpBar: !!links.find((a) => a.getAttribute('href') === '/integrations/mcp' && a.offsetParent !== null),
+            mcpMenu: !!document.querySelector('.nav-menu a[href="/integrations/mcp"]'),
+            menuShown: (() => { const m = document.querySelector('.nav-menu'); return !!m && m.offsetParent !== null })(),
+          }
+        })(),
+        apps: !!document.getElementById('connected-apps'),
+        approve: (() => { const b = document.getElementById('approve'); return b && b.offsetParent !== null ? Math.round(b.getBoundingClientRect().bottom + window.scrollY) : null })(),
         overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
         // An escaped `\${` inside a template literal emits the expression as
         // TEXT. It renders as a paragraph of source at the top of the page, it
@@ -377,6 +426,13 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           failures.push(`${vp} ${name}: the hero button's bottom edge is ${m.hero.bottom - m.hero.vh}px BELOW the fold`)
         }
       }
+      if (m.nav) {
+        if (m.nav.h !== 60) failures.push(`${vp} ${name}: the nav bar is ${m.nav.h}px tall, not 60`)
+        if (m.nav.wrapped.length) failures.push(`${vp} ${name}: nav link(s) wrap: ${m.nav.wrapped.join(', ')}`)
+        if (!(m.nav.menuShown ? m.nav.mcpMenu : m.nav.mcpBar)) failures.push(`${vp} ${name}: no MCP link in the ${m.nav.menuShown ? 'menu' : 'nav bar'}`)
+      }
+      if (name === 'console-keys' && !m.apps) failures.push(`${vp} ${name}: no connected-apps table on the keys view`)
+      if (name === 'mcp-consent' && m.approve === null) failures.push(`${vp} ${name}: no visible Allow button on the consent page`)
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)
       if (m.overflowX) failures.push(`${vp} ${name}: scrolls sideways`)
       if (m.leak) failures.push(`${vp} ${name}: template source leaked into the page ("${m.leak}")`)
@@ -402,6 +458,79 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   }
   await ctx.close()
 }
+// ---------------------------------------------------------------- /integrations/mcp: every tab, the keys, and no script
+//
+// 2026-09-25. The connect page is a tab list: one capture per tab at desktop
+// and phone width, each asserting that exactly its own panel is shown and its
+// one Connect action is visible; then the keyboard (ArrowRight, End, Home move
+// the selection and the focus, as WAI-ARIA tabs do); then the page with
+// JavaScript off, where the tab row is plain links and every panel is shown.
+{
+  const TABS = ['claude', 'chatgpt', 'claude-code', 'codex', 'cursor', 'antigravity', 'other']
+  const ACTION = { claude: 'connect-claude', chatgpt: 'connect-chatgpt', 'claude-code': 'connect-claude-code', codex: 'connect-codex',
+                   cursor: 'connect-cursor', antigravity: 'connect-antigravity', other: 'connect-vscode' }
+  for (const [vp, width, height, isMobile] of [['desktop', 1440, 735, false], ['mobile', 390, 844, true]]) {
+    const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile })
+    const page = await ctx.newPage()
+    const errs = []
+    page.on('console', (msg) => { if (msg.type() === 'error') errs.push(msg.text()) })
+    await page.goto(`${BASE}/integrations/mcp`, { waitUntil: 'networkidle' })
+    for (const id of TABS) {
+      await page.click(`#tab-${id}`)
+      await page.waitForTimeout(150)
+      const st = await page.evaluate(([id, action]) => ({
+        shown: [...document.querySelectorAll('.mcp-panel')].filter((p) => !p.hidden && p.offsetParent !== null).map((p) => p.id),
+        selected: document.querySelector('.mcp-tab[aria-selected="true"]')?.id,
+        action: (() => { const b = document.getElementById(action); return !!b && b.offsetParent !== null })(),
+        hash: location.hash,
+        overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+      }), [id, ACTION[id]])
+      await page.screenshot({ path: `${OUT}/${vp}-mcp-tab-${id}.png`, fullPage: true })
+      if (st.shown.length !== 1 || st.shown[0] !== id) failures.push(`${vp} mcp tab ${id}: panels shown ${JSON.stringify(st.shown)}`)
+      if (st.selected !== `tab-${id}`) failures.push(`${vp} mcp tab ${id}: selected tab is ${st.selected}`)
+      if (!st.action) failures.push(`${vp} mcp tab ${id}: its Connect action #${ACTION[id]} is not visible`)
+      if (st.hash !== `#${id}`) failures.push(`${vp} mcp tab ${id}: the address says ${st.hash}`)
+      if (st.overflowX) failures.push(`${vp} mcp tab ${id}: scrolls sideways`)
+    }
+    if (errs.length) failures.push(`${vp} mcp tabs: ${errs.length} console error(s): ${errs[0]}`)
+    rows.push(`${vp.padEnd(8)} mcp-tabs      ${TABS.length} tabs captured`)
+    await ctx.close()
+  }
+  // The keyboard.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 735 } })
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/integrations/mcp`, { waitUntil: 'networkidle' })
+    await page.focus('#tab-claude')
+    const at = () => page.evaluate(() => ({ sel: document.querySelector('.mcp-tab[aria-selected="true"]')?.id, focus: document.activeElement?.id,
+      tabindex: [...document.querySelectorAll('.mcp-tab')].map((t) => t.getAttribute('tabindex')).join(''), role: document.querySelector('.mcp-tabs')?.getAttribute('role') }))
+    await page.keyboard.press('ArrowRight'); const a1 = await at()
+    await page.keyboard.press('End'); const a2 = await at()
+    await page.keyboard.press('Home'); const a3 = await at()
+    await page.keyboard.press('ArrowLeft'); const a4 = await at()
+    const good = a1.sel === 'tab-chatgpt' && a1.focus === 'tab-chatgpt' && a2.sel === 'tab-other' && a3.sel === 'tab-claude' && a3.focus === 'tab-claude'
+      && a4.sel === 'tab-other' && a1.role === 'tablist' && a3.tabindex === '0' + '-1'.repeat(6)
+    if (!good) failures.push(`mcp tabs keyboard: ${JSON.stringify([a1, a2, a3, a4])}`)
+    rows.push(`browser  mcp-keys      ArrowRight ${a1.sel}, End ${a2.sel}, Home ${a3.sel}, ArrowLeft ${a4.sel}`)
+    await ctx.close()
+  }
+  // No script: every panel is shown, and the tab row is links to them.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, javaScriptEnabled: false })
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/integrations/mcp`, { waitUntil: 'networkidle' })
+    const st = await page.evaluate(() => ({
+      shown: [...document.querySelectorAll('.mcp-panel')].filter((p) => p.offsetParent !== null).length,
+      links: [...document.querySelectorAll('.mcp-tab')].filter((a) => /^#/.test(a.getAttribute('href') ?? '')).length,
+      role: document.querySelector('.mcp-tabs')?.getAttribute('role'),
+    }))
+    await page.screenshot({ path: `${OUT}/mobile-mcp-nojs.png`, fullPage: true })
+    if (st.shown !== TABS.length || st.links !== TABS.length || st.role) failures.push(`mcp without script: ${JSON.stringify(st)}`)
+    rows.push(`nojs     mcp           ${st.shown}/${TABS.length} panels shown, ${st.links} tab links`)
+    await ctx.close()
+  }
+}
+
 // ---------------------------------------------------------------- the ?src= rewrite, in a browser
 //
 // The only check that can prove this one. The homepage's eight links to

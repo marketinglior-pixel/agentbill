@@ -102,7 +102,10 @@ export MAIL_TEST_OUTBOX="$AUTH_TMP/outbox.jsonl"
 # AUTH_FAILURES_PER_MINUTE: raised for the same reason as the rate limit; the
 # [secfix] gates start a second server with the production values to test it.
 export POLAR_PRODUCT_ID_BUILDER=prod_verify_builder POLAR_PRODUCT_ID_TEAM=prod_verify_team POLAR_PRODUCT_ID_SCALE=prod_verify_scale
-AUTH_FAILURES_PER_MINUTE=100000 META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
+# MCP_PUBLIC_ORIGIN, 2026-09-25: the [mcp] gates run the MCP SDK's own OAuth
+# client against this server, and a real client refuses metadata whose
+# resource is not the URL it dialled. Production ignores it (src/lib/mcp-oauth.ts).
+MCP_PUBLIC_ORIGIN="http://localhost:$PORT" AUTH_FAILURES_PER_MINUTE=100000 META_PIXEL_ID=1234567890 RATE_LIMIT_PER_MINUTE=100000 DATABASE_SSL=disable PORT="$PORT" NODE_ENV=test POLAR_WEBHOOK_SECRET="$WEBHOOK_SECRET" APP_SESSION_SECRET="preflight-verify-session-secret" ADMIN_SECRET="$ADMIN_SECRET" node "$ROOT/dist/server.js" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
   curl -sf "http://localhost:$PORT/health/db" >/dev/null 2>&1 && break
