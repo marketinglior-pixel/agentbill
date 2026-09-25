@@ -19,8 +19,9 @@ export type Pick = 'p50' | 'p90' | 'max'
 export const PICKS: readonly Pick[] = ['p50', 'p90', 'max']
 
 /** One finished job: the agent that spent under it, what it spent, when it last moved. */
-export type HistoryJob = { agentId: string; usedUnits: number; updatedAt: Date }
-export type AgentHistory = { agentId: string; jobs: number } & Record<Pick, number>
+/** unit is the job's (task_budgets.unit): a figure is only ever a p50 of one kind of number. */
+export type HistoryJob = { agentId: string; usedUnits: number; updatedAt: Date; unit?: string }
+export type AgentHistory = { agentId: string; jobs: number; unit: string } & Record<Pick, number>
 
 /**
  * Postgres's percentile_disc, in integers: the smallest value with at least
@@ -52,10 +53,15 @@ export function summarizeHistory(rows: readonly HistoryJob[]): AgentHistory[] {
   }
   const out: { h: AgentHistory; lastAt: number }[] = []
   for (const [agentId, list] of byAgent) {
-    const recent = [...list].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()).slice(0, HISTORY_JOBS)
+    // One unit per figure: an agent whose jobs moved from units to tokens is
+    // suggested in the unit of its most recent job, from those jobs only, so
+    // a p50 never averages tokens with a count the developer chose.
+    const sorted = [...list].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    const unit = sorted[0].unit ?? 'unit'
+    const recent = sorted.filter((r) => (r.unit ?? 'unit') === unit).slice(0, HISTORY_JOBS)
     const used = recent.map((r) => Number(r.usedUnits)).sort((a, b) => a - b)
     out.push({
-      h: { agentId, jobs: used.length, p50: percentileDisc(used, 50), p90: percentileDisc(used, 90), max: used[used.length - 1] },
+      h: { agentId, jobs: used.length, unit, p50: percentileDisc(used, 50), p90: percentileDisc(used, 90), max: used[used.length - 1] },
       lastAt: recent[0].updatedAt.getTime(),
     })
   }

@@ -440,8 +440,8 @@ export const MCP_SCRIPTS = [tabsScript, { html: COPY_JS, hash: COPY_HASH }]
 export function mcpConnectBody(): string {
   return `
   <h1>Connect AgentBill to your AI tools</h1>
-  <p class="lede">One URL. Your agent asks a job's ceiling before a call, records what the call used, and reads where the
-  units went. Pick where you work.</p>
+  <p class="lede">One URL. Your assistant reads what each job used and what it cost at list price, asks a job's ceiling
+  before a call, and records what a call used. Pick where you work.</p>
 
   <div class="mcp" data-tabs>
     <nav class="mcp-tabs" aria-label="Where you work">
@@ -456,15 +456,15 @@ ${TABS.map((t) => `    <section class="mcp-panel" id="${t.id}">
   <table class="mcp-tools">
     <thead><tr><th>Tool</th><th>What it does</th><th>Scope</th></tr></thead>
     <tbody>
-      <tr><td>preflight</td><td>Asks before a call whether the job and the customer have units left. <span class="inline">approved: false</span> comes back as the answer, with the reason and a sentence the model can act on. An approved call reserves units against the job.</td><td>meter</td></tr>
-      <tr><td>record_event</td><td>Records what a call used. With the job's task_ref and the reservation_id preflight returned, it settles that reservation.</td><td>meter</td></tr>
+      <tr><td>preflight</td><td>Asks before a call whether the job and the customer have room left. <span class="inline">approved: false</span> comes back as the answer, with the reason and a sentence the model can act on. An approved call reserves its estimate against the job.</td><td>meter</td></tr>
+      <tr><td>record_event</td><td>Records what a call used. With the model and the token counts in its metadata, AgentBill prices it at list price. With the job's task_ref and the reservation_id preflight returned, it settles that reservation.</td><td>meter</td></tr>
       <tr><td>task_status</td><td>One job: its ceiling, what it used and what is reserved, and its calls by model and by step.</td><td>read</td></tr>
-      <tr><td>top_jobs</td><td>Your jobs ranked by the units they used, or by an estimate in dollars at public list price.</td><td>read</td></tr>
+      <tr><td>top_jobs</td><td>Your jobs ranked by an estimate in dollars at public list price, or by what they used in their own unit.</td><td>read</td></tr>
       <tr><td>recent_refusals</td><td>The calls refused on your account, the newest at the top, with the body each agent received.</td><td>read</td></tr>
     </tbody>
   </table>
   <p>Dollar figures are estimates at public list price, labelled as estimates, for calls recorded with a model named. They are
-  not your invoice.</p>
+  not your invoice. The assistant does not meter the tokens of your chat with it: a call is recorded only when a tool records it.</p>
 
   <h2>How it signs in</h2>
   <p><b>With a sign-in (OAuth).</b> The app sends you to AgentBill, you sign in with Google, GitHub or an email link, and a page

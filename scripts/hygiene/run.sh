@@ -107,60 +107,29 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   });")
 gate "home.ts: one python, one node sample, no phantom block" "1:1:2" "$n"
 
-# The console's start screen (pre-save) carries the repo's one executed task_ref-only
-# sample as a literal, beside exactly one interpolated pre (the refusal body
-# viewer), and nothing else. It moved here from /register#done on 2026-09-11,
-# and the same day a comment that spelled the tag name with angle brackets
-# swallowed it into a "dynamic" block: python went 38 -> 37 and nothing failed.
-# Same trap as home.ts above, same guard.
+# The console's start screen carries two executed samples as literals, the
+# Python and the Node wrap() path (2026-09-25), beside exactly one interpolated
+# pre (the refusal body viewer), and nothing else. Until 2026-09-25 it carried
+# the task_ref-only record(units=1) sample, and on 2026-09-11 a comment that
+# spelled the tag name with angle brackets swallowed it into a "dynamic" block:
+# python went 38 -> 37 and nothing failed. Same trap as home.ts above, same guard.
 n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   let s=''; process.stdin.on('data', d => s += d).on('end', () => {
     const b = JSON.parse(s).filter(x => x.source.endsWith('routes/app.ts'));
     const py = b.filter(x => x.kind === 'python').length;
+    const nd = b.filter(x => x.kind === 'node').length;
     const dy = b.filter(x => x.kind === 'dynamic').length;
-    process.stdout.write(py + ':' + dy + ':' + b.length);
+    process.stdout.write(py + ':' + nd + ':' + dy + ':' + b.length);
   });")
-gate "app.ts: one python literal, one dynamic pre, no phantom block" "1:1:2" "$n"
+gate "app.ts: one python, one node literal, one dynamic pre, no phantom" "1:1:1:3" "$n"
 
-# The onboarding sample exists twice on purpose, and this is what stops the two
-# copies drifting.
-#
-# The console's start screen, before a save, carries it as a literal <pre class="snip">,
-# because scripts/snippets only executes a literal: any ${...} inside a pre is
-# classified "dynamic" with empty code and leaves the gate in silence. After a
-# save the console carries the SAME lines built by taskSnippet() in
-# src/ui/steps.ts, with the reader's own job name in them, so that copy cannot
-# be a literal. One is executed and the other is the one a reader actually
-# pastes, which is the wrong way round to leave unchecked.
-#
-# Until 2026-09-11 the literal lived on /register#done. It moved when that
-# screen stopped teaching the sequence (dogfood run 3 ended there, on "I do
-# not understand what I need to do"); the console owns every step now. The
-# block was already dropped from CI once, during the commit that added this
-# gate: it was written as ${taskSnippet()} and the inventory went from python
-# to dynamic with nobody noticing but a hand-run of extract.mjs.
-n=$(node -e "
-const fs=require('fs');
-const src=fs.readFileSync('src/ui/steps.ts','utf8');
-const m=src.match(/export function taskSnippet[\s\S]*?return \\\`([\s\S]*?)\\\`\n\}/);
-if(!m){process.stderr.write('taskSnippet template not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
-const agent=(src.match(/export const SAMPLE_AGENT = '([^']*)'/)||[])[1];
-const ref=(src.match(/export const SAMPLE_REF = '([^']*)'/)||[])[1];
-const ceil=(src.match(/export const SAMPLE_CEILING = ([0-9]+)/)||[])[1];
-if(!agent||!ref||!ceil){process.stderr.write('SAMPLE_AGENT / SAMPLE_REF / SAMPLE_CEILING not found in src/ui/steps.ts\n');process.stdout.write('1');process.exit(0)}
-// The plus-one first, or the plain ceiling would eat the head of it.
-const built=m[1].replace(/\\\$\{ceiling \+ 1\}/g,String(Number(ceil)+1)).replace(/\\\$\{ceiling\}/g,ceil)
-  .replace(/\\\$\{agentId\}/g,agent).replace(/\\\$\{taskRef\}/g,ref);
-const reg=fs.readFileSync('src/routes/app.ts','utf8').match(/<pre class=\"snip\">([\s\S]*?)<\/pre>/);
-if(!reg){process.stderr.write('no literal pre.snip block in src/routes/app.ts\n');process.stdout.write('1');process.exit(0)}
-const lit=reg[1];
-if(lit.trim()===built.trim()){process.stdout.write('0');process.exit(0)}
-process.stderr.write('    app.ts <pre class=snip> and taskSnippet() have drifted:\n');
-const a=lit.trim().split('\n'), b=built.trim().split('\n');
-for(let i=0;i<Math.max(a.length,b.length);i++) if(a[i]!==b[i]) process.stderr.write('      line '+(i+1)+'\n        register: '+JSON.stringify(a[i])+'\n        steps.ts: '+JSON.stringify(b[i])+'\n');
-process.stdout.write('1');
-")
-gate "console pre-save sample is byte-identical to taskSnippet()" 0 "$n"
+# The start screen's prose says what one run does: job first-call, a ceiling of
+# 20,000 tokens, wrap(). The two samples are literals (the harvester executes
+# only a literal), so nothing ties them to that sentence but this gate: both
+# samples must open the job steps.ts names, with its agent and its ceiling,
+# through wrap(), and the sentence must carry the same name and number.
+n=$(node scripts/hygiene/start-samples.mjs)
+gate "start samples open the job the start screen describes" 0 "$n"
 
 
 # Every inline script the site emits must PARSE.

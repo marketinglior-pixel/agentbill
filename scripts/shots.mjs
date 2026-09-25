@@ -119,6 +119,12 @@ const FORM_ACTION_VISIBLE = new Set(['desktop', 'laptop', 'mobile'])
 // number that can only be met by deleting the sentence is not a gate.
 const HERO_ACTION_VISIBLE = new Set(['desktop'])
 
+// The start screen's connect choices, 2026-09-25: above the fold at 1440,
+// 1280 and 390. At 320 they are measured and printed, not enforced, for the
+// reason the key screen's action is not: three stacked cards under the
+// console's own bar do not fit a 568px viewport with the question above them.
+const VIA_VISIBLE = new Set(['desktop', 'laptop', 'mobile'])
+
 // `laptop`, 2026-09-25: 1280 wide at the same 735 the desktop gate holds, the
 // narrowest desktop width in common use, asked for with the sign-in pages.
 const VIEWPORTS = [
@@ -200,8 +206,15 @@ if (process.env.SHOTS_COOKIE) {
   }
 }
 
+// The start screen's three answers to "how will you connect?" and the
+// activity view in dollars, 2026-09-25. Each path is its own capture; the
+// dollar view needs an account with a priced call, so it is captured with
+// SHOTS_COOKIE only (a local server's session), never against production.
+const START_VIAS = ['mcp', 'python', 'node']
 const SIGNED_IN = [
-  ...(process.env.SHOTS_COOKIE ? [['console-start', '/app?view=start', process.env.SHOTS_COOKIE], ['console-keys', '/app?view=keys', process.env.SHOTS_COOKIE]] : []),
+  ...(process.env.SHOTS_COOKIE ? [['console-start', '/app?view=start', process.env.SHOTS_COOKIE], ['console-keys', '/app?view=keys', process.env.SHOTS_COOKIE],
+    ...START_VIAS.map((v) => [`console-start-${v}`, `/app?view=start&via=${v}`, process.env.SHOTS_COOKIE]),
+    ['console-activity', '/app?view=activity', process.env.SHOTS_COOKIE]] : []),
   ...(process.env.SHOTS_KEY_COOKIE ? [['console-keysess', '/app?view=keys', process.env.SHOTS_KEY_COOKIE]] : []),
   ...(CONSENT_PATH ? [['mcp-consent', CONSENT_PATH, process.env.SHOTS_COOKIE]] : []),
 ]
@@ -322,6 +335,15 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           }
         })(),
         apps: !!document.getElementById('connected-apps'),
+        // The start screen's three choices, against the fold: the question is
+        // the screen, so every answer to it is visible without a scroll.
+        vias: (() => {
+          const cards = [...document.querySelectorAll('.vias .via')]
+          if (!cards.length) return null
+          return { vh: window.innerHeight, n: cards.length, bottom: Math.max(...cards.map((c) => Math.round(c.getBoundingClientRect().bottom + window.scrollY))),
+                   current: cards.filter((c) => c.hasAttribute('aria-current')).map((c) => c.getAttribute('href')) }
+        })(),
+        cost: !!document.getElementById('cost-chart'),
         approve: (() => { const b = document.getElementById('approve'); return b && b.offsetParent !== null ? Math.round(b.getBoundingClientRect().bottom + window.scrollY) : null })(),
         overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
         // An escaped `\${` inside a template literal emits the expression as
@@ -431,6 +453,18 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         if (m.nav.wrapped.length) failures.push(`${vp} ${name}: nav link(s) wrap: ${m.nav.wrapped.join(', ')}`)
         if (!(m.nav.menuShown ? m.nav.mcpMenu : m.nav.mcpBar)) failures.push(`${vp} ${name}: no MCP link in the ${m.nav.menuShown ? 'menu' : 'nav bar'}`)
       }
+      if (name.startsWith('console-start')) {
+        // A renamed class is a failure, not a skip.
+        if (!m.vias) failures.push(`${vp} ${name}: no .vias .via cards on the start screen, so the fold check measured nothing`)
+        else {
+          if (m.vias.n !== 3) failures.push(`${vp} ${name}: ${m.vias.n} connect choices, expected 3`)
+          if (VIA_VISIBLE.has(vp) && m.vias.bottom > m.vias.vh) failures.push(`${vp} ${name}: the connect choices end ${m.vias.bottom - m.vias.vh}px BELOW the fold`)
+          const want = name === 'console-start' ? [] : [`/app?view=start&via=${name.replace('console-start-', '')}`]
+          if (JSON.stringify(m.vias.current) !== JSON.stringify(want)) failures.push(`${vp} ${name}: chosen ${JSON.stringify(m.vias.current)}, expected ${JSON.stringify(want)}`)
+          rows.push(`${' '.repeat(8)} ${' '.repeat(13)}     fold ${m.vias.vh}  choices-bottom ${m.vias.bottom}${m.vias.bottom <= m.vias.vh ? '' : ` (+${m.vias.bottom - m.vias.vh} BELOW)`}`)
+        }
+      }
+      if (name === 'console-activity' && !m.cost) failures.push(`${vp} ${name}: the activity view is not the cost chart (seed a priced call first)`)
       if (name === 'console-keys' && !m.apps) failures.push(`${vp} ${name}: no connected-apps table on the keys view`)
       if (name === 'mcp-consent' && m.approve === null) failures.push(`${vp} ${name}: no visible Allow button on the consent page`)
       if (status !== 200) failures.push(`${vp} ${name}: HTTP ${status}`)

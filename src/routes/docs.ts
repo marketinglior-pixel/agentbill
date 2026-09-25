@@ -73,7 +73,7 @@ const quickStartLd = {
       '@type': 'HowToStep',
       position: 2,
       name: 'Step 2, Give the job a ceiling',
-      text: 'Name the job and say what it is worth, on the console start screen or with PUT /tasks/:task_ref/ceiling. No terminal yet: a preflight for a job that has no ceiling is a 422 task_ceiling_required, because there is nothing to check the call against. Every call carrying that name is checked against that one ceiling, whatever agent or tool made it.',
+      text: 'Name the job and say what it is worth, on the console task budgets view or with PUT /tasks/:task_ref/ceiling. No terminal yet: a preflight for a job that has no ceiling is a 422 task_ceiling_required, because there is nothing to check the call against. Every call carrying that name is checked against that one ceiling, whatever agent or tool made it.',
       url: `${ORIGIN}/docs#step-ceiling`,
     },
     {
@@ -121,7 +121,7 @@ export async function docsRoute(app: FastifyInstance) {
   copy. No key is issued before your address is verified.</p>
 
   <h3 id="step-ceiling">Step 2, Give the job a ceiling</h3>
-  <p>Name the job and say what it is worth, on the console's start screen or with
+  <p>Name the job and say what it is worth, on the console's <a href="/app?view=tasks">task budgets view</a> or with
   <a href="#put-task-ceiling">PUT /tasks/:task_ref/ceiling</a>. <strong>No terminal yet, and that
   order is the point:</strong> a preflight for a job that has no ceiling is a
   <span class="inline">422 task_ceiling_required</span>, because there is nothing to check the call

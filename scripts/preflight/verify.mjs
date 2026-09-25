@@ -1295,130 +1295,167 @@ ok('[console] the tasks view empty state points at the form above it', emptyTask
 const emptyOverview8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
 ok('[console] the overview empty state links to the tasks view instead', emptyOverview8.includes('No jobs yet') && emptyOverview8.includes('view=tasks">Name a job'))
 
-// ------------------------------------------------- 8b: the onboarding path
+// ------------------------------------------------- 8b: the start screen, "how will you connect?"
 //
-// Ticket 2026-09-10: an account has to reach a first understandable preflight
-// on a job the holder created, without anyone helping and without reading a
-// blog. Nothing here existed before, and the first run it replaces was a raw
-// curl asking for 5 units against a per-request ceiling of 1: a refusal
-// manufactured on a job the reader never opened.
+// 2026-09-25. The founder, as a user: "not clear at all", "quite complicated".
+// Claude, reading his account over MCP: "There's no dollar estimate. None of
+// its calls were recorded with a model name." The start screen's first sample
+// called record(units=1), so a new account's first experience could never be
+// a dollar. The screen now asks how the reader will connect, shows one short
+// path per answer, and ends on the account's first recorded model call with
+// its tokens, its model and its list-price estimate.
 //
-// reset() above leaves preflight_decisions behind, so the account it calls
-// clean is not virgin and overviewView never rendered its first run at all.
-// That is why this gate could not see the screen it is about until now.
-await sql`DELETE FROM preflight_decisions WHERE account_id = ${ACCT}`
-const virgin8 = await nav8('/app', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] the first run is three numbered steps and a form, not a curl that manufactures a refusal',
-   virgin8.includes('class="setf3"') && virgin8.includes('Three steps to your first refusal')
-     && !virgin8.includes('"ceiling":1'), 'the virgin overview did not render the steps')
-// Ticket 2026-09-11, after dogfood run 3 ended on /register#done with "I do
-// not understand what I need to do". The install is INSIDE the numbered
-// sequence, after the step that needs no terminal, and before the sample it
-// makes runnable. The cold-path ticket the same evening made the refusal the
-// third step, so name and units share the first; the order is unchanged and
-// is asserted on the rendered page, not the source.
-const iName8 = virgin8.indexOf('Name this job')
-const iUnits8 = virgin8.indexOf('How many units is this job worth')
-const iPip8 = virgin8.indexOf('pip install agentbill-sdk')
-const iAsk8 = virgin8.indexOf('Ask before each call')
-const iSample8 = virgin8.search(/<pre class="snip">/)
-ok('[onboarding] the install opens step 2: after the job name and the units, before the ask and the sample',
-   iName8 > -1 && iUnits8 > iName8 && iPip8 > iUnits8 && iAsk8 > iPip8 && iSample8 > iAsk8,
-   `name ${iName8}, units ${iUnits8}, pip ${iPip8}, ask ${iAsk8}, sample ${iSample8}`)
-ok('[onboarding] the sequence is numbered 1 to 3 on one screen, the count UX v1 locked, and nothing on it is a bullet',
-   ['1', '2', '3'].every((n) => virgin8.includes(`<span class="ns3-n">${n}</span>`))
-     && !virgin8.includes('<span class="ns3-n">4</span>') && !virgin8.includes('ns3-n">&middot;'))
-// Locked path, item 4: "one job = one budget" is read first, the wire name second.
-const iBudget8 = virgin8.indexOf('One job is one budget')
-const iRef8 = virgin8.indexOf('task_ref')
-ok('[onboarding] "one job is one budget" is read before the name task_ref',
-   iBudget8 > -1 && iRef8 > -1 && iBudget8 < iRef8, `budget at ${iBudget8}, task_ref at ${iRef8}`)
-ok('[onboarding] and the page says whose decision the refusal is',
-   virgin8.includes('Your code decides what the job does next'))
-// The same rule, on the surface it was never asserted on. #33 fixed the order
-// on /register#done and the homepage fold kept the old one: "Preflight says no
-// when this job is out of units" opened the only explanation above the fold
-// with our endpoint's name, to a reader who does not have one yet. Nothing in
-// this harness looked at / at all, which is why it survived the pass that
-// found it three screens away. The check compares INDEXES and not presence,
-// because presence was already true of the copy it replaces.
+// Its own account, so nothing the gates above left behind decides what a
+// virgin account sees, and nothing here reaches the account they share.
+//
+// The production path: the Python and the Node sample are taken off the
+// served page, unescaped, and run as a reader would paste them, with the real
+// SDKs, the real key over HTTP and this server pricing the record. Only the
+// provider is a stand-in (no OpenAI key in CI). No test bypass is on that
+// path: the key is a bearer header, checked by the same hook production runs.
+// The homepage, read by the gates further down.
 const fold8 = await fetch(`${API}/`).then(r => r.text())
-// The concept-before-name gate itself moved below, onto the hero slice, on
-// 2026-09-23: until then both of its strings sat inside <meta name="description">
-// and it never read the page at all.
-// The sample is task_ref-only on purpose: the ceiling is set before the code
-// runs, and a task_ceiling sent after the job exists is not applied.
-// Before a save the sample is a literal <pre>, the one copy CI executes; the
-// hygiene gate holds it byte-identical to taskSnippet(). It is not escaped, so
-// the quote here is a real quote, not &quot;.
-const snipAt8 = virgin8.search(/<pre class="snip">/)
-const snip8 = snipAt8 === -1 ? '' : virgin8.slice(snipAt8, virgin8.indexOf('</pre>', snipAt8))
-ok('[onboarding] the sample preflights with task_ref and carries no task_ceiling',
-   snip8.includes('task_ref="job-1"') && !snip8.includes('task_ceiling'), snip8.slice(0, 120))
-// One paste is one run is one refusal: the sample loops one call past the
-// ceiling it was written for, and the ceiling is what ends the loop. Before
-// 2026-09-12 it made one call and asked the reader to run it N+1 times.
-ok('[onboarding] the sample loops one call past the ceiling, so one run is one refusal',
-   snip8.includes('for _ in range(4)') && snip8.includes('ceiling of 3'), snip8.slice(0, 200))
-// The start screen is its own view, off the rail, and where /register#done
-// signs a new key in. Its form posts back to itself; the tasks view's editor
-// posts nothing and lands where it always has.
-const startView8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[start] ?view=start is the same three steps, off the rail, and its form posts back to itself',
-   startView8.includes('Three steps to your first refusal') && startView8.includes('name="back" value="start"')
-     && !startView8.includes('<span>Start</span>'), 'the start view did not render the steps')
-const saveStart8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5&back=start' })
-ok('[start] a save from the start screen lands back on the start screen',
-   saveStart8.status === 303 && saveStart8.headers.get('location') === '/app?view=start&saved=job-mine&created=1', `${saveStart8.headers.get('location')}`)
-// After a save the sample is the reader's own job, read off the row, with
-// the row's ceiling in the loop bound.
-const mine8 = await nav8('/app?view=start&saved=job-mine&created=1', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] a saved job puts its own name and ceiling in the lines the reader pastes',
-   mine8.includes('task_ref=&quot;job-mine&quot;') && mine8.includes('range(6)') && mine8.includes('ceiling of 5'), 'no personalised sample')
-ok('[start] before any call, step 3 says nothing is here yet and how to get there',
-   mine8.includes('Nothing here yet') && mine8.includes('reload this page'), 'step 3 resting state missing')
-const saveElse8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-mine&ceiling_units=5&back=%2Fevil' })
-ok('[start] back is an allowlist of two, not an echo',
-   saveElse8.headers.get('location') === '/app?view=tasks&saved=job-mine', `${saveElse8.headers.get('location')}`)
-// The refusal the screen exists to show. Five reservations of one unit fill a
-// ceiling of five; the sixth is refused, and step 3 then carries the row and
-// the persisted body, while the overview stops being the start screen.
-for (let i = 0; i < 5; i++) await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
-const sixth8 = await pre({ agent_id: 'researcher', task_ref: 'job-mine', estimated_units: 1 })
-ok('[start] the sixth call on a ceiling of 5 is refused', sixth8.body.approved === false && sixth8.body.reason === 'task_ceiling_exceeded', JSON.stringify(sixth8.body))
-const afterRefuse8 = await pageUntil('/app?view=start', { headers: { cookie: cookie8 } }, b => b.includes('Refused. Asked 1 unit'))
-ok('[start] step 3 shows the refusal with the body the code received',
-   afterRefuse8.includes('Refused. Asked 1 unit') && afterRefuse8.includes('&quot;reason&quot;: &quot;task_ceiling_exceeded&quot;')
-     && afterRefuse8.includes('Open the console'), 'step 3 did not show the refusal')
-const overviewAfter8 = await pageUntil('/app', { headers: { cookie: cookie8 } }, b => b.includes('class="kpis"'))
-ok('[start] after the first refusal the overview is the dashboard, and the start screen stays reachable',
-   overviewAfter8.includes('class="kpis"') && !overviewAfter8.includes('Three steps to your first refusal')
-     && afterRefuse8.includes('class="setf3"'), 'the overview did not become the dashboard')
-// A name that cannot sit inside a Python string falls back rather than
-// rendering a block that does not parse. esc() is HTML escaping: &quot;
-// renders in the browser as the character that closes the string.
-await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: `task_ref=${encodeURIComponent('say "hi"')}&ceiling_units=5` })
-const quoted8 = await nav8('/app?view=start', { headers: { cookie: cookie8 } }).then(r => r.text())
-ok('[onboarding] a job name carrying a quote does not go inside the sample',
-   quoted8.includes('cannot hold inline') && !quoted8.includes('task_ref=&quot;say &quot;hi&quot;'), 'the quote reached the sample')
-// A failed save must never come back proposing a name. verifyFlash strips
-// f.ref whenever no row carries that name, which is exactly a failed save on a
-// NEW job, and the first version of this screen then fell through to whatever
-// other job the account had. Fixing the ceiling and pressing Save rewrote THAT
-// job's budget, and nothing on screen said the name had changed.
-await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-existing&ceiling_units=5' })
-const retarget8 = await nav8('/app/tasks', { method: 'POST', headers: { ...FORM8, cookie: cookie8 }, body: 'task_ref=job-brand-new&ceiling_units=1e3' })
-ok('[onboarding] a bad ceiling on a new job name is refused before any write',
-   retarget8.headers.get('location') === '/app?view=tasks&err=ceiling&ref=job-brand-new', `${retarget8.headers.get('location')}`)
-const after8 = await nav8('/app?view=tasks&err=ceiling&ref=job-brand-new', { headers: { cookie: cookie8 } }).then(r => r.text())
-const field8 = (after8.match(/<input id="t-ref"[^>]*value="([^"]*)"/) ?? [])[1]
-ok('[onboarding] and the name field does not come back holding a different job',
-   field8 === '', `the field offered "${field8}" for a save the reader did not make`)
-const afterStart8 = await nav8('/app?view=start&err=ceiling&ref=job-brand-new', { headers: { cookie: cookie8 } }).then(r => r.text())
-const fieldStart8 = (afterStart8.match(/<input id="t-ref"[^>]*value="([^"]*)"/) ?? [])[1]
-const ceilStart8 = (afterStart8.match(/<input id="t-ceil"[^>]*value="([^"]*)"/) ?? [])[1]
-ok('[start] the same rule on the start screen: neither field comes back holding a different job',
-   fieldStart8 === '' && ceilStart8 === '', `name "${fieldStart8}", ceiling "${ceilStart8}"`)
+const visibleST = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ')
+const ACCT_ST = '00000000-0000-0000-0000-0000000000c1'
+const KEY_ST = shapedKey(`start-screen-${Date.now()}`)
+await sql`DELETE FROM accounts WHERE id = ${ACCT_ST}`
+await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_ST}, 'free', 0, date_trunc('month', CURRENT_DATE)::date)`
+await sql`INSERT INTO developer_api_keys (account_id, api_key, label) VALUES (${ACCT_ST}, ${KEY_ST}, 'harness-start')`
+const loginST = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY_ST}` })
+const cookieST = (loginST.headers.get('set-cookie') ?? '').split(';')[0]
+const pageST = (path) => nav8(path, { headers: { cookie: cookieST } })
+const virgin8 = await pageST('/app').then(r => r.text())
+const viaLinksST = [...virgin8.matchAll(/<a class="via" href="([^"]+)"([^>]*)>/g)].map((m) => [m[1], m[2]])
+ok('[start] a virgin account\'s overview asks how you will connect, with three links and nothing chosen, and no ceiling form',
+   virgin8.includes('How will you connect?') && viaLinksST.length === 3
+     && JSON.stringify(viaLinksST.map((l) => l[0])) === JSON.stringify(['/app?view=start&amp;via=mcp', '/app?view=start&amp;via=python', '/app?view=start&amp;via=node'])
+     && viaLinksST.every((l) => !l[1].includes('aria-current')) && !virgin8.includes('class="setf3"') && !virgin8.includes('Three steps'),
+   JSON.stringify(viaLinksST))
+ok('[start] before anything is recorded the screen says where the first call will appear',
+   virgin8.includes('Nothing recorded yet. Run it, then reload this page'), 'no waiting line')
+const unesc = (h) => h.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+const snipOf = (h) => { const m = h.match(/<pre class="snip">([\s\S]*?)<\/pre>/); return m ? unesc(m[1]) : '' }
+const pyPageST = await pageST('/app?view=start&via=python')
+const pyST = await pyPageST.text()
+const nodeST = await pageST('/app?view=start&via=node').then(r => r.text())
+const mcpResST = await pageST('/app?view=start&via=mcp')
+const mcpST = await mcpResST.text()
+const current = (h) => (h.match(/<a class="via" href="[^"]*via=(\w+)" aria-current="true">/) ?? [])[1]
+ok('[start] Python: the chosen card is marked, the install upgrades, and the one sample wraps an OpenAI client on job first-call',
+   current(pyST) === 'python' && pyST.includes('pip install -U agentbill-sdk openai') && snipOf(pyST).includes('agentbill.wrap(OpenAI(), task_ref="first-call"')
+     && !/client\.record\(|units=1/.test(snipOf(pyST)), snipOf(pyST).slice(0, 160))
+ok('[start] Node: the same, with the npm package and wrap(new OpenAI())',
+   current(nodeST) === 'node' && nodeST.includes('npm install agentbill openai') && snipOf(nodeST).includes("wrap(new OpenAI(), { taskRef: 'first-call'"),
+   snipOf(nodeST).slice(0, 160))
+ok('[start] MCP: the connect page, a copyable first prompt, and what it does and does not do, said plainly',
+   current(mcpST) === 'mcp' && mcpST.includes('href="/integrations/mcp"') && mcpST.includes('id="mcp-prompt"') && mcpST.includes('data-copy="mcp-prompt"')
+     && mcpST.includes('record_event') && mcpST.includes('It does not meter the tokens of your chat with it') && !mcpST.includes('<pre class="snip">'),
+   'the MCP path is missing a part')
+const cspST = (r) => r.headers.get('content-security-policy') ?? ''
+const copyHashST = (mcpST.match(/<script[^>]*>[\s\S]*?<\/script>/) ?? [''])[0]
+ok('[start] the copy control is the one script, under a hash, on the MCP path only: the other paths and views carry no script-src',
+   /script-src 'sha256-[A-Za-z0-9+/=]+'/.test(cspST(mcpResST)) && copyHashST.includes('data-copy') && !/script-src/.test(cspST(pyPageST))
+     && !/<script/.test(pyST) && !/<script/.test(nodeST), `${cspST(mcpResST).slice(0, 120)} | ${cspST(pyPageST).slice(0, 80)}`)
+const evilST = await pageST('/app?view=start&via=%3Cscript%3E').then(r => r.text())
+ok('[start] a via that is not one of the three chooses nothing and is never echoed',
+   evilST.includes('How will you connect?') && !current(evilST) && !evilST.includes('%3Cscript') && !/via=<|via=&lt;/.test(evilST))
+
+// A record that names no model: the screen says why there is no dollar yet,
+// and the overview stops being the start screen, because something arrived.
+await fetch(`${API}/events`, { method: 'POST', headers: { Authorization: `Bearer ${KEY_ST}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ customer_id: 'default', event_type: 'hand', idempotency_key: `st-hand-${Date.now()}`, units: 1 }) })
+const handST = await pageST('/app?view=start&via=python').then(r => r.text())
+const overST = await pageST('/app').then(r => r.text())
+ok('[start] a record that names no model: the screen says none can be priced, and shows no dollar figure for it',
+   handST.includes('none of them names a model, so none can be priced') && !handST.includes('Your first call was recorded'), 'no unpriced line')
+ok('[start] and once anything is recorded the overview is the dashboard, with the start screen still reachable',
+   overST.includes('class="kpis"') && !overST.includes('How will you connect?') && handST.includes('How will you connect?'))
+
+// The production path, Python: the literal on the page, run as pasted.
+const { mkdtempSync: mkdtST, writeFileSync: writeST, mkdirSync: mkdirST, symlinkSync: linkST } = await import('node:fs')
+const { tmpdir: tmpST } = await import('node:os')
+const { spawnSync: spawnST } = await import('node:child_process')
+const ROOT_ST = new URL('../../', import.meta.url).pathname
+const dirST = mkdtST(`${tmpST()}/agentbill-start-`)
+// A stand-in for the openai package: the constructor and the one method the
+// sample calls, answering with the usage shape OpenAI reports. It sees the
+// request, so the gate can assert the call went out once.
+mkdirST(`${dirST}/py/openai`, { recursive: true })
+writeST(`${dirST}/py/openai/__init__.py`, `from types import SimpleNamespace as NS
+SENT = []
+class OpenAI:
+    def __init__(self, *a, **k):
+        self.base_url = "https://api.openai.com/v1/"
+        def create(**kw):
+            SENT.append(kw)
+            print("SENT", len(SENT), kw.get("model"))
+            return NS(id="chatcmpl-start-py", model="gpt-4o-mini-2024-07-18", service_tier="default",
+                      usage=NS(prompt_tokens=14, completion_tokens=9, total_tokens=23,
+                               prompt_tokens_details=NS(cached_tokens=0), completion_tokens_details=NS(reasoning_tokens=0)),
+                      choices=[NS(index=0, message=NS(role="assistant", content="hi there friend"))])
+        self.chat = NS(completions=NS(create=create))
+OpenAI.__module__ = "openai"
+`)
+writeST(`${dirST}/first_call.py`, snipOf(pyST))
+const PY_ST = process.env.WRAP_PYTHON
+const envST = { ...process.env, AGENTBILL_API_KEY: KEY_ST, AGENTBILL_BASE_URL: API }
+const pyRunST = PY_ST ? spawnST(PY_ST, [`${dirST}/first_call.py`], { encoding: 'utf8', timeout: 60_000,
+  env: { ...envST, PYTHONPATH: `${dirST}/py:${ROOT_ST}sdk/python` } }) : null
+ok('[start] python: the sample on the page runs as pasted with the real SDK and key, sends one call and prints the answer',
+   pyRunST?.status === 0 && /SENT 1 gpt-4o-mini/.test(pyRunST.stdout) && pyRunST.stdout.includes('hi there friend'),
+   PY_ST ? `${pyRunST?.status} ${(pyRunST?.stdout ?? '').slice(-200)} ${(pyRunST?.stderr ?? '').slice(-300)}` : 'WRAP_PYTHON is not set')
+const [evPyST] = await sql`SELECT units, list_price_usd::text AS usd, price_version, task_ref, metadata->>'model' AS model
+  FROM events WHERE account_id = ${ACCT_ST} AND idempotency_key = 'chatcmpl-start-py'`
+ok('[start] python: the record names the model and 23 tokens, and the server priced it at $0.0000075 with the snapshot it used',
+   evPyST?.units === 23 && evPyST.usd === '0.000007500000' && evPyST.taskRef === 'first-call' && evPyST.model === 'gpt-4o-mini-2024-07-18' && !!evPyST.priceVersion,
+   JSON.stringify(evPyST))
+const [jobST] = await sql`SELECT unit, ceiling_units, used_units, reserved_units FROM task_budgets WHERE account_id = ${ACCT_ST} AND task_ref = 'first-call'`
+ok('[start] python: wrap() opened first-call in tokens at the 20,000 the screen says, and nothing is left reserved',
+   jobST?.unit === 'token' && jobST.ceilingUnits === 20_000 && jobST.usedUnits === 23 && jobST.reservedUnits === 0, JSON.stringify(jobST))
+const afterRefuse8 = await pageST('/app?view=start&via=mcp').then(r => r.text())
+const firstLineST = visibleST((afterRefuse8.match(/<p class="first-ok" id="first-call">([\s\S]*?)<\/p>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+ok('[start] the screen ends on the first call: the stored estimate, labelled, its tokens and its model, on every path',
+   firstLineST.replace(/ ([,.])/g, '$1') === 'Your first call was recorded: $0.0000075 (estimate at list price), 23 tokens, model gpt-4o-mini-2024-07-18 on job first-call.',
+   firstLineST)
+ok('[start] and the estimate carries the list-price label beside it',
+   afterRefuse8.includes('An estimate at public list price') && afterRefuse8.includes('(estimate at list price)'))
+
+// The production path, Node: the same, through the Node SDK as run.sh built it.
+mkdirST(`${dirST}/node/node_modules/openai`, { recursive: true })
+linkST(`${ROOT_ST}sdk/node`, `${dirST}/node/node_modules/agentbill`)
+writeST(`${dirST}/node/node_modules/openai/package.json`, JSON.stringify({ name: 'openai', version: '0.0.0-harness', type: 'module', main: 'index.js', exports: './index.js' }))
+writeST(`${dirST}/node/node_modules/openai/index.js`, `export default class OpenAI {
+  constructor() {
+    this.baseURL = 'https://api.openai.com/v1'
+    this.chat = { completions: { create: async (body) => { console.log('SENT', body.model)
+      return { id: 'chatcmpl-start-node', model: 'gpt-4o-mini-2024-07-18', usage: { prompt_tokens: 14, completion_tokens: 10, total_tokens: 24,
+        prompt_tokens_details: { cached_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 0 } },
+        choices: [{ index: 0, message: { role: 'assistant', content: 'hello from node' } }] } } } }
+  }
+}
+export { OpenAI }
+`)
+writeST(`${dirST}/node/first-call.mjs`, snipOf(nodeST))
+const nodeRunST = spawnST(process.execPath, [`${dirST}/node/first-call.mjs`], { encoding: 'utf8', timeout: 60_000, cwd: `${dirST}/node`, env: envST })
+ok('[start] node: saved as first-call.mjs and run with node, the sample sends one call and prints the answer',
+   nodeRunST.status === 0 && /SENT gpt-4o-mini/.test(nodeRunST.stdout) && nodeRunST.stdout.includes('hello from node'),
+   `${nodeRunST.status} ${nodeRunST.stdout.slice(-200)} ${nodeRunST.stderr.slice(-300)}`)
+const [evNodeST] = await sql`SELECT units, list_price_usd::text AS usd, price_version, task_ref FROM events WHERE account_id = ${ACCT_ST} AND idempotency_key = 'chatcmpl-start-node'`
+ok('[start] node: its record is priced from its own 24 tokens, $0.0000081, on the same job',
+   evNodeST?.units === 24 && evNodeST.usd === '0.000008100000' && evNodeST.taskRef === 'first-call' && !!evNodeST.priceVersion, JSON.stringify(evNodeST))
+const mine8 = await pageST('/app?view=start&via=node').then(r => r.text())
+ok('[start] the first call stays the first: the Node run after it (24 tokens) does not replace the Python one (23) on the screen',
+   mine8.includes('Your first call was recorded: <b>$0.0000075</b>') && mine8.includes(', 23 tokens,') && !mine8.includes(', 24 tokens,') && (mine8.match(/<p class="first-ok"/g) ?? []).length === 1)
+
+// The console that follows, on this account: dollars lead, tokens beside them.
+const actST = await pageST('/app?view=activity').then(r => r.text())
+const tilesST = visibleST((await pageST('/app').then(r => r.text())).match(/<div class="kpis">([\s\S]*?)<div class="leak/)?.[1] ?? '').replace(/\s+/g, ' ')
+ok('[start] after a priced call the overview tiles lead with the estimate and tokens, not units',
+   tilesST.includes('Est. cost') && tilesST.includes('$0.000016') && tilesST.includes('Tokens') && tilesST.includes('47') && !/Units (metered|recorded|refused)/.test(tilesST), tilesST.slice(0, 240))
+ok('[start] and the activity chart is the cost chart, its split by event_type in dollars',
+   actST.includes('id="cost-chart"') && actST.includes('Share of cost') && actST.includes('An estimate at public list price') && !actST.includes('Units recorded'),
+   'activity is not the cost view')
+await sql`DELETE FROM accounts WHERE id = ${ACCT_ST}`
 // The microcopy bans, measured on the VISIBLE text and not the markup: every
 // one of these words appears inside the CSS of every page on the site
 // (display:block, flex-wrap), so a grep over HTML can only ever be noise.
@@ -1784,7 +1821,7 @@ ok('[register] the person\'s session and the key session share name-independent 
    attrs8(up8.cookie) === attrs8(login8.headers.getSetCookie()[0] ?? ''), `${attrs8(up8.cookie)} vs ${attrs8(login8.headers.getSetCookie()[0] ?? '')}`)
 const asNew8 = await nav8('/app?view=start', { headers: { cookie: up8.cookie.split(';')[0] } }).then(r => r.text())
 ok('[register] and that cookie opens the start screen as the account just created, not another',
-   asNew8.includes('Three steps to your first refusal') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
+   asNew8.includes('How will you connect?') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
    'the new session did not render the new account')
 // The owner's signup alert, 2026-09-12. There is no Resend key in the harness,
 // so what is checked here is the DECISION, not a delivery: the daily cap is a
@@ -1924,8 +1961,8 @@ ok('[home] the bill line calls the dollar figure an estimate at list price on ca
    billLine8.includes('A dollar figure appears only as an estimate at public list price, on calls wrap() measured.')
      && billLine8.includes('units refused is not money') && !/never turns units into dollars|no dollar estimate/i.test(visible8(fold8)),
    billLine8.slice(0, 160) || 'no bill line')
-ok('[start] the footer names the endpoint with the field it takes, and does not teach task_ceiling from code',
-   visible8(virgin8).includes('ceiling_units') && !/\btask_ceiling\b/.test(visible8(virgin8)))
+ok('[start] the first screen teaches no preflight or record by hand: nothing on it asks the reader to pick a number of units',
+   !/How many units|in units|units=1|ceiling_units/.test(visible8(virgin8)) && !virgin8.includes('name="ceiling_units"'))
 
 // Attribute text counts as copy, 2026-09-16. `visible8` strips tags, so every
 // gate built on it has been blind to aria-label, title, alt and placeholder,
@@ -2690,8 +2727,11 @@ const cookieM = (loginM.headers.get('set-cookie') ?? '').split(';')[0]
 const pageM = await navM('/app?view=tasks', { headers: { cookie: cookieM } }).then((r) => r.text())
 ok('[meter] the console shows a tokens job as "300 / 900 tokens" and "600 tokens left"',
    pageM.includes('<b>300</b> / 900 tokens</td>') && pageM.includes('600 tokens left'), (pageM.match(/meter-tok[\s\S]{0,600}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 300))
-ok('[meter] and a job in the developer\'s own unit exactly as before, with no unit word added',
-   /<b>1<\/b> \/ 100<\/td>/.test(pageM) && !/<b>1<\/b> \/ 100 (tokens|units)/.test(pageM), (pageM.match(/meter-def[\s\S]{0,400}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 200))
+// 2026-09-25: a job in the developer's own unit now names it too, as what it
+// literally is, "units", with "your own count" on the cell, so a unit job is
+// never mistaken for tokens or dollars beside a job that is (ticket: units out).
+ok('[meter] and a job in the developer\'s own unit says units, labelled as your own count, never tokens',
+   /<td class="num" data-l="used" title="units: your own count"><b>1<\/b> \/ 100 units<\/td>/.test(pageM) && !/<b>1<\/b> \/ 100 tokens/.test(pageM), (pageM.match(/meter-def[\s\S]{0,400}/) ?? [''])[0].replace(/\s+/g, ' ').slice(0, 200))
 // One of meter-missing's three calls found no reservation open and was
 // recorded at the 0 it sent, so "charged at their reservation", the wording
 // before 2026-09-23, was false on this very row.
@@ -4012,7 +4052,7 @@ ok('[jobs] the tasks view opens on Recent, most recently touched first, the orde
 const mostJ = await pageJ('/app?view=tasks&sort=used')
 ok('[jobs] Most used ranks the same rows by units used, and says so under them',
    rowsJ(mostJ) === 'jobs-old,jobs-mid,jobs-new' && mostJ.includes('<a class="on" href="/app?view=tasks&amp;sort=used" aria-current="true">Most used</a>')
-     && mostJ.includes('most units used first'), rowsJ(mostJ))
+     && mostJ.includes('most used first'), rowsJ(mostJ))
 ok('[jobs] and another account\'s job is on neither order of this account\'s tasks view',
    !recentJ.includes('jobs-other') && !mostJ.includes('jobs-other') && rowsJ(recentJ) !== '' && rowsJ(mostJ) !== '',
    `recent: ${rowsJ(recentJ)} | most used: ${rowsJ(mostJ)}`)
@@ -4123,7 +4163,7 @@ ok('[jobs] the footer and the served JSON agree: GET /tasks returns no preflight
    `served span fields ${JSON.stringify(spanKeysJ)} | ${footPagesJ.map((f) => `${f.path} draws=${f.draws} "${f.foot.slice(0, 120)}"`).join(' | ')}`)
 const tasksPageJ = await pageJ('/app?view=tasks')
 const noteNowJ = [...tasksPageJ.matchAll(/<p class="note">([\s\S]*?)<\/p>/g)].map((m) => visible8(m[1]).replace(/\s+/g, ' '))
-  .find((t) => t.includes('Units are the ones your code reported')) ?? ''
+  .find((t) => t.includes('Used is what your code reported')) ?? ''
 ok('[jobs] the tasks note says the time is from records that begin 2026-09-03, that GET /tasks has the rows without it, and never "full attribution" or "seen"',
    noteNowJ.includes('first to the last preflight on record') && noteNowJ.includes('Those records begin 2026-09-03')
      && noteNowJ.includes('The same rows, without that time, are on GET /tasks') && !/full attribution|\bseen\b/i.test(noteNowJ),
@@ -4218,9 +4258,14 @@ const docsNewJ = docsJ.slice(docsJ.indexOf('<h3 id="get-tasks">'), docsJ.indexOf
 const tasksNoteJ = (mostJ.match(/<p class="note">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
 const newCopyJ = visible8([tasksNoteJ, demoSeenJ.join(' '), actJ.slice(actJ.indexOf('<h2>By event_type'), actJ.indexOf('<h2>Day by day')), docsNewJ].join(' '))
 ok('[jobs] /docs documents GET /tasks?sort and GET /usage', docsNewJ.includes('<h3 id="get-usage">GET /usage</h3>') && docsNewJ.includes('sort=used'), docsNewJ.slice(0, 80) || 'no new docs sections')
-ok('[jobs] the new copy never says stop, block, kill, halt or cut off, and names no money',
-   newCopyJ.length > 400 && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(newCopyJ),
-   (newCopyJ.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/gi) ?? []).join(', '))
+// 2026-09-25: the tasks note names a dollar figure in exactly one form, the
+// list-price estimate of a job's priced calls, which is what the console
+// prints beside a job. That one phrase is allowed; any other money is not.
+const ALLOWED_MONEY_J = 'a dollar figure is the list-price estimate of the job\'s priced calls'
+const moneyCopyJ = newCopyJ.split(ALLOWED_MONEY_J).join(' ')
+ok('[jobs] the new copy never says stop, block, kill, halt or cut off, and names money only as the list-price estimate',
+   newCopyJ.length > 400 && newCopyJ.includes(ALLOWED_MONEY_J) && !/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/i.test(moneyCopyJ),
+   (moneyCopyJ.match(/\b[a-z]*(stop|block|kill|halt)[a-z]*\b|\bcuts? off\b|\$\s?\d|dollar|\bUSD\b|provider bill/gi) ?? []).join(', '))
 // server.ts: the canonical-host redirect skips only paths on this list, and a cross-host
 // 301 drops the Authorization header, so a bearer GET missing from it breaks on the old host.
 const prefixesJ = (readFileSync9(`${ROOT9}/src/server.ts`, 'utf8').match(/const API_PREFIXES = \[([\s\S]*?)\]/) ?? [])[1] ?? ''

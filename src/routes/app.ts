@@ -13,13 +13,13 @@ import { isId, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT, unitWord } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import {
-  STEP_NAME, STEP_UNITS, STEP_INSTALL, STEP_ASK, STEP_REFUSE, KEY_ENV_LINE, SEQUENCE_INTRO, REQUIRED_LINE,
-  LABEL_REF, HINT_REF, LABEL_CEIL, HINT_CEIL, SAMPLE_REF, SAMPLE_AGENT, SAMPLE_CEILING, taskSnippet, inlineSafeRef,
+  VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
+  INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
 } from '../ui/steps.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
 import { KEY_COMMANDS } from '../ui/panels.js'
-import { INSTALL_PY } from '../ui/site.js'
-import { usageByEventType, type EventTypeUsage } from '../lib/usage.js'
+import { usageByEventType, EVENT_TOKENS_SQL, type EventTypeUsage } from '../lib/usage.js'
 import { readUserSession, CLEAR_USER_COOKIE } from '../lib/user-session.js'
 import { endSessions, linkedProviders } from '../lib/users.js'
 import { configuredProviders, providerConfig, isProvider, newFlow, flowCookie, authorizeUrl, type Provider } from '../lib/oauth.js'
@@ -177,7 +177,11 @@ export async function appRoute(app: FastifyInstance) {
     // with the outcome of a Disconnect: a code from a closed set, never echoed.
     const apps = view === 'keys' && !demo ? await connectedApps(viewer.accountId) : []
     const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg,
+    const via = asVia(q?.via)
+    // The MCP path's prompt has a Copy control, the one script this page can
+    // run, under its own hash and only where the control is drawn.
+    if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, via,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -609,9 +613,9 @@ const VIEWS = {
   // Not in the rail: it is where a new key lands and where the overview sends
   // an account that has no refusal yet, and a rail item for "start" beside
   // "overview" is two names for the same first screen.
-  start:     { title: 'Start',        lede: 'A job, a ceiling, the lines that run into it, and the refusal they produce.', hidden: true },
+  start:     { title: 'Start',        lede: 'Connect once, and your first recorded call shows up here with its tokens and what it cost at list price.', hidden: true },
   overview:  { title: 'Overview',     lede: 'What ran, what was refused, and the one number that should be zero.' },
-  activity:  { title: 'Activity',     lede: 'Units metered and calls refused, day by day, and the units split by event_type.' },
+  activity:  { title: 'Activity',     lede: 'What your calls cost at list price, the tokens they used and the calls refused, day by day, split by event_type.' },
   tasks:     { title: 'Task budgets', lede: 'One job, many calls, one ceiling. Every row is a task_ref burning down.' },
   refusals:  { title: 'Refusals',     lede: 'Every call refused on your behalf, and every one that ran past a ceiling, newest first, with the literal body the agent got.' },
   customers: { title: 'Customers',    lede: 'One balance per customer_id. Balances are lifetime, not a period.' },
@@ -663,9 +667,15 @@ function readFilter(q: Record<string, unknown>): Filter {
 // Data
 // ---------------------------------------------------------------------------
 
-type Series = { day: string; blocks: number; units: number; refused: number }
+/** One day. units is what the code reported (tokens for a wrap() call, the
+ *  developer's own count otherwise); usd is the list-price estimate over the
+ *  day's priced calls and priced how many there were, so a day with calls and
+ *  no price reads as unpriced, never as $0; tokens is what providers reported. */
+type Series = { day: string; blocks: number; units: number; refused: number; usd: number; priced: number; tokens: number; calls: number }
 /** What POST /app/tasks left on the query string for the tasks view to say. */
-type Flash = { saved?: string; created?: boolean; agentKept?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below' | 'rate'; ref?: string; min?: number }
+type Flash = { saved?: string; created?: boolean; agentKept?: boolean; err?: 'ref' | 'ceiling' | 'agent' | 'below' | 'rate'; ref?: string; min?: number
+  /** The named job's unit, read off its row by verifyFlash, never off the URL. */
+  unit?: string }
 const FLASH_ERRS = new Set(['ref', 'ceiling', 'agent', 'below', 'rate'])
 
 /** Shape only. readFlash accepts what a redirect from POST /app/tasks would
@@ -694,11 +704,11 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
   const name = f.saved ?? f.ref
   if (!name) return f
   const [row] = await sql`
-    SELECT used_units, reserved_units FROM task_budgets
+    SELECT used_units, reserved_units, unit FROM task_budgets
     WHERE account_id = ${accountId} AND task_ref = ${name}
   `
   if (!row) return { ...f, saved: f.saved ? '' : undefined, ref: undefined, min: undefined }
-  return { ...f, min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
+  return { ...f, unit: String(row.unit ?? 'unit'), min: f.err === 'below' ? Number(row.usedUnits) + Number(row.reservedUnits) : undefined }
 }
 
 // ---------------------------------------------------------------------------
@@ -723,7 +733,7 @@ async function verifyFlash(accountId: string, f: Flash | null): Promise<Flash | 
 type Suggest = {
   history: AgentHistory[]
   /** Recomputed from the rows on every load, never read off the URL. */
-  pick: { agentId: string; which: Pick; units: number; jobs: number } | null
+  pick: { agentId: string; which: Pick; units: number; jobs: number; unit: string } | null
 }
 
 /**
@@ -735,7 +745,7 @@ type Suggest = {
 async function loadHistory(accountId: string): Promise<HistoryJob[]> {
   const rows = await sql`
     WITH finished AS (
-      SELECT agent_id, used_units, updated_at,
+      SELECT agent_id, used_units, updated_at, unit,
              row_number() OVER (PARTITION BY agent_id ORDER BY updated_at DESC, id DESC) AS rn
       FROM task_budgets
       WHERE account_id = ${accountId}
@@ -750,11 +760,11 @@ async function loadHistory(accountId: string): Promise<HistoryJob[]> {
       ORDER BY last_at DESC, agent_id COLLATE "C"
       LIMIT ${HISTORY_AGENTS}
     )
-    SELECT f.agent_id, f.used_units, f.updated_at
+    SELECT f.agent_id, f.used_units, f.updated_at, f.unit
     FROM finished f JOIN agents a ON a.agent_id = f.agent_id
     WHERE f.rn <= ${HISTORY_JOBS}
   `
-  return rows.map((r) => ({ agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date) }))
+  return rows.map((r) => ({ agentId: String(r.agentId), usedUnits: Number(r.usedUnits), updatedAt: new Date(r.updatedAt as Date), unit: String(r.unit ?? 'unit') }))
 }
 
 /** The same test as loadHistory, on the sample rows ?demo=1 lists, so the
@@ -762,7 +772,7 @@ async function loadHistory(accountId: string): Promise<HistoryJob[]> {
 function demoHistory(tasks: TaskRow[]): HistoryJob[] {
   return tasks
     .filter((t) => Number(t.usedUnits) > 0 && Number(t.reservedUnits) === 0 && t.agentId !== CONSOLE_AGENT)
-    .map((t) => ({ agentId: t.agentId, usedUnits: Number(t.usedUnits), updatedAt: new Date(t.updatedAt) }))
+    .map((t) => ({ agentId: t.agentId, usedUnits: Number(t.usedUnits), updatedAt: new Date(t.updatedAt), unit: t.unit ?? 'unit' }))
 }
 
 /** The pick names an agent and a statistic; the number comes from the rows,
@@ -771,7 +781,7 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
   const history = summarizeHistory(rows)
   const which = PICKS.find((k) => k === q?.pick)
   const row = isId(q?.history) ? history.find((h) => h.agentId === q.history) : undefined
-  return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs } : null }
+  return { history, pick: row && which ? { agentId: row.agentId, which, units: row[which], jobs: row.jobs, unit: row.unit } : null }
 }
 
 /** firstSeen, lastSeen and preflights describe the preflights on record for
@@ -779,11 +789,20 @@ function readSuggest(rows: HistoryJob[], q: Record<string, unknown>): Suggest {
  *  why they can be fewer than the preflights the job made, and why
  *  task_budgets' own timestamps are not them. */
 // unit and usageMissingCalls are absent on the demo rows, which read as 'unit' and 0.
+// usd is the list-price estimate over the job's priced calls (null when none
+// is priced, never 0 for "unpriced"), from events.task_ref (migration 017).
 type TaskRow = { taskRef: string; agentId: string; ceilingUnits: number; usedUnits: number; reservedUnits: number; unit?: string; usageMissingCalls?: number; updatedAt: Date
-                 firstSeen: Date | null; lastSeen: Date | null; preflights: number }
+                 firstSeen: Date | null; lastSeen: Date | null; preflights: number
+                 usd?: number | null; pricedCalls?: number; calls?: number; tokens?: number }
 type CustomerRow = { customerRef: string; limitUnits: number | null; usedUnits: number; reservedUnits: number }
 type KeyRow = { apiKey: string; label: string | null; createdAt: Date; revokedAt: Date | null; expiresAt: Date | null; lastSeenIp: string | null }
-type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date }
+// unit is the job's (task_budgets.unit, joined on task_ref), so a refusal on a
+// job counted in tokens says tokens. Absent for a call that named no job.
+type DecisionRow = { agentId: string | null; taskRef: string | null; reason: string; blocked: boolean; estimatedUnits: number | null; ceilingUnits: number | null; usedUnits: number | null; snapshot: string; createdAt: Date; unit?: string | null }
+
+/** The account's first recorded model call: the one the start screen ends on.
+ *  usd null means it could not be priced, and note says why. */
+type FirstCall = { model: string; step: string | null; taskRef: string | null; tokens: number; usd: number | null; note: string | null; createdAt: Date }
 
 // Everything a page shows is here or derived from here. The in-period counts
 // (blocked, units metered, units refused) are sums over `series`, so a tile and
@@ -818,6 +837,13 @@ type Console = {
   /** Rows matching the current filter, across the whole account. */
   decisionMatched: number
   truncated: boolean
+  /** Whether this account has recorded anything at all, ever. */
+  recorded: boolean
+  /** Whether any call on this account was ever priced. Until one is, the
+   *  console shows units, the only number it has; after, the list-price
+   *  estimate leads and tokens sit beside it. */
+  pricedEver: boolean
+  first: FirstCall | null
 }
 
 async function loadConsole(accountId: string, days: number, f: Filter, sort: TaskSort = 'recent'): Promise<Console> {
@@ -841,7 +867,11 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     SELECT to_char(d, 'YYYY-MM-DD') AS day,
            coalesce(b.blocks, 0)    AS blocks,
            coalesce(b.refused, 0)   AS refused,
-           coalesce(e.units, 0)     AS units
+           coalesce(e.units, 0)     AS units,
+           coalesce(e.usd, 0)       AS usd,
+           coalesce(e.priced, 0)    AS priced,
+           coalesce(e.tokens, 0)    AS tokens,
+           coalesce(e.calls, 0)     AS calls
     FROM generate_series(current_date - ${days - 1}::int, current_date, interval '1 day') d
     LEFT JOIN (
       SELECT created_at::date AS day, count(*) AS blocks, coalesce(sum(estimated_units), 0) AS refused
@@ -850,7 +880,8 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
       GROUP BY 1
     ) b ON b.day = d::date
     LEFT JOIN (
-      SELECT created_at::date AS day, sum(units) AS units
+      SELECT created_at::date AS day, sum(units) AS units, sum(list_price_usd) AS usd,
+             count(list_price_usd) AS priced, sum(${sql.unsafe(EVENT_TOKENS_SQL)}) AS tokens, count(*) AS calls
       FROM events
       WHERE account_id = ${accountId} AND created_at >= current_date - ${days - 1}::int
       GROUP BY 1
@@ -899,9 +930,18 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
       ) seen
       GROUP BY task_ref
     )
+    , cost AS (
+      SELECT task_ref, sum(list_price_usd) AS usd, count(list_price_usd) AS priced_calls, count(*) AS calls,
+             sum(${sql.unsafe(EVENT_TOKENS_SQL)}) AS tokens
+      FROM events
+      WHERE account_id = ${accountId} AND task_ref IN (SELECT task_ref FROM page)
+      GROUP BY task_ref
+    )
     SELECT page.task_ref, page.agent_id, page.ceiling_units, page.used_units, page.reserved_units, page.unit, page.usage_missing_calls, page.updated_at,
-           spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights
+           spans.first_seen, spans.last_seen, coalesce(spans.preflights, 0) AS preflights,
+           cost.usd, coalesce(cost.priced_calls, 0) AS priced_calls, coalesce(cost.calls, 0) AS calls, coalesce(cost.tokens, 0) AS tokens
     FROM page LEFT JOIN spans ON spans.task_ref = page.task_ref
+              LEFT JOIN cost ON cost.task_ref = page.task_ref
     ORDER BY ${order()}
   `
   const customers = await sql`
@@ -942,16 +982,33 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     WHERE account_id = ${accountId}
     ORDER BY created_at ASC
   `
-  const usage = await usageByEventType(accountId, days, 20)
+  // Priced ever, recorded ever, and the first model call: each one indexed
+  // read that stops at its first row.
+  const [ever] = await sql`
+    SELECT EXISTS (SELECT 1 FROM events WHERE account_id = ${accountId}) AS recorded,
+           EXISTS (SELECT 1 FROM events WHERE account_id = ${accountId} AND list_price_usd IS NOT NULL) AS priced
+  `
+  const pricedEver = ever?.priced === true
+  const usage = await usageByEventType(accountId, days, 20, pricedEver ? 'usd' : 'units')
+  const [firstRow] = await sql`
+    SELECT metadata->>'model' AS model, nullif(metadata->>'step', '') AS step, task_ref,
+           list_price_usd::text AS usd, price_note, (${sql.unsafe(EVENT_TOKENS_SQL)}) AS tokens, created_at
+    FROM events
+    WHERE account_id = ${accountId} AND jsonb_typeof(metadata->'tokens') = 'object'
+      AND coalesce(metadata->>'model', '') <> ''
+    ORDER BY created_at, id
+    LIMIT 1
+  `
   const decisions = await sql`
-    SELECT agent_id, task_ref, reason, blocked, estimated_units, ceiling_units,
-           used_units, snapshot::text AS snapshot, created_at
-    FROM preflight_decisions
-    WHERE account_id = ${accountId}
-      ${f.task ? sql`AND task_ref = ${f.task}` : sql``}
-      ${f.agent ? sql`AND agent_id = ${f.agent}` : sql``}
-      ${f.only === 'leaks' ? sql`AND NOT blocked` : sql``}
-    ORDER BY created_at DESC, id DESC
+    SELECT d.agent_id, d.task_ref, d.reason, d.blocked, d.estimated_units, d.ceiling_units,
+           d.used_units, d.snapshot::text AS snapshot, d.created_at, tb.unit
+    FROM preflight_decisions d
+    LEFT JOIN task_budgets tb ON tb.account_id = d.account_id AND tb.task_ref = d.task_ref
+    WHERE d.account_id = ${accountId}
+      ${f.task ? sql`AND d.task_ref = ${f.task}` : sql``}
+      ${f.agent ? sql`AND d.agent_id = ${f.agent}` : sql``}
+      ${f.only === 'leaks' ? sql`AND NOT d.blocked` : sql``}
+    ORDER BY d.created_at DESC, d.id DESC
     LIMIT 100
   `
   const byReason: Record<string, number> = {}
@@ -961,9 +1018,11 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     overruns: Number(totals?.overruns ?? 0),
     lastBlock: (totals?.lastBlock as Date | null) ?? null,
     prevBlocked: Number(prev?.blocks ?? 0),
-    series: (series as unknown as Series[]).map((s) => ({ day: s.day, blocks: Number(s.blocks), units: Number(s.units), refused: Number(s.refused) })),
+    series: (series as unknown as Series[]).map((s) => ({ day: s.day, blocks: Number(s.blocks), units: Number(s.units), refused: Number(s.refused),
+                                                          usd: Number(s.usd), priced: Number(s.priced), tokens: Number(s.tokens), calls: Number(s.calls) })),
     byReason,
-    tasks: (tasks as unknown as TaskRow[]).map((t) => ({ ...t, preflights: Number(t.preflights) })),
+    tasks: (tasks as unknown as TaskRow[]).map((t) => ({ ...t, preflights: Number(t.preflights),
+      usd: Number(t.pricedCalls) > 0 ? Number(t.usd) : null, pricedCalls: Number(t.pricedCalls), calls: Number(t.calls), tokens: Number(t.tokens) })),
     taskCount: Number(ttotal?.n ?? 0),
     taskLive: Number(ttotal?.live ?? 0),
     taskNear: Number(ttotal?.near ?? 0),
@@ -978,6 +1037,13 @@ async function loadConsole(accountId: string, days: number, f: Filter, sort: Tas
     // From the count, not the page length: exactly 100 matching rows is a
     // complete list, and the page length alone called it "100 of 100".
     truncated: Number(matched?.n ?? 0) > decisions.length,
+    recorded: ever?.recorded === true,
+    pricedEver,
+    first: firstRow ? {
+      model: String(firstRow.model), step: (firstRow.step as string | null) ?? null, taskRef: (firstRow.taskRef as string | null) ?? null,
+      tokens: Number(firstRow.tokens ?? 0), usd: firstRow.usd == null ? null : Number(firstRow.usd),
+      note: (firstRow.priceNote as string | null) ?? null, createdAt: firstRow.createdAt as Date,
+    } : null,
   }
 }
 
@@ -1043,7 +1109,11 @@ export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'
     // ~13% of calls refused. High enough to be worth paying for, low enough
     // to be a real account rather than a broken one.
     const blocks = n < 4 ? 0 : Math.round(n * 0.13)
-    return { day: iso(shape.length - 1 - i), blocks, units: n * 40, refused: blocks * DEMO_AVG_ASK }
+    // The sample account records in units of its own and names no model, so
+    // it has nothing to price: the console shows it the way it shows any
+    // account without a priced call, in units. The homepage renders these
+    // same rows, which is why they stay one sample account in one unit.
+    return { day: iso(shape.length - 1 - i), blocks, units: n * 40, refused: blocks * DEMO_AVG_ASK, usd: 0, priced: 0, tokens: 0, calls: Math.round(n * 40 / 35) }
   })
   const blockedTotal = series.reduce((a, x) => a + x.blocks, 0)
   // The window's refusals split by rule. Derived from the same total the
@@ -1129,12 +1199,14 @@ export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'
   const groups = split.map(([eventType, frac, perRecord], i) => {
     const units = i === split.length - 1 ? rest : Math.round(metered * frac)
     rest -= units
-    return { eventType, units, events: units > 0 ? Math.max(1, Math.round(units / perRecord)) : 0 }
+    return { eventType, units, events: units > 0 ? Math.max(1, Math.round(units / perRecord)) : 0, usd: null, pricedEvents: 0, tokens: 0 }
   }).filter((g) => g.units > 0).sort((a, b) => b.units - a.units || a.eventType.localeCompare(b.eventType))
   const usage: EventTypeUsage = {
     since: iso(days - 1),
     totalUnits: metered,
     totalEvents: groups.reduce((a, g) => a + g.events, 0),
+    totalUsd: null,
+    totalPriced: 0,
     groupCount: groups.length,
     groups,
   }
@@ -1162,6 +1234,9 @@ export function demoConsole(f: Filter = {}, days = 30, sort: TaskSort = 'recent'
     decisions,
     decisionMatched: decisions.length,
     truncated: false,
+    recorded: true,
+    pricedEver: false,
+    first: null,
   }
 }
 
@@ -1193,6 +1268,19 @@ function relFuture(mins: number): string {
 
 function num(n: number): string {
   return n.toLocaleString('en-US')
+}
+
+/**
+ * A list-price estimate as the console prints it. Under a cent it keeps two
+ * significant figures, because one short call costs a fraction of a cent and
+ * rounding it to $0.00 would print the $0 a priced call must never read as.
+ * The figure is always one the server stored (events.list_price_usd); every
+ * place that prints one labels it as an estimate at list price.
+ */
+function usd(n: number): string {
+  if (n === 0) return '$0'
+  if (Math.abs(n) < 0.01) return '$' + n.toLocaleString('en-US', { maximumSignificantDigits: 2 })
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 /** "Aug 8" from an ISO day. The chart's x-axis used to print 2026-08-08. */
@@ -1235,17 +1323,21 @@ export function decisionLine(r: DecisionRow): string {
   // step 2 tells a reader "a call that says nothing counts as one unit", and
   // the first refusal they saw then contradicted it with a question mark.
   const n = r.estimatedUnits == null ? 1 : Number(r.estimatedUnits)
-  const asked = `${num(n)} ${n === 1 ? 'unit' : 'units'}`
+  // A job counted in tokens (the unit wrap() opens a job in) says tokens; a
+  // row with no job, or a job in the developer's own unit, says units.
+  const word = (k: number) => unitWord(r.unit === 'token' ? 'token' : 'unit', k)
+  const asked = `${num(n)} ${word(n)}`
+  const of = r.unit === 'token' ? ' tokens' : ''
   switch (r.reason) {
     case 'ceiling_exceeded': return `Asked ${asked} against a per-request ceiling of ${ceil ?? '?'}.`
-    case 'task_ceiling_exceeded': return `Asked ${asked} with the task at ${used ?? '?'} of ${ceil ?? '?'}.`
+    case 'task_ceiling_exceeded': return `Asked ${asked} with the task at ${used ?? '?'} of ${ceil ?? '?'}${of}.`
     case 'budget_exhausted': return `Asked ${asked}; the customer had ${typeof body.remaining_units === 'number' ? num(body.remaining_units) : '0'} remaining.`
     case 'free_tier_exceeded':
     case 'plan_limit_exceeded': return `${used ?? '?'} of ${ceil ?? '?'} preflight calls this month; the plan quota is spent.`
     // Not `asked`: this row is a record(), where the number is what was
     // settled and has no default. A missing one stays unknown rather than
     // claiming one unit was recorded.
-    case 'task_overrun_recorded': return `Recorded ${r.estimatedUnits == null ? '?' : num(Number(r.estimatedUnits))} units after the call ran; the task stands at ${used ?? '?'} of ${ceil ?? '?'}.`
+    case 'task_overrun_recorded': return `Recorded ${r.estimatedUnits == null ? '?' : num(Number(r.estimatedUnits))} ${word(r.estimatedUnits == null ? 2 : Number(r.estimatedUnits))} after the call ran; the task stands at ${used ?? '?'} of ${ceil ?? '?'}${of}.`
     default: return r.reason
   }
 }
@@ -1269,7 +1361,7 @@ export function decisionLine(r: DecisionRow): string {
 // teaching the wire name first. No reader sees a comment; the bytes go too.
 const KIT = KIT_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
-const CSS = `${KIT}
+const CSS = `${KIT}${COPY_CSS}
   /* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell: side rail + server-rendered views)
      · nav: N3 side rail, folds to a top bar and a view menu under 960px · footer: none (in-page API note)
      · design-system: design.md, the canvas system · designed-as-app */
@@ -1722,6 +1814,27 @@ ${SIGNIN_CSS}
      signal and the one refusal line on the screen reads as body text. */
   .ns3 > div > p.cv-no { color: var(--signal); font-size: var(--fs-body); }
   .start .cv-code { width: 100%; }
+  /* The question, then three answers as cards. A card is a link, so the
+     choice works with no script; the chosen one carries aria-current and the
+     kit's inset ring, and the others stay quiet. */
+  .start > .ask { margin: var(--s2) var(--s2) 0; display: grid; gap: var(--s2); }
+  .start > .ask .intro { color: var(--text); font-size: var(--fs-h3); font-weight: 500; line-height: 1.3; margin: 0; }
+  .start > .ask p { color: var(--muted); max-width: 64ch; }
+  .vias { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+  .via { display: grid; gap: var(--s1); align-content: start; background: var(--card-bg); border: 1px solid var(--card-line);
+         border-radius: var(--r-inner); padding: var(--s4); color: var(--text); text-decoration: none; min-height: var(--h-lg); }
+  .via b { font-weight: 500; }
+  .via span { color: var(--muted); font-size: var(--fs-small); line-height: 1.45; }
+  .via:hover { border-color: var(--border2); text-decoration: none; }
+  .via[aria-current] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+  .does { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); width: 100%; }
+  .does > div { background: var(--surface2); border-radius: var(--r-inner); padding: var(--s3) var(--s4); display: grid; gap: var(--s1); }
+  .does p { color: var(--muted); font-size: var(--fs-small); line-height: 1.5; }
+  .ns3 > div > p.first-ok { color: var(--text); font-size: var(--fs-body); }
+  .first-ok b { font-weight: 600; }
+  .est { color: var(--muted); }
+  .first-wait { grid-template-columns: minmax(0, 1fr); }
+  .start .cv-plate, .start .cp { max-width: 100%; }
   /* Your code on a light card with a hairline, the kit's .cv-snip recipe,
      under one class for two tags, on purpose. scripts/snippets/extract.mjs
      harvests every code block under src/routes and executes it, and records
@@ -1800,6 +1913,8 @@ ${SIGNIN_CSS}
     .setc { padding: var(--s4); border-radius: var(--r-card-sm); }
     .ns3 { padding: var(--s4); gap: var(--s3); }
     .start > .intro { font-size: var(--fs-body); margin-inline: var(--s1); }
+    .vias, .does { grid-template-columns: minmax(0, 1fr); }
+    .start > .ask { margin-inline: var(--s1); }
     .tile { padding: var(--s4); }
     .leak { margin: 0 var(--s2) var(--s2); padding: var(--s3); }
     .chart { padding: var(--s4) var(--s3) var(--s3); }
@@ -2077,12 +2192,14 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** Apps connected to this account over MCP, for the keys view. */
   apps?: ConnectedApp[]
   /** A Disconnect's outcome, 'disconnected' or 'gone'. */
-  appMsg?: 'disconnected' | 'gone' | null }
+  appMsg?: 'disconnected' | 'gone' | null
+  /** The start screen's answer to "how will you connect?", off ?via=. */
+  via?: Via | null }
 
 /** Every link on the page is built here, so demo=1 and the period survive a
  *  change of view. A prospect on the sample console who clicked a rail item
  *  and landed on the login page would never come back. */
-function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick }> = {}): string {
+function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: string; agent: string; only: string; demo: boolean; sort: TaskSort; history: string; pick: Pick; via: Via }> = {}): string {
   const q: string[] = []
   const demo = extra.demo ?? p.demo
   if (demo) q.push('demo=1')
@@ -2100,6 +2217,7 @@ function href(p: Page, view: ViewKey, extra: Partial<{ range: string; task: stri
   // is never on the URL; readSuggest looks it up in the rows.
   if (extra.history) q.push(`history=${encodeURIComponent(extra.history)}`)
   if (extra.pick) q.push(`pick=${extra.pick}`)
+  if (extra.via) q.push(`via=${extra.via}`)
   return q.length ? `/app?${q.join('&amp;')}` : '/app'
 }
 
@@ -2212,7 +2330,7 @@ function periodControl(p: Page): string {
     `<a href="${href(p, p.view, { range: k })}"${k === p.range ? ' aria-current="true"' : ''}>${esc(r.label)}</a>`).join('')}</span>`
 }
 
-function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused', cls: string): string {
+function sparkline(series: Series[], key: 'units' | 'blocks' | 'refused' | 'usd' | 'tokens', cls: string): string {
   const max = Math.max(1, ...series.map((s) => s[key]))
   return `<div class="spark" aria-hidden="true">${series.map((s) => {
     const v = s[key]
@@ -2252,6 +2370,42 @@ function kpis(p: Page, rangeLabel: string): string {
   // "30d", not "last 30 days": the long form wrapped every label at 1440px and
   // the tiles stopped lining up. The period control in the header says the rest.
   const win = rangeLabel.replace(' days', 'd')
+  if (d.pricedEver) {
+    // An account with a priced call leads with the estimate and the tokens.
+    // Both are sums over the same series the chart draws, so a tile and the
+    // chart beside it cannot disagree. Days with calls and no price are not
+    // in the dollar sum, and the tile says how many calls that was.
+    const cost = d.series.reduce((a, x) => a + x.usd, 0)
+    const priced = d.series.reduce((a, x) => a + x.priced, 0)
+    const calls = d.series.reduce((a, x) => a + x.calls, 0)
+    const tokens = d.series.reduce((a, x) => a + x.tokens, 0)
+    const unpriced = calls - priced
+    return `<div class="kpis">
+      <div class="tile">
+        ${label(`Est. cost · ${esc(win)}`)}
+        <div class="cv-stat" title="${esc(LIST_PRICE_LABEL)}"><b>${priced ? usd(cost) : 'none'}</b></div>
+        ${sparkline(d.series, 'usd', '')}
+        <div class="tf">${priced ? `at list price, ${num(priced)} priced ${priced === 1 ? 'call' : 'calls'}${unpriced ? ` · ${num(unpriced)} with no price` : ''}` : 'no priced call in this window'}</div>
+      </div>
+      <div class="tile">
+        ${label(`Tokens · ${esc(win)}`)}
+        <div class="cv-stat"><b>${num(tokens)}</b></div>
+        ${sparkline(d.series, 'tokens', '')}
+        <div class="tf">${num(calls)} ${calls === 1 ? 'call' : 'calls'} recorded</div>
+      </div>
+      <div class="tile">
+        ${label(`Refused · ${esc(win)}`)}
+        <div class="cv-stat"><b>${num(blocked)}</b></div>
+        ${sparkline(d.series, 'blocks', 'held')}
+        ${delta(blocked, d.prevBlocked, rangeLabel)}
+      </div>
+      <div class="tile">
+        ${label('Live tasks · now')}
+        <div class="cv-stat"><b>${num(live)}</b></div>
+        <div class="tf now">${live === 0 ? 'none under a ceiling' : near ? `${num(near)} within a fifth of the ceiling` : 'all comfortably under their ceilings'}</div>
+      </div>
+    </div>`
+  }
   return `<div class="kpis">
       <div class="tile">
         ${label(`Refused · ${esc(win)}`)}
@@ -2266,7 +2420,7 @@ function kpis(p: Page, rangeLabel: string): string {
         <div class="tf">${blocked ? `${num(avgAsk)} units per refused call` : 'units asked for and not run'}</div>
       </div>
       <div class="tile">
-        ${label(`Units metered · ${esc(win)}`)}
+        ${label(`Units recorded · ${esc(win)}`)}
         <div class="cv-stat"><b>${num(metered)}</b></div>
         ${sparkline(d.series, 'units', '')}
         <div class="tf">${d.lastBlock ? `last refusal ${rel(d.lastBlock)}` : 'no refusal yet'}</div>
@@ -2303,6 +2457,7 @@ function figures(p: Page, rangeLabel: string): string {
 // Two rows, one series each, one scale each, one x-axis. The label column is
 // the legend: each row is single-series and named, so no swatch box is needed.
 function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
+  if (p.d.pricedEver) return costChart(p, series, rangeLabel)
   const n = series.length
   const unitMax = Math.max(...series.map((s) => s.units), 0)
   const blockMax = Math.max(...series.map((s) => s.blocks), 0)
@@ -2310,7 +2465,7 @@ function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
   const peakI = unitMax > 0 ? series.findIndex((s) => s.units === unitMax) : -1
   const peakB = blockMax > 0 ? series.findIndex((s) => s.blocks === blockMax) : -1
   const edge = (i: number) => (i < 3 ? ' l' : i >= n - 3 ? ' r' : '')
-  const tip = (s: Series) => `${fmtDay(s.day)} · ${num(s.units)} units metered · ${num(s.blocks)} refused`
+  const tip = (s: Series) => `${fmtDay(s.day)} · ${num(s.units)} units recorded · ${num(s.blocks)} refused`
   const dense = n > 31 ? ' dense' : ''
   const cols = series.map((s, i) => {
     const h = s.units > 0 ? Math.max(2, Math.round((s.units / top) * 100)) : 0
@@ -2332,7 +2487,7 @@ function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
   }).join('')
   return frame(p, barOf(esc(rangeLabel)), `<div class="chart">
       <div class="crow">
-        <div class="clab"><b>Units metered</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
+        <div class="clab"><b>Units recorded</b><span>${unitMax > 0 ? `peak ${num(unitMax)} on ${esc(fmtDay(series[peakI].day))}` : 'nothing metered yet'}</span></div>
         <div class="cplot">
           <div class="cgrid"><span data-y="${num(top)}"></span>${Number.isInteger(top / 2) ? `<span data-y="${num(top / 2)}"></span>` : ''}<span data-y="0"></span></div>
           <div class="cbars${dense}">${cols}</div>
@@ -2346,7 +2501,82 @@ function chartBlock(p: Page, series: Series[], rangeLabel: string): string {
     </div>`)
 }
 
+/**
+ * The chart for an account with a priced call: the list-price estimate per
+ * day as the main series, tokens as the second row, refusals as the third.
+ * Same frame, same axis and same hover layer as the units chart; the dollar
+ * scale's ticks are the estimate itself. A day with calls and no price draws
+ * no cost bar, and its tip says how many calls had no price, so an unpriced
+ * day never reads as a free one.
+ */
+function costChart(p: Page, series: Series[], rangeLabel: string): string {
+  const n = series.length
+  const usdMax = Math.max(...series.map((s) => s.usd), 0)
+  const tokMax = Math.max(...series.map((s) => s.tokens), 0)
+  const blockMax = Math.max(...series.map((s) => s.blocks), 0)
+  // niceMax works on whole numbers; the cost axis is scaled to micro-dollars
+  // for it and printed back in dollars.
+  const top = usdMax > 0 ? niceMax(Math.ceil(usdMax * 1e6)) / 1e6 : 1
+  const peakI = usdMax > 0 ? series.findIndex((s) => s.usd === usdMax) : -1
+  const peakT = tokMax > 0 ? series.findIndex((s) => s.tokens === tokMax) : -1
+  const peakB = blockMax > 0 ? series.findIndex((s) => s.blocks === blockMax) : -1
+  const edge = (i: number) => (i < 3 ? ' l' : i >= n - 3 ? ' r' : '')
+  const unpriced = (s: Series) => s.calls - s.priced
+  const tip = (s: Series) => `${fmtDay(s.day)} · ${s.priced ? `${usd(s.usd)} est. at list price` : 'no priced call'}${unpriced(s) ? ` · ${num(unpriced(s))} with no price` : ''} · ${num(s.tokens)} tokens · ${num(s.blocks)} refused`
+  const dense = n > 31 ? ' dense' : ''
+  const cols = series.map((s, i) => {
+    const h = s.usd > 0 ? Math.max(2, Math.round((s.usd / top) * 100)) : 0
+    return `<div class="col${edge(i)}${i === peakI ? ' peak' : ''}${h >= 80 ? ' tall' : ''}" data-t="${esc(tip(s))}" data-v="${s.priced ? usd(s.usd) : 'none'}">${h ? `<i style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
+  }).join('')
+  const tcols = series.map((s, i) => {
+    const h = s.tokens > 0 ? Math.max(4, Math.round((s.tokens / Math.max(1, tokMax)) * 100)) : 0
+    return `<div class="col${edge(i)}${i === peakT ? ' peak' : ''}" data-t="${esc(tip(s))}" data-v="${num(s.tokens)}">${h ? `<i style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
+  }).join('')
+  const bcols = series.map((s, i) => {
+    const h = s.blocks > 0 ? Math.max(4, Math.round((s.blocks / Math.max(1, blockMax)) * 100)) : 0
+    return `<div class="col${edge(i)}${i === peakB ? ' peak' : ''}" data-t="${esc(tip(s))}" data-v="${num(s.blocks)}">${h ? `<i class="held" style="height:${h}%"></i>` : '<i class="zero"></i>'}</div>`
+  }).join('')
+  const stride = n <= 7 ? 1 : n <= 31 ? 7 : 15
+  let nth = 0
+  const xs = series.map((s, i) => {
+    const on = (n - 1 - i) % stride === 0
+    const alt = on && nth++ % 2 === 1 ? ' class="alt"' : ''
+    return `<span${alt}>${on ? esc(fmtDay(s.day)) : ''}</span>`
+  }).join('')
+  return frame(p, barOf(esc(rangeLabel)), `<div class="chart" id="cost-chart">
+      <div class="crow">
+        <div class="clab"><b>Est. cost</b><span>${usdMax > 0 ? `peak ${usd(usdMax)} on ${esc(fmtDay(series[peakI].day))}, at list price` : 'no priced call in this window'}</span></div>
+        <div class="cplot">
+          <div class="cgrid"><span data-y="${usd(top)}"></span><span data-y="${usd(top / 2)}"></span><span data-y="$0"></span></div>
+          <div class="cbars${dense}">${cols}</div>
+        </div>
+      </div>
+      <div class="crow">
+        <div class="clab"><b>Tokens</b><span>${tokMax > 0 ? `peak ${num(tokMax)} a day` : 'none in this window'}</span></div>
+        <div class="cplot"><div class="cbars strip${dense}">${tcols}</div></div>
+      </div>
+      <div class="crow">
+        <div class="clab held"><b>Refused</b><span>${blockMax > 0 ? `peak ${num(blockMax)} a day` : 'none in this window'}</span></div>
+        <div class="cplot"><div class="cbars strip${dense}">${bcols}</div></div>
+      </div>
+      <div class="cx"><span></span><div class="${dense.trim()}${stride === 1 ? ' x1' : ''}">${xs}</div></div>
+    </div>`)
+}
+
 function activityTable(p: Page, series: Series[], rangeLabel: string): string {
+  if (p.d.pricedEver) {
+    const rows = [...series].reverse().map((s) => `<tr${s.calls === 0 && s.blocks === 0 ? ' class="zero"' : ''}>
+      <td class="when">${esc(fmtDay(s.day))} <span class="dim">${esc(new Date(`${s.day}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }))}</span></td>
+      <td class="num" data-l="est. cost">${s.priced ? usd(s.usd) : s.calls ? '<span class="dim">no price</span>' : usd(0)}</td>
+      <td class="num" data-l="tokens">${num(s.tokens)}</td>
+      <td class="num" data-l="calls">${num(s.calls)}</td>
+      <td class="num" data-l="refused">${num(s.blocks)}</td>
+    </tr>`).join('')
+    return frame(p, barOf(esc(rangeLabel)), `<div class="cv-body flush cv-scroll"><table class="cv-table is-ruled days cost">
+    <thead><tr><th>Day</th><th class="num">Est. cost</th><th class="num">Tokens</th><th class="num">Calls</th><th class="num">Refused</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`)
+  }
   const rows = [...series].reverse().map((s) => `<tr${s.units === 0 && s.blocks === 0 ? ' class="zero"' : ''}>
       <td class="when">${esc(fmtDay(s.day))} <span class="dim">${esc(new Date(`${s.day}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }))}</span></td>
       <td class="num">${num(s.units)}</td>
@@ -2408,8 +2638,11 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
   const refusedRow = leaked || used >= ceiling
   // A job counted in tokens says so beside its numbers (migration 014). A job
   // in the developer's own unit reads as it always has.
+  // Every row names its unit (migration 014): tokens for a job wrap() opened,
+  // units for a job counted in the developer's own unit, which is labelled as
+  // exactly that, because it is the one number here nobody measured.
   const tokens = t.unit === 'token'
-  const per = tokens ? ' tokens' : ''
+  const per = tokens ? ' tokens' : ' units'
   // Calls recorded without a usage count were charged at least the
   // reservation they settled, not 0, so the total is partly an estimate; the
   // row says how many. A call that found no reservation open was recorded at
@@ -2424,9 +2657,9 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
       <td class="lead"><div class="tk">
         <div class="tk-n"><a href="${href(p, 'refusals', { task: t.taskRef })}" title="Refusals for this task">${esc(t.taskRef)}</a><span class="tk-a">${esc(t.agentId)}</span></div>
         <div class="tk-f">${leaked ? `${num(used - ceiling)}${per} past the ceiling` : `${num(remaining)}${per} left`}${reserved > 0 ? ` · ${num(reserved)} reserved in flight` : ''} · ${rel(t.updatedAt)}</div>
-        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>${missingLine}
+        <div class="tk-f tk-s"><span class="bseen">${seenLine(t)}</span></div>${missingLine}${costLine(t)}
       </div></td>
-      <td class="num" data-l="units"><b>${num(used)}</b> / ${num(ceiling)}${per}</td>
+      <td class="num" data-l="used"${tokens ? '' : ' title="units: your own count"'}><b>${num(used)}</b> / ${num(ceiling)}${per}</td>
       <td class="burn"><div class="cv-meter is-row${cls ? ` ${cls}` : ''}" aria-hidden="true"><i style="width:${usedPct.toFixed(1)}%"></i><s style="left:${usedPct.toFixed(1)}%;width:${resPct.toFixed(1)}%"></s><u></u></div></td>
       <td class="state">${state}</td>${editable ? `
       <td class="wide"><form method="POST" action="/app/tasks" class="bset" autocomplete="off">
@@ -2438,6 +2671,23 @@ function taskRow(p: Page, t: TaskRow, i = 0, editable = false): string {
     </tr>`
 }
 
+/**
+ * What the job's recorded calls cost at list price: the sum the server stored
+ * on each priced event of this task_ref, never a conversion of the job's
+ * units. A job with calls and no price says so; a job with no calls says
+ * nothing, because there is nothing yet to be honest about.
+ */
+function costLine(t: TaskRow): string {
+  const calls = Number(t.calls ?? 0)
+  if (!calls) return ''
+  const priced = Number(t.pricedCalls ?? 0)
+  const left = calls - priced
+  if (t.usd == null) {
+    return `<div class="tk-f tk-s"><span class="bcost" title="${t.unit === 'token' ? 'No call on this job named a model with a list price.' : 'Units are your own count, and no call on this job named a model.'}">${t.unit === 'token' ? 'no list price' : 'your own count, no $ estimate'}</span></div>`
+  }
+  return `<div class="tk-f tk-s"><span class="bcost" title="${esc(LIST_PRICE_LABEL)}"><b>${usd(t.usd)}</b> est.${left ? `, ${num(left)} of ${num(calls)} calls unpriced` : ''}</span></div>`
+}
+
 function tasksBlock(p: Page, tasks: TaskRow[], side = ''): string {
   const editable = p.view === 'tasks' && !p.demo
   if (tasks.length === 0) {
@@ -2446,12 +2696,12 @@ function tasksBlock(p: Page, tasks: TaskRow[], side = ''): string {
     // arguments, which was the console admitting it could not do the one thing
     // a person opening it wanted from it.
     const where = editable
-      ? 'Name a job above and give it a ceiling in units'
-      : `<a href="${href(p, 'tasks')}">Name a job and give it a ceiling in units</a>`
+      ? 'Name a job above and give it a ceiling'
+      : `<a href="${href(p, 'tasks')}">Name a job and give it a ceiling</a>`
     return `<div class="cv-empty"><p class="nothing">No jobs yet. One job is one budget. ${where}, then have your code preflight with that <code>task_ref</code>; it appears here and burns down live. A job opened from code, with <code>task_ref</code> and <code>task_ceiling</code> on its first preflight, appears the same way.</p></div>`
   }
   const table = `<div class="cv-body flush cv-scroll"><table class="cv-table cards tasks">
-    <thead><tr><th>Task</th><th class="num">Units</th><th>Burn-down</th><th>State</th>${editable ? '<th class="num">Ceiling</th>' : ''}</tr></thead>
+    <thead><tr><th>Task</th><th class="num">Used</th><th>Burn-down</th><th>State</th>${editable ? '<th class="num">Ceiling</th>' : ''}</tr></thead>
     <tbody>${tasks.map((t, i) => taskRow(p, t, i, editable)).join('')}</tbody>
   </table></div>`
   return frame(p, barOf('task_ref', true),
@@ -2476,8 +2726,9 @@ function jobSide(p: Page): string {
   const ceiling = Number(job.ceilingUnits)
   return `<div class="cv-side">
         <div class="side-h">${label('this job')}${tag(esc(job.taskRef), true)}</div>
-        <div class="cv-stat"><b>${num(used)}</b> <span>/ ${num(ceiling)} units</span></div>
+        <div class="cv-stat"><b>${num(used)}</b> <span>/ ${num(ceiling)} ${unitWord(job.unit)}${job.unit === 'token' ? '' : ', your own count'}</span></div>
         ${meter(used, ceiling)}
+        ${job.usd != null ? `<p class="side-cost" title="${esc(LIST_PRICE_LABEL)}"><b>${usd(job.usd)}</b> est. at list price</p>` : ''}
         ${refusal ? `<p class="cv-no">${esc(decisionLine(refusal))}</p>
         <div class="cv-code is-sm plate">${plateBody(refusal.snapshot)}</div>` : ''}
       </div>`
@@ -2498,11 +2749,11 @@ function plateBody(snapshot: string): string {
 
 const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
   ref: () => 'The job name (task_ref) is 1 to 128 characters with no control characters.',
-  ceiling: () => 'The ceiling is a whole number of units, 1 or more.',
+  ceiling: () => 'The ceiling is a whole number, 1 or more, in the job\u2019s own unit.',
   agent: () => 'The agent label is 1 to 128 characters with no control characters.',
   rate: () => 'Too many saves in one minute for this key. Wait a moment and try again.',
   below: (f) => f.ref && f.min != null
-    ? `<code>${esc(f.ref)}</code> already has <b>${num(f.min)}</b> units committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min)} or more, or wait for the reservations to settle or expire.`
+    ? `<code>${esc(f.ref)}</code> already has <b>${num(f.min)}</b> ${unitWord(f.unit, f.min)} committed: spent, plus reserved by calls in flight. The ceiling cannot go under that. Set ${num(f.min)} or more, or wait for the reservations to settle or expire.`
     : 'That ceiling is under what the job has already committed: spent, plus reserved by calls in flight. Set it at or above that number, or wait for the reservations to settle or expire.',
 }
 
@@ -2523,7 +2774,7 @@ const FLASH_TEXT: Record<NonNullable<Flash['err']>, (f: Flash) => string> = {
  *  screen built for them. */
 function ceilingForm(p: Page): string {
   const pointer = p.d.lastBlock === null && p.d.overruns === 0
-    ? `<p class="fine"><a href="${href(p, 'start')}">New here? Your first refusal is three steps &rarr;</a></p>` : ''
+    ? `<p class="fine"><a href="${href(p, 'start')}">New here? Connect first, and your first call shows what it cost &rarr;</a></p>` : ''
   const f = p.flash
   const said = !f ? ''
     : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
@@ -2535,7 +2786,7 @@ function ceilingForm(p: Page): string {
   const pick = p.suggest?.pick ?? null
   const fields = `
       <div><label class="cv-flabel" for="t-ref">Job <code>task_ref</code></label><input id="t-ref" class="cv-field m" name="task_ref" placeholder="job-142" maxlength="128" value="${keep}" required /></div>
-      <div><label class="cv-flabel" for="t-ceil">Ceiling, in units</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${pick ? `value="${pick.units}"` : 'placeholder="500"'} required /></div>
+      <div><label class="cv-flabel" for="t-ceil">Ceiling, in the job's unit</label><input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" ${pick ? `value="${pick.units}"` : 'placeholder="500"'} required /></div>
       <div><label class="cv-flabel" for="t-agent">Agent label, optional</label><input id="t-agent" class="cv-field m" name="agent_id" placeholder="researcher" maxlength="128"${pick ? ` value="${esc(pick.agentId)}"` : ''} /></div>`
   const form = p.demo
     ? `<div class="setf">${fields}
@@ -2549,7 +2800,7 @@ function ceilingForm(p: Page): string {
     ${form}
     ${pickLine(p)}
     ${historyBlock(p)}
-    <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job is out of units, preflight answers <code>approved: false</code> and your code decides what next.</p>
+    <p class="fine">One job, one budget. A job <code>wrap()</code> opened counts tokens; a job opened here counts units of your own. The ceiling saved here is the one preflight uses. Your code can open a job with <code>task_ceiling</code> on its first call; once the job exists, a <code>task_ceiling</code> on preflight is not applied, and the ceiling changes only here or through <code>PUT /tasks/:task_ref/ceiling</code>: last save wins. The agent label is read only when a save opens the job. When the job has no room left, preflight answers <code>approved: false</code> and your code decides what next.</p>
   </div>`
 }
 
@@ -2563,7 +2814,7 @@ function pickLine(p: Page): string {
   const from = k.jobs === 1
     ? `what your last job of ${who} used`
     : `the ${k.which} of your last ${num(k.jobs)} jobs of ${who}`
-  return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${k.units === 1 ? 'unit' : 'units'}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
+  return `<p class="conv">In the ceiling field: <b>${num(k.units)} ${unitWord(k.unit, k.units)}</b>, ${from}, with that agent's label beside it. Still editable: change it if the next job will not look like ${k.jobs === 1 ? 'that one' : 'those'}.${p.demo ? ' This is sample data, so nothing here is saved.' : ' Nothing is saved until you press Set ceiling.'}</p>`
 }
 
 
@@ -2582,7 +2833,7 @@ function historyBlock(p: Page): string {
       `<a class="pk${on(k) ? ' on' : ''}" href="${href(p, 'tasks', { history: h.agentId, pick: k })}"${on(k) ? ' aria-current="true"' : ''}>${name}<b>${num(h[k])}</b></a>`
     // One job has one figure; three equal links would be noise.
     const figures = h.jobs === 1 ? link('max', '') : PICKS.map((k) => link(k, `${k} `)).join('')
-    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">units</span></span></div>`
+    return `<div class="hrow"><span class="hw">from your last ${h.jobs === 1 ? 'job' : `${num(h.jobs)} jobs`} of <b class="ha">${esc(h.agentId)}</b></span><span class="hp">${figures}<span class="hu">${unitWord(h.unit)}</span></span></div>`
   }).join('')
   return `<div class="hist">
       <p class="lbl cv-label">Suggested ceilings</p>
@@ -2643,6 +2894,28 @@ function decisionsTable(p: Page, rows: DecisionRow[], truncated: boolean): strin
 function usageTable(p: Page, u: EventTypeUsage, rangeLabel: string): string {
   if (u.groups.length === 0) {
     return `<div class="cv-empty"><p class="nothing">Nothing recorded in the last ${esc(rangeLabel)}. Each event your code records lands here under its <code>event_type</code>.</p></div>`
+  }
+  if (p.d.pricedEver && u.totalPriced > 0) {
+    // Shares are of the window's estimate; a group with no priced call has no
+    // share of it and says so, rather than reading as 0% of the money.
+    const dearest = Math.max(...u.groups.map((g) => g.usd ?? 0), 0)
+    const total = u.totalUsd ?? 0
+    const rows = u.groups.map((g) => {
+      const share = g.usd != null && total > 0 ? (g.usd / total) * 100 : null
+      const pct = share == null ? 'no price' : share > 0 && share < 1 ? '&lt;1% of cost' : `${Math.round(share)}% of cost`
+      const w = g.usd != null && dearest > 0 ? Math.max(2, Math.round((g.usd / dearest) * 100)) : 0
+      return `<tr>
+      <td class="id lead" title="${esc(g.eventType)}">${esc(g.eventType)}</td>
+      <td class="wide"><div class="share"><div class="cv-meter is-row" aria-hidden="true"><i style="width:${w}%"></i></div><span>${pct}</span></div></td>
+      <td class="num" data-l="est. cost">${g.usd != null ? usd(g.usd) : '<span class="dim">no price</span>'}</td>
+      <td class="num" data-l="tokens">${num(g.tokens)}</td>
+      <td class="num" data-l="records">${num(g.events)}</td>
+    </tr>`
+    }).join('')
+    return frame(p, barOf('event_type', true), `<div class="cv-body flush cv-scroll"><table class="cv-table cards cost">
+    <thead><tr><th>event_type</th><th>Share of cost</th><th class="num">Est. cost</th><th class="num">Tokens</th><th class="num">Records</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`)
   }
   const heaviest = Math.max(1, ...u.groups.map((g) => g.units))
   const body = u.groups.map((g) => {
@@ -2795,130 +3068,93 @@ function limitsBlock(p: Page, rangeLabel: string): string {
 }
 
 /**
- * The start screen: three numbered steps to a refusal on this account, and
- * the refusal itself when it arrives. Rendered at ?view=start, which is where
- * /register#done signs a new key in, and as the overview until the account
- * has a refusal (see onboardingDue).
+ * The start screen, 2026-09-25: one question, how will you connect, and for
+ * each answer one short path that ends on the account's first recorded model
+ * call, shown back with its tokens, its model and its list-price estimate.
+ * Rendered at ?view=start (where a new key lands) and as the overview until
+ * the account has recorded anything (see onboardingDue). The words are in
+ * src/ui/steps.ts; the choice is ?via=, a link, because this page ships no
+ * script of its own (the one exception is the copy control on the MCP path,
+ * under its own hash).
  *
- * The words are in src/ui/steps.ts and this is the ONLY surface that renders
- * them. /register#done used to render the same steps under numerals 1/2/3
- * beneath an unnumbered install bullet, which made "step 1" the third thing
- * to do and put the terminal before the console; dogfood run 3 ended on that
- * screen with "I do not understand what I need to do". The key screen now
- * hands over the key and signs the reader in here. One owner of the sequence
- * means one numbering.
+ * Why it changed. The three steps it replaced (a job and a ceiling in units, a
+ * sample that called record(units=1), the refusal) never showed a new account
+ * a dollar: record(units=1) names no model, so the server has nothing to
+ * price. The founder, as a user, found them "not clear at all". The ceiling
+ * and the refusal are now the next thing, on the Task budgets view.
  *
- * This replaced a first run that led with a raw curl asking for 5 units
- * against a per-request ceiling of 1, which manufactured a refusal on a job
- * the reader never created, against the wrong ceiling.
+ * The two code samples are literal blocks in this file (pythonSample and
+ * nodeSample below), because scripts/snippets/extract.mjs executes only a
+ * literal one, and records an interpolated one as "dynamic" with no code,
+ * which drops it from CI in silence. The hygiene gate counts them. Neither
+ * carries anything of the reader's: wrap() opens its own job, first-call,
+ * with a ceiling in tokens, on the first call.
  *
- * `job` is the reader's most recently touched row. It is what turns step 2
- * from a sample into their sample: the name they typed and the ceiling they
- * chose, rendered into lines that run as pasted. It comes from d.tasks
- * (ORDER BY updated_at DESC) and never from the query string; the one place a
- * task_ref off the URL is echoed is the flash line, and verifyFlash already
- * proves that name against a row on this account before it renders.
- *
- * `refusal` is the newest refusal on that job (or on the account when there
- * is no job yet), read from the same rows the refusals view lists, and the
- * body shown under it is the persisted snapshot: the literal JSON the SDK
- * received, not a re-rendering of it.
+ * The last block is the account's own first model call (loadConsole's
+ * `first`): the earliest event whose metadata names a model and carries token
+ * counts. Its dollar figure is the one the server stored when the record
+ * landed (events.list_price_usd, src/lib/prices.ts), never one worked out
+ * here, and a call it could not price says why instead of showing $0.
  */
+function pythonSample(): string {
+  return `<pre class="snip">import agentbill
+from openai import OpenAI
+
+# reads AGENTBILL_API_KEY and OPENAI_API_KEY from the environment
+llm = agentbill.wrap(OpenAI(), task_ref="first-call",
+                     agent_id="start", task_ceiling=20_000)
+reply = llm.chat.completions.create(
+    model="gpt-4o-mini",
+    max_tokens=20,
+    messages=[{"role": "user", "content": "Say hi in three words."}],
+)
+if isinstance(reply, agentbill.Refusal):
+    print(reply)
+else:
+    print(reply.choices[0].message.content)</pre>`
+}
+
+function nodeSample(): string {
+  return `<pre class="snip">import OpenAI from 'openai'
+import { wrap, isRefusal } from 'agentbill'
+
+// reads AGENTBILL_API_KEY and OPENAI_API_KEY from the environment
+const llm = wrap(new OpenAI(), { taskRef: 'first-call', agentId: 'start', taskCeiling: 20_000 })
+const reply = await llm.chat.completions.create({
+  model: 'gpt-4o-mini',
+  max_tokens: 20,
+  messages: [{ role: 'user', content: 'Say hi in three words.' }],
+})
+console.log(isRefusal(reply) ? String(reply) : reply.choices[0].message.content)</pre>`
+}
+
+/** The last step of every path: the account's first model call, or where it will appear. */
+function firstCallBlock(p: Page): string {
+  const f = p.d.first
+  const job = (ref: string | null) => ref ? ` on job <code>${esc(ref)}</code>` : ''
+  const step = (s: string | null) => s ? `, step <code>${esc(s)}</code>` : ''
+  if (f && f.usd != null) {
+    return `<p class="first-ok" id="first-call">Your first call was recorded: <b>${usd(f.usd)}</b> <span class="est" title="${esc(LIST_PRICE_LABEL)}">(estimate at list price)</span>, ${num(f.tokens)} ${f.tokens === 1 ? 'token' : 'tokens'}, model <code>${esc(f.model)}</code>${job(f.taskRef)}${step(f.step)}.</p>
+       <p class="fine">${esc(LIST_PRICE_LABEL)}</p>
+       <p>Next, give a job a ceiling on <a href="${href(p, 'tasks')}">Task budgets</a>. Once it is spent, preflight answers <code>approved: false</code> before the call goes out, and your code decides what happens next.</p>
+       <p><a class="btn" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
+  }
+  if (f) {
+    return `<p class="first-ok" id="first-call">Your first call was recorded: ${num(f.tokens)} ${f.tokens === 1 ? 'token' : 'tokens'}, model <code>${esc(f.model)}</code>${job(f.taskRef)}${step(f.step)}. It has no dollar estimate: ${esc(f.note ?? 'it could not be priced')}. A call with no list price is never counted as $0.</p>
+       <p><a class="btn" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
+  }
+  if (p.d.recorded) {
+    return `<p id="first-call">Calls are arriving on this account, but none of them names a model, so none can be priced. The lines above record the model and the tokens your provider reported, and the first one appears here.</p>`
+  }
+  return `<p id="first-call">${WAITING_LINE}</p>`
+}
+
 function startScreen(p: Page): string {
   const f = p.flash
   const said = !f ? ''
-    : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.${f.agentKept ? ' The agent label was not changed: it is read only when a save opens the job.' : ''}</p>`
+    : f.saved !== undefined ? `<p class="ok">${f.saved ? `Ceiling set on <code>${esc(f.saved)}</code>${f.created ? ', a new job' : ''}.` : 'Ceiling saved.'} Every preflight that names this task_ref uses it from the next call.</p>`
     : f.err ? `<p class="err cv-err">${FLASH_TEXT[f.err](f)}</p>`
     : ''
-  const job = p.d.tasks[0] ?? null
-  // A failed save NEVER proposes a name. It gives back the one the reader
-  // typed when that name is a job on this account, and otherwise an empty
-  // field they must fill in.
-  //
-  // Falling through to `job` here was a data-loss bug, and the first version
-  // of this line had it. verifyFlash strips f.ref whenever no task_budgets row
-  // carries that name, which is exactly a failed save on a NEW job: the reader
-  // types "invoice-run" with a bad ceiling, the redirect carries
-  // err=ceiling&ref=invoice-run, verifyFlash finds no row and drops the name,
-  // and the field then came back reading some OTHER job. Fixing the number and
-  // pressing Set ceiling rewrote that job's budget while "invoice-run" was
-  // never created, with nothing on screen saying the name had changed.
-  //
-  // The empty branch is deliberate over echoing the raw query value: `ref` is
-  // text anyone can put in a link, and this file's echo discipline is that an
-  // unverified name is never rendered back. `required` on the input means an
-  // empty field cannot be submitted by accident.
-  const refValue = f?.err ? (f.ref ? esc(f.ref) : '') : job ? esc(job.taskRef) : SAMPLE_REF
-  // The ceiling is prefilled the same way: the job's own number once one
-  // exists, the suggested first ceiling before that, nothing after an error.
-  const ceilValue = f?.err ? '' : job ? String(Number(job.ceilingUnits)) : String(SAMPLE_CEILING)
-  // A name carrying a quote or a backslash cannot sit inside the Python string
-  // literal below: esc() is HTML escaping, and &quot; renders in the browser as
-  // the character that closes the string.
-  const safe = job ? inlineSafeRef(job.taskRef) : true
-  const snipRef = job && safe ? job.taskRef : SAMPLE_REF
-  const snipAgent = job && job.agentId !== CONSOLE_AGENT && inlineSafeRef(job.agentId) ? job.agentId : SAMPLE_AGENT
-  const ceiling = job ? Number(job.ceilingUnits) : SAMPLE_CEILING
-  const spent = job ? Number(job.usedUnits) : 0
-  const refusal = p.d.decisions.find((r) => r.blocked && (!job || r.taskRef === job.taskRef)) ?? null
-
-  // Two containers for one sample, and the tag is the point. The personalised
-  // copy carries the reader's job name, so it is interpolated and MUST be a
-  // div: scripts/snippets/extract.mjs executes every pre element under
-  // src/routes and records an interpolated one as "dynamic" with empty code,
-  // which drops it from the gate in silence. The pre-save copy below is a
-  // literal, so it CAN be a pre, and it has to be: it is the repo's one executed
-  // task_ref-only sample. The hygiene gate asserts it is byte-identical to
-  // taskSnippet(), so the copy CI runs and the copy a reader pastes cannot
-  // drift apart.
-  const sample = job
-    ? `<p>${safe
-        ? 'Here it is with your job and its ceiling in it. It runs as pasted.'
-        : `Here it is. Change the job name before you run it: yours carries a character this sample cannot hold inline, so it shows <code>${esc(SAMPLE_REF)}</code>. Put <code>${esc(job.taskRef)}</code> in both places, or the call names a job you do not have and the SDK raises <code>TaskCeilingRequiredError</code>.`}</p>
-       <div class="snip">${esc(taskSnippet(snipRef, snipAgent, ceiling))}</div>
-       <p class="fine">It makes ${num(ceiling + 1)} calls. The first ${num(ceiling)} print <span class="out">approved: True</span> and count <span class="out">units left</span> down from ${num(Math.max(0, ceiling - 1))}, because a call that says nothing about its worth counts as one unit. The last one is refused.${ceiling > 20 ? ' A smaller ceiling reaches that refusal sooner; change it in step 1 and save again.' : ''}</p>`
-    : `<p>Save the job above and this step hands these lines back with your own job name and ceiling in them.</p>
-       <pre class="snip">import os
-from agentbill import AgentBillClient, TaskCeilingExceededError
-
-key = os.environ["AGENTBILL_API_KEY"]
-client = AgentBillClient(api_key=key)
-
-try:
-    # one call more than the ceiling of 3
-    for _ in range(4):
-        result = client.preflight(
-            agent_id="researcher",
-            task_ref="job-1",
-        )
-        print("approved:", result.approved,
-              "units left:", result.task_remaining_units)
-        # your model call runs here
-        client.record(
-            agent_id="researcher",
-            task_ref="job-1",
-            units=1,
-        )
-except TaskCeilingExceededError as refused:
-    print(refused)</pre>`
-
-  // Step 3. The body is the persisted snapshot, pretty-printed when it parses
-  // and verbatim when it does not (plateBody, the rule every body on this page
-  // follows), on the plate, because it is the machine's answer and not code to
-  // copy. A div and not the code tag, for the reason above: it is interpolated.
-  let third: string
-  if (refusal) {
-    third = `<p class="cv-no">Refused. ${esc(decisionLine(refusal))}</p>
-       <div class="got">${ruleChip(refusal)}<span class="dim">${esc(rel(refusal.createdAt))}${refusal.agentId ? ` &middot; ${esc(refusal.agentId)}` : ''}${refusal.taskRef ? ` &rarr; ${esc(refusal.taskRef)}` : ''}</span></div>
-       <div class="cv-code plate">${plateBody(refusal.snapshot)}</div>
-       <p class="fine">That is the body your code received, kept as a row. Every refusal on this account lands on the <a href="${href(p, 'refusals')}">refusals view</a> the same way, and the overview is now your console.</p>
-       <p><a class="btn" href="${href(p, 'overview')}">Open the console &rarr;</a></p>`
-  } else if (job && spent > 0) {
-    third = `<p><code>${esc(job.taskRef)}</code> has spent ${num(spent)} of ${num(ceiling)} ${unitWord(job.unit)} and nothing has been refused yet. Run the lines above again, then <a href="${href(p, 'start')}">reload this page</a>.</p>`
-  } else {
-    third = `<p>Nothing here yet. Run the lines above, then <a href="${href(p, 'start')}">reload this page</a>: the refusal appears here with the body your code received.</p>`
-  }
-
   // A person whose account has no key yet: the key comes first, from here.
   const firstKey = !p.anon && !p.demo && p.v.via === 'user' && !p.v.apiKey
     ? `<div class="ns3 firstkey-row"><span class="ns3-n">0</span><div class="firstkey">
@@ -2926,56 +3162,68 @@ except TaskCeilingExceededError as refused:
           <form method="POST" action="/app/keys/first"><button class="btn btn-lg" type="submit">Create my API key &rarr;</button></form>
         </div></div>`
     : ''
+  const via = p.via ?? null
+  const cards = VIAS.map((v) =>
+    `<a class="via" href="${href(p, 'start', { via: v })}"${v === via ? ' aria-current="true"' : ''}><b>${VIA_TITLE[v]}</b><span>${VIA_SUB[v]}</span></a>`).join('\n        ')
+  const step = (n: number, body: string) => `<div class="ns3"><span class="ns3-n">${n}</span><div>${body}</div></div>`
+  const last = (n: number) => step(n, `<p><b>Your first call</b></p>${firstCallBlock(p)}`)
+  let path = ''
+  if (via === 'mcp') {
+    path = [
+      step(1, `<p>Add AgentBill to your client. The connect page has the steps for Claude, ChatGPT, Claude Code, Codex, Cursor and any other MCP client: sign in, allow, done.</p>
+        <p><a class="btn" href="/integrations/mcp">Open the connect page &rarr;</a></p>`),
+      step(2, `<p>Paste this into a new chat.</p>
+        ${copyPlate('mcp-prompt', esc(MCP_PROMPT))}
+        <div class="does"><div>${label('What it does')}<p>${MCP_DOES}</p></div><div>${label('What it does not')}<p>${MCP_DOES_NOT}</p></div></div>
+        <p class="fine">The prompt records a test call, with the token counts you gave it, so you can see one priced record land here. It is not a measurement of anything, and it is recorded under step <code>test</code>.</p>`),
+      last(3),
+    ].join('\n      ')
+  } else if (via === 'python') {
+    path = [
+      step(1, `<p>Install the SDK and the OpenAI client, once, where your code runs.</p>
+        <div class="snip">${INSTALL_PY_WRAP}</div>`),
+      step(2, `<p>Run this. It makes one real call to OpenAI through <code>wrap()</code>.</p>
+        ${pythonSample()}
+        <p class="fine">${KEYS_LINE}</p>
+        <p class="fine">${WHAT_RUNS}</p>
+        <p class="fine">${ANTHROPIC_LINE}</p>`),
+      last(3),
+    ].join('\n      ')
+  } else if (via === 'node') {
+    path = [
+      step(1, `<p>Install the SDK and the OpenAI client, once, where your code runs.</p>
+        <div class="snip">${INSTALL_NODE_WRAP}</div>`),
+      step(2, `<p>Save this as <code>first-call.mjs</code> and run <code>node first-call.mjs</code>. It makes one real call to OpenAI through <code>wrap()</code>.</p>
+        ${nodeSample()}
+        <p class="fine">${KEYS_LINE}</p>
+        <p class="fine">${WHAT_RUNS}</p>
+        <p class="fine">${ANTHROPIC_LINE}</p>`),
+      last(3),
+    ].join('\n      ')
+  } else {
+    path = `<div class="ns3 first-wait"><div>${firstCallBlock(p)}</div></div>`
+  }
   return `<div class="start cv-panel">
       ${said}
-      <p class="intro">${SEQUENCE_INTRO}</p>
       ${firstKey}
-      <form method="POST" action="/app/tasks" class="setf3" autocomplete="off">
-        <input type="hidden" name="back" value="start" />
-        <div class="ns3"><span class="ns3-n">1</span><div>
-          <p>${STEP_NAME}</p>
-          <div class="fld"><label class="cv-flabel" for="t-ref">${LABEL_REF}</label>
-          <input id="t-ref" class="cv-field m" name="task_ref" maxlength="128" value="${refValue}" required />
-          <span class="cv-hint">${HINT_REF}</span></div>
-          <p class="units">${STEP_UNITS}</p>
-          <div class="fld"><label class="cv-flabel" for="t-ceil">${LABEL_CEIL}</label>
-          <input id="t-ceil" class="cv-field m" name="ceiling_units" type="number" inputmode="numeric" min="1" max="${INT4_MAX}" step="1" value="${ceilValue}" required />
-          <span class="cv-hint">${HINT_CEIL}</span></div>
-          <details><summary>Add an agent label, optional</summary>
-            <input id="t-agent" class="cv-field m" name="agent_id" maxlength="128" placeholder="researcher" />
-            <p class="fine">Read only when a save opens the job. Leave it blank and the job is listed as <code>console</code> until an approved call names one.</p>
-          </details>
-          <button class="btn btn-lg" type="submit">${job ? 'Save the ceiling' : 'Set the ceiling'}</button>
-          ${job ? `<p class="fine">Saved: <code>${esc(job.taskRef)}</code> at ${num(ceiling)} ${unitWord(job.unit, ceiling)}. Change either and save again; the last save wins.</p>` : ''}
-        </div></div>
-      </form>
-      <div class="ns3"><span class="ns3-n">2</span><div>
-        <p>${STEP_INSTALL}</p>
-        <div class="snip">${INSTALL_PY}</div>
-        <p>${STEP_ASK}</p>
-        ${sample}
-        <p class="fine">${KEY_ENV_LINE}</p>
-        <p class="fine">${REQUIRED_LINE}</p>
-      </div></div>
-      <div class="ns3"><span class="ns3-n">3</span><div>
-        <p>${STEP_REFUSE}</p>
-        ${third}
-      </div></div>
-      <p class="fine">One job, one budget, in units you define. The ceiling saved here is the one preflight uses, and it changes only here or through <code>PUT /tasks/:task_ref/ceiling</code> with <code>ceiling_units</code> in the body: last save wins. Your code names the job and nothing about its budget.</p>
+      <div class="ask"><h2 class="intro">${CONNECT_Q}</h2><p>${CONNECT_LEDE}</p></div>
+      <nav class="vias" aria-label="${CONNECT_Q}">
+        ${cards}
+      </nav>
+      ${path}
       <p class="seedemo"><a href="${href(p, 'overview', { demo: true })}">Show me the console with sample data &rarr;</a></p>
     </div>`
 }
 
 /**
- * Whether the overview is still the start screen. Until the account's first
- * refusal the dashboard is tiles of zero, a chart of nothing and two empty
- * tables, and a reader who has not reached a refusal has nothing to read
- * there; the rail still lists every view for anyone who wants it. A leak
- * counts as having arrived: a leak is a row on the refusals view, and the
- * honest state is then the dashboard that shows it.
+ * Whether the overview is still the start screen: until the account has
+ * recorded anything, and has no refusal and no leak. Before that the
+ * dashboard is tiles of zero and a chart of nothing, and the one useful thing
+ * on the page is how to connect. A refusal or a leak counts as having arrived,
+ * because each is a row the dashboard shows.
  */
 function onboardingDue(p: Page): boolean {
-  return !p.demo && p.d.lastBlock === null && p.d.overruns === 0 && !p.filter.task && !p.filter.agent
+  return !p.demo && !p.d.recorded && p.d.lastBlock === null && p.d.overruns === 0 && !p.filter.task && !p.filter.agent
 }
 
 // ---------------------------------------------------------------------------
@@ -3006,6 +3254,18 @@ function overviewView(p: Page, rangeLabel: string): string {
 
 function activityView(p: Page, rangeLabel: string): string {
   const u = p.d.usage
+  if (p.d.pricedEver && u.totalPriced > 0) {
+    const more = u.groupCount > u.groups.length ? `The ${num(u.groups.length)} dearest of ${num(u.groupCount)} event_types. ` : ''
+    const left = u.totalEvents - u.totalPriced
+    return `${chartBlock(p, p.d.series, rangeLabel)}
+    <p class="note">${esc(LIST_PRICE_LABEL)}</p>
+    <h2>By event_type <span>the last ${esc(rangeLabel)}, dearest first</span></h2>
+    <p class="lede">What the calls recorded in this window cost at list price, and the tokens their providers reported, grouped by the <code>event_type</code> each record carried. <code>wrap()</code> and <code>record()</code> in both SDKs send the <code>agent_id</code> as the <code>event_type</code>, so for those calls this is a split by agent.</p>
+    ${usageTable(p, u, rangeLabel)}
+    <p class="note">${more}Shares are of the ${usd(u.totalUsd ?? 0)} estimated over ${num(u.totalPriced)} priced ${u.totalPriced === 1 ? 'call' : 'calls'} in the window${left > 0 ? `; ${num(left)} ${left === 1 ? 'record has' : 'records have'} no list price and ${left === 1 ? 'is' : 'are'} left out of it, never counted as $0` : ''}. The same records are on <code>GET /usage?by=event_type</code>, and each job's estimate on <code>GET /tasks/:task_ref</code>.</p>
+    <h2>Day by day <span>the last ${esc(rangeLabel)}, newest first</span></h2>
+    ${activityTable(p, p.d.series, rangeLabel)}`
+  }
   const more = u.groupCount > u.groups.length ? `The ${num(u.groups.length)} heaviest of ${num(u.groupCount)} event_types. ` : ''
   return `${chartBlock(p, p.d.series, rangeLabel)}
     <h2>By event_type <span>the last ${esc(rangeLabel)}, heaviest first</span></h2>
@@ -3019,12 +3279,12 @@ function activityView(p: Page, rangeLabel: string): string {
 function tasksView(p: Page): string {
   const used = p.sort === 'used'
   const page = p.d.taskCount > p.d.tasks.length
-    ? `The ${num(p.d.tasks.length)} ${used ? 'with the most units used' : 'most recently touched'} of ${num(p.d.taskCount)} tasks.`
-    : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, ${used ? 'most units used first' : 'most recently touched first'}.`
+    ? `The ${num(p.d.tasks.length)} ${used ? 'most used' : 'most recently touched'} of ${num(p.d.taskCount)} tasks.`
+    : `${num(p.d.taskCount)} ${p.d.taskCount === 1 ? 'task' : 'tasks'}, ${used ? 'most used first' : 'most recently touched first'}.`
   return `${ceilingForm(p)}
     ${tasksBlock(p, p.d.tasks)}
     ${p.d.tasks.length ? TASK_KEY : ''}
-    <p class="note">${page} Units are the ones your code reported. The time on a row runs from the first to the last preflight on record for that job, approved or refused; it is not the job's own duration, and a record() does not move it. Those records begin ${PREFLIGHT_RECORDS_SINCE}, so a job older than that shows only its preflights since then. The same rows, without that time, are on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
+    <p class="note">${page} Used is what your code reported: tokens on a job <code>wrap()</code> opened, your own count on a job in units, and a dollar figure is the list-price estimate of the job's priced calls. The time on a row runs from the first to the last preflight on record for that job, approved or refused; it is not the job's own duration, and a record() does not move it. Those records begin ${PREFLIGHT_RECORDS_SINCE}, so a job older than that shows only its preflights since then. The same rows, without that time, are on <code>GET /tasks</code> (<code>?sort=used</code> for this ranking) and <code>GET /tasks/:task_ref</code>.</p>`
 }
 
 function refusalsView(p: Page): string {
@@ -3177,11 +3437,12 @@ function consolePage(p: Page): string {
         ${body}
         <div class="foot">
           Every number on this page is on the API too${spanShown ? ', except the preflight span on a task row, which the API does not return' : ''}:
-          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets, <code>/usage?by=event_type</code> for the split by event_type, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
+          <code>GET /decisions</code> for refusals, <code>/tasks</code> for budgets and <code>/tasks/:task_ref</code> for a job's list-price estimate, <code>/usage?by=event_type</code> for the split by event_type and its estimate, <code>/customers</code> for balances, <code>/keys</code> for keys, each with <code>Authorization: Bearer &lt;your key&gt;</code>.${p.suggest?.history.length ? ` A suggested ceiling is one job's <code>used_units</code>, as <code>GET /tasks/:task_ref</code> returns it: the p50, p90 or max over one agent's ${num(HISTORY_JOBS)} most recently updated finished jobs, worked out on this page.` : ''}
         </div>
       </div>
     </main>
   </div>
+${body.includes('data-copy=') ? COPY_JS : ''}
 </body>
 </html>`
 }
