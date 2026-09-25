@@ -49,6 +49,9 @@ const PAGES = [
   // Sample data, so the rows exist without an account.
   ['console-demo-tasks', '/app?demo=1&view=tasks&sort=used'],
   ['console-demo-activity', '/app?demo=1&view=activity'],
+  // The keys view, 2026-09-25 (security batch B): every key as agb_1234…abcd,
+  // the key commands, and no key in full anywhere on it.
+  ['console-demo-keys', '/app?demo=1&view=keys'],
   ['blog', '/blog'],
   ['about', '/about'],
   ['faq', '/faq'],
@@ -647,6 +650,68 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
   rows.push(`browser  src-rewrite   ${tagged}/8 tagged, click ${cta?.source ?? 'none'}, plain ${plainHrefs.every((h) => h === '/register') ? 'clean' : 'DIRTY'}`)
   rows.push(`browser  page-view     tagged load ${pv.length} beacon(s) src ${pv[0]?.source ?? 'none'}, plain load ${plainPv.length} beacon(s) src ${plainPv[0]?.source ?? 'none'}`)
   await ctx.close()
+}
+
+// ---------------------------------------------------------------- keys: /recover and Revoke all, 2026-09-25
+//
+// Security batch B. Only with tokens and a session handed in, so only against
+// a local server: SHOTS_RECOVER_TOKEN is a live recovery link's token for an
+// account (a GET never spends it, so every viewport captures the choices),
+// and the desktop capture then presses "Replace" and captures the one page a
+// new key is shown on. SHOTS_REVOKE_COOKIE is a key session on a throwaway
+// account: the keys view with the Revoke all block, then the box ticked and
+// the button pressed, and the page that lands on. Both end what they open.
+{
+  const FULL = /agb_[0-9a-f]{48}/g
+  const tok = process.env.SHOTS_RECOVER_TOKEN
+  if (tok) {
+    for (const [vp, width, height, isMobile] of VIEWPORTS) {
+      const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile })
+      const page = await ctx.newPage()
+      const res = await page.goto(`${BASE}/recover/${tok}`, { waitUntil: 'networkidle' })
+      await page.screenshot({ path: `${OUT}/${vp}-recover-choices.png`, fullPage: true })
+      const st = await page.evaluate(() => ({ html: document.documentElement.outerHTML, overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+        buttons: [...document.querySelectorAll('.choice button')].map((b) => b.textContent.trim()) }))
+      if (res?.status() !== 200) failures.push(`${vp} recover-choices: HTTP ${res?.status()}`)
+      if ((st.html.match(FULL) ?? []).length) failures.push(`${vp} recover-choices: a whole key on the page`)
+      if (st.buttons.length !== 2) failures.push(`${vp} recover-choices: ${st.buttons.length} choices, expected 2`)
+      if (st.overflowX) failures.push(`${vp} recover-choices: scrolls sideways`)
+      rows.push(`${vp.padEnd(8)} recover-choices ${res?.status()} ${st.buttons.join(' | ')}`)
+      await ctx.close()
+    }
+    // Last, because it spends the link.
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 735 }, deviceScaleFactor: 2 })
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/recover/${tok}`, { waitUntil: 'networkidle' })
+    await Promise.all([page.waitForNavigation(), page.click('form:has(input[value="replace"]) button')])
+    await page.screenshot({ path: `${OUT}/desktop-recover-replaced.png`, fullPage: true })
+    const keys = [...new Set((await page.content()).match(FULL) ?? [])]
+    if (keys.length !== 1) failures.push(`desktop recover-replaced: ${keys.length} distinct keys on the page, expected the one new key`)
+    rows.push(`desktop  recover-replaced ${keys.length} new key shown`)
+    await ctx.close()
+  }
+  const revoke = process.env.SHOTS_REVOKE_COOKIE
+  if (revoke) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 735 }, deviceScaleFactor: 2 })
+    const page = await ctx.newPage()
+    await page.setExtraHTTPHeaders({ cookie: revoke })
+    await page.goto(`${BASE}/app?view=keys`, { waitUntil: 'networkidle' })
+    await page.screenshot({ path: `${OUT}/desktop-console-keys-revoke-all.png`, fullPage: true })
+    const block = page.locator('#revoke-all')
+    if (!(await block.count())) failures.push('revoke-all: no Revoke all block on the keys view of a key session')
+    else {
+      await block.scrollIntoViewIfNeeded()
+      await page.locator('.revall').screenshot({ path: `${OUT}/desktop-console-revoke-all-block.png` })
+      await page.check('.revall input[name="confirm"]')
+      await Promise.all([page.waitForNavigation(), page.click('.revall button[type="submit"]')])
+      await page.screenshot({ path: `${OUT}/desktop-console-revoked-all.png`, fullPage: true })
+      const html = await page.content()
+      if (!html.includes('agentbill.dev/recover')) failures.push('revoke-all: the page it lands on does not point to /recover')
+      if ((html.match(FULL) ?? []).length) failures.push('revoke-all: a whole key on the page it lands on')
+      rows.push(`desktop  revoke-all    landed on ${new URL(page.url()).pathname}${new URL(page.url()).search}`)
+    }
+    await ctx.close()
+  }
 }
 
 await browser.close()
