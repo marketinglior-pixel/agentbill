@@ -1,6 +1,8 @@
 import { ORIGIN } from './site.js'
 import { inlineScript } from '../lib/csp.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from './copy.js'
+import { CONNECT_MARKS } from './connect-marks.js'
+import { SDK_VERSIONS } from '../lib/llms.js'
 
 // /integrations/mcp as a connect page, 2026-09-25: platform tabs across the
 // top, one Connect action per platform, the URL in a copy box under each, and
@@ -128,6 +130,27 @@ const VSCODE_JSON = `{
       "url": "${MCP_URL}",
       "headers": {
         "Authorization": "Bearer \${input:agentbill-key}"
+      }
+    }
+  }
+}`
+
+// OpenClaw, 2026-09-25. Not MCP: a native OpenClaw plugin, @agentbill/openclaw
+// on ClawHub. The command, the listing and the config are byte for byte what
+// plugins/openclaw/README.md says and what the listing itself shows
+// (https://clawhub.ai/agentbill/plugins/openclaw, read 2026-09-25, v0.2.0).
+export const CLAWHUB_URL = 'https://clawhub.ai/agentbill/plugins/openclaw'
+export const OPENCLAW_CMD = 'openclaw plugins install clawhub:@agentbill/openclaw'
+const OPENCLAW_JSON = `{
+  "plugins": {
+    "entries": {
+      "agentbill": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true },
+        "config": {
+          "apiKey": "agb_...",
+          "ceilingUnits": 500000
+        }
       }
     }
   }
@@ -296,6 +319,30 @@ const TABS: Tab[] = [
         <p>Antigravity has no install link, so this button copies the config.</p>`)}`,
   },
   {
+    id: 'openclaw',
+    label: 'OpenClaw',
+    body: `
+      <p class="mcp-for">OpenClaw, with the AgentBill plugin from ClawHub, version ${SDK_VERSIONS.openclaw}. This one is not MCP: it is a
+      native OpenClaw plugin that gives each session one ceiling and checks it before every model turn and every tool call. When the
+      ceiling is spent, the call is refused and the session says so.</p>
+      <div class="mcp-act">
+        <a class="btn btn-lg" id="connect-openclaw" href="${CLAWHUB_URL}" rel="noopener" target="_blank">View on ClawHub</a>
+        <button type="button" class="btn-alt" data-copy="cmd-openclaw" aria-label="Copy the install command">Copy command</button>
+      </div>
+      <div class="mcp-cmd">${copyPill('cmd-openclaw', OPENCLAW_CMD)}</div>
+      ${steps([
+        'Run the install command.',
+        'Give it your key: <span class="mono-in">apiKey</span> in the plugin config below, or <span class="mono-in">AGENTBILL_API_KEY</span> in the Gateway environment. Keep <span class="mono-in">hooks.allowConversationAccess</span> on: without it OpenClaw does not gate model turns.',
+        'Restart the Gateway. The log line <span class="mono-in">[agentbill] ceiling 500000 tokens per session</span> means it is on.',
+      ])}
+      ${code('openclaw-json', OPENCLAW_JSON, 'OpenClaw config')}
+      ${how(`
+        <p>The package is <span class="mono-in">@agentbill/openclaw</span>; its plugin id, the key under
+        <span class="mono-in">plugins.entries</span>, is <span class="mono-in">agentbill</span>. The ceiling is per session, 500,000
+        tokens by default, and subagents spawned from a session draw on the same ceiling.</p>
+        <p>Every option, and what a refusal looks like, is on <a href="/integrations/openclaw">the OpenClaw guide</a>.</p>`)}`,
+  },
+  {
     id: 'other',
     label: 'Other',
     body: `
@@ -347,6 +394,14 @@ export const MCP_CONNECT_CSS = `${COPY_CSS}
      the panel's own heading would say the same word twice. Without it, every
      panel is visible and titled by its heading. */
   .mcp.is-tabs .mcp-panel > h2 { display: none; }
+  /* The mark at the top of a panel, 2026-09-25: in the h2 without script, and
+     in this decorative row with it, where the h2 is hidden (aria-hidden, since
+     the selected tab already names the panel). */
+  .mcp-panel > h2 { display: flex; align-items: center; gap: var(--s2); }
+  .mcp-ptop { display: none; align-items: center; gap: var(--s2); color: var(--text); font-weight: 500; }
+  .mcp.is-tabs .mcp-ptop { display: flex; }
+  .mcp-mark { flex: none; width: 18px; height: 18px; }
+  .mcp-tab .mcp-mark { margin-inline-end: var(--s2); }
   .mcp-panel > * { min-width: 0; }
   .mcp-for { color: var(--muted); max-width: 62ch; margin: 0; line-height: 1.55; }
   .mcp-act { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
@@ -373,7 +428,11 @@ export const MCP_CONNECT_CSS = `${COPY_CSS}
              line-height: 1.6; color: var(--code-ink); }
   .mcp-tools td:first-child { white-space: nowrap; }
   @media (max-width: 640px) {
-    .mcp-tabs { border-radius: var(--r-inner); width: 100%; }
+    /* Eight tabs with a mark each do not fit two tidy rows on a phone, so the
+       row scrolls sideways inside itself; the page never does. */
+    .mcp-tabs { border-radius: var(--r-inner); width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .mcp-tabs::-webkit-scrollbar { display: none; }
+    .mcp-tab { flex: none; }
     .mcp-tab { padding: 0 var(--s3); }
     .mcp-panel { padding: var(--s4); }
     .mcp-url .cp, .mcp-cmd .cp { width: 100%; }
@@ -441,14 +500,15 @@ export function mcpConnectBody(): string {
   return `
   <h1>Connect AgentBill to your AI tools</h1>
   <p class="lede">One URL. Your assistant reads what each job used and what it cost at list price, asks a job's ceiling
-  before a call, and records what a call used. Pick where you work.</p>
+  before a call, and records what a call used. Pick where you work. OpenClaw has a plugin of its own instead.</p>
 
   <div class="mcp" data-tabs>
     <nav class="mcp-tabs" aria-label="Where you work">
-${TABS.map((t) => `      <a class="mcp-tab" id="tab-${t.id}" href="#${t.id}">${t.label}</a>`).join('\n')}
+${TABS.map((t) => `      <a class="mcp-tab" id="tab-${t.id}" href="#${t.id}">${CONNECT_MARKS[t.id].svg}<span>${t.label}</span></a>`).join('\n')}
     </nav>
 ${TABS.map((t) => `    <section class="mcp-panel" id="${t.id}">
-      <h2 id="${t.id}-h">${t.label}</h2>${t.body}
+      <div class="mcp-ptop" aria-hidden="true">${CONNECT_MARKS[t.id].svg}<span>${t.label}</span></div>
+      <h2 id="${t.id}-h">${CONNECT_MARKS[t.id].svg}<span>${t.label}</span></h2>${t.body}
     </section>`).join('\n')}
   </div>
 

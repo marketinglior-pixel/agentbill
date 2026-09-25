@@ -257,6 +257,7 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
     ['https://pypi.org/project/agentbill-sdk/', 'Python SDK', true],
     ['https://www.npmjs.com/package/agentbill', 'Node SDK', true],
     ['/integrations/mcp', 'MCP server', false],
+    ['/integrations/openclaw', 'OpenClaw plugin', false],
   ]],
   ['Company', [
     ['/about', 'About', false],

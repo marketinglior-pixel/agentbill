@@ -1,3 +1,4 @@
+import { CLAWHUB_URL } from '../ui/mcp-connect.js'
 import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
@@ -269,6 +270,7 @@ export async function homeRoute(app: FastifyInstance) {
     .how-mcp { margin-top: var(--s6); text-align: center; color: var(--muted); font-size: var(--fs-body); }
     .how-mcp a { color: var(--text); font-weight: 500; text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
     .how-mcp a:hover { text-decoration-color: currentColor; }
+    .how-mcp.how-claw { margin-top: var(--s3); }
 
     /* The frame: the agent's log, on the reference's large soft-cornered panel. */
     .frame { margin: 36px 0 0; width: 100%; background: var(--surface2); border-radius: var(--r-card); padding: 24px; text-align: left; }
@@ -555,6 +557,7 @@ ${playgroundSection(codeFrame())}
       </div>
     </div>
     <p class="how-mcp">Working in Claude, ChatGPT, Cursor or Codex? <a href="/integrations/mcp" id="home-mcp">Connect via MCP &rarr;</a> One URL, and preflight is a tool your agent can call.</p>
+    <p class="how-mcp how-claw">Running OpenClaw? <a href="${CLAWHUB_URL}" id="home-clawhub" rel="noopener">OpenClaw plugin on ClawHub &rarr;</a> One ceiling per session, checked before every model turn and tool call. <a href="/integrations/openclaw" id="home-openclaw">How it works</a>.</p>
   </section>
 
   <section class="wrap sec icp">

@@ -500,10 +500,10 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
 // the selection and the focus, as WAI-ARIA tabs do); then the page with
 // JavaScript off, where the tab row is plain links and every panel is shown.
 {
-  const TABS = ['claude', 'chatgpt', 'claude-code', 'codex', 'cursor', 'antigravity', 'other']
+  const TABS = ['claude', 'chatgpt', 'claude-code', 'codex', 'cursor', 'antigravity', 'openclaw', 'other']
   const ACTION = { claude: 'connect-claude', chatgpt: 'connect-chatgpt', 'claude-code': 'connect-claude-code', codex: 'connect-codex',
-                   cursor: 'connect-cursor', antigravity: 'connect-antigravity', other: 'connect-vscode' }
-  for (const [vp, width, height, isMobile] of [['desktop', 1440, 735, false], ['mobile', 390, 844, true]]) {
+                   cursor: 'connect-cursor', antigravity: 'connect-antigravity', openclaw: 'connect-openclaw', other: 'connect-vscode' }
+  for (const [vp, width, height, isMobile] of [['desktop', 1440, 735, false], ['laptop', 1280, 735, false], ['mobile', 390, 844, true]]) {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile })
     const page = await ctx.newPage()
     const errs = []
@@ -526,6 +526,20 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
       if (st.hash !== `#${id}`) failures.push(`${vp} mcp tab ${id}: the address says ${st.hash}`)
       if (st.overflowX) failures.push(`${vp} mcp tab ${id}: scrolls sideways`)
     }
+    // The tab row, 2026-09-25: a mark in every tab, one line of tabs (a
+    // phone scrolls the row inside itself), and no sideways page scroll.
+    const row = await page.evaluate(() => {
+      const tabs = [...document.querySelectorAll('.mcp-tab')]
+      const tops = new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top)))
+      const list = document.querySelector('.mcp-tabs')
+      return { marks: tabs.filter((t) => t.querySelector('svg.mcp-mark[aria-hidden="true"]')).length, n: tabs.length, rows: tops.size,
+               scrolls: list ? list.scrollWidth > list.clientWidth + 1 : false, pageX: document.documentElement.scrollWidth > window.innerWidth + 1 }
+    })
+    await page.locator('.mcp-tabs').screenshot({ path: `${OUT}/${vp}-mcp-tabrow.png` })
+    if (row.marks !== row.n) failures.push(`${vp} mcp tab row: ${row.marks} of ${row.n} tabs carry a mark`)
+    if (isMobile ? row.rows !== 1 : row.rows > 2) failures.push(`${vp} mcp tab row: ${row.rows} rows of tabs`)
+    if (row.pageX) failures.push(`${vp} mcp tab row: the page scrolls sideways`)
+    rows.push(`${vp.padEnd(8)} mcp-tabrow    ${row.marks}/${row.n} marks, ${row.rows} row(s)${row.scrolls ? ', row scrolls inside itself' : ''}`)
     if (errs.length) failures.push(`${vp} mcp tabs: ${errs.length} console error(s): ${errs[0]}`)
     rows.push(`${vp.padEnd(8)} mcp-tabs      ${TABS.length} tabs captured`)
     await ctx.close()
@@ -543,7 +557,7 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
     await page.keyboard.press('Home'); const a3 = await at()
     await page.keyboard.press('ArrowLeft'); const a4 = await at()
     const good = a1.sel === 'tab-chatgpt' && a1.focus === 'tab-chatgpt' && a2.sel === 'tab-other' && a3.sel === 'tab-claude' && a3.focus === 'tab-claude'
-      && a4.sel === 'tab-other' && a1.role === 'tablist' && a3.tabindex === '0' + '-1'.repeat(6)
+      && a4.sel === 'tab-other' && a1.role === 'tablist' && a3.tabindex === '0' + '-1'.repeat(TABS.length - 1)
     if (!good) failures.push(`mcp tabs keyboard: ${JSON.stringify([a1, a2, a3, a4])}`)
     rows.push(`browser  mcp-keys      ArrowRight ${a1.sel}, End ${a2.sel}, Home ${a3.sel}, ArrowLeft ${a4.sel}`)
     await ctx.close()
