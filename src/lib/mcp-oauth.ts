@@ -5,7 +5,7 @@ import { sql } from '../db/index.js'
 import { ORIGIN } from '../ui/site.js'
 import { createLimiter } from './rate-limiter.js'
 import { safeEqual } from './session-secret.js'
-import { urlProblem, isPrivateAddress, getJsonOnce, guardedLookup } from './webhook-target.js'
+import { urlProblem, getJsonOnce, guardedLookup } from './webhook-target.js'
 
 // agentbill.dev as the OAuth 2.1 authorization server for its own remote MCP
 // endpoint, 2026-09-25. Written against the MCP authorization specification,
@@ -406,7 +406,10 @@ function cimdUrlProblem(id: string): string | null {
   if (p.url.port && p.url.port !== '443') return 'the client_id URL must use the default port'
   const host = p.url.hostname.replace(/^\[|\]$/g, '')
   if (isIP(host)) return 'the client_id URL must name a host, not an address'
-  if (isPrivateAddress(host)) return 'the client_id URL is not a public address'
+  // A name, not an address: urlProblem has held it to the hostname rules, and
+  // the addresses it resolves to are checked where they are dialled
+  // (guardedLookup). isPrivateAddress takes an IP, and called here on a name it
+  // refused every public client_id, claude.ai's included (2026-09-25).
   return null
 }
 
