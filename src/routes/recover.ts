@@ -143,8 +143,49 @@ async function tokenIsLive(token: string): Promise<boolean> {
   return Boolean(row)
 }
 
-async function sendRecoveryEmail(log: FastifyBaseLogger, email: string, token: string): Promise<boolean> {
-  const link = `${ORIGIN}/recover/${token}`
+/** One account this address can recover, and why it matched. */
+type Recoverable = { id: string; via: 'registered' | 'signin' }
+
+/**
+ * Every account an address owns, for recovery (security batch C,
+ * 2026-09-25). Two ways, and until now only the first was looked at:
+ *
+ *   registered  accounts.email is the address: the register form, or a
+ *               sign-in whose address was free.
+ *   signin      the account's owner (accounts.owner_user_id) is the person
+ *               whose verified users.email is the address. A sign-in whose
+ *               address an unverified legacy account already held creates its
+ *               account with accounts.email NULL (src/lib/users.ts), so this
+ *               is the only way to find that account by its address.
+ *
+ * accounts.email, users.email and owner_user_id are each UNIQUE, so this is
+ * at most two accounts, and one when both ways reach the same one.
+ */
+async function recoverableAccounts(email: string): Promise<Recoverable[]> {
+  const rows = await sql`
+    SELECT a.id, (a.email IS NOT DISTINCT FROM ${email}) AS registered
+    FROM accounts a
+    LEFT JOIN users u ON u.id = a.owner_user_id
+    WHERE a.email = ${email} OR u.email = ${email}
+    ORDER BY a.created_at, a.id
+  `
+  return rows.map((r) => ({ id: r.id as string, via: r.registered ? 'registered' as const : 'signin' as const }))
+}
+
+async function sendRecoveryEmail(log: FastifyBaseLogger, email: string, links: { token: string; via: Recoverable['via'] }[]): Promise<boolean> {
+  const url = (t: string) => `${ORIGIN}/recover/${t}`
+  const label = (via: Recoverable['via']) => via === 'registered'
+    ? 'The account registered with this address'
+    : 'The account you sign in to as this address (Google, GitHub or an email link)'
+  // One account: the mail it always was. Two: one link each, in one mail,
+  // because one mail per account would double what a stranger can aim at
+  // this mailbox.
+  const body = links.length === 1
+    ? `<p><a href="${url(links[0]!.token)}">Open this link</a> to get a new API key. You choose there whether the keys you have now keep working.</p>
+        <p>It works once and expires in ${TTL_MINUTES} minutes. It carries no key of its own.</p>`
+    : `<p>This address has ${links.length} AgentBill accounts. Each link opens one of them, and gets it a new API key; you choose there whether the keys it has now keep working.</p>
+        <ul>${links.map((l) => `<li>${label(l.via)}: <a href="${url(l.token)}">open this link</a></li>`).join('')}</ul>
+        <p>Each works once and expires in ${TTL_MINUTES} minutes. None carries a key of its own.</p>`
   // reason 'account', not 'welcome': /recover answers identically for an
   // unknown address and sends nothing (the POST handler returns before minting
   // when no account matches), so the recipient of this mail always already owns
@@ -155,30 +196,39 @@ async function sendRecoveryEmail(log: FastifyBaseLogger, email: string, token: s
   return mailUser(log, 'account', email, {
     subject: 'Get back into your AgentBill account',
     html: `
-        <p>Someone asked for a way back into the AgentBill account registered to this address.</p>
-        <p><a href="${link}">Open this link</a> to get a new API key. You choose there whether the keys you have now keep working.</p>
-        <p>It works once and expires in ${TTL_MINUTES} minutes. It carries no key of its own.</p>
-        <p>If this was not you, nothing has happened yet and you can ignore this. The link
-           expires on its own, and your key has not changed.</p>
+        <p>Someone asked for a way back into the AgentBill account${links.length === 1 ? '' : 's'} of this address.</p>
+        ${body}
+        <p>If this was not you, nothing has happened yet and you can ignore this. The link${links.length === 1 ? '' : 's'}
+           expire${links.length === 1 ? 's' : ''} on ${links.length === 1 ? 'its' : 'their'} own, and your key has not changed.</p>
         <p>Questions: ${SUPPORT_EMAIL}</p>
       `,
   })
 }
 
 /**
- * Mint a link and mail it. The one entry point for anything outside this file,
- * so /register cannot grow a second, subtly different recovery path (which is
- * how the old raw-key mail survived as long as it did). Returns whether Resend
- * accepted the send; callers must not tell an unauthenticated visitor which it
- * was, because that answers whether the address has an account.
+ * Mint a link for every account this address owns that has not been sent one
+ * within the hour, and mail them in one message. The one entry point, so no
+ * caller can grow a second, subtly different recovery path (which is how the
+ * old raw-key mail survived as long as it did). 'none' when the address owns
+ * nothing (nothing is sent), 'cooldown' when every account it owns was sent a
+ * link within the hour. Callers must not tell an unauthenticated visitor
+ * which it was, because that answers whether the address has an account.
  */
-export async function sendRecoveryLink(log: FastifyBaseLogger, email: string, accountId: string): Promise<boolean> {
-  if (await recoveryMailedRecently(accountId)) {
-    log.info({ accountId }, 'recovery link not sent: one already went out within the hour')
-    return true
+export async function sendRecoveryLinks(log: FastifyBaseLogger, email: string): Promise<'none' | 'cooldown' | 'sent' | 'refused'> {
+  const accounts = await recoverableAccounts(email)
+  if (accounts.length === 0) return 'none'
+  const links: { token: string; via: Recoverable['via'] }[] = []
+  for (const a of accounts) {
+    // The durable half of the cooldown, per account: the Map in the route is
+    // per machine and is zeroed by a cold start.
+    if (await recoveryMailedRecently(a.id)) {
+      log.info({ accountId: a.id }, 'recovery link not sent: one already went out within the hour')
+      continue
+    }
+    links.push({ token: await mintToken(a.id), via: a.via })
   }
-  const token = await mintToken(accountId)
-  return sendRecoveryEmail(log, email, token)
+  if (links.length === 0) return 'cooldown'
+  return (await sendRecoveryEmail(log, email, links)) ? 'sent' : 'refused'
 }
 
 // ---------------------------------------------------------------------------
@@ -313,22 +363,22 @@ export async function recoverRoute(app: FastifyInstance) {
     if (!parsed.success) return done()
 
     const email = parsed.data.email
-    const [account] = await sql`SELECT id FROM accounts WHERE email = ${email}`
-    if (!account) return done()
     if (recoveryInCooldown(email)) return done()
 
+    // Every account the address owns, looked up inside the fire-and-forget
+    // work, so a known address and an unknown one answer in the same time
+    // with the same redirect (the lookup used to sit before the answer).
     markRecoverySent(email)
     void (async () => {
       try {
-        // The durable half of the same cooldown, and the one that actually
-        // holds: the Map above is per machine and is zeroed by a cold start.
-        if (await recoveryMailedRecently(account.id as string)) {
-          request.log.info({ accountId: account.id }, 'recovery link not sent: one already went out within the hour')
+        const outcome = await sendRecoveryLinks(request.log, email)
+        if (outcome === 'none') {
+          // Nothing owned, nothing sent: the mark must not hold the address
+          // for an hour against an account it may own a minute from now.
+          clearRecoveryMark(email)
           return
         }
-        const token = await mintToken(account.id as string)
-        const ok = await sendRecoveryEmail(request.log, email, token)
-        if (!ok) {
+        if (outcome === 'refused') {
           // The contract register-limiter.ts states in its own words: "a failed
           // send must not block the next attempt (or claim an email that never
           // went out)." Both call sites armed the mark before the send and
@@ -336,7 +386,7 @@ export async function recoverRoute(app: FastifyInstance) {
           // state a degraded sending domain produces, silently locked the
           // address out of recovery for an hour.
           clearRecoveryMark(email)
-          request.log.error({ accountId: account.id }, 'recovery email was not accepted by Resend')
+          request.log.error('recovery email was not accepted by Resend')
         }
       } catch (err) {
         clearRecoveryMark(email)
