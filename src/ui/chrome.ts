@@ -259,6 +259,7 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
   ['Legal', [
     ['/terms', 'Terms', false],
     ['/privacy', 'Privacy', false],
+    ['/security', 'Security', false],
   ]],
 ]
 

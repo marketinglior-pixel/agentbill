@@ -584,7 +584,7 @@ if (isRefusal(stream)) {
     <tr><td>success</td><td>bool <span class="tag">optional</span></td><td>false releases the preflight reservation without billing. Default: true.</td></tr>
     <tr><td>reservation_id</td><td>string <span class="tag">optional</span></td><td>The one preflight returned. That reservation closes whole: units is what was spent, and the rest it held is released now. Without it, the record closes the oldest reservations of this customer and task FIFO by units. result.record(...) passes it for you.</td></tr>
     <tr><td>idempotency_key</td><td>string <span class="tag">optional</span></td><td>Same key, one event. A fresh one is sent when you leave it out.</td></tr>
-    <tr><td>metadata</td><td>object <span class="tag">optional</span></td><td>Stored on the event, never counted. provider, model and tokens in the shape <a href="#wrap">wrap()</a> writes are priced at list price for the job's <a href="#wrap-breakdown">breakdown</a>.</td></tr>
+    <tr><td>metadata</td><td>object <span class="tag">optional</span></td><td>Stored on the event, never counted. At most 8 KB as JSON and 32 keys; more is a 422. provider, model and tokens in the shape <a href="#wrap">wrap()</a> writes are priced at list price for the job's <a href="#wrap-breakdown">breakdown</a>.</td></tr>
     <tr><td>usage_missing</td><td>bool <span class="tag">optional</span></td><td>The provider reported no usage. Not read as 0: the call is charged at least the reservation it settles, and counted in usage_missing_calls.</td></tr>
   </table>
 
@@ -681,6 +681,52 @@ curl -X PUT https://agentbill.dev/budget \\
   used and reserved. Nothing is rewritten to fit, no counter goes negative, and the customer is
   simply refused with <span class="inline">budget_exhausted</span> until the open reservations settle
   or expire. Raising it again releases them on the next call, with no repair step.</p>
+
+  <h3 id="webhook-config">POST /webhook-config</h3>
+  <p>Sets the one URL this account's anomaly alerts go to. <span class="inline">POST /step</span>
+  flags a step whose units are more than twice the average of that agent_id and step_name, and
+  posts an <span class="inline">anomaly.detected</span> payload to this URL.</p>
+
+  <div class="code"><pre>
+curl -X POST https://agentbill.dev/webhook-config \\
+  -H "Authorization: Bearer agb_your_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{"url":"https://hooks.example.com/agentbill"}'
+
+<span class="comment"># {"webhook_url":"https://hooks.example.com/agentbill",</span>
+<span class="comment">#  "signing_secret":"whsec_...","signature_header":"X-AgentBill-Signature"}</span></pre></div>
+
+  <p>The URL must be <span class="inline">https</span> on a public address. It is refused with
+  <span class="inline">422 webhook_url_refused</span> when its host is, or resolves to, a loopback,
+  private, link-local, carrier-grade NAT or unique-local address, or is a name like
+  <span class="inline">localhost</span> or one ending in <span class="inline">.internal</span> or
+  <span class="inline">.local</span>. The same check runs again on the address actually dialled at
+  send time. A delivery is one POST with a five-second timeout; a redirect is not followed.</p>
+
+  <p><span class="inline">signing_secret</span> is shown once, in this response. Saving the URL again
+  issues a new one. Every delivery carries
+  <span class="inline">X-AgentBill-Signature: t=&lt;unix seconds&gt;,v1=&lt;hex&gt;</span>, where the
+  hex is the HMAC-SHA256 of <span class="inline">&lt;t&gt;.&lt;raw body&gt;</span> keyed by that secret.
+  Check it against the raw body before you parse it, and refuse an old <span class="inline">t</span>:</p>
+
+  <div class="code"><pre>
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+<span class="comment">// header: the X-AgentBill-Signature value. body: the raw request body, as a string.</span>
+export function verifyAgentBill(header: string, body: string, secret: string, maxAgeSeconds = 300): boolean {
+  const m = /^t=(\\d+),v1=([0-9a-f]{64})$/.exec(header)
+  if (!m) return false
+  if (Math.abs(Date.now() / 1000 - Number(m[1])) > maxAgeSeconds) return false
+  const expected = createHmac('sha256', secret).update(m[1] + '.' + body).digest('hex')
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(m[2]))
+}</pre></div>
+
+  <p>A URL saved before signing existed has no secret, and its deliveries go out unsigned until it
+  is saved again.</p>
+
+  <h2 id="security">Security</h2>
+  <p>How to report a vulnerability, what the SDKs send and what they never send, and how to revoke
+  a key that leaked: <a href="/security">agentbill.dev/security</a>.</p>
 
   <h2>Node.js</h2>
   <div class="code"><pre>npm install agentbill</pre></div>
