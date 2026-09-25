@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
-import { reportUsage, PLAN_LIMITS } from '../integrations/polar.js'
+import { reportUsage, PLAN_LIMITS, upgradeUrlFor } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
@@ -258,6 +258,12 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
                 WHEN billing_period_start < date_trunc('month', CURRENT_DATE)::DATE THEN 1
                 ELSE monthly_calls + 1
               END,
+              -- The records-and-steps counter shares this billing period
+              -- (migration 028, src/lib/event-quota.ts): the roll zeroes it.
+              monthly_events = CASE
+                WHEN billing_period_start < date_trunc('month', CURRENT_DATE)::DATE THEN 0
+                ELSE monthly_events
+              END,
               billing_period_start = CASE
                 WHEN billing_period_start < date_trunc('month', CURRENT_DATE)::DATE
                 THEN date_trunc('month', CURRENT_DATE)::DATE
@@ -486,7 +492,7 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
                 plan: account.plan,
                 monthly_calls: err.detail.monthly_calls,
                 plan_limit: planLimit,
-                upgrade_url: `https://agentbill.dev/pricing?account_id=${accountId}`,
+                upgrade_url: upgradeUrlFor(accountId),
               }
             : err.reason === 'budget_exhausted'
               ? {

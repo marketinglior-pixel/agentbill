@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { checkoutPath, createCheckoutSession, isPolarCheckoutUrl, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { TIERS_CSS, tierCards, SAME_FEATURES } from '../ui/tiers.js'
 import { isUuid } from '../lib/ids.js'
+import { EVENTS_PER_PREFLIGHT_CALL, eventLimitFor } from '../lib/event-quota.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
 import { ORIGIN, HEADLINE } from '../ui/site.js'
@@ -176,7 +177,7 @@ ${siteNav('/pricing', { sticky: false })}
         <li><b>Per-agent attribution.</b> Every task and every refusal carries the agent that asked.</li>
         <li><b>Key security.</b> Revoke, rotate, expiry and rate limiting on every API key.</li>
         <li><b>New-address alert.</b> An email when a key is used from an address it has not been seen from.</li>
-        <li><b>Idempotent usage records.</b> Safe to call from retried or parallel workflows.</li>
+        <li><b>Idempotent usage records.</b> Safe to call from retried or parallel workflows. A record that settles its own preflight is part of that call. Other records and steps: ${EVENTS_PER_PREFLIGHT_CALL} a month for every preflight call a plan includes (${num(eventLimitFor('free') ?? 0)} on Free).</li>
         <li><b>Units you define.</b> We count an integer you choose; we never read your provider bill.</li>
         <li><b>The console.</b> Live task budgets, every refusal with the literal response, key health.</li>
       </ul>

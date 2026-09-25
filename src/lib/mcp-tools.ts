@@ -262,6 +262,14 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
       for (const k of ['metadata', 'task_ref', 'reservation_id'] as const) if (a[k] !== undefined) input[k] = a[k]
       const r = await runRecord(ctx.accountId, input, ctx.log)
       const body = r.body as Record<string, unknown>
+      // A 402 is one of two refusals: this customer's budget, or (since
+      // 2026-09-25, src/lib/event-quota.ts) the account's monthly records
+      // allowance, which carries its reason and upgrade_url as preflight's
+      // quota refusal does. Neither is an error of the tool.
+      if (r.status === 402 && body.quota === 'events') {
+        return result({ recorded: false, reason: body.reason, quota: 'events', monthly_events: body.monthly_events,
+          events_limit: body.events_limit, upgrade_url: body.upgrade_url, message: body.message as string })
+      }
       if (r.status === 402) return result({ recorded: false, reason: 'budget_exhausted', message: (body.message as string) ?? 'Customer budget is exhausted.' })
       if (r.status === 422) return result({ recorded: false, reason: 'validation_error', message: (body.message as string) ?? 'The record was rejected as invalid.' })
       if (r.status !== 200) return result({ recorded: false, reason: 'unavailable', message: 'The record could not be written.' }, true)

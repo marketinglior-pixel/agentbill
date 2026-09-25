@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
 import { deliverWebhook, webhookSecretFor } from '../lib/webhook-target.js'
+import { claimEvent, eventLimitFor, eventQuotaRefusal, EVENT_QUOTA_STATUS } from '../lib/event-quota.js'
 
 const ANOMALY_MULTIPLIER = 2.0  // flag if units > baseline * 2
 const BASELINE_MIN_SAMPLES = 5  // need at least 5 samples before flagging
@@ -28,11 +29,26 @@ export async function stepRoute(app: FastifyInstance) {
     const { agent_id, step_name, units } = parse.data
     const accountId = request.accountId
 
-    // Record this step
-    await sql`
-      INSERT INTO step_costs (account_id, agent_id, step_name, units)
-      VALUES (${accountId}, ${agent_id}, ${step_name}, ${units})
-    `
+    // Record this step, against the account's monthly records-and-steps
+    // allowance (migration 028, src/lib/event-quota.ts): the claim and the
+    // row commit together or not at all, and a refused step stores nothing.
+    // This route locks no customer row, so the claim's UPDATE is the only
+    // account lock it takes and there is no order to keep.
+    const stored = await sql.begin(async (tx) => {
+      const [acct] = await tx`SELECT plan FROM accounts WHERE id = ${accountId}`
+      const plan = (acct?.plan as string) ?? 'free'
+      const limit = eventLimitFor(plan)
+      const claim = await claimEvent(tx, accountId, limit)
+      if (!claim.ok) return { ok: false as const, plan, monthlyEvents: claim.monthlyEvents, limit: limit as number }
+      await tx`
+        INSERT INTO step_costs (account_id, agent_id, step_name, units)
+        VALUES (${accountId}, ${agent_id}, ${step_name}, ${units})
+      `
+      return { ok: true as const }
+    })
+    if (!stored.ok) {
+      return reply.code(EVENT_QUOTA_STATUS).send(eventQuotaRefusal(accountId, stored.plan, stored.monthlyEvents, stored.limit))
+    }
 
     // Compute baseline from last N steps (excluding the one just inserted)
     const baseline = await sql`

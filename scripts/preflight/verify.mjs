@@ -74,7 +74,7 @@ const reset = async () => {
   await sql`DELETE FROM events WHERE account_id = ${ACCT}`
   await sql`DELETE FROM task_budgets WHERE account_id = ${ACCT}`
   await sql`DELETE FROM customers WHERE account_id = ${ACCT}`
-  await sql`UPDATE accounts SET monthly_calls = 0, plan = 'free', default_budget_units = NULL,
+  await sql`UPDATE accounts SET monthly_calls = 0, monthly_events = 0, plan = 'free', default_budget_units = NULL,
             billing_period_start = date_trunc('month', CURRENT_DATE)::date WHERE id = ${ACCT}`
 }
 const acct = async () => (await sql`SELECT monthly_calls FROM accounts WHERE id = ${ACCT}`)[0].monthlyCalls
@@ -4780,6 +4780,13 @@ await keyhashGates({
   API, sql, ok, bootS, stopS, portS: PORT_S, adminCookie, root: ROOT_S,
   outbox: process.env.MAIL_TEST_OUTBOX,
   preKey: process.env.PRE_026_KEY, preAccount: process.env.PRE_026_ACCOUNT,
+})
+// ------------------------------------------------ [batchc] security batch C (2026-09-25), in its own file
+const { batchcGates } = await import('./batchc-gates.mjs')
+await batchcGates({
+  API, sql, ok, bootS, stopS, portS: PORT_S, adminCookie, root: ROOT_S,
+  outbox: process.env.MAIL_TEST_OUTBOX,
+  serverLog: process.env.SERVER_LOG ?? '/tmp/agentbill-verify-server.log',
 })
 // Last, so every mail and every log line of the run is in what they read.
 await new Promise((r) => setTimeout(r, 500))
