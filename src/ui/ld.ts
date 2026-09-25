@@ -103,8 +103,8 @@ export function softwareLd(): unknown {
       availability: 'https://schema.org/InStock',
       category: PLAN_PRICES[tier] === 0 ? 'Free' : 'Subscription',
       // Free is claimed at /register; a paid tier is bought from /pricing,
-      // which mints the Polar checkout session. /checkout/:tier is not a valid
-      // public link on its own, it needs an account_id.
+      // which signs the buyer in and mints the Polar checkout session for that
+      // account (/app/checkout/:tier, S24). No checkout path is a public link.
       url: PLAN_PRICES[tier] === 0 ? `${ORIGIN}/register` : `${ORIGIN}/pricing`,
       description: `${PLAN_LIMITS[tier].toLocaleString('en-US')} preflight calls/month`,
       seller: { '@id': `${ORIGIN}/#organization` },

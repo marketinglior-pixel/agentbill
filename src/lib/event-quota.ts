@@ -1,4 +1,4 @@
-import { PLAN_LIMITS, upgradeUrlFor } from '../integrations/polar.js'
+import { PLAN_LIMITS, UPGRADE_URL } from '../integrations/polar.js'
 
 // The monthly allowance of records and steps (security batch C, S7, 2026-09-25).
 //
@@ -62,7 +62,10 @@ type Tx = any
  * the foreign-key checks of inserts elsewhere (FOR UPDATE would).
  */
 export async function lockAccountForEvents(tx: Tx, accountId: string): Promise<{ plan: string } | null> {
-  const [row] = await tx`SELECT plan FROM accounts WHERE id = ${accountId} FOR NO KEY UPDATE`
+  // The plan as it stands now (EFFECTIVE_PLAN_SQL, src/lib/plan-period.ts).
+  const [row] = await tx`
+    SELECT CASE WHEN plan_ends_at IS NOT NULL AND plan_ends_at <= NOW() THEN 'free' ELSE plan END AS plan
+    FROM accounts WHERE id = ${accountId} FOR NO KEY UPDATE`
   return row ? { plan: (row.plan as string) ?? 'free' } : null
 }
 
@@ -130,7 +133,7 @@ export function eventQuotaRefusal(accountId: string, plan: string, monthlyEvents
     plan,
     monthly_events: monthlyEvents,
     events_limit: limit,
-    upgrade_url: upgradeUrlFor(accountId),
-    message: `This account has stored its ${limit.toLocaleString('en-US')} records and steps for this billing month, so this one was not stored. It resets on the 1st, or upgrade: ${upgradeUrlFor(accountId)}`,
+    upgrade_url: UPGRADE_URL,
+    message: `This account has stored its ${limit.toLocaleString('en-US')} records and steps for this billing month, so this one was not stored. It resets on the 1st, or upgrade: ${UPGRADE_URL}`,
   }
 }

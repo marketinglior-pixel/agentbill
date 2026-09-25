@@ -1043,7 +1043,10 @@ ok('and it set the session cookie', cookie7.startsWith('agentbill_app='), cookie
 r7 = await nav('/app/upgrade/team', { headers: { cookie: cookie7 } })
 html7 = await r7.text()
 ok('with a session the page is a 200 hand-off, not a redirect chain', r7.status === 200 && html7.includes('http-equiv="refresh"'), String(r7.status))
-ok('and it hands off to checkout for this account', html7.includes(`/checkout/team?account_id=${ACCT}`))
+// Since 2026-09-25 (S24) the hand-off carries no account id: /app/checkout/:tier
+// mints for the session's account. The [S24 checkout] gates prove the binding.
+ok('and it hands off to the session-bound checkout, with no account id in the link',
+   html7.includes('url=/app/checkout/team"') && !html7.includes('account_id='), (html7.match(/url=[^"]*/) ?? [''])[0])
 ok('and /app itself still opens with that cookie', (await nav('/app', { headers: { cookie: cookie7 } })).status === 200)
 
 // ---------------------------------------------------------------- 8: a job's ceiling from the console

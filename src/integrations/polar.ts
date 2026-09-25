@@ -22,21 +22,45 @@ export async function reportUsage(polarCustomerId: string, units = 1): Promise<v
 /**
  * Where a quota refusal sends the reader: the preflight refusal and, since
  * 2026-09-25, the records-and-steps refusal (src/lib/event-quota.ts). One
- * function, so the two refusals cannot point at different pages.
+ * constant, so the two refusals cannot point at different pages.
+ *
+ * It carried ?account_id=<id> until 2026-09-25 (S24), and /pricing turned
+ * that into checkout links for whichever account the query named, signed in
+ * or not. The purchase is bound to the signed-in session now (checkoutPath),
+ * so the id would do nothing but put an account id in every agent log that
+ * prints a refusal. /pricing ignores the parameter on older links.
  */
-export function upgradeUrlFor(accountId: string): string {
-  return `https://agentbill.dev/pricing?account_id=${accountId}`
-}
+export const UPGRADE_URL = 'https://agentbill.dev/pricing'
 
 // The buy button points at OUR server, never at buy.polar.sh directly. A Polar
 // checkout LINK silently drops a `?metadata[...]` query parameter (verified
 // against their API on 2026-09-07: the created checkout came back with empty
 // metadata), so the account id we used to append never reached the webhook and
 // no purchase could be attributed to an account. A checkout SESSION made via
-// the API keeps its metadata. So the button links to /checkout/:tier, which
-// mints a real session on click.
-export function checkoutPath(tier: string, accountId: string): string {
-  return `/checkout/${encodeURIComponent(tier)}?account_id=${encodeURIComponent(accountId)}`
+// the API keeps its metadata.
+//
+// Since 2026-09-25 (S24) the session is minted for the account of the console
+// session making the request, and nothing else: /app/checkout/:tier reads the
+// signed-in viewer (a person or a key session; the cookie is Path=/app, which
+// is why the route lives under /app) and takes no account id from the URL.
+// Until then /checkout/:tier?account_id=<id> minted a session for whatever id
+// the link carried, with no session at all, so anyone holding a link could
+// start a purchase that landed on another account. The old path now sends
+// the browser to sign in, and ignores the id.
+export function checkoutPath(tier: string): string {
+  return `/app/checkout/${encodeURIComponent(tier)}`
+}
+
+/**
+ * Polar's API origin. POLAR_API_TEST_BASE points it at a local fake, and only
+ * outside production (the same rule as OAUTH_TEST_BASE): the harness reads
+ * what a checkout was minted with from it. In production it is always
+ * api.polar.sh, whatever the environment says; a gate proves that branch.
+ */
+export function polarApiBase(env: NodeJS.ProcessEnv = process.env): string {
+  const t = env.POLAR_API_TEST_BASE
+  if (env.NODE_ENV !== 'production' && t && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(t)) return t
+  return 'https://api.polar.sh'
 }
 
 const PRODUCT_IDS: Record<string, string> = {
@@ -73,7 +97,7 @@ export async function createCheckoutSession(tier: string, accountId: string): Pr
   const productId = PRODUCT_IDS[tier]
   if (!POLAR_API_KEY || !productId) return null
   try {
-    const r = await fetch('https://api.polar.sh/v1/checkouts', {
+    const r = await fetch(`${polarApiBase()}/v1/checkouts`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${POLAR_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -104,7 +128,7 @@ export async function createCheckoutSession(tier: string, accountId: string): Pr
 async function fetchCheckout(checkoutId: string): Promise<Record<string, any> | null> {
   if (!POLAR_API_KEY || !checkoutId) return null
   try {
-    const r = await fetch(`https://api.polar.sh/v1/checkouts/${encodeURIComponent(checkoutId)}`, {
+    const r = await fetch(`${polarApiBase()}/v1/checkouts/${encodeURIComponent(checkoutId)}`, {
       headers: { Authorization: `Bearer ${POLAR_API_KEY}` },
       signal: AbortSignal.timeout(4000),
     })

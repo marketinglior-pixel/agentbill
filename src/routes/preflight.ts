@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
-import { reportUsage, PLAN_LIMITS, upgradeUrlFor } from '../integrations/polar.js'
+import { reportUsage, PLAN_LIMITS, UPGRADE_URL } from '../integrations/polar.js'
 import { recordDecision } from '../lib/decisions.js'
 import { reservationExpiry } from '../lib/reservations.js'
 import { alertQuota, thresholdCrossed } from '../lib/quota-alert.js'
@@ -207,8 +207,13 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
     // Load account: plan and per-customer default. The monthly counter is NOT
     // read here to decide anything, it is checked and incremented atomically
     // inside the transaction below.
+    // The plan as it stands now: a canceled plan whose paid period has ended
+    // reads as free (EFFECTIVE_PLAN_SQL, src/lib/plan-period.ts), by the
+    // database clock, before the sweeper has written it.
     const [account] = await sql`
-      SELECT id, plan, polar_customer_id, default_budget_units
+      SELECT id,
+             CASE WHEN plan_ends_at IS NOT NULL AND plan_ends_at <= NOW() THEN 'free' ELSE plan END AS plan,
+             polar_customer_id, default_budget_units
       FROM accounts
       WHERE id = ${accountId}
     `
@@ -492,7 +497,7 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
                 plan: account.plan,
                 monthly_calls: err.detail.monthly_calls,
                 plan_limit: planLimit,
-                upgrade_url: upgradeUrlFor(accountId),
+                upgrade_url: UPGRADE_URL,
               }
             : err.reason === 'budget_exhausted'
               ? {

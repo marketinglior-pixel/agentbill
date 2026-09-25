@@ -143,7 +143,9 @@ async function deliver(log: FastifyBaseLogger, a: QuotaAlert): Promise<void> {
 function compose(a: QuotaAlert, resetsOn: string): { subject: string; html: string } {
   const reason = a.plan === 'free' ? 'free_tier_exceeded' : 'plan_limit_exceeded'
   const plan = title(a.plan)
-  const raise = `${ORIGIN}/pricing?account_id=${encodeURIComponent(a.accountId)}`
+  // No account id in the link since 2026-09-25 (S24): checkout is bound to the
+  // signed-in session, and /pricing ignores the parameter.
+  const raise = `${ORIGIN}/pricing`
   const refuses = `
     <p>preflight answers <code>approved: false</code> with reason <code>${reason}</code> and an
        <code>upgrade_url</code>. It does not raise: your code gets a result and decides what
