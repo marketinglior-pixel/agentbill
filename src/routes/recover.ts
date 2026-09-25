@@ -229,6 +229,10 @@ function page(title: string, body: string, band = false): string {
     .rec .choice h2 { font-size: var(--fs-h3); letter-spacing: -0.01em; margin: 0; }
     .rec .choice p { font-size: var(--fs-small); margin: 0; }
     .rec .choice form { margin-top: auto; padding-top: var(--s2); }
+    /* The two buttons say what happens to the old keys, in words, so at 320
+       and 390 they are longer than the card: they wrap inside it instead of
+       running out of it (measured 2026-09-25, cut off at "keep w"). */
+    .rec .choice button { white-space: normal; max-width: 100%; text-align: center; line-height: 1.35; height: auto; min-height: 44px; }
     /* Code in a sentence: the docs' inline chip, for the bare code the key
        page writes (AGENTBILL_API_KEY, the client call, the header). */
     .rec p code { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
