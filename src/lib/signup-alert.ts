@@ -93,7 +93,7 @@ async function send(log: FastifyBaseLogger, a: SignupAlert): Promise<void> {
   // every real payment for months because its failure branch returned a status
   // and told nobody, not even a log (webhook-alert.ts). Every branch below
   // leaves a line.
-  log.info({ accountId: a.accountId, email: a.email, stack: a.stack, useCase: a.useCase }, 'new signup')
+  log.info({ accountId: a.accountId, stack: a.stack, useCase: a.useCase }, 'new signup')
 
   if (!ownerMailReady()) {
     log.warn({ accountId: a.accountId }, 'signup alert not sent: RESEND_API_KEY or OWNER_ALERT_EMAIL is unset')
