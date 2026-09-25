@@ -98,14 +98,25 @@ async function gates({ API, sql, ok, F, O }) {
   // The payroll card (M3, 2026-09-26): drawn in the browser and never sent.
   ok('[office] the payroll card is made in the browser: the engine draws it with canvas and has no way to send it (no fetch, XHR, beacon, socket or form)',
      jsText.includes('makeCard') && jsText.includes('toBlob') && jsText.includes('made with AgentBill')
-       && !/fetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|\.submit\(|navigator\.share/.test(jsText))
+       && !/fetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|\.submit\(/.test(jsText))
+  // Share is the device's own sheet, once, behind a file-capability check and a click.
+  const shareAt = jsText.indexOf('navigator.share(')
+  ok('[office] the only way out is the device share sheet: navigator.share once, inside the Share button\'s click handler, after canShare',
+     (jsText.match(/navigator\.share\(/g) ?? []).length === 1 && shareAt > jsText.indexOf("shareBtn.addEventListener('click'") && jsText.indexOf('navigator.canShare(') > 0
+       && jsText.indexOf('navigator.canShare(') < shareAt)
   const s = data?.summary ?? {}
   ok('[office] and it prints the same figures as the cards above the room: payroll $4.01, 7 on staff, 1 at a desk, 1 sent home, the highest paid named with its index',
      s.payroll === 4.01 && s.staff === 7 && s.atDesk === 1 && s.sentHome === 1 && s.top?.name === 'panicky' && s.top?.sal === 2 && typeof s.top?.idx === 'number'
        && data.agents[s.top.idx]?.name === 'panicky' && /^\d{4}-\d{2}$/.test(s.month ?? ''), JSON.stringify(s))
+  const xLink = html.match(/href="(https:\/\/x\.com\/intent\/post\?text=[^"]+)"/)?.[1] ?? ''
+  const xText = decodeURIComponent(xLink.split('text=')[1] ?? '')
+  ok('[office] Post on X opens a draft with the payroll and staff and no agent name; LinkedIn shares only agentbill.dev; both in a new tab with noopener',
+     xText === 'Payroll for my AI agents this month: $4.01 across 7 agents, 1 sent home by a spend ceiling. Made with AgentBill, agentbill.dev'
+       && !/worker|panicky|homebound/.test(xText) && html.includes('href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fagentbill.dev"')
+       && (html.match(/target="_blank" rel="noopener noreferrer"/g) ?? []).length === 2 && data?.shareText === xText, xText)
   ok('[office] the page offers the card, the choice to hide agent names on it, and a download named for the month, and says nothing is uploaded',
      html.includes('id="office-card"') && html.includes('id="office-card-anon"') && new RegExp(`download="agentbill-payroll-${s.month}\\.png"`).test(html)
-       && html.includes('nothing is uploaded or posted'))
+       && html.includes('nothing is uploaded') && html.includes('Nothing is posted unless you post it'))
   const png = await fetch(`${API}/app/office-sprites.png`)
   const buf = Buffer.from(await png.arrayBuffer())
   ok('[office] the sprite sheet is round 3\'s sheet_1x.png, byte for byte',
