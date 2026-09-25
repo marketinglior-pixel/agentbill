@@ -98,6 +98,11 @@ export function demoOffice(now = new Date()): Office {
 
 /** The data block's JSON, safe inside a <script type="application/json">: no "<" survives. */
 export function officeJson(o: Office, sample: boolean): string {
-  return JSON.stringify({ sample, agents: o.agents.map((a) => ({ name: a.name, sal: a.sal, state: a.state, working: a.working })) })
+  // The summary is what the payroll card prints: the same figures as the
+  // cards above the room, so the card and the page cannot disagree.
+  const topIdx = o.topEarner ? o.agents.findIndex((a) => a.name === o.topEarner!.name) : -1
+  return JSON.stringify({ sample, agents: o.agents.map((a) => ({ name: a.name, sal: a.sal, state: a.state, working: a.working })),
+    summary: { month: o.month, payroll: o.payroll == null ? null : Math.round(o.payroll * 100) / 100, staff: o.staff, atDesk: o.atDesk, sentHome: o.sentHome,
+      top: o.topEarner ? { name: o.topEarner.name, sal: Math.round(o.topEarner.sal * 100) / 100, idx: topIdx < 0 ? 0 : topIdx } : null } })
     .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }

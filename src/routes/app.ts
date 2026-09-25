@@ -2246,6 +2246,9 @@ const OFFICE_CSS = `
   .of-card.is-no b { color: var(--signal); }
   .of-room canvas { display: block; width: 100%; height: auto; border-radius: var(--r-field); image-rendering: pixelated; background: var(--plate); }
   .of-bar { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s3) 0 var(--s2); font-size: var(--fs-micro); }
+  .of-anon { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+  .of-cardout img { display: block; width: 100%; max-width: 720px; border-radius: var(--r-field); margin: var(--s3) 0 var(--s2); }
+  .of-cardout img[hidden], .of-cardout a[hidden] { display: none; }
   .of-list { list-style: none; padding: 0; margin: 0 0 var(--s3); }
   .of-list li { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--row-line); font-size: var(--fs-small); }
   .of-list li span:first-of-type { font-weight: 500; }
@@ -3730,8 +3733,14 @@ function officeView(p: Page): string {
     ${frame(p, barOf('office'), `<div class="of-room">
       <canvas id="office" width="1100" height="790" data-sprites="/app/office-sprites.png" role="img" aria-label="The office: ${num(o.agents.length)} agents, drawn from the list below">Your agents, as in the list below.</canvas>
       <div class="of-bar"><button type="button" class="btn-ghost" id="office-labels">Hide salaries</button>
+        <button type="button" class="btn-ghost" id="office-card">Make a payroll card</button>
+        <label class="of-anon"><input type="checkbox" id="office-card-anon"> Hide agent names on the card</label>
         <span class="dim">${o.topEarner ? `Highest paid this month: <code>${esc(o.topEarner.name)}</code>, ${salary(o.topEarner.sal)}.` : ''}${o.staff > o.agents.length ? ` The room seats ${num(OFFICE_MAX)}; ${num(o.staff - o.agents.length)} more on staff are in the Agents view.` : ''}</span></div>
     </div>`)}
+    <div class="of-cardout">
+      <img id="office-card-img" hidden alt="Your payroll card: the office, this month's payroll, the staff count, the highest paid and who was sent home">
+      <p class="note"><a id="office-card-dl" hidden download="agentbill-payroll-${esc(o.month)}.png" href="#">Download the card (PNG)</a> The card is drawn in this browser from the room above and saved to your computer only: nothing is uploaded or posted. Share it where you like, or not at all.</p>
+    </div>
     <h2>Staff <a href="${href(p, 'agents')}">All agents &rarr;</a></h2>
     <ul class="of-list">${rows}</ul>
     <p class="note">Salary is what the agent cost this UTC month at public list price, over priced calls. At a desk: a call recorded in the last ${WORKING_MINUTES} minutes. Sent home: a ceiling (a job's, a call's or a customer's budget) refused it in the last 24 hours. New hire: its first call ever was in the last 24 hours. 3× its usual day: a spend spike was flagged for it today. Nothing in the room is invented${p.demo ? ', except here, where every agent is sample data' : ''}.</p>
