@@ -233,7 +233,11 @@ export function registerAuth(app: FastifyInstance) {
     // different hosts in production. The clock that writes the timestamp is the
     // clock that must read it.
     const rows = await sql`
-      SELECT k.id, k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip, a.email,
+      SELECT k.id, k.account_id, k.revoked_at, k.expires_at, k.last_seen_ip,
+             -- An account created by a sign-in beside a legacy account that
+             -- holds the same address has no accounts.email (src/lib/users.ts);
+             -- its owner's verified address is where its alerts go.
+             COALESCE(a.email, (SELECT u.email FROM users u WHERE u.id = a.owner_user_id)) AS email,
              (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
              (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired
       FROM developer_api_keys k

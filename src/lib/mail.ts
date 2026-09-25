@@ -99,8 +99,16 @@ export async function mailOwner(m: Mail): Promise<boolean> {
  *              suppressing one of these costs a real person something real: a
  *              recovery link is how a locked-out owner gets back in. Counted,
  *              never refused.
+ *   'signin'   the email sign-in link (src/routes/auth.ts, 2026-09-25). Its
+ *              recipient is as free as the welcome mail's: POST /auth/email and
+ *              the JSON POST /register mail whatever address was typed, and
+ *              they answer identically whether or not it has an account, so
+ *              there is no account list standing in front of breadth. It has
+ *              its own ceiling below rather than the welcome one, because it is
+ *              also the mail an existing user asks for every time they sign in
+ *              by email, and a signup spike must not lock returning users out.
  */
-export type MailReason = 'welcome' | 'account'
+export type MailReason = 'welcome' | 'account' | 'signin'
 
 /**
  * Every reason, and its ceiling, in one table that the type system will not let
@@ -160,6 +168,17 @@ type Ceiling = { perDay: number; perHour: number } | { unbounded: string }
 
 export const CEILINGS: Record<MailReason, Ceiling> = {
   welcome: { perDay: 50, perHour: 20 },
+  // SIGNIN_PER_DAY = 200 and SIGNIN_PER_HOUR = 40, on its own table
+  // (email_sign_in_tokens, one row per link minted), so it never shares a rank
+  // with the welcome mail. Four times the welcome ceiling, because this mail is
+  // sent on every email sign-in and not once per account: ~45 accounts signing
+  // in by email on the same day is 45, and a launch day that doubles the
+  // record signup day several times over still clears it. Depth to one mailbox
+  // is bounded separately and tighter, three links an hour per address
+  // (auth.ts), because depth is the shape of the September incident. A full
+  // day at this ceiling is 200 sends, 1.4% of the 13,835 that took Gmail
+  // delivery from 66% to 17%, and the hourly term keeps them out of a burst.
+  signin: { perDay: 200, perHour: 40 },
   account: {
     unbounded:
       'The recipient must already own an account, so breadth is bounded by the accounts table ' +
@@ -172,10 +191,25 @@ export const CEILINGS: Record<MailReason, Ceiling> = {
   },
 }
 
-/** The welcome ceiling, read once so the gate and the copy cannot disagree. */
-const welcomeCeiling = (): { perDay: number; perHour: number } => {
-  const c = CEILINGS.welcome
+/** A reason's ceiling, read once so the gate and the copy cannot disagree. */
+const ceilingOf = (reason: 'welcome' | 'signin'): { perDay: number; perHour: number } => {
+  const c = CEILINGS[reason]
   return 'unbounded' in c ? { perDay: Infinity, perHour: Infinity } : c
+}
+
+// A test outbox, never in production. The harness has no Resend key, and the
+// sign-in link is the one mail whose CONTENT a gate has to read: the token in
+// it is stored nowhere but as a hash. With MAIL_TEST_OUTBOX set and NODE_ENV
+// anything but production, every mailUser() call appends one JSON line there
+// and then carries on exactly as it would have, so the answer each caller gets
+// (and every other gate that depends on it) is unchanged.
+const TEST_OUTBOX = process.env.NODE_ENV !== 'production' ? process.env.MAIL_TEST_OUTBOX : undefined
+async function toTestOutbox(reason: MailReason, to: string, m: Mail): Promise<void> {
+  if (!TEST_OUTBOX) return
+  try {
+    const { appendFile } = await import('node:fs/promises')
+    await appendFile(TEST_OUTBOX, JSON.stringify({ reason, to, subject: m.subject, html: m.html }) + '\n')
+  } catch { /* a test aid must never be able to fail a send */ }
 }
 
 let failureReportedAt = 0
@@ -230,6 +264,21 @@ async function welcomeRanks(accountId: string): Promise<{ day: number; hour: num
   return row ? { day: row.day, hour: row.hour } : null
 }
 
+/** The same two ranks for one sign-in link, over email_sign_in_tokens. */
+async function signinRanks(tokenRowId: string): Promise<{ day: number; hour: number } | null> {
+  const [row] = await sql<{ day: number; hour: number }[]>`
+    WITH me AS (SELECT id, created_at FROM email_sign_in_tokens WHERE id = ${tokenRowId})
+    SELECT (SELECT count(*)::int FROM email_sign_in_tokens t, me
+             WHERE t.created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+               AND (t.created_at, t.id) < (me.created_at, me.id)) AS day,
+           (SELECT count(*)::int FROM email_sign_in_tokens t, me
+             WHERE t.created_at >= date_trunc('hour', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+               AND (t.created_at, t.id) < (me.created_at, me.id)) AS hour
+    FROM me
+  `
+  return row ? { day: row.day, hour: row.hour } : null
+}
+
 /**
  * Never throws. Returns false when nothing was sent, for any reason, and the
  * caller logs that: a send that fails silently is how the Polar webhook
@@ -246,29 +295,31 @@ export async function mailUser(
   reason: MailReason,
   to: string,
   m: Mail,
-  accountId?: string,
+  rowId?: string,
 ): Promise<boolean> {
+  await toTestOutbox(reason, to, m)
   if (!resend) {
     log.warn({ reason }, 'user mail not sent: RESEND_API_KEY is unset')
     return false
   }
 
-  // Only 'welcome' is gated, and only when the caller handed over the row this
-  // send belongs to. Without an accountId there is no rank to be, and the send
-  // goes: a ceiling that cannot identify its own row has no business refusing.
-  if (reason === 'welcome' && accountId) {
-    const { perDay, perHour } = welcomeCeiling()
-    const r = await welcomeRanks(accountId)
+  // 'welcome' and 'signin' are gated, and only when the caller handed over the
+  // row this send belongs to: the account row for a welcome, the token row for
+  // a sign-in link. Without one there is no rank to be, and the send goes: a
+  // ceiling that cannot identify its own row has no business refusing.
+  if ((reason === 'welcome' || reason === 'signin') && rowId) {
+    const { perDay, perHour } = ceilingOf(reason)
+    const r = reason === 'welcome' ? await welcomeRanks(rowId) : await signinRanks(rowId)
     const overDay = r !== null && r.day >= perDay
     const overHour = r !== null && r.hour >= perHour
     if (r !== null && (overDay || overHour)) {
       const window = overDay ? 'day' : 'hour'
-      log.warn({ reason, day: r.day, hour: r.hour, window }, 'welcome mail suppressed: past the ceiling')
+      log.warn({ reason, day: r.day, hour: r.hour, window }, `${reason} mail suppressed: past the ceiling`)
       // Exactly one announcement per window, decided by the row rather than by
       // a clock: only one send in a UTC day has day-rank perDay, and only one
       // in a UTC hour has hour-rank perHour.
       if (r.day === perDay || (!overDay && r.hour === perHour)) {
-        void announceCeiling(log, window, overDay ? r.day + 1 : r.hour + 1)
+        void announceCeiling(log, reason, window, overDay ? r.day + 1 : r.hour + 1)
       }
       return false
     }
@@ -312,7 +363,9 @@ export async function mailUser(
  * failure mode of an outage is a few duplicate notices rather than silence.
  */
 async function reportFailure(log: FastifyBaseLogger, reason: MailReason, detail: string): Promise<void> {
-  if (reason !== 'account') return
+  // 'signin' too: the sign-in page says "check your inbox" to everyone, for the
+  // same reason /recover does, so a refused link is the same silent wait.
+  if (reason === 'welcome') return
   const now = Date.now()
   if (now - failureReportedAt < FAILURE_COOLDOWN_MS) return
   failureReportedAt = now
@@ -324,8 +377,8 @@ async function reportFailure(log: FastifyBaseLogger, reason: MailReason, detail:
          known or not, so that it is not an account-existence oracle, and a visitor whose link
          never arrives has no way to tell the difference.</p>
       <p><b>What Resend said:</b> ${detail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
-      <p>The three sends this covers are the recovery link, the new-network alert and the quota
-         warning. Check the logs for the attempt, and check the sending domain's standing in
+      <p>The sends this covers are the email sign-in link, the recovery link, the new-network
+         alert and the quota warning. Check the logs for the attempt, and check the sending domain's standing in
          Resend: a reputation problem shows up here first.</p>
       <p><a href="${ORIGIN}/admin">Open the dashboard</a></p>
     `,
@@ -342,16 +395,32 @@ async function reportFailure(log: FastifyBaseLogger, reason: MailReason, detail:
  * owner an email. Under-announcing it means a real launch lost its welcome mail
  * and nobody knew, which is the failure this whole file is about.
  */
-async function announceCeiling(log: FastifyBaseLogger, window: 'day' | 'hour', sent: number): Promise<void> {
-  const { perDay, perHour } = welcomeCeiling()
+async function announceCeiling(log: FastifyBaseLogger, reason: 'welcome' | 'signin', window: 'day' | 'hour', sent: number): Promise<void> {
+  const { perDay, perHour } = ceilingOf(reason)
   const ceiling = window === 'day' ? perDay : perHour
+  if (reason === 'signin') {
+    const ok = await mailOwner({
+      subject: `AgentBill: past ${ceiling} sign-in links this ${window}, email sign-in is paused`,
+      html: `
+        <p>${sent} email sign-in links have been asked for in the last UTC ${window}, past the ceiling of
+           ${ceiling} per ${window}. The page still answers "check your inbox" to everyone, and nothing
+           is mailed until the ${window} turns. Google and GitHub sign-in are unaffected.</p>
+        <p>If this is a real spike, raise <code>SIGNIN_PER_${window === 'day' ? 'DAY' : 'HOUR'}</code>
+           in <code>src/lib/mail.ts</code> and deploy. If it is a sweep of /auth/email or /register,
+           leave it and look at email_sign_in_tokens.</p>
+        <p><a href="${ORIGIN}/admin">Open the dashboard</a></p>
+      `,
+    })
+    if (!ok) log.error({ window }, 'sign-in ceiling notice was not sent')
+    return
+  }
   const ok = await mailOwner({
     subject: `AgentBill: past ${ceiling} signups this ${window}, welcome mail is paused`,
     html: `
       <p>${sent} accounts have been created in the last UTC ${window}, past the ceiling of
-         ${ceiling} welcome mails per ${window}. Accounts are still being created and keys are
-         still being issued; only the welcome note is paused, and everything it says is already on
-         the screen that showed the key and on a public URL.</p>
+         ${ceiling} welcome mails per ${window}. Accounts are still being created; only the welcome
+         note is paused, and everything it says is on the console the new owner is already signed
+         into and on a public URL.</p>
       <p>If this is a real spike, raise <code>WELCOME_PER_${window === 'day' ? 'DAY' : 'HOUR'}</code>
          in <code>src/lib/mail.ts</code> and deploy. If it is a sweep of /register, leave it and
          look at the new rows.</p>
