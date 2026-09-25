@@ -14,6 +14,9 @@
 //   [migration tls] scripts/db/apply-migration.mjs verifies the database
 //                certificate by the server's own rule; the only opt-out is
 //                DATABASE_SSL=disable on this machine.
+//   [recover]    /recover finds every account an address owns, the one a
+//                sign-in made with accounts.email NULL included, with the same
+//                answer for any address and the same token rules.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
@@ -28,7 +31,7 @@ import { createServer } from 'node:http'
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates], ['S17 logout', logoutGates], ['migration tls', migrationTlsGates], ['recover', recoverGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -617,4 +620,91 @@ async function migrationTlsGates({ ok, sql }) {
   const [t] = await sql`SELECT count(*)::int AS n FROM pg_tables WHERE tablename = 'batchc_migration_tls_probe'`
   ok('[migration tls] with DATABASE_SSL=disable on localhost it applies to the local harness database', applied?.attempts === 1 && t.n === 1, JSON.stringify(applied))
   await sql`DROP TABLE IF EXISTS batchc_migration_tls_probe`
+}
+
+// ------------------------------------------------------------------ /recover
+async function recoverGates({ API, sql, ok, bootS, stopS, portS, outbox }) {
+  const tag = randomBytes(4).toString('hex')
+  const X = `bc-recover-${tag}@example.invalid`, Y = `bc-recover-only-${tag}@example.invalid`, Z = `bc-recover-prod-${tag}@example.invalid`
+  const ids = {
+    legacy: '00000000-0000-0000-0000-0000000005a1', signin: '00000000-0000-0000-0000-0000000005a2', only: '00000000-0000-0000-0000-0000000005a3',
+    pLegacy: '00000000-0000-0000-0000-0000000005a4', pSignin: '00000000-0000-0000-0000-0000000005a5',
+    ux: '00000000-0000-0000-0000-0000000005b1', uy: '00000000-0000-0000-0000-0000000005b2', uz: '00000000-0000-0000-0000-0000000005b3',
+  }
+  const wipe = async () => {
+    await sql`DELETE FROM accounts WHERE id IN (${ids.legacy}, ${ids.signin}, ${ids.only}, ${ids.pLegacy}, ${ids.pSignin})`
+    await sql`DELETE FROM users WHERE id IN (${ids.ux}, ${ids.uy}, ${ids.uz})`
+  }
+  await wipe()
+  // X: an unverified legacy account holds the address, and the person who
+  // then signed in with it got a second account with accounts.email NULL.
+  await sql`INSERT INTO users (id, email, email_verified_at) VALUES (${ids.ux}, ${X}, now()), (${ids.uy}, ${Y}, now()), (${ids.uz}, ${Z}, now())`
+  await sql`INSERT INTO accounts (id, email, plan) VALUES (${ids.legacy}, ${X}, 'free'), (${ids.pLegacy}, ${Z}, 'free')`
+  await sql`INSERT INTO accounts (id, email, plan, owner_user_id) VALUES (${ids.signin}, NULL, 'free', ${ids.ux}), (${ids.only}, NULL, 'free', ${ids.uy}), (${ids.pSignin}, NULL, 'free', ${ids.uz})`
+  let net = 1
+  const ask = (email, base = API) => fetch(`${base}/recover`, { method: 'POST', redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', 'fly-client-ip': `198.18.5.${net++}` }, body: `email=${encodeURIComponent(email)}` })
+  const mails = (to) => (readFileSync(outbox, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))).filter((m) => m.to === to)
+  const waitMail = async (to, n) => { for (let i = 0; i < 40 && mails(to).length < n; i++) await new Promise((r) => setTimeout(r, 100)); return mails(to) }
+  const tokensOf = (html) => [...html.matchAll(/\/recover\/([A-Za-z0-9_-]{43})/g)].map((m) => m[1])
+  const sha = (t) => createHash('sha256').update(t).digest('hex')
+  const ownerOf = async (t) => (await sql`SELECT account_id FROM account_recovery_tokens WHERE token_hash = ${sha(t)}`)[0]?.accountId ?? null
+
+  const rX = await ask(X)
+  const mX = (await waitMail(X, 1))
+  const tX = tokensOf(mX[0]?.html ?? '')
+  const owners = await Promise.all(tX.map(ownerOf))
+  ok('[recover] an address with a legacy account AND a sign-in account (accounts.email NULL): one mail, two links, one for each account',
+     rX.status === 303 && mX.length === 1 && tX.length === 2 && owners.includes(ids.legacy) && owners.includes(ids.signin)
+       && /registered with this address/.test(mX[0].html) && /sign in to as this address/.test(mX[0].html),
+     `${rX.status} mails ${mX.length} tokens ${tX.length} owners ${JSON.stringify(owners)}`)
+  const rY = await ask(Y)
+  const mY = await waitMail(Y, 1)
+  const tY = tokensOf(mY[0]?.html ?? '')
+  ok('[recover] an address whose only account was made by a sign-in (accounts.email NULL) now gets its link; before this it got nothing',
+     rY.status === 303 && mY.length === 1 && tY.length === 1 && await ownerOf(tY[0]) === ids.only && /Open this link/.test(mY[0].html), `mails ${mY.length} tokens ${tY.length}`)
+
+  // The same answer for any address: status, Location and body, byte for byte.
+  const unknown = `bc-recover-nobody-${tag}@example.invalid`
+  const rU = await ask(unknown)
+  const rK = await ask(`bc-recover-only-${tag}@example.invalid`)
+  const shape = async (r) => JSON.stringify([r.status, r.headers.get('location'), (await r.text()).length])
+  const [su, sk] = [await shape(rU), await shape(rK)]
+  await new Promise((r) => setTimeout(r, 500))
+  ok('[recover] an unknown address gets the identical answer (303 to /recover?sent=1, same body), and no mail',
+     su === sk && rU.headers.get('location') === '/recover?sent=1' && mails(unknown).length === 0, `${su} vs ${sk}`)
+  ok('[recover] a second request within the hour mails nothing new (the address mark and the per-account hour, together)', mails(Y).length === 1, `${mails(Y).length}`)
+
+  // The token rules, unchanged: GET reads without spending, POST spends once.
+  const g1 = await fetch(`${API}/recover/${tX[1]}`)
+  const g2 = await fetch(`${API}/recover/${tX[1]}`)
+  const FORM = { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin' }
+  const p1 = await fetch(`${API}/recover/${tX[1]}`, { method: 'POST', headers: FORM, body: 'action=add' })
+  const p1html = await p1.text()
+  const p2 = await fetch(`${API}/recover/${tX[1]}`, { method: 'POST', headers: FORM, body: 'action=add' })
+  const newKey = (p1html.match(/agb_[0-9a-f]{48}/) ?? [])[0]
+  const [keyAcct] = newKey ? await sql`SELECT account_id FROM developer_api_keys WHERE key_hash = ${sha(newKey)}` : []
+  ok('[recover] the second account\'s link: GET twice does not spend it, POST spends it once and makes a key on THAT account, a second POST is 410',
+     g1.status === 200 && g2.status === 200 && p1.status === 200 && p2.status === 410 && keyAcct?.accountId === await ownerOf(tX[1]), `${g1.status} ${g2.status} ${p1.status} ${p2.status}`)
+  await sql`UPDATE account_recovery_tokens SET expires_at = NOW() - INTERVAL '1 second' WHERE token_hash = ${sha(tX[0])}`
+  const exp = await fetch(`${API}/recover/${tX[0]}`, { method: 'POST', headers: FORM, body: 'action=add' })
+  ok('[recover] an expired link is 410 and makes nothing', exp.status === 410)
+
+  // The production path: NODE_ENV=production, no test outbox. The mail cannot
+  // be read there, so the gate reads what was minted: one live token for each
+  // account the address owns.
+  const LONG = 'batchc-production-session-secret-0123456789'
+  const prod = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG }, portS)
+  try {
+    const rp = await ask(Z, `http://localhost:${portS}`)
+    let rows = []
+    for (let i = 0; i < 40; i++) {
+      rows = await sql`SELECT account_id FROM account_recovery_tokens WHERE account_id IN (${ids.pLegacy}, ${ids.pSignin}) AND consumed_at IS NULL AND expires_at > NOW()`
+      if (rows.length >= 2) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    ok('[recover] production: the address resolves to both of its accounts, one live link minted for each, and the answer is the same 303',
+       rp.status === 303 && rp.headers.get('location') === '/recover?sent=1' && new Set(rows.map((r) => r.accountId)).size === 2, `${rp.status} ${rows.length}`)
+  } finally { await stopS(prod) }
+  await wipe()
 }
