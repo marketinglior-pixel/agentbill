@@ -206,7 +206,25 @@ Read this section before the pitch, not after.
 
 ## MCP Server
 
-AgentBill ships an MCP server for Claude Code, Cursor, Windsurf, and any MCP-compatible host.
+### Remote: `https://agentbill.dev/mcp`
+
+One URL for Claude, ChatGPT, Claude Code, Codex, Cursor, Antigravity, VS Code and any client that
+speaks Streamable HTTP. Claude and ChatGPT connect with a sign-in (OAuth 2.1, per the MCP
+authorization spec); the others can sign in too, or send `Authorization: Bearer` with an API key.
+Setup for each client, checked against its own docs: [agentbill.dev/integrations/mcp](https://agentbill.dev/integrations/mcp).
+
+```bash
+claude mcp add --transport http agentbill https://agentbill.dev/mcp
+```
+
+Five tools: `preflight` and `record_event` (which takes `task_ref` and `reservation_id`, so it
+settles a job), and three reads, `task_status`, `top_jobs` and `recent_refusals`. Scopes are
+`agentbill:read` and `agentbill:meter`. No tool creates or shows an API key, changes a plan or
+touches billing. A connected app is listed in the console under API keys, with Disconnect.
+
+### Local: `agentbill-mcp` (stdio)
+
+The Python package runs on your machine with the key in its environment.
 
 ```bash
 uvx agentbill-mcp

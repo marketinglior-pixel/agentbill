@@ -94,6 +94,12 @@ curl -X POST https://agentbill.dev/keys/revoke \\
         ends the moment its key is revoked; a signed-in person's session also ends on our side when
         they sign out, so a copy of the cookie no longer opens anything. Its forms, sign-in and sign-up refuse
         requests from other sites.</li>
+    <li>The MCP server at <code class="inline">https://agentbill.dev/mcp</code> answers only a request
+        carrying an API key or an access token it issued for itself. An app connects only after you
+        approve it on a page that names it, says where your browser goes next and what it will be able
+        to do, and you can disconnect it in the console. Its codes and tokens are stored only as a hash,
+        an access token lasts an hour, and a refresh token that is used twice ends the connection. No
+        MCP tool can create or show a key, or change your plan or billing.</li>
     <li>An alert webhook goes only to an https URL on a public address, checked when you save it and
         again when we send; it is signed, and a redirect is never followed.</li>
     <li>Payments are handled by Polar. We never see a card number. Polar's notifications are verified

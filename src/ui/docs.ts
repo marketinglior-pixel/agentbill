@@ -307,6 +307,8 @@ export function withAnchors(body: string): { body: string; toc: { id: string; la
 }
 
 type ShellOpts = {
+  /** Page scripts beyond DOCS_JS, each from inlineScript() so its hash is in the CSP. */
+  scripts?: ReadonlyArray<{ html: string; hash: string }>
   title: string
   description: string
   /** Path in the registry. Drives canonical, the share card and the robots directive. */
@@ -407,7 +409,7 @@ export function splitHead(body: string): { head: string; rest: string } | null {
   return opened === closed ? { head, rest: body.slice(i) } : null
 }
 
-export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, sticky = true, body }: ShellOpts): string {
+export function docsShell({ title, description, path, extraHead, jsonLd, mainEntity, og, css = '', current = '/docs', rail: wantRail = true, navCta = true, sticky = true, scripts = [], body }: ShellOpts): string {
   const crumb = breadcrumb(path)
   const ld = [...(jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []), ...(crumb ? [crumb.ld] : [])]
   const { body: anchored, toc } = withAnchors(body)
@@ -434,7 +436,7 @@ ${parts.rest}
 ${anchored}
   </div>`
   return `${head({ title, description, path, jsonLd: ld, mainEntity, breadcrumb: !!crumb, og,
-                    css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH] })}
+                    css: `${DOCS_CSS}${css}`, extraHead, scriptHashes: [DOCS_HASH, ...scripts.map((x) => x.hash)] })}
 <body>
 ${siteNav(current, { cta: navCta, sticky })}
 <div class="docs ${hasRail ? 'has-rail' : 'no-rail'}">
@@ -444,7 +446,7 @@ ${inner}
   </main>
 </div>
 ${siteFooter()}
-${DOCS_JS}
+${DOCS_JS}${scripts.map((x) => `\n${x.html}`).join('')}
 </body>
 </html>`
 }

@@ -263,6 +263,12 @@ export async function homeRoute(app: FastifyInstance) {
     .nb { white-space: nowrap; }
     .hero-cta { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
     .trust { margin-top: 16px; font-size: var(--fs-small); color: var(--dim); }
+    /* The MCP entry, 2026-09-25: one line under the three steps, where a reader
+       who works in Claude or Cursor asks "and without code?". Not in the hero,
+       which holds two actions and no third (the [fold] gate). */
+    .how-mcp { margin-top: var(--s6); text-align: center; color: var(--muted); font-size: var(--fs-body); }
+    .how-mcp a { color: var(--text); font-weight: 500; text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+    .how-mcp a:hover { text-decoration-color: currentColor; }
 
     /* The frame: the agent's log, on the reference's large soft-cornered panel. */
     .frame { margin: 36px 0 0; width: 100%; background: var(--surface2); border-radius: var(--r-card); padding: 24px; text-align: left; }
@@ -548,6 +554,7 @@ ${playgroundSection(codeFrame())}
         your code decides.</p>
       </div>
     </div>
+    <p class="how-mcp">Working in Claude, ChatGPT, Cursor or Codex? <a href="/integrations/mcp" id="home-mcp">Connect via MCP &rarr;</a> One URL, and preflight is a tool your agent can call.</p>
   </section>
 
   <section class="wrap sec icp">

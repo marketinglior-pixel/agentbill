@@ -4,6 +4,14 @@
 
 One spend ceiling for one agent job, exposed as MCP tools. Bound to a `task_ref` you pass, not to a calendar month.
 
+## Remote or local
+
+This package is the **local** server: it runs on your machine over stdio, with your API key in its
+environment. There is also a **remote** server at `https://agentbill.dev/mcp`, with a sign-in
+instead of a key for Claude, ChatGPT and other clients, and three more tools. Setup for each client
+is at [agentbill.dev/integrations/mcp](https://agentbill.dev/integrations/mcp). The package's HTTP
+mode is for your own machine only; the hosted copy that once ran it was taken down on 2026-09-25.
+
 ## What it does
 
 Exposes two tools to any MCP-compatible agent host (Claude Code, Cursor, Windsurf, etc.):
