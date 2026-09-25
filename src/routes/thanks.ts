@@ -6,7 +6,7 @@ import { isUuid } from '../lib/ids.js'
 import { checkoutIsPaid, getCheckoutSummary, PLAN_LIMITS, PLAN_PRICES } from '../integrations/polar.js'
 
 // Where Polar returns a buyer after checkout. It is the success_url on every
-// session /checkout/:tier mints, and it is the only inbound this page has:
+// session /app/checkout/:tier mints, and it is the only inbound this page has:
 // nothing in the site links here.
 //
 // Until 2026-09-08 this page was a contact-form thank-you ("that arrived, a

@@ -5,6 +5,10 @@
 //                records-and-steps allowance (migration 028,
 //                src/lib/event-quota.ts), exactly under concurrency, and the
 //                record that settles its own preflight is never refused.
+//   [S24 payments] a canceled plan runs to the end of its paid period
+//                (migration 029, src/lib/plan-period.ts); the checkout is
+//                minted for the signed-in session's account only, never for
+//                an account id in a URL.
 //
 // Every gate here was planted red once before it was trusted; the plants and
 // which gate each turned red are in the commit that added the gate.
@@ -13,11 +17,12 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 
 const shaped = (tag) => 'agb_' + createHash('sha256').update(`${tag}-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
 
 export async function batchcGates(opts) {
-  const sections = [['S7 events', eventsGates]]
+  const sections = [['S7 events', eventsGates], ['S24 payments', paymentsGates]]
   for (const [name, fn] of sections) {
     console.log(`\n[batchc ${name}]`)
     let reached = false
@@ -255,4 +260,198 @@ print(json.dumps(out))
      `${JSON.stringify(nodeOut)} ${JSON.stringify(warned)}`)
 
   await sql`DELETE FROM accounts WHERE id = ${E}`
+}
+
+// ------------------------------------------------------------------ S24
+async function paymentsGates({ API, sql, ok, bootS, stopS, portS }) {
+  const { Webhook } = await import('standardwebhooks')
+  const wh = new Webhook(Buffer.from(process.env.WEBHOOK_SECRET ?? '', 'utf-8').toString('base64'))
+  let seq = 0
+  // Signed exactly as Polar signs (Standard Webhooks), through the library
+  // Polar's SDK uses: the production verification path, no bypass.
+  const hook = async (payload) => {
+    const body = JSON.stringify(payload)
+    const id = `msg_bc_${Date.now()}_${seq++}`
+    const date = new Date()
+    const r = await fetch(`${API}/webhooks/polar`, { method: 'POST', body, headers: {
+      'Content-Type': 'application/json', 'webhook-id': id, 'webhook-timestamp': String(Math.floor(date.getTime() / 1000)),
+      'webhook-signature': wh.sign(id, date, body) } })
+    return { status: r.status, body: await r.text() }
+  }
+  const P = '00000000-0000-0000-0000-0000000024a1'
+  const KP = shaped('batchc-pay')
+  const NET = { 'fly-client-ip': '198.18.24.1' }
+  await sql`DELETE FROM accounts WHERE id = ${P}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${P}, 'free', 0, date_trunc('month', CURRENT_DATE)::date)`
+  await insertKeyRow(sql, P, KP, 'harness-batchc-pay')
+  const md = { agentbill_account_id: P }
+  const BUILDER = process.env.POLAR_PRODUCT_ID_BUILDER ?? 'prod_verify_builder'
+  const acct = async () => (await sql`
+    SELECT plan, plan_ends_at, polar_subscription_id, (plan_ends_at > NOW()) AS ends_later FROM accounts WHERE id = ${P}`)[0]
+  const pre = async () => {
+    const r = await fetch(`${API}/preflight`, { method: 'POST', headers: { Authorization: `Bearer ${KP}`, 'Content-Type': 'application/json', ...NET },
+      body: JSON.stringify({ agent_id: 'bc-pay', estimated_units: 1 }) })
+    return r.json()
+  }
+  const inDays = (d) => new Date(Date.now() + d * 86_400_000).toISOString()
+  const sub = (id, extra = {}) => ({ id, status: 'active', product_id: BUILDER, customer_id: 'cus_bc', metadata: md, ...extra })
+
+  // ---- a purchase remembers its subscription
+  const up = await hook({ type: 'subscription.active', data: sub('sub_bc_1') })
+  let a = await acct()
+  ok('[S24 payments] a purchase (subscription.active) upgrades and remembers the subscription behind the plan',
+     up.status === 200 && a.plan === 'builder' && a.polarSubscriptionId === 'sub_bc_1' && a.planEndsAt === null, `${up.status} ${JSON.stringify(a)}`)
+
+  // ---- canceled: the plan runs to the period end Polar sends
+  const end10 = inDays(10)
+  const c1 = await hook({ type: 'subscription.canceled', data: sub('sub_bc_1', { cancel_at_period_end: true, canceled_at: new Date().toISOString(), ends_at: end10, current_period_end: end10 }) })
+  a = await acct()
+  await sql`UPDATE accounts SET monthly_calls = 1500 WHERE id = ${P}`
+  const p1 = await pre()
+  ok('[S24 payments] subscription.canceled keeps the plan: still builder, plan_ends_at is Polar\'s ends_at, and a call past the free quota (1,501st) is approved',
+     c1.status === 200 && a.plan === 'builder' && a.planEndsAt !== null && Math.abs(new Date(a.planEndsAt).getTime() - Date.parse(end10)) < 1000 && p1.approved === true,
+     `${c1.status} ${JSON.stringify(a)} ${JSON.stringify(p1)}`)
+  const login = await fetch(`${API}/app/session`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', ...NET }, body: `api_key=${KP}` })
+  const cookieP = (login.headers.get('set-cookie') ?? '').split(';')[0]
+  const shown = new Date(end10).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  const appP = await fetch(`${API}/app`, { headers: { cookie: cookieP } }).then((r) => r.text())
+  ok('[S24 payments] and the console says so: "Canceled · builder until <date>"', appP.includes(`Canceled · builder until <b>${shown}</b>`), shown)
+
+  // ---- uncanceled clears it; a cancel with only current_period_end uses it
+  const u1 = await hook({ type: 'subscription.uncanceled', data: sub('sub_bc_1') })
+  a = await acct()
+  ok('[S24 payments] subscription.uncanceled clears the scheduled end', u1.status === 200 && a.plan === 'builder' && a.planEndsAt === null, JSON.stringify(a))
+  const end5 = inDays(5)
+  await hook({ type: 'subscription.canceled', data: sub('sub_bc_1', { cancel_at_period_end: true, current_period_end: end5 }) })
+  a = await acct()
+  ok('[S24 payments] a cancel that names only current_period_end runs to that', a.plan === 'builder' && a.planEndsAt !== null && Math.abs(new Date(a.planEndsAt).getTime() - Date.parse(end5)) < 1000, JSON.stringify(a))
+  await hook({ type: 'subscription.uncanceled', data: sub('sub_bc_1') })
+  const nop = await hook({ type: 'subscription.canceled', data: sub('sub_bc_1', { cancel_at_period_end: true }) })
+  a = await acct()
+  ok('[S24 payments] a cancel with no period end at all changes nothing (revoked ends it when Polar ends access), and is not a downgrade',
+     nop.status === 200 && a.plan === 'builder' && a.planEndsAt === null, JSON.stringify(a))
+
+  // ---- another subscription's events leave this plan alone
+  const oc = await hook({ type: 'subscription.canceled', data: sub('sub_bc_OLD', { ends_at: inDays(1) }) })
+  const orv = await hook({ type: 'subscription.revoked', data: sub('sub_bc_OLD', { status: 'canceled' }) })
+  a = await acct()
+  ok('[S24 payments] a cancel and a revoke of a DIFFERENT subscription (an old one) leave the plan and its end untouched',
+     oc.status === 200 && orv.status === 200 && a.plan === 'builder' && a.planEndsAt === null && a.polarSubscriptionId === 'sub_bc_1', JSON.stringify(a))
+
+  // ---- the end passes: free at read time, then the sweeper writes it
+  await hook({ type: 'subscription.canceled', data: sub('sub_bc_1', { ends_at: inDays(3) }) })
+  await sql`UPDATE accounts SET plan_ends_at = NOW() - INTERVAL '1 second', monthly_calls = 1500 WHERE id = ${P}`
+  const p2 = await pre()
+  const stored = (await acct()).plan
+  ok('[S24 payments] once plan_ends_at has passed, preflight reads the plan as free (free_tier_exceeded at 1,500) before any sweep, by the database clock',
+     p2.approved === false && p2.reason === 'free_tier_exceeded' && p2.plan === 'free' && stored === 'builder', `${JSON.stringify(p2)} stored=${stored}`)
+  const { sweepEndedPlans } = await import('../../dist/lib/plan-period.js')
+  const swept = await sweepEndedPlans()
+  a = await acct()
+  const [cnt] = await sql`SELECT monthly_calls, polar_customer_id FROM accounts WHERE id = ${P}`
+  ok('[S24 payments] and the sweeper writes the downgrade: free, the end and the subscription cleared, the counters into a new period',
+     swept >= 1 && a.plan === 'free' && a.planEndsAt === null && a.polarSubscriptionId === null && cnt.monthlyCalls === 0 && cnt.polarCustomerId === null,
+     `swept ${swept} ${JSON.stringify(a)} ${JSON.stringify(cnt)}`)
+
+  // ---- revoked still ends it at once; a late cancel with a past end too
+  await hook({ type: 'order.paid', data: { status: 'paid', product_id: BUILDER, customer_id: 'cus_bc', subscription_id: 'sub_bc_2', metadata: md } })
+  a = await acct()
+  ok('[S24 payments] order.paid upgrades and remembers the subscription it names', a.plan === 'builder' && a.polarSubscriptionId === 'sub_bc_2', JSON.stringify(a))
+  const rv = await hook({ type: 'subscription.revoked', data: sub('sub_bc_2', { status: 'canceled', ended_at: new Date().toISOString() }) })
+  a = await acct()
+  ok('[S24 payments] subscription.revoked downgrades at once, as before', rv.status === 200 && a.plan === 'free' && a.polarSubscriptionId === null, JSON.stringify(a))
+  await hook({ type: 'subscription.active', data: sub('sub_bc_3') })
+  await sql`UPDATE accounts SET monthly_calls = 1500 WHERE id = ${P}`
+  await hook({ type: 'subscription.canceled', data: sub('sub_bc_3', { ends_at: new Date(Date.now() - 60_000).toISOString() }) })
+  const p3 = await pre()
+  ok('[S24 payments] a cancel delivered after its own period end reads as free at once', p3.approved === false && p3.plan === 'free', JSON.stringify(p3))
+
+  // ---- (b) the checkout is bound to the session. Production first, no bypass.
+  const LONG = 'batchc-production-session-secret-0123456789'
+  const prod = await bootS({ NODE_ENV: 'production', DATABASE_SSL: 'disable', DATABASE_SSL_INSECURE_OK: '1', APP_SESSION_SECRET: LONG,
+    POLAR_API_TEST_BASE: 'http://127.0.0.1:9', POLAR_PRODUCT_ID_TEAM: 'prod_verify_team' }, portS)
+  const PB = `http://localhost:${portS}`
+  try {
+    const pr = await fetch(`${PB}/pricing?account_id=${P}`).then(async (r) => ({ status: r.status, html: await r.text() }))
+    const hrefs = [...pr.html.matchAll(/<a\b[^>]*data-tier="(builder|team|scale)"[^>]*>/g)].map((m) => m[0])
+    ok('[S24 payments] production: /pricing?account_id=<id> renders no link carrying the id, every paid button goes to /app/upgrade/<tier>, and there is no key box',
+       pr.status === 200 && !pr.html.includes(P) && !pr.html.includes('account_id=') && hrefs.length === 3
+         && hrefs.every((h) => /href="\/app\/upgrade\/(builder|team|scale)"/.test(h)) && !pr.html.includes('id="keyin"'),
+       `${pr.status} ${hrefs.join(' ')}`)
+    const up301 = await fetch(`${PB}/upgrade?account_id=${P}`, { redirect: 'manual' })
+    const old = await fetch(`${PB}/checkout/team?account_id=${P}`, { redirect: 'manual' })
+    const anon = await fetch(`${PB}/app/checkout/team?account_id=${P}`, { redirect: 'manual' })
+    const signin = await fetch(`${PB}/app/upgrade/team`).then((r) => r.text())
+    ok('[S24 payments] production: the old /checkout/team?account_id=<id> mints nothing and sends the browser to sign in; /app/checkout/team with no session does the same; that page is the sign-in for Team',
+       old.status === 302 && old.headers.get('location') === '/app/upgrade/team' && anon.status === 302 && anon.headers.get('location') === '/app/upgrade/team'
+         && signin.includes('Sign in to buy Team') && up301.status === 301,
+       `${old.status} ${old.headers.get('location')} ${anon.status} ${anon.headers.get('location')}`)
+  } finally { await stopS(prod) }
+  const { polarApiBase } = await import('../../dist/integrations/polar.js')
+  ok('[S24 payments] production ignores POLAR_API_TEST_BASE: Polar is api.polar.sh whatever the environment says',
+     polarApiBase({ NODE_ENV: 'production', POLAR_API_TEST_BASE: 'http://127.0.0.1:9' }) === 'https://api.polar.sh'
+       && polarApiBase({ NODE_ENV: 'test', POLAR_API_TEST_BASE: 'http://127.0.0.1:9' }) === 'http://127.0.0.1:9'
+       && polarApiBase({ NODE_ENV: 'test', POLAR_API_TEST_BASE: 'https://evil.example' }) === 'https://api.polar.sh')
+
+  // What the checkout is minted with, read from a local fake of Polar's API.
+  const minted = []
+  const fake = createServer((req, res) => {
+    let b = ''
+    req.on('data', (d) => { b += d })
+    req.on('end', () => {
+      if (req.method === 'POST' && req.url === '/v1/checkouts') {
+        try { minted.push(JSON.parse(b)) } catch { minted.push({ bad: b }) }
+        res.writeHead(201, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ id: 'co_fake', url: 'https://sandbox.polar.sh/checkout/co_fake' }))
+      }
+      res.writeHead(404); res.end()
+    })
+  })
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r))
+  const FAKE = `http://127.0.0.1:${fake.address().port}`
+  const TSECRET = 'batchc-test-session-secret-0123456789abcdef'
+  const test = await bootS({ NODE_ENV: 'test', DATABASE_SSL: 'disable', APP_SESSION_SECRET: TSECRET, RATE_LIMIT_PER_MINUTE: '100000',
+    POLAR_API_TEST_BASE: FAKE, POLAR_API_KEY: 'polar_fake_key', POLAR_PRODUCT_ID_TEAM: 'prod_verify_team', POLAR_PRODUCT_ID_SCALE: 'prod_verify_scale' }, portS)
+  const TB = `http://localhost:${portS}`
+  try {
+    const OTHER = '00000000-0000-0000-0000-0000000024b2'
+    await sql`DELETE FROM accounts WHERE id = ${OTHER}`
+    await sql`INSERT INTO accounts (id, plan) VALUES (${OTHER}, 'free')`
+    const l = await fetch(`${TB}/app/session`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': 'same-origin', ...NET }, body: `api_key=${KP}` })
+    const ck = (l.headers.get('set-cookie') ?? '').split(';')[0]
+    const r1 = await fetch(`${TB}/app/checkout/team?account_id=${OTHER}`, { redirect: 'manual', headers: { cookie: ck } })
+    ok('[S24 payments] a key session asking /app/checkout/team?account_id=<another account>: the checkout is minted for the session\'s own account, never the one in the URL',
+       r1.status === 302 && r1.headers.get('location') === 'https://sandbox.polar.sh/checkout/co_fake' && minted.length === 1
+         && minted[0]?.metadata?.agentbill_account_id === P && JSON.stringify(minted[0]?.products) === '["prod_verify_team"]',
+       `${r1.status} ${r1.headers.get('location')} ${JSON.stringify(minted)}`)
+    // A person's session, for an account a sign-in owns.
+    const U = '00000000-0000-0000-0000-0000000024c3', UA = '00000000-0000-0000-0000-0000000024c4'
+    await sql`DELETE FROM accounts WHERE id = ${UA}`
+    await sql`DELETE FROM users WHERE id = ${U}`
+    await sql`INSERT INTO users (id, email, email_verified_at) VALUES (${U}, 'bc-checkout-person@example.invalid', now())`
+    await sql`INSERT INTO accounts (id, plan, owner_user_id) VALUES (${UA}, 'free', ${U})`
+    const secretBefore = process.env.APP_SESSION_SECRET
+    process.env.APP_SESSION_SECRET = TSECRET
+    const { userSessionCookie } = await import('../../dist/lib/user-session.js')
+    const uck = (userSessionCookie(U, 0) ?? '').split(';')[0]
+    if (secretBefore === undefined) delete process.env.APP_SESSION_SECRET; else process.env.APP_SESSION_SECRET = secretBefore
+    const r2 = await fetch(`${TB}/app/checkout/scale?account_id=${P}`, { redirect: 'manual', headers: { cookie: uck } })
+    ok('[S24 payments] a person\'s session: /app/checkout/scale?account_id=<another account> mints for the account that person owns',
+       r2.status === 302 && minted.length === 2 && minted[1]?.metadata?.agentbill_account_id === UA, `${r2.status} ${JSON.stringify(minted[1])}`)
+    const r3 = await fetch(`${TB}/app/checkout/team?account_id=${P}`, { redirect: 'manual' })
+    const r4 = await fetch(`${TB}/checkout/team?account_id=${P}`, { redirect: 'manual' })
+    const r5 = await fetch(`${TB}/app/upgrade/team`, { headers: { cookie: ck } }).then((r) => r.text())
+    ok('[S24 payments] with no session, neither /app/checkout nor the old /checkout mints anything for the id in the URL, and a signed-in hand-off page carries no account id',
+       r3.headers.get('location') === '/app/upgrade/team' && r4.headers.get('location') === '/app/upgrade/team' && minted.length === 2
+         && r5.includes('url=/app/checkout/team"') && !r5.includes('account_id'),
+       `${r3.headers.get('location')} ${r4.headers.get('location')} minted ${minted.length}`)
+    await sql`DELETE FROM accounts WHERE id IN (${OTHER}, ${UA})`
+    await sql`DELETE FROM users WHERE id = ${U}`
+  } finally {
+    await stopS(test)
+    fake.close()
+  }
+  const pf = await pre()
+  ok('[S24 payments] a quota refusal\'s upgrade_url is /pricing, with no account id in it', pf.upgrade_url === 'https://agentbill.dev/pricing', JSON.stringify(pf))
+  await sql`DELETE FROM accounts WHERE id = ${P}`
 }

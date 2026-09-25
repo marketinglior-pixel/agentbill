@@ -1,4 +1,5 @@
 import { sql } from '../db/index.js'
+import { sweepEndedPlans } from './plan-period.js'
 
 // Reclaims the budget held by runs that never came back.
 //
@@ -80,6 +81,15 @@ async function tick(): Promise<void> {
     // A failed sweep is not an outage. The budget stays held until the next
     // tick, which is the safe direction, so log and move on.
     console.error('[reservation-sweeper] sweep failed:', (err as Error).message)
+  }
+  // The same tick writes the downgrade of plans whose paid period has ended
+  // (src/lib/plan-period.ts). Every enforcing read already treats them as
+  // free, so a failed or late sweep here grants nothing.
+  try {
+    const ended = await sweepEndedPlans()
+    if (ended > 0) console.log(`[plan-sweeper] ${ended} canceled plan(s) reached the end of their period: now free`)
+  } catch (err) {
+    console.error('[plan-sweeper] sweep failed:', (err as Error).message)
   }
 }
 

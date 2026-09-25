@@ -35,7 +35,10 @@ export async function stepRoute(app: FastifyInstance) {
     // This route locks no customer row, so the claim's UPDATE is the only
     // account lock it takes and there is no order to keep.
     const stored = await sql.begin(async (tx) => {
-      const [acct] = await tx`SELECT plan FROM accounts WHERE id = ${accountId}`
+      // The plan as it stands now (EFFECTIVE_PLAN_SQL, src/lib/plan-period.ts).
+      const [acct] = await tx`
+        SELECT CASE WHEN plan_ends_at IS NOT NULL AND plan_ends_at <= NOW() THEN 'free' ELSE plan END AS plan
+        FROM accounts WHERE id = ${accountId}`
       const plan = (acct?.plan as string) ?? 'free'
       const limit = eventLimitFor(plan)
       const claim = await claimEvent(tx, accountId, limit)

@@ -3,6 +3,7 @@ import { sql } from '../db/index.js'
 import { verifyWebhookSignature, planFromProductId, getCheckoutMetadata } from '../integrations/polar.js'
 import { isUuid, isId } from '../lib/ids.js'
 import { alertRejectedWebhook } from '../lib/webhook-alert.js'
+import { periodEndOf } from '../lib/plan-period.js'
 
 const POLAR_WEBHOOK_SECRET = process.env.POLAR_WEBHOOK_SECRET ?? ''
 
@@ -101,9 +102,23 @@ export async function webhooksRoute(app: FastifyInstance) {
     const isUpgradeEvent =
       (eventType === 'order.paid' && (status === '' || status === 'paid')) ||
       ((eventType === 'subscription.active' || eventType === 'subscription.created') && status === 'active')
-    const isDowngradeEvent = eventType === 'subscription.revoked' || eventType === 'subscription.canceled'
+    // What ends a plan, since 2026-09-25 (S24, migration 029). Polar's own
+    // descriptions: subscription.canceled is "sent when a subscription is
+    // canceled. Customers might still have access until the end of the
+    // current period"; subscription.revoked is "sent when a subscription is
+    // revoked and the user loses access immediately"; subscription.uncanceled
+    // is "sent when a customer revokes a pending cancellation". Until this
+    // commit canceled downgraded on the spot, so a customer who canceled on
+    // day 2 lost the 28 days they had paid for. Now:
+    //   revoked      downgrade now, as before
+    //   canceled     schedule the end at the period end Polar sends
+    //                (src/lib/plan-period.ts); the plan runs until then
+    //   uncanceled   clear the scheduled end
+    const isDowngradeEvent = eventType === 'subscription.revoked'
+    const isCancelEvent = eventType === 'subscription.canceled'
+    const isUncancelEvent = eventType === 'subscription.uncanceled'
 
-    if (!isUpgradeEvent && !isDowngradeEvent) {
+    if (!isUpgradeEvent && !isDowngradeEvent && !isCancelEvent && !isUncancelEvent) {
       request.log.info({ eventType, status: status || null, webhookId }, 'Polar webhook: nothing to do for this event')
       return reply.send({ received: true })
     }
@@ -115,7 +130,7 @@ export async function webhooksRoute(app: FastifyInstance) {
 
     // Fallback via checkout_id. The subscription's own metadata comes back
     // empty (verified on the first real delivery, 2026-09-07), but the payload
-    // always carries data.checkout_id, and the session /checkout/:tier minted
+    // always carries data.checkout_id, and the session /app/checkout/:tier minted
     // put the account id on that checkout. One guarded GET recovers it, and it
     // only runs when the fast path above found nothing, so a well-formed
     // upgrade pays for no extra call. Done before the transaction below, so
@@ -140,12 +155,24 @@ export async function webhooksRoute(app: FastifyInstance) {
     const productId: string = data?.product_id ?? data?.productId ?? data?.product?.id ?? ''
     const plan = isUpgradeEvent ? planFromProductId(typeof productId === 'string' ? productId : '') : null
 
+    // Which subscription this is about. On a subscription.* event it is the
+    // object itself; order.paid names it (null for a one-off order). Bounded
+    // like every id. An account remembers the subscription that bought its
+    // plan, and a cancel, uncancel or revoke of any OTHER subscription (an
+    // old one, after the buyer bought again) leaves the plan alone. An
+    // account upgraded before migration 029 remembers none and accepts any,
+    // which is how it behaved.
+    const rawSubId = eventType.startsWith('subscription.') ? data?.id : (data?.subscription_id ?? data?.subscriptionId)
+    const subscriptionId: string = typeof rawSubId === 'string' && isId(rawSubId, 128) ? rawSubId : ''
+    const endsAt = isCancelEvent ? periodEndOf(data) : null
+
     // The claim and the change, in one transaction: of N copies of one
     // delivery exactly one acts, and a change that fails rolls its claim back
     // so Polar's retry can still land. A delivery with no usable id is acted
     // on without a claim (the library already required the header, so this
     // is belt and braces rather than a path Polar takes).
     type Outcome = 'duplicate' | 'unusable_account' | 'unknown_product' | 'upgraded' | 'downgraded'
+      | 'end_scheduled' | 'end_cleared' | 'no_period_end' | 'other_subscription'
     const outcome: Outcome = await sql.begin(async (tx) => {
       if (webhookId) {
         const [claim] = await tx`
@@ -163,29 +190,51 @@ export async function webhooksRoute(app: FastifyInstance) {
       if (!isUuid(accountId)) return 'unusable_account' as const
       if (isUpgradeEvent) {
         if (!plan) return 'unknown_product' as const
+        // A purchase clears any end a cancel had scheduled, and remembers
+        // the subscription (when the event names one) so a later cancel of
+        // a different one cannot end this plan.
         await tx`
           UPDATE accounts
           SET
-            plan                = ${plan},
-            polar_customer_id   = ${polarCustomerId},
-            monthly_calls       = 0,
-            monthly_events      = 0,
-            billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
+            plan                  = ${plan},
+            polar_customer_id     = ${polarCustomerId},
+            polar_subscription_id = COALESCE(${subscriptionId || null}, polar_subscription_id),
+            plan_ends_at          = NULL,
+            monthly_calls         = 0,
+            monthly_events        = 0,
+            billing_period_start  = date_trunc('month', CURRENT_DATE)::DATE
           WHERE id = ${accountId}
         `
         return 'upgraded' as const
       }
-      await tx`
+      // Everything below changes this account only for its own subscription.
+      const ours = tx`(polar_subscription_id IS NULL OR ${subscriptionId} = '' OR polar_subscription_id = ${subscriptionId})`
+      if (isCancelEvent) {
+        // Without a period end there is nothing to schedule: the plan stays
+        // as it is, and subscription.revoked ends it when Polar ends access.
+        // Downgrading here instead is the bug this replaced.
+        if (!endsAt) return 'no_period_end' as const
+        const hit = await tx`UPDATE accounts SET plan_ends_at = ${endsAt} WHERE id = ${accountId} AND ${ours} RETURNING id`
+        return hit.length ? 'end_scheduled' as const : 'other_subscription' as const
+      }
+      if (isUncancelEvent) {
+        const hit = await tx`UPDATE accounts SET plan_ends_at = NULL WHERE id = ${accountId} AND ${ours} RETURNING id`
+        return hit.length ? 'end_cleared' as const : 'other_subscription' as const
+      }
+      const hit = await tx`
         UPDATE accounts
         SET
-          plan              = 'free',
-          polar_customer_id = NULL,
-          monthly_calls     = 0,
-          monthly_events    = 0,
-          billing_period_start = date_trunc('month', CURRENT_DATE)::DATE
-        WHERE id = ${accountId}
+          plan                  = 'free',
+          polar_customer_id     = NULL,
+          polar_subscription_id = NULL,
+          plan_ends_at          = NULL,
+          monthly_calls         = 0,
+          monthly_events        = 0,
+          billing_period_start  = date_trunc('month', CURRENT_DATE)::DATE
+        WHERE id = ${accountId} AND ${ours}
+        RETURNING id
       `
-      return 'downgraded' as const
+      return hit.length ? 'downgraded' as const : 'other_subscription' as const
     })
 
     if (outcome === 'duplicate') {
@@ -223,8 +272,12 @@ export async function webhooksRoute(app: FastifyInstance) {
       return reply.send({ received: true })
     }
 
-    if (outcome === 'upgraded') request.log.info({ accountId, polarCustomerId, plan, productId }, 'Account upgraded')
-    else request.log.info({ accountId }, 'Account downgraded to free')
+    if (outcome === 'upgraded') request.log.info({ accountId, polarCustomerId, plan, productId, subscriptionId }, 'Account upgraded')
+    else if (outcome === 'downgraded') request.log.info({ accountId, subscriptionId }, 'Account downgraded to free')
+    else if (outcome === 'end_scheduled') request.log.info({ accountId, subscriptionId, endsAt }, 'Plan canceled: it runs to the end of the paid period')
+    else if (outcome === 'end_cleared') request.log.info({ accountId, subscriptionId }, 'Cancellation withdrawn: the plan continues')
+    else if (outcome === 'no_period_end') request.log.warn({ accountId, subscriptionId, eventType }, 'subscription.canceled without a period end: plan left as it is until subscription.revoked')
+    else request.log.info({ accountId, subscriptionId, eventType }, 'Polar webhook for a subscription that is not the one behind this plan: no change')
 
     return reply.send({ received: true })
   })

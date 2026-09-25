@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { sessionSecret, hmacHex, readCookie, safeEqual } from '../lib/session-secret.js'
 import { sql } from '../db/index.js'
-import { PLAN_LIMITS, checkoutPath } from '../integrations/polar.js'
+import { PLAN_LIMITS, checkoutPath, createCheckoutSession, isPolarCheckoutUrl } from '../integrations/polar.js'
 import { eventLimitFor } from '../lib/event-quota.js'
 import { limiterKey } from '../lib/client-ip.js'
 import { head, BP } from '../ui/theme.js'
@@ -114,6 +114,8 @@ export type Viewer = {
   monthlyCalls: number
   /** Records and steps stored this billing month (migration 028). */
   monthlyEvents: number
+  /** When a canceled plan ends, ISO, or null (migration 029). */
+  planEndsAt: string | null
   /** The balance every new customer of this account is born with. NULL = no limit. */
   defaultBudgetUnits: number | null
   /** How this browser signed in: a pasted key (the legacy login) or as a person. */
@@ -429,7 +431,7 @@ export async function appRoute(app: FastifyInstance) {
   // console session (the cookie is scoped Path=/app, deliberately), so it sends
   // the click here, where the session IS visible, and this route decides:
   //
-  //   session       a 200 hand-off page that refreshes into /checkout/:tier for
+  //   session       a 200 hand-off page that refreshes into /app/checkout/:tier for
   //                 that account. A page, not a redirect: see APP_CSP for why a
   //                 redirect chain from the login form is blocked in Chrome.
   //   no session    the login page, with this path as its validated next, so
@@ -448,7 +450,28 @@ export async function appRoute(app: FastifyInstance) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', APP_CSP)
     if (!viewer) return reply.send(loginPage('', `/app/upgrade/${tier}`))
-    return reply.send(handoffPage(tier, checkoutPath(tier, viewer.accountId)))
+    return reply.send(handoffPage(tier, checkoutPath(tier)))
+  })
+
+  // Where the hand-off page goes: the one route that mints a Polar checkout
+  // session (S24, 2026-09-25). The account is the signed-in viewer's, a
+  // person's or a key session's, and nothing in the URL is read: an
+  // ?account_id= on it, or on /pricing, or on the old /checkout/:tier, cannot
+  // route a purchase to another account. No session: the sign-in page for
+  // this tier, which comes back here after. A GET, as the old public route
+  // was: the worst a cross-site link can do is open a checkout for the
+  // visitor's own account, and SameSite=Lax sends the cookie on that
+  // top-level navigation only. Any failure lands on /pricing, never a 500.
+  app.get('/app/checkout/:tier', publicRoute(), async (request, reply) => {
+    const tier = (request.params as { tier: string }).tier
+    if (!TIERS.has(tier)) return reply.redirect('/pricing', 302)
+    reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin').header('X-Robots-Tag', 'noindex')
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect(`/app/upgrade/${tier}`, 302)
+    const url = await createCheckoutSession(tier, viewer.accountId)
+    // createCheckoutSession already refuses anything off polar.sh; the check
+    // is repeated at the sink so the redirect never depends on it.
+    return reply.redirect(isPolarCheckoutUrl(url) ? url : '/pricing', 302)
   })
 }
 
@@ -504,7 +527,9 @@ function verifyToken(token: string, secret: string): string | null {
 async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Viewer | null> {
   const [row] = await sql`
     SELECT u.id AS user_id, u.email AS user_email, u.session_epoch,
-           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.monthly_events, a.default_budget_units
+           a.id AS account_id, a.email,
+           CASE WHEN a.plan_ends_at IS NOT NULL AND a.plan_ends_at <= NOW() THEN 'free' ELSE a.plan END AS plan,
+           a.plan_ends_at, a.monthly_calls, a.monthly_events, a.default_budget_units
     FROM users u JOIN accounts a ON a.owner_user_id = u.id
     WHERE u.id = ${u.userId}
   `
@@ -525,6 +550,7 @@ async function loadUserViewer(u: { userId: string; epoch: number }): Promise<Vie
     plan: (row.plan as string) ?? 'free',
     monthlyCalls: Number(row.monthlyCalls ?? 0),
     monthlyEvents: Number(row.monthlyEvents ?? 0),
+    planEndsAt: row.planEndsAt ? new Date(row.planEndsAt as string).toISOString() : null,
     defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
     via: 'user',
     userId: row.userId as string,
@@ -555,7 +581,9 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
     SELECT k.id AS key_id, k.key_prefix, k.key_last4, k.label,
            (k.revoked_at IS NOT NULL AND k.revoked_at <= NOW()) AS is_revoked,
            (k.expires_at IS NOT NULL AND k.expires_at <= NOW()) AS is_expired,
-           a.id AS account_id, a.email, a.plan, a.monthly_calls, a.monthly_events, a.default_budget_units
+           a.id AS account_id, a.email,
+           CASE WHEN a.plan_ends_at IS NOT NULL AND a.plan_ends_at <= NOW() THEN 'free' ELSE a.plan END AS plan,
+           a.plan_ends_at, a.monthly_calls, a.monthly_events, a.default_budget_units
     FROM developer_api_keys k
     JOIN accounts a ON a.id = k.account_id
     WHERE k.id = ${keyId}
@@ -575,6 +603,7 @@ export async function loadSession(request: FastifyRequest): Promise<Viewer | nul
     plan: (row.plan as string) ?? 'free',
     monthlyCalls: Number(row.monthlyCalls ?? 0),
     monthlyEvents: Number(row.monthlyEvents ?? 0),
+    planEndsAt: row.planEndsAt ? new Date(row.planEndsAt as string).toISOString() : null,
     defaultBudgetUnits: row.defaultBudgetUnits == null ? null : Number(row.defaultBudgetUnits),
     via: 'key',
     userId: null,
@@ -1149,6 +1178,7 @@ const DEMO_VIEWER: Viewer = {
   plan: 'builder',
   monthlyCalls: 12480,
   monthlyEvents: 13022,
+  planEndsAt: null,
   defaultBudgetUnits: 5000,
   via: 'key',
   userId: null,
@@ -2188,7 +2218,7 @@ ${siteFooter()}
 
 /**
  * The 200 page between a signed-in click on /pricing and Polar. It refreshes
- * into /checkout/:tier at once; the link is the fallback for a client that
+ * into /app/checkout/:tier at once; the link is the fallback for a client that
  * ignores meta refresh. A page rather than a 302 on purpose: a redirect chain
  * that starts at the login form and ends at polar.sh is what Chrome's
  * form-action check blocks, and the block is silent. See APP_CSP.
@@ -2348,12 +2378,17 @@ function accountCard(p: Page): string {
   const quota = limit === null
     ? `<b>${num(plan.monthlyCalls)}</b> calls this month · metered, no cap`
     : `<b>${num(plan.monthlyCalls)}</b> / ${num(limit)} calls · this billing month${pct >= 75
-        ? ` · <a href="/pricing?account_id=${encodeURIComponent(p.v.accountId)}">raise the ceiling</a>` : ''}`
+        ? ` · <a href="/pricing">raise the ceiling</a>` : ''}`
   // The records-and-steps allowance (src/lib/event-quota.ts), one line under
   // the calls, and only where it is a cap.
   const eventLimit = eventLimitFor(plan.plan)
   const events = eventLimit === null ? null
     : `<b>${num(plan.monthlyEvents)}</b> / ${num(eventLimit)} records and steps`
+  // A canceled plan runs to the end of its paid period (src/lib/plan-period.ts)
+  // and says when; past that moment the plan above already reads free.
+  const ends = !p.demo && plan.planEndsAt && plan.plan !== 'free'
+    ? `Canceled · ${esc(plan.plan)} until <b>${new Date(plan.planEndsAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</b>`
+    : ''
   // The plan's end is a ceiling, so it is the kit's meter with the tick. The
   // share is the meter's own arithmetic from the two numbers; the state class
   // is planOf's, so the colour and the percentage cannot disagree.
@@ -2364,6 +2399,7 @@ function accountCard(p: Page): string {
         ${limit === null ? '' : `<div class="acct-m${cls ? ` is-${cls}` : ''}">${meter(plan.monthlyCalls, limit)}</div>`}
         <div class="acct-q">${quota}</div>
         ${events === null ? '' : `<div class="acct-q">${events}</div>`}
+        ${ends ? `<div class="acct-q">${ends}</div>` : ''}
       </div>`
 }
 
@@ -3168,7 +3204,7 @@ function limitsBlock(p: Page, rangeLabel: string): string {
         <div class="live">
           ${limit === null ? `<span><b>${num(v.monthlyCalls)}</b> calls this month</span>` : `<span><b class="${pct >= 90 ? 'fail' : ''}">${num(v.monthlyCalls)}</b> of ${num(limit)} this month · ${pct}%</span>`}
           ${refusedLine(planRefused)}
-          ${limit !== null && pct >= 75 ? `<a href="/pricing?account_id=${encodeURIComponent(v.accountId)}">Raise the ceiling &rarr;</a>` : ''}
+          ${limit !== null && pct >= 75 ? `<a href="/pricing">Raise the ceiling &rarr;</a>` : ''}
         </div>
       </div>
       <div class="lim">

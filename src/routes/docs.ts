@@ -560,7 +560,7 @@ if (isRefusal(stream)) {
   "plan": "free",
   "monthly_calls": 1000,
   "plan_limit": 1000,
-  "upgrade_url": "https://agentbill.dev/pricing?account_id=acc_..."
+  "upgrade_url": "https://agentbill.dev/pricing"
 }</pre>
 
   <p>That is the raw HTTP shape. Both SDKs then apply one rule to it, and it is the same rule in

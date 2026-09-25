@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { checkoutPath, createCheckoutSession, isPolarCheckoutUrl, PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
+import { PLAN_LIMITS, PLAN_PRICES, PLAN_ORDER } from '../integrations/polar.js'
 import { TIERS_CSS, tierCards, SAME_FEATURES } from '../ui/tiers.js'
-import { isUuid } from '../lib/ids.js'
 import { EVENTS_PER_PREFLIGHT_CALL, eventLimitFor } from '../lib/event-quota.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { softwareLd } from '../ui/ld.js'
@@ -9,51 +8,30 @@ import { ORIGIN, HEADLINE } from '../ui/site.js'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS } from '../ui/chrome.js'
 import { publicRoute } from '../middleware/auth.js'
-import { inlineScript } from '../lib/csp.js'
 import { pixelHashes, pixelExtra } from '../lib/pixel.js'
 
 const num = (n: number) => n.toLocaleString('en-US')
 
 
-// Lifted out of the page template so its hash matches the string emitted.
-const upg = inlineScript(`    document.getElementById('keybtn').addEventListener('click', async function () {
-      var k = document.getElementById('keyin').value.trim()
-      var msg = document.getElementById('keymsg')
-      msg.style.display = 'block'
-      if (!k) { msg.style.color = 'var(--red)'; msg.textContent = 'Paste your API key first.'; return }
-      try {
-        var r = await fetch('/account/upgrade-url', { headers: { Authorization: 'Bearer ' + k } })
-        if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = 'Key not recognized. Check it and try again.'; return }
-        var d = await r.json()
-        document.querySelectorAll('[data-tier]').forEach(function (a) {
-          var t = a.getAttribute('data-tier')
-          if (d.checkout && d.checkout[t]) a.setAttribute('href', d.checkout[t])
-        })
-        msg.style.color = 'var(--green)'
-        msg.textContent = 'Checkout unlocked for your account. Pick a plan above.'
-      } catch (e) {
-        msg.style.color = 'var(--red)'
-        msg.textContent = 'Network error. Try again.'
-      }
-    })`)
-const UPGRADE_JS = upg.html
-export const UPGRADE_HASH = upg.hash
+// The "Already have an API key?" box and its script were removed on
+// 2026-09-25 (S24). It fetched /account/upgrade-url with a pasted key and
+// rewrote the buy buttons into checkout links carrying the account id, on a
+// page that also runs the ad pixels (S12). The buttons go to /app/upgrade/:tier
+// now, which signs the buyer in (with a key too) and mints the checkout for
+// that session's account.
 
 export async function upgradeRoute(app: FastifyInstance) {
   // Served at both /upgrade (in-product links) and /pricing (what ad clickers
   // type; used to 401 because the auth allowlist knew no such path).
   const pricingPage = async (request: FastifyRequest, reply: FastifyReply) => {
-    const accountId = ((request.query as any).account_id as string) ?? ''
-
-    // With ?account_id (preflight's upgrade_url, the console's "raise the
-    // ceiling" link) the button is a real checkout session for that account.
-    // Without it, the button goes to /app/upgrade/:tier, which can see the
-    // console session this page cannot (the cookie is scoped to /app) and
-    // either hands a signed-in buyer straight to Polar or asks for the key
-    // once. It used to go to /register, which sent a buyer who already had an
-    // account off to sign up again.
-    const cta = (tier: string) =>
-      accountId ? checkoutPath(tier, accountId) : `/app/upgrade/${tier}`
+    // Every paid button goes to /app/upgrade/:tier, which can see the console
+    // session this page cannot (the cookie is scoped to /app) and either hands
+    // a signed-in buyer to checkout for THAT session's account or signs them
+    // in first. An ?account_id= on this page (older quota refusals and console
+    // links carried one) is ignored: until 2026-09-25 (S24) it turned every
+    // button into a checkout for whichever account the query named, with no
+    // session at all.
+    const cta = (tier: string) => `/app/upgrade/${tier}`
 
     const paidSummary = PLAN_ORDER.filter((t) => t !== 'free')
       .map((t) => `${t[0].toUpperCase()}${t.slice(1)} $${PLAN_PRICES[t]}`).join('. ')
@@ -73,7 +51,7 @@ export async function upgradeRoute(app: FastifyInstance) {
       jsonLd: softwareLd(),
       mainEntity: `${ORIGIN}/#software`,
       extraHead: pixelSnippet(),
-      scriptHashes: [UPGRADE_HASH, ...pixelHashes()],
+      scriptHashes: [...pixelHashes()],
       scriptOrigins: pixelExtra(),
       css: `${CHROME_CSS}${TIERS_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: Split Studio family, pricing page
@@ -183,18 +161,6 @@ ${siteNav('/pricing', { sticky: false })}
       </ul>
     </section>
 
-    ${accountId ? '' : `
-    <div class="cv-panel havekey">
-      <div class="cv-card">
-        <div class="cv-bar"><span class="cv-bar-t"><b>Already have an API key?</b></span><span class="hk-aside">unlock checkout for your account</span></div>
-        <div class="hk-row">
-          <input id="keyin" class="cv-field m" type="password" placeholder="agb_..." autocomplete="off" spellcheck="false" aria-label="API key" />
-          <button id="keybtn" type="button" class="btn-alt">Unlock checkout</button>
-        </div>
-        <div class="msg-slot"><span class="msg" id="keymsg" aria-live="polite"></span></div>
-      </div>
-    </div>
-${UPGRADE_JS}`}
     <!-- The line that used to open this note said "One runaway retry loop costs more than a
          year of Builder." It is a claim about what a run would have cost, and this product
          cannot know that: it meters units the developer defines and never reads a provider
@@ -215,7 +181,7 @@ ${siteFooter()}
   // only /pricing was canonicalised. Two URLs for one page is a duplicate that
   // a canonical papers over rather than fixes. 301, permanently.
   //
-  // Buy buttons point at /checkout/:tier (see below), which mints a real Polar
+  // Buy buttons point at /app/upgrade/:tier, which signs in and then mints a real Polar
   // session with the account id as metadata; a bare checkout link would drop it.
   // Forward the query. Until 2026-09-06 this dropped it, and preflight's
   // quota refusals hand agents /upgrade?account_id=<id>: the redirect landed
@@ -225,37 +191,30 @@ ${siteFooter()}
     return reply.redirect(`/pricing${q}`, 301)
   })
 
-  // Authenticated helper for the pricing page's "already have a key?" box:
-  // turns a bearer key into checkout links carrying the account metadata, so
-  // existing users can upgrade before they hit a limit. (Auth middleware
-  // resolves the key. This route deliberately carries no publicRoute(), which
-  // is why it sits three lines below two routes that do.)
-  app.get('/account/upgrade-url', async (request, reply) => {
-    const accountId = (request as any).accountId
+  // Kept for any client that still calls it (the /pricing box that did was
+  // removed on 2026-09-25). Bearer-authenticated as before, and it now answers
+  // the paths a browser signs in through: a checkout is minted only for a
+  // console session, never for a URL (S24).
+  app.get('/account/upgrade-url', async (_request, reply) => {
     return reply.send({
       checkout: {
-        builder: checkoutPath('builder', accountId),
-        team: checkoutPath('team', accountId),
-        scale: checkoutPath('scale', accountId),
+        builder: '/app/upgrade/builder',
+        team: '/app/upgrade/team',
+        scale: '/app/upgrade/scale',
       },
     })
   })
 
-  // The buy button lands here, not on buy.polar.sh, so the account id can be
-  // attached to a real checkout SESSION as metadata (a checkout LINK drops it).
-  // Public: it is a plain navigation from the pricing page, the account id is
-  // in the query, and the worst a stranger can do is start a checkout attributed
-  // to an id they already knew. Any failure is a redirect, never a 500 to a
-  // buyer, because a broken buy button on a slow-Polar day should still land
-  // somewhere sensible.
+  // The old buy-button target. Until 2026-09-25 (S24) it minted a Polar
+  // checkout for the ?account_id= in its query, public and with no session,
+  // so a link could start a purchase that landed on somebody else's account;
+  // "the worst a stranger can do" was exactly that. It mints nothing now: it
+  // sends the browser to /app/upgrade/:tier, which signs the buyer in and
+  // checks out the signed-in account (checkoutPath, src/integrations/polar.ts).
+  // The account id in an old link is dropped.
   app.get('/checkout/:tier', publicRoute(), async (request, reply) => {
     const tier = (request.params as { tier: string }).tier
-    const accountId = ((request.query as { account_id?: string }).account_id) ?? ''
-    if (!isUuid(accountId)) return reply.redirect('/register', 302)
-    const url = await createCheckoutSession(tier, accountId)
-    // createCheckoutSession already refuses anything off polar.sh; the check is
-    // repeated at the sink so the redirect never depends on a caller upstream
-    // remembering to. Off-list means /pricing, the same as a failed call.
-    return reply.redirect(isPolarCheckoutUrl(url) ? url : '/pricing', 302)
+    const known = tier === 'builder' || tier === 'team' || tier === 'scale'
+    return reply.redirect(known ? `/app/upgrade/${tier}` : '/pricing', 302)
   })
 }
