@@ -175,7 +175,7 @@ ${line('/integrations', 'Integrations|What AgentBill publishes and where to inst
 
 ## Optional
 
-${line('/pricing', 'Pricing|The four plans and the monthly preflight-call limit each includes.')}${line('/register', 'Get an API key|Email in, one agb_ key out. Free plan, no card.')}${line('/blog/monthly-caps-wont-save-you', "Why monthly caps don't protect you from one bad LLM run|Why a calendar month is the wrong unit for a single run.")}${line('/blog/how-preflight-avoids-double-billing', 'How preflight avoids double-billing under concurrent load|Reservations, idempotency keys and concurrent settlement.')}${line('/about', 'About|Who builds this, and what it deliberately is not.')}${line('/status', 'Status|Service status.')}${line('/he/cost-per-client', 'כמה כל לקוח עולה לך|Hebrew, for n8n and Make operators: working out what one client costs to run.')}${line('/terms', 'Terms|Terms of service.')}${line('/privacy', 'Privacy|Privacy policy.')}- [Console](${ORIGIN}/app): Your tasks, refusals and keys. Sample data at /app?demo=1, no account needed.
+${line('/pricing', 'Pricing|The four plans and the monthly preflight-call limit each includes.')}${line('/register', 'Get an API key|Email in, one agb_ key out. Free plan, no card.')}${line('/blog/monthly-caps-wont-save-you', "Why monthly caps don't protect you from one bad LLM run|Why a calendar month is the wrong unit for a single run.")}${line('/blog/how-preflight-avoids-double-billing', 'How preflight avoids double-billing under concurrent load|Reservations, idempotency keys and concurrent settlement.')}${line('/about', 'About|Who builds this, and what it deliberately is not.')}${line('/status', 'Status|Service status.')}${line('/he/cost-per-client', 'כמה כל לקוח עולה לך|Hebrew, for n8n and Make operators: working out what one client costs to run.')}${line('/terms', 'Terms|Terms of service.')}${line('/privacy', 'Privacy|Privacy policy.')}${line('/security', 'Security|How to report a vulnerability, what the SDKs send, and how to revoke a leaked key.')}- [Console](${ORIGIN}/app): Your tasks, refusals and keys. Sample data at /app?demo=1, no account needed.
 ${self === 'short'
   ? `- [llms-full.txt](${ORIGIN}/llms-full.txt): The same product with the whole HTTP contract, the reservation lifecycle and a worked cross-process example.`
   : `- [llms.txt](${ORIGIN}/llms.txt): The same product in short: the summary, the quick starts and the link lists.`}`
@@ -658,10 +658,13 @@ anomaly.detected payload to the account webhook if one is configured.
 
 ### Keys, webhook, health
 
-GET /keys, POST /keys/generate, POST /keys/rotate (issues a new key and keeps the old one working
+GET /keys (200 a page by default, limit up to 500, next_cursor when there are more), POST /keys/generate, POST /keys/rotate (issues a new key and keeps the old one working
 for 24 hours), POST /keys/revoke (stops authenticating on the next request; the check is one
 predicate on the database clock, so no app-to-database skew can keep a dead key alive). POST
-/webhook-config sets one https URL per account. POST /register is public and takes email, plus
+/webhook-config sets one https URL per account, on a public address (loopback, private,
+link-local and internal hosts are refused, when saved and again when sent), and returns a signing
+secret once; each delivery carries X-AgentBill-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of
+"<t>.<raw body>">, no redirect is followed, and a delivery times out after five seconds. POST /register is public and takes email, plus
 optional name, use_case and stack; a new account gets its key in the response body once, and the
 201 also carries the console's session cookie for that key, so the browser that registered is
 signed in at /app. An email that already has an account is sent a single-use link to get back in,
