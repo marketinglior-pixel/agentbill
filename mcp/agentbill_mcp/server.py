@@ -4,6 +4,7 @@ import os
 import sys
 import uuid
 from typing import Optional
+from urllib.parse import urlsplit
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -18,6 +19,35 @@ mcp = FastMCP(
 )
 
 BASE_URL = os.getenv("AGENTBILL_BASE_URL", "https://agentbill.dev")
+
+_LOOPBACK_HTTP_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _base_url() -> str:
+    """BASE_URL if the API key may be sent there, else raise ValueError.
+
+    Every request carries the API key, so it only goes over https, or over
+    plain http to this machine (localhost, 127.0.0.1, [::1], any port) for a
+    local server. The same rule and the same sentence as the Python and Node
+    SDKs. Checked when a tool makes a request, not at start, so a bad value
+    fails the tool call with this message instead of the server's launch.
+    """
+    try:
+        parts = urlsplit(str(BASE_URL))
+        host = parts.hostname
+    except ValueError:
+        parts, host = None, None
+    scheme = parts.scheme.lower() if parts else ""
+    if scheme == "https" and host:
+        return BASE_URL
+    if scheme == "http" and host in _LOOPBACK_HTTP_HOSTS:
+        return BASE_URL
+    # Host and port only: a netloc can carry user:password@, never echo that.
+    shown = f"{scheme}://{parts.netloc.rpartition('@')[2]}" if parts and scheme else "a value that is not a URL"
+    raise ValueError(
+        "AGENTBILL_BASE_URL must be an https URL (plain http is accepted only for localhost, "
+        f"127.0.0.1 and [::1]). Refusing to send the API key to {shown}."
+    )
 
 
 def _headers() -> dict:
@@ -81,7 +111,7 @@ def preflight(
         payload["idempotency_key"] = idempotency_key
 
     with httpx.Client(timeout=5) as client:
-        resp = client.post(f"{BASE_URL}/preflight", json=payload, headers=_headers())
+        resp = client.post(f"{_base_url()}/preflight", json=payload, headers=_headers())
 
     # A rejected request carries no "approved" key. Never fall through to the
     # success path on an error response: a gate that approves when it cannot
@@ -166,7 +196,7 @@ def record_event(
         payload["metadata"] = metadata
 
     with httpx.Client(timeout=5) as client:
-        resp = client.post(f"{BASE_URL}/events", json=payload, headers=_headers())
+        resp = client.post(f"{_base_url()}/events", json=payload, headers=_headers())
 
     if resp.status_code == 402:
         data = resp.json()

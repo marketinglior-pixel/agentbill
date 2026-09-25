@@ -84,7 +84,7 @@ The server answers approved=False when the customer has no remaining balance, an
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AGENTBILL_API_KEY` | Yes | none | Your AgentBill API key |
-| `AGENTBILL_BASE_URL` | No | `https://agentbill.dev` | Override for self-hosted |
+| `AGENTBILL_BASE_URL` | No | `https://agentbill.dev` | Override for self-hosted. Must be `https`, or plain `http` to `localhost`, `127.0.0.1` or `[::1]` (since 0.3.0); anything else fails the tool call before a request is sent |
 | `MCP_TRANSPORT` | No | `stdio` | Set to `http` to serve streamable HTTP at `/mcp` instead of stdio |
 | `AGENTBILL_MCP_HOST` | No | `127.0.0.1` | HTTP mode only. Interface to bind |
 | `AGENTBILL_MCP_PORT` | No | `8080` | HTTP mode only. Port to bind |

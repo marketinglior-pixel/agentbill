@@ -140,3 +140,34 @@ def test_http_app_refuses_a_foreign_host_header():
         assert bad_origin.status_code == 403
         local = client.post("/mcp", json=body, headers={**headers, "host": "127.0.0.1:8080"})
         assert local.status_code == 200
+
+
+# AGENTBILL_BASE_URL: https only, plain http to this machine ------------------
+# 0.3.0: every request carries the API key, so the server refuses to send it
+# over plain http to another host. Same rule and sentence as both SDKs.
+
+@pytest.mark.parametrize("base", [
+    "http://example.com", "http://agentbill.dev", "HTTP://example.com:80", "ftp://example.com",
+    "not a url", "http://user:secret@evil.example", "https://",
+])
+@pytest.mark.parametrize("tool", ["preflight", "record_event"])
+def test_a_non_https_base_url_is_refused_before_a_request(monkeypatch, base, tool):
+    seen = _answer(monkeypatch, 200, {"approved": True})
+    monkeypatch.setattr(server, "BASE_URL", base)
+    with pytest.raises(ValueError) as e:
+        getattr(server, tool)(agent_id="a")
+    msg = str(e.value)
+    assert msg.startswith("AGENTBILL_BASE_URL must be an https URL (plain http is accepted only for localhost, "
+                          "127.0.0.1 and [::1]). Refusing to send the API key to ")
+    assert "secret" not in msg
+    assert seen == []                                   # nothing went out
+
+
+@pytest.mark.parametrize("base", [
+    "https://agentbill.test", "http://localhost:3992", "http://127.0.0.1:1", "http://[::1]:8080", "http://LOCALHOST",
+])
+def test_https_and_loopback_http_are_allowed(monkeypatch, base):
+    seen = _answer(monkeypatch, 200, {"approved": True})
+    monkeypatch.setattr(server, "BASE_URL", base)
+    assert server.preflight(agent_id="a")["approved"] is True
+    assert len(seen) == 1                                # and the request went out

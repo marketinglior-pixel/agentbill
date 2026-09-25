@@ -20,6 +20,13 @@ in the commit history of this repository.
   answer without `approved` (a proxy page, a truncated body) as approved. Any
   other value, or a body that is not an object, now returns
   `approved: False`.
+- **`AGENTBILL_BASE_URL` must be `https`.** Plain `http` is accepted only for
+  `localhost`, `127.0.0.1` and `[::1]` (any port), the same rule as the SDKs.
+  Any other value fails the `preflight` or `record_event` call with
+  `ValueError: AGENTBILL_BASE_URL must be an https URL (plain http is accepted only for localhost, 127.0.0.1 and [::1]). Refusing to send the API key to <scheme>://<host>.`
+  before a request is sent, because every request carries your API key. The
+  server itself still starts. 0.2.2 sent the key to whatever the variable
+  named.
 - The `mcp` dependency floor is now `>=1.10.0,<2` (was `>=1.0.0,<2`): HTTP
   mode needs `TransportSecuritySettings`, added in 1.10.0.
 
