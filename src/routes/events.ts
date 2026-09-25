@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { unitsOf, unitsOrNull } from '../db/int8.js'
@@ -11,18 +11,77 @@ import { priceEvent } from '../lib/prices.js'
 
 const ALERT_THRESHOLD = 800
 
-async function maybeSendThresholdAlert(customerRef: string, usedUnits: number, prevUsedUnits: number) {
-  if (!ownerMailReady()) return
-  if (prevUsedUnits >= ALERT_THRESHOLD || usedUnits < ALERT_THRESHOLD) return
-  await mailOwner({
-    subject: `AgentBill: customer "${customerRef}" has used ${usedUnits} units`,
+/**
+ * How many 800-unit alerts one account may cause in a UTC day, and how many all
+ * accounts together may. A real account crossing the line with a few customers
+ * in one day is the signal this mail exists for; the tenth in a day tells the
+ * owner nothing the third did not, and an account minting customer ids to
+ * cross it is a flood of the owner's mailbox. The global term is there because
+ * accounts are free to make.
+ */
+export const USAGE_ALERTS_PER_ACCOUNT_PER_DAY = 3
+export const USAGE_ALERTS_PER_DAY = 20
+
+const esc = (v: unknown) =>
+  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * The mail itself. customerRef is whatever string the caller chose (zId
+ * rejects control characters, not markup), so it is escaped in the body and
+ * stripped of markup characters in the subject. Exported for the harness.
+ */
+export function usageAlertMail(accountId: string, customerRef: string, usedUnits: number): { subject: string; html: string } {
+  return {
+    subject: `AgentBill: customer "${customerRef.replace(/[<>"&]/g, '').slice(0, 64)}" has used ${usedUnits} units`,
     html: `
-      <p>Customer <strong>${customerRef}</strong> has used <strong>${usedUnits} units</strong>, past the ${ALERT_THRESHOLD}-unit alert threshold. This is a usage signal, not the account's plan quota, which is counted in preflight calls per month.</p>
+      <p>Customer <strong>${esc(customerRef)}</strong> on account <code>${esc(accountId)}</code> has used <strong>${usedUnits} units</strong>, past the ${ALERT_THRESHOLD}-unit alert threshold. This is a usage signal, not the account's plan quota, which is counted in preflight calls per month.</p>
       <p>This is a good time to reach out and convert them to a paying customer.</p>
       <p><a href="https://agentbill.dev/admin">Open the admin radar</a></p>
     `,
-  })
+  }
 }
+
+/**
+ * The owner alert for one customer crossing ALERT_THRESHOLD. Never throws.
+ *
+ * The claim (migration 022) makes it once per customer, and the claim row's
+ * rank decides whether it is mailed: its position among this account's claims
+ * earlier the same UTC day, and among all claims that day. A rank, not a count
+ * read at a moment, for the reason src/lib/mail.ts gives. The row is written
+ * whether or not a mailer is configured, so the decision is the same in the
+ * harness as in production.
+ */
+async function maybeSendThresholdAlert(
+  log: FastifyBaseLogger, accountId: string, customerRef: string, usedUnits: number, prevUsedUnits: number,
+) {
+  if (prevUsedUnits >= ALERT_THRESHOLD || usedUnits < ALERT_THRESHOLD) return
+  const [claim] = await sql`
+    INSERT INTO customer_usage_alerts (account_id, customer_ref, used_units)
+    VALUES (${accountId}, ${customerRef}, ${usedUnits})
+    ON CONFLICT (account_id, customer_ref) DO NOTHING
+    RETURNING id
+  `
+  if (!claim) return
+  const [rank] = await sql<{ account: number; dayAll: number }[]>`
+    SELECT (SELECT count(*)::int FROM customer_usage_alerts
+             WHERE account_id = ${accountId} AND id < ${claim.id}
+               AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS account,
+           (SELECT count(*)::int FROM customer_usage_alerts
+             WHERE id < ${claim.id}
+               AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS day_all
+  `
+  if (!rank || rank.account >= USAGE_ALERTS_PER_ACCOUNT_PER_DAY || rank.dayAll >= USAGE_ALERTS_PER_DAY) {
+    log.warn({ accountId, accountRank: rank?.account, dayRank: rank?.dayAll }, 'usage alert suppressed: past the daily cap')
+    return
+  }
+  if (!ownerMailReady()) return
+  const sent = await mailOwner(usageAlertMail(accountId, customerRef, usedUnits))
+  if (sent) await sql`UPDATE customer_usage_alerts SET emailed = true WHERE id = ${claim.id}`
+}
+
+/** events.metadata is stored as given: this is how much of it a record may carry. */
+export const METADATA_MAX_BYTES = 8 * 1024
+export const METADATA_MAX_KEYS = 32
 
 const EventBody = z.object({
   customer_id:      zId(),
@@ -57,7 +116,9 @@ const statusOf = (r: NamedReservation | null): ReservationStatus | null =>
   r == null ? null : r.state === 'open' ? 'settled' : r.state
 
 export async function eventsRoute(app: FastifyInstance) {
-  app.post('/events', async (request, reply) => {
+  // 64 KB for the whole body: metadata is capped at 8 KB below, and nothing
+  // else in a record is more than a few ids. Fastify's default was 1 MB.
+  app.post('/events', { bodyLimit: 64 * 1024 }, async (request, reply) => {
     const parsed = EventBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(422).send({
@@ -70,6 +131,26 @@ export async function eventsRoute(app: FastifyInstance) {
       customer_id: customerRef, event_type, idempotency_key, units: reportedUnits,
       metadata, success, task_ref, reservation_id, usage_missing,
     } = parsed.data
+    // Bounded before anything is written. The column is jsonb and nothing
+    // capped it, so 1 MB of metadata per record was accepted (50 records added
+    // 30 MB to the table in the audit). wrap() writes eight keys and well under
+    // 1 KB, so neither bound is near anything the SDKs send.
+    if (metadata !== undefined) {
+      const keys = Object.keys(metadata).length
+      if (keys > METADATA_MAX_KEYS) {
+        return reply.code(422).send({
+          error: 'validation_error',
+          message: `metadata has ${keys} keys; the limit is ${METADATA_MAX_KEYS}.`,
+        })
+      }
+      const bytes = Buffer.byteLength(JSON.stringify(metadata), 'utf8')
+      if (bytes > METADATA_MAX_BYTES) {
+        return reply.code(422).send({
+          error: 'validation_error',
+          message: `metadata is ${bytes} bytes as JSON; the limit is ${METADATA_MAX_BYTES}.`,
+        })
+      }
+    }
     const usageMissing = usage_missing === true
     // The event row's metadata, as JSON text jsonb accepts, built before the
     // transaction so nothing a caller put in it can roll the record back.
@@ -352,7 +433,8 @@ export async function eventsRoute(app: FastifyInstance) {
         })
       }
 
-      maybeSendThresholdAlert(result.customerRef, result.usedUnits, result.prevUsedUnits).catch(() => {})
+      maybeSendThresholdAlert(request.log, accountId, result.customerRef, result.usedUnits, result.prevUsedUnits)
+        .catch((err) => request.log.warn({ err }, 'usage alert failed'))
 
       const t = result.taskRow
       const body = {
