@@ -550,8 +550,22 @@ export interface TaskStatus {
   reservedUnits: number
   remainingUnits: number
   exceeded: boolean
-  /** What the numbers count: 'unit' (yours) or 'token'. getTask always sets it. */
-  unit?: 'unit' | 'token'
+  /** What the numbers count: 'unit' (yours), 'token', or 'usd' (a job whose
+   *  ceiling is in dollars: every *Units field is then micro-dollars, 1,000,000
+   *  is $1). getTask always sets it. */
+  unit?: 'unit' | 'token' | 'usd'
+  /** On a job in dollars only (unit 'usd'): the same figures in dollars, as
+   *  GET /tasks/:task_ref returns them (ceiling_usd, used_usd, reserved_usd,
+   *  remaining_usd), list-price estimates. */
+  ceilingUsd?: number
+  usedUsd?: number
+  reservedUsd?: number
+  remainingUsd?: number
+  /** On a job in dollars only: calls that could not be priced, charged their
+   *  reservation or the job's estimate, never $0. */
+  unpricedCalls?: number
+  /** On a job in dollars only: what "list price" means here, the server's sentence. */
+  listPriceLabel?: string
   /** Calls recorded with usageMissing, charged at least the reservation they
    *  settled (units as sent when none was open). getTask always sets it. */
   usageMissingCalls?: number
@@ -577,8 +591,18 @@ export async function getTask(taskRef: string): Promise<TaskStatus> {
     reservedUnits: data.reserved_units,
     remainingUnits: data.remaining_units,
     exceeded: Boolean(data.exceeded),
-    unit: data.unit === 'token' ? 'token' : 'unit',
+    // 0.5.0 read every unit but 'token' as 'unit', so a job in dollars came
+    // back as 'unit' with its numbers in micro-dollars and no dollar figure.
+    unit: data.unit === 'token' || data.unit === 'usd' ? data.unit : 'unit',
     usageMissingCalls: typeof data.usage_missing_calls === 'number' ? data.usage_missing_calls : 0,
+    ...(data.unit === 'usd' ? {
+      ceilingUsd: data.ceiling_usd,
+      usedUsd: data.used_usd,
+      reservedUsd: data.reserved_usd,
+      remainingUsd: data.remaining_usd,
+      unpricedCalls: typeof data.unpriced_calls === 'number' ? data.unpriced_calls : 0,
+      listPriceLabel: data.list_price_label,
+    } : {}),
     ...(data.breakdown && typeof data.breakdown === 'object' ? { breakdown: data.breakdown } : {}),
   }
 }
