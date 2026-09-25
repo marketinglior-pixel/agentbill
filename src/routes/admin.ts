@@ -8,14 +8,29 @@ import { publicRoute } from '../middleware/auth.js'
 import { head, BP } from '../ui/theme.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
 import { KIT_CSS, tag } from '../ui/kit.js'
+import { sameOrigin } from './app.js'
+import { limiterKey } from '../lib/client-ip.js'
+import { createLimiter } from '../lib/rate-limiter.js'
 
 const WARN_AT = 800
 const SESSION_COOKIE = 'agentbill_admin'
-const SESSION_MAX_AGE = 7 * 24 * 3_600 // seconds
+// Twelve hours, and carried inside the signed token, not only in the cookie's
+// Max-Age: a copied cookie stops working when the token says so, whatever the
+// browser that holds it does. It was seven days, and the token was a constant.
+const SESSION_MAX_AGE = 12 * 3_600 // seconds
+
+// Attempts per network on /admin/login, the same shape as the console's
+// allowLogin (src/routes/app.ts): counted per limiterKey (the IPv4 address or
+// the IPv6 /64), before the secret is compared. There was no limit at all, so
+// the secret could be guessed as fast as the server answered.
+const adminLogins = createLimiter({ max: 10, windowMs: 15 * 60_000, maxEntries: 10_000 })
 
 export async function adminRoute(app: FastifyInstance) {
 
-  // JSON, curl -H "Authorization: Bearer <ADMIN_SECRET>" /admin/accounts
+  // JSON, for the signed-in owner. Same session as the dashboard: sign in at
+  // /admin, then this is readable in that browser. It used to also accept
+  // Authorization: Bearer <ADMIN_SECRET>, the raw secret on every request;
+  // nothing in this repository called it that way, so that door is closed.
   app.get('/admin/accounts', publicRoute(), async (request, reply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send({ error: 'unauthorized' })
@@ -39,29 +54,69 @@ export async function adminRoute(app: FastifyInstance) {
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
   // The secret never appears in a URL (query params leak into logs and browser history).
   app.post('/admin/login', publicRoute(), async (request, reply) => {
+    reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
+    if (!sameOrigin(request)) return reply.code(403).send(loginPage('Sign in from this page.'))
+    const network = limiterKey(request)
+    if (!adminLogins.hit(network).allowed) {
+      request.log.warn({ network }, 'admin login refused: too many attempts from this network')
+      return reply.code(429).send(loginPage('Too many attempts. Try again in fifteen minutes.'))
+    }
     const body = request.body as Record<string, unknown>
     const secret = typeof body?.secret === 'string' ? body.secret : ''
     const expected = process.env.ADMIN_SECRET ?? ''
     if (!expected || !safeEqual(secret, expected)) {
-      reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
+      // Never the value typed: a wrong secret is often the right one with a typo.
+      request.log.warn({ network, configured: Boolean(expected) }, 'admin login failed')
       return reply.code(401).send(loginPage('Wrong secret.'))
     }
+    request.log.info({ network }, 'admin login')
     reply.header(
       'Set-Cookie',
-      `${SESSION_COOKIE}=${sessionToken(expected)}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${SESSION_MAX_AGE}`
+      `${SESSION_COOKIE}=${mintAdminToken(expected)}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${SESSION_MAX_AGE}`
     )
-    return reply.redirect('/admin')
+    return reply.redirect('/admin', 303)
+  })
+
+  // Clears this browser's session. The token is stateless, so a copy of it
+  // taken elsewhere still works until its expiry (twelve hours at most);
+  // rotating ADMIN_SECRET ends every session at once.
+  app.post('/admin/logout', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    reply.header('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=0`)
+    return reply.redirect('/admin', 303)
   })
 }
 
 // ---------------------------------------------------------------------------
-// Auth, accepts Bearer header (curl) OR the session cookie (browser).
-// The cookie holds an HMAC derived from ADMIN_SECRET, not the secret itself,
-// so rotating the secret invalidates all sessions.
+// Auth: the session cookie, and nothing else.
+//
+// The cookie was HMAC(ADMIN_SECRET, a constant): the same value on every login,
+// forever, so one copied cookie was the dashboard until the secret rotated. It
+// is now <issued>.<expires>.<mac>, the mac over both times and a version
+// label, keyed by ADMIN_SECRET, and every request checks the mac and the
+// expiry. Rotating the secret still invalidates every session.
 // ---------------------------------------------------------------------------
 
-function sessionToken(secret: string): string {
-  return createHmac('sha256', secret).update('agentbill-admin-session').digest('hex')
+const ADMIN_TOKEN_LABEL = 'agentbill-admin-session-v2'
+
+function adminMac(secret: string, iat: number, exp: number): string {
+  return createHmac('sha256', secret).update(`${ADMIN_TOKEN_LABEL}.${iat}.${exp}`).digest('hex')
+}
+
+function mintAdminToken(secret: string, now = Date.now()): string {
+  const iat = Math.floor(now / 1000)
+  const exp = iat + SESSION_MAX_AGE
+  return `${iat}.${exp}.${adminMac(secret, iat, exp)}`
+}
+
+/** True for a token this secret minted that has not expired. */
+export function verifyAdminToken(token: string, secret: string, now = Date.now()): boolean {
+  const m = /^(\d{10})\.(\d{10})\.([0-9a-f]{64})$/.exec(token)
+  if (!m || !secret) return false
+  const iat = Number(m[1]), exp = Number(m[2]), t = Math.floor(now / 1000)
+  if (exp - iat !== SESSION_MAX_AGE) return false
+  if (iat > t + 60 || exp <= t) return false
+  return safeEqual(m[3], adminMac(secret, iat, exp))
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -79,15 +134,11 @@ function readCookie(header: string, name: string): string {
   return ''
 }
 
-function checkAuth(request: { headers: { authorization?: string; cookie?: string } }): boolean {
+function checkAuth(request: { headers: { cookie?: string } }): boolean {
   const expected = process.env.ADMIN_SECRET ?? ''
   if (!expected) return false
-
-  const bearer = (request.headers.authorization ?? '').replace(/^Bearer /, '')
-  if (bearer && safeEqual(bearer, expected)) return true
-
   const cookie = readCookie(request.headers.cookie ?? '', SESSION_COOKIE)
-  return cookie !== '' && safeEqual(cookie, sessionToken(expected))
+  return cookie !== '' && verifyAdminToken(cookie, expected)
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +175,7 @@ const CSS = `${KIT_CSS}${MARK_CSS}
             padding-inline: var(--gutter); gap: var(--s4); }
   nav.top .logo { display: flex; align-items: center; gap: 9px; font-family: var(--mono);
                   font-weight: 700; font-size: var(--fs-body); color: var(--text); text-decoration: none; }
+  nav.top form.out { margin: 0 0 0 auto; }
   nav.top .who { font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: var(--track-chip); text-transform: uppercase;
                  color: var(--muted); border: 1px solid var(--chip-line); border-radius: var(--r-pill); padding: 3px 10px; }
 
@@ -203,9 +255,10 @@ const SHELL = (title: string) => head({
   css: CSS,
 })
 
-const topBar = (who = '') => `  <nav class="top" aria-label="Account">
+const topBar = (who = '', signedIn = false) => `  <nav class="top" aria-label="Account">
     <a class="logo" href="/">${mark(18)}AgentBill</a>
     <span class="who">${who}</span>
+    ${signedIn ? `<form class="out" method="post" action="/admin/logout"><button class="btn" type="submit">Sign out</button></form>` : ''}
   </nav>`
 
 function loginPage(error = '') {
@@ -279,7 +332,7 @@ function adminPage(accounts: AccountSignals[], pulse: SitePulse) {
 
   return `${SHELL('Admin')}
 <body>
-${topBar('signed in')}
+${topBar('signed in', true)}
   <div class="wrap">
   <h1>Admin</h1>
   <p class="sub">Conversion radar: hot accounts first, sorted by likelihood to pay. Refresh to update.</p>
