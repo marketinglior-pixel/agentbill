@@ -24,8 +24,12 @@ export const OFFICE_JS = String.raw`(function () {
 'use strict';
 var dataEl = document.getElementById('office-data');
 var cv = document.getElementById('office');
-if (!dataEl || !cv || !cv.getContext) return;
-var DATA = JSON.parse(dataEl.textContent || '{}');
+if (!cv || !cv.getContext) return;
+// The console writes a <script type=application/json> block; the homepage,
+// which names every inline script in its CSP, puts the same JSON on the canvas.
+var raw = dataEl ? dataEl.textContent : cv.getAttribute('data-office');
+if (!raw) return;
+var DATA = JSON.parse(raw);
 var META = {"w": 16, "h": 26, "poses": [{"name": "front_idle", "start": 0, "frames": 2}, {"name": "front_walk", "start": 2, "frames": 4}, {"name": "side_walk", "start": 6, "frames": 4}, {"name": "desk_type", "start": 10, "frames": 2}, {"name": "sent_home", "start": 12, "frames": 2}, {"name": "panic", "start": 14, "frames": 2}, {"name": "wave", "start": 16, "frames": 2}, {"name": "back_walk", "start": 18, "frames": 4}, {"name": "sit_type", "start": 22, "frames": 2}], "chars": ["classic", "bun", "blond", "curly", "ponytail", "bald", "bob", "afro", "hijab", "mustache"]};
 var img = new Image();
 var g = cv.getContext('2d'); g.imageSmoothingEnabled = false;

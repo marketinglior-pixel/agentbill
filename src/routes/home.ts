@@ -6,6 +6,7 @@ import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
 import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL, RUN } from '../ui/playground.js'
 import { ESTIMATOR_CSS, ESTIMATOR_JS, ESTIMATOR_HASH, estimatorSection } from '../ui/estimator.js'
 import { pixelSnippet } from '../lib/pixel.js'
+import { demoOffice, officeJson } from '../lib/office.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { COPY_CSS, COPY_JS, COPY_HASH, copyPill } from '../ui/copy.js'
@@ -100,6 +101,28 @@ function logFrame(): string {
             </div>
           </div>
         </div>
+      </div>
+    </figure>`
+}
+
+/**
+ * The hero's office (2026-09-26, Lior: "the office view, big, in the hero").
+ * The console's own office engine (/app/office.js, src/ui/office-engine.ts)
+ * over the sample staff the console's sample shows, labelled SAMPLE in the
+ * bar and in the caption. It became a thing the homepage may show on the day
+ * it shipped in the product (#96): before that it was a picture of a screen
+ * nobody could open, which is the invented dashboard this page removed on
+ * 2026-09-16.
+ */
+function officeFrame(): string {
+  return `<figure class="frame of-hero" aria-label="Sample: the AgentBill office, every agent at work with its monthly cost">
+      <div class="fr-win">
+        <div class="fr-bar">
+          <span class="fr-title"><span class="tag tag-id">office</span><span class="fr-t">your agents as staff &middot; salary is what each one cost this month</span></span>
+          <span class="tag">sample</span>
+        </div>
+        <div class="of-crop"><canvas id="office" width="1100" height="790" data-sprites="/app/office-sprites.png" data-office="${officeJson(demoOffice(), true).replace(/"/g, '&quot;')}" role="img" aria-label="Sample office: agents at desks, one sent home by a ceiling, one at three times its usual day"></canvas></div>
+        <figcaption class="of-cap">Sample data. An agent sits at a desk while it works, leaves with a box when a ceiling refuses it, and a new one walks in and waves.</figcaption>
       </div>
     </figure>`
 }
@@ -214,7 +237,9 @@ export async function homeRoute(app: FastifyInstance) {
       mainEntity: `${ORIGIN}/#software`,
       extraHead: pixelSnippet(),
       scriptHashes: [PLAYGROUND_HASH, ESTIMATOR_HASH, COPY_HASH, TABS_HASH, ...pixelHashes()],
-      scriptOrigins: pixelExtra(),
+      // 'self' for the office engine the hero runs (/app/office.js), and only
+      // that file: every other script on this page is an inline one by hash.
+      scriptOrigins: { ...pixelExtra(), script: [...pixelExtra().script, "'self'"] },
       css: `${CHROME_CSS}${PLAYGROUND_CSS}${ESTIMATOR_CSS}${COPY_CSS}${TABS_CSS}${TIERS_CSS}
     /* Hallmark · genre: modern-minimal · macrostructure: centred canvas
      * theme: canvas (theme.ts) · design-system: design.md · designed-as-app
@@ -253,6 +278,13 @@ export async function homeRoute(app: FastifyInstance) {
     /* Hero: centred, the reference's order. The block padding is the page's
        largest on purpose; the frame under the actions is the one picture. */
     .hero { padding-block: 56px 0; text-align: center; display: flex; flex-direction: column; align-items: center; }
+    .of-hero { width: 100%; margin-top: 40px; }
+    /* The top 180 of the canvas's 790 is bare wall, the part that fills the frame:
+       in the hero the room starts where the people do. 180 / 1100 of the width. */
+    .of-crop { overflow: hidden; aspect-ratio: 1100 / 610; }
+    .of-hero canvas { display: block; width: 100%; height: auto; margin-top: -16.36%; image-rendering: pixelated; }
+    .of-cap { text-align: left; font-size: var(--fs-micro); color: var(--muted); padding: 10px 16px 12px; }
+
     .hero h1 { margin-top: 24px; max-width: 880px; }
     .sub { font-size: var(--fs-lede); color: var(--muted); margin-top: var(--s5); max-width: 42rem; line-height: 1.55;
            text-wrap: pretty; }
@@ -504,6 +536,7 @@ ${siteNav('/')}
       <a class="btn-alt" href="#estimate">Estimate a run</a>
     </div>
     <p class="trust">Start free &middot; ${num(PLAN_LIMITS.free)} preflight calls/mo, no card</p>
+    ${officeFrame()}
     ${logFrame()}
   </header>
 
@@ -645,6 +678,7 @@ ${QUESTIONS.map(([q, a]) => `        <details>
 </main>
 ${siteFooter()}
 ${PLAYGROUND_JS}${ESTIMATOR_JS}${COPY_JS}${TABS_JS}
+<script src="/app/office.js" defer></script>
 </body>
 </html>
     `)
