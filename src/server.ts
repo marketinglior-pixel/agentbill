@@ -35,6 +35,7 @@ import { appRoute } from './routes/app.js'
 import { legalRoute } from './routes/legal.js'
 import { heCostPerClientRoute } from './routes/he-cost-per-client.js'
 import { faqRoute } from './routes/faq.js'
+import { shareRoute } from './routes/share.js'
 import { aboutRoute } from './routes/about.js'
 import { thanksRoute } from './routes/thanks.js'
 import { recoverRoute } from './routes/recover.js'
@@ -275,6 +276,7 @@ app.register(webhooksRoute)
 app.register(inboundMailRoute)
 app.register(legalRoute)
 app.register(faqRoute)
+app.register(shareRoute)
 app.register(aboutRoute)
 app.register(thanksRoute)
 app.register(recoverRoute)

@@ -10,7 +10,7 @@ import { mark, MARK_CSS } from '../ui/mark.js'
 import { KEY_CTA, KEY_CTA_SHORT, CHROME_CSS, siteNav, siteFooter } from '../ui/chrome.js'
 import { KIT_CSS, tag, SAMPLE_TAG, label, meter } from '../ui/kit.js'
 import { z } from 'zod'
-import { isId, INT4_MAX, plain } from '../lib/ids.js'
+import { isId, isUuid, INT4_MAX, plain } from '../lib/ids.js'
 import { setTaskCeiling, CONSOLE_AGENT, unitWord, TASK_UNITS, asTaskUnit, amountText, usdText, usdAmount, microsFromUsd, microsFromListPrice, type TaskUnit } from '../lib/task-ceiling.js'
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import {
@@ -23,6 +23,8 @@ import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
 import { loadSetup, markOfficeSeen, hideSetup, SETUP_STEPS, type Setup, type SetupKey } from '../lib/setup.js'
 import { loadOffice, demoOffice, officeJson, shareText, WORKING_MINUTES, OFFICE_MAX, type Office } from '../lib/office.js'
 import { OFFICE_JS, OFFICE_SPRITES_PNG } from '../ui/office-engine.js'
+import { createShare, cardFromField, listShares, stopShare, SHARES_ACTIVE_MAX, SHARES_PER_DAY, type OwnShare } from '../lib/share.js'
+import { ORIGIN } from '../ui/site.js'
 import { agentRows, demoAgentRows, monthlyReport, demoReport, reportCsv, asMonth, thisMonth, recentMonths, type AgentRow, type Report } from '../lib/report.js'
 import { rankOrderSql } from '../lib/task-rank.js'
 import { checkRateLimit } from '../lib/rate-limiter.js'
@@ -203,6 +205,9 @@ export async function appRoute(app: FastifyInstance) {
     const month = asMonth(q?.month) ?? thisMonth()
     const report = view !== 'customers' ? null : demo ? demoReport(month) : await monthlyReport(viewer.accountId, month)
     const office = view !== 'office' ? null : demo ? demoOffice() : await loadOffice(viewer.accountId)
+    // The account's live public links, and what the last share action did.
+    const shares = view === 'office' && !demo ? await listShares(viewer.accountId) : []
+    const shareMsg = asShareMsg(q?.share)
     // The guide reads the account's rows; the office step is the one it marks,
     // on the first visit, after reading, so that visit still shows its step.
     const setup = demo ? null : await loadSetup(viewer.accountId)
@@ -210,7 +215,7 @@ export async function appRoute(app: FastifyInstance) {
     // The MCP path's prompt has a Copy control, the one script this page can
     // run, under its own hash and only where the control is drawn.
     if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office, setup,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office, shares, shareMsg, setup,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -400,6 +405,32 @@ export async function appRoute(app: FastifyInstance) {
     if (!viewer) return reply.redirect('/app', 303)
     await hideSetup(viewer.accountId)
     return reply.redirect('/app', 303)
+  })
+
+  // A public link to the office (2026-09-26): the owner's two choices and the
+  // card their browser drew, as a same-origin form (this page's CSP has no
+  // connect-src, so a form is how it talks to us). The token never goes in a
+  // redirect URL: the office view lists the account's links itself.
+  // bodyLimit: a 1 MB card is about 1.4 MB as a url-encoded data URL.
+  app.post('/app/office/share', { ...publicRoute(), bodyLimit: 2 * 1024 * 1024 }, async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    if (!checkRateLimit(bucket(viewer)).allowed) return reply.redirect('/app?view=office&share=rate#share', 303)
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const card = cardFromField(body.card)
+    if (card === 'invalid') return reply.redirect('/app?view=office&share=bad_card#share', 303)
+    const made = await createShare(viewer.accountId, { showNames: body.names === '1', showUsd: body.usd === '1' }, card)
+    return reply.redirect(`/app?view=office&share=${made.ok ? 'made' : made.reason}#share`, 303)
+  })
+
+  app.post('/app/office/share/:id/stop', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    const { id } = request.params as { id: string }
+    const stopped = isUuid(id) && await stopShare(viewer.accountId, id)
+    return reply.redirect(`/app?view=office&share=${stopped ? 'stopped' : 'not_found'}#share`, 303)
   })
 
   app.post('/app/logout', publicRoute(), async (request, reply) => {
@@ -2276,6 +2307,13 @@ const OFFICE_CSS = `
   .of-room canvas { display: block; width: 100%; height: auto; border-radius: var(--r-field); image-rendering: pixelated; background: var(--plate); }
   .of-bar { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s3) 0 var(--s2); font-size: var(--fs-micro); }
   .of-anon { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+  .of-choose { display: contents; }
+  .of-links { margin: var(--s5) 0; }
+  .of-linklist { list-style: none; padding: 0; margin: var(--s3) 0; display: grid; gap: var(--s3); }
+  .of-linklist li { display: grid; gap: 6px; padding: var(--s3) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .of-linklist li > a { font-family: var(--mono); font-size: var(--fs-small); }
+  .of-linkact { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; }
+  .of-linkact form { margin: 0; }
   .of-cardout img { display: block; width: 100%; max-width: 720px; border-radius: var(--r-field); margin: var(--s3) 0 var(--s2); }
   .of-cardout img[hidden], .of-cardout a[hidden], .of-cardout button[hidden] { display: none; }
   .of-share { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin: var(--s2) 0; font-size: var(--fs-small); }
@@ -2472,6 +2510,10 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   report?: Report | null
   /** The office view's staff (src/lib/office.ts). */
   office?: Office | null
+  /** The account's live public links to its office (src/lib/share.ts). */
+  shares?: OwnShare[]
+  /** What the last make or stop of a link did, from ?share=. */
+  shareMsg?: ShareMsg | null
   /** The setup guide (src/lib/setup.ts): a signed-in account's own, never the sample's. */
   setup?: Setup | null }
 
@@ -3770,6 +3812,45 @@ function setupBar(p: Page): string {
     </section>`
 }
 
+const SHARE_MSGS = ['made', 'stopped', 'not_found', 'bad_card', 'empty', 'active_limit', 'day_limit', 'rate'] as const
+type ShareMsg = (typeof SHARE_MSGS)[number]
+const asShareMsg = (v: unknown): ShareMsg | null => (SHARE_MSGS as readonly unknown[]).includes(v) ? (v as ShareMsg) : null
+const SHARE_MSG_TEXT: Record<ShareMsg, [string, boolean]> = {
+  made: ['Your public link is ready. It is the newest one below.', true],
+  stopped: ['That link is stopped: it answers 404 from now on, and its image and what it showed are deleted. A preview a feed already fetched may stay in the feed.', true],
+  not_found: ['That link was not found on this account, or it was already stopped.', false],
+  bad_card: ['The card image did not arrive intact, so no link was made. Try again; if it keeps happening, write to hello@agentbill.dev.', false],
+  empty: ['There is nobody on staff to share yet: an agent joins the office with its first recorded call this month.', false],
+  active_limit: [`An account can hold ${SHARES_ACTIVE_MAX} live links. Stop one below to make another.`, false],
+  day_limit: [`An account can make ${SHARES_PER_DAY} links a day. Try again tomorrow (UTC).`, false],
+  rate: ['Too many requests just now. Wait a minute and try again.', false],
+}
+
+/** The office's public links: the form that makes one, and the account's live ones. */
+function shareSection(p: Page): string {
+  if (p.demo) return `<section class="of-links" id="share"><h2>Public link</h2>
+      <p class="note">On your own account you can publish this office at a link anyone can open, choosing whether agent names and dollar amounts are shown. The sample console has nothing of yours to publish.</p></section>`
+  const msg = p.shareMsg ? SHARE_MSG_TEXT[p.shareMsg] : null
+  const shares = p.shares ?? []
+  const what = (x: OwnShare) => `${x.showNames ? 'names shown' : 'names hidden'} · ${x.showUsd ? 'dollars shown' : 'dollars hidden'}${x.hasCard ? '' : ' · no preview image'}`
+  const rows = shares.map((x) => {
+    const url = `${ORIGIN}/share/${x.token}`
+    return `<li><a href="/share/${esc(x.token)}" target="_blank" rel="noopener">${esc(url)}</a>
+        <span class="dim">${esc(what(x))} · made ${esc(x.createdAt.toISOString().slice(0, 10))}</span>
+        <span class="of-linkact">
+          <a class="btn-ghost" href="https://x.com/intent/post?url=${encodeURIComponent(url)}" target="_blank" rel="noopener noreferrer">Post on X</a>
+          <a class="btn-ghost" href="https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}" target="_blank" rel="noopener noreferrer">Post on LinkedIn</a>
+          <form method="POST" action="/app/office/share/${esc(x.id)}/stop"><button class="btn-ghost" type="submit">Stop sharing</button></form>
+        </span></li>`
+  }).join('')
+  return `<section class="of-links" id="share">
+      <h2>Public links</h2>
+      ${msg ? `<p class="${msg[1] ? 'ok' : 'err cv-err'}" role="status" id="share-flash">${esc(msg[0])}</p>` : ''}
+      ${rows ? `<ul class="of-linklist">${rows}</ul>` : '<p class="dim">No public link yet. Choose what to show above, then Create a public link.</p>'}
+      <p class="note">A public link shows this office as it is at the moment you make it, frozen: the room, the staff count, who was at a desk and who was sent home, and, only if you chose to show them, agent names and dollar amounts. The card image your browser draws is stored with it for the preview a feed shows. Anyone with the link can open it; search engines are asked not to index it. Stop sharing makes it answer 404 at once and deletes its image and what it showed; a preview a feed already fetched may stay there.</p>
+    </section>`
+}
+
 /** Salary as the office's cards print it. */
 function salary(v: number | null): string {
   return v == null ? '<span class="dim">unpriced</span>' : usd(Math.round(v * 100) / 100)
@@ -3795,8 +3876,13 @@ function officeView(p: Page): string {
     ${frame(p, barOf('office'), `<div class="of-room">
       <canvas id="office" width="1100" height="790" data-sprites="/app/office-sprites.png" role="img" aria-label="The office: ${num(o.agents.length)} agents, drawn from the list below">Your agents, as in the list below.</canvas>
       <div class="of-bar"><button type="button" class="btn-ghost" id="office-labels">Hide salaries</button>
-        <button type="button" class="btn-ghost" id="office-card">Make a payroll card</button>
-        <label class="of-anon"><input type="checkbox" id="office-card-anon"> Hide agent names on the card</label>
+        <form class="of-choose" id="office-share-form" method="POST" action="/app/office/share">
+          <label class="of-anon"><input type="checkbox" id="office-show-names" name="names" value="1"> Show agent names</label>
+          <label class="of-anon"><input type="checkbox" id="office-show-usd" name="usd" value="1" checked> Show dollar amounts</label>
+          <input type="hidden" name="card" id="office-share-card" value="">
+          <button type="button" class="btn-ghost" id="office-card">Make a payroll card</button>
+          ${p.demo ? '' : '<button type="submit" class="btn-ghost">Create a public link</button>'}
+        </form>
         <span class="dim">${o.topEarner ? `Highest paid this month: <code>${esc(o.topEarner.name)}</code>, ${salary(o.topEarner.sal)}.` : ''}${o.staff > o.agents.length ? ` The room seats ${num(OFFICE_MAX)}; ${num(o.staff - o.agents.length)} more on staff are in the Agents view.` : ''}</span></div>
     </div>`)}
     <div class="of-cardout">
@@ -3807,8 +3893,9 @@ function officeView(p: Page): string {
         <a class="btn-ghost" href="https://x.com/intent/post?text=${encodeURIComponent(shareText(o, p.demo))}" target="_blank" rel="noopener noreferrer">Post on X</a>
         <a class="btn-ghost" href="https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent('https://agentbill.dev')}" target="_blank" rel="noopener noreferrer">Post on LinkedIn</a>
       </div>
-      <p class="note">The card is drawn in this browser from the room above and saved to your computer only: nothing is uploaded. Share opens your device's own share sheet with the card attached, and the X and LinkedIn buttons open a post for you to finish, with the card added from your download. Nothing is posted unless you post it.</p>
+      <p class="note">Make a payroll card draws the card in this browser from the room above, with the two choices beside it, and saves it to your computer only: nothing is uploaded. Share opens your device's own share sheet with the card attached, and the X and LinkedIn buttons open a post for you to finish, with the card added from your download. Nothing is posted unless you post it.</p>
     </div>
+    ${shareSection(p)}
     <h2>Staff <a href="${href(p, 'agents')}">All agents &rarr;</a></h2>
     <ul class="of-list">${rows}</ul>
     <p class="note">Salary is what the agent cost this UTC month at public list price, over priced calls. At a desk: a call recorded in the last ${WORKING_MINUTES} minutes. Sent home: a ceiling (a job's, a call's or a customer's budget) refused it in the last 24 hours. New hire: its first call ever was in the last 24 hours. 3× its usual day: a spend spike was flagged for it today. Nothing in the room is invented${p.demo ? ', except here, where every agent is sample data' : ''}.</p>

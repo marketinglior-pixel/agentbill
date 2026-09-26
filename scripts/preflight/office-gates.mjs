@@ -114,8 +114,11 @@ async function gates({ API, sql, ok, F, O }) {
      xText === 'Payroll for my AI agents this month: $4.01 across 7 agents, 1 sent home by a spend ceiling. Made with AgentBill, agentbill.dev'
        && !/worker|panicky|homebound/.test(xText) && html.includes('href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fagentbill.dev"')
        && (html.match(/target="_blank" rel="noopener noreferrer"/g) ?? []).length === 2 && data?.shareText === xText, xText)
-  ok('[office] the page offers the card, the choice to hide agent names on it, and a download named for the month, and says nothing is uploaded',
-     html.includes('id="office-card"') && html.includes('id="office-card-anon"') && new RegExp(`download="agentbill-payroll-${s.month}\\.png"`).test(html)
+  // 2026-09-26: the one "hide names" box became two choices, shared by the card
+  // and the public link (src/lib/share.ts): names start hidden, dollars shown.
+  ok('[office] the page offers the card with two choices, names (unticked) and dollars (ticked), a download named for the month, and says the card is not uploaded',
+     html.includes('id="office-card"') && /<input type="checkbox" id="office-show-names" name="names" value="1">/.test(html)
+       && /<input type="checkbox" id="office-show-usd" name="usd" value="1" checked>/.test(html) && new RegExp(`download="agentbill-payroll-${s.month}\\.png"`).test(html)
        && html.includes('nothing is uploaded') && html.includes('Nothing is posted unless you post it'))
   const png = await fetch(`${API}/app/office-sprites.png`)
   const buf = Buffer.from(await png.arrayBuffer())

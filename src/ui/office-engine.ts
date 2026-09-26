@@ -112,8 +112,11 @@ function drawAgent(a) { var name = 'front_idle', fi = Math.floor(a.t / 30), flip
   if (flip) { g.save(); g.translate(x + dw, y); g.scale(-1, 1); g.drawImage(img, col * FW, a.ch * FH, FW, FH, 0, 0, dw, dh); g.restore(); } else g.drawImage(img, col * FW, a.ch * FH, FW, FH, x, y, dw, dh);
   g.globalAlpha = 1; if (SHOW && a.alpha > .3) LABELS.push([a, s[0], y - 4]); }
 var ANON = false;
+// A public link whose owner hid the dollars (src/lib/share.ts): every salary is
+// null there by choice, not because it is unpriced, so the label prints none.
+var NOUSD = !!DATA.usdHidden;
 function shownName(a) { return ANON ? 'agent ' + (a.idx + 1) : a.name; }
-function label(a, cx, cy) { var s = shownName(a) + '  ' + money(a.sal); g.font = '11px ui-monospace,monospace'; var w = Math.ceil(g.measureText(s).width) + 12; var x = Math.round(cx - w / 2); var y = Math.round(cy - 18);
+function label(a, cx, cy) { var s = shownName(a) + (NOUSD ? '' : '  ' + money(a.sal)); g.font = '11px ui-monospace,monospace'; var w = Math.ceil(g.measureText(s).width) + 12; var x = Math.round(cx - w / 2); var y = Math.round(cy - 18);
   var sub = a.st === 'sent' ? 'ceiling hit, heading home' : a.st === 'panic' ? '3x its usual day' : a.st === 'new' ? 'new hire' : ''; var top = sub ? 14 : 0;
   for (var k = 0; k < 5; k++) { var hit = false; for (var j = 0; j < PLACED.length; j++) { var r = PLACED[j]; if (x < r[0] + r[2] && x + w > r[0] && y - top < r[1] + r[3] && y + 18 > r[1]) hit = true; } if (!hit) break; y -= 22; } PLACED.push([x, y - top, w, 18 + top]);
   var st = a.st === 'sent' ? ['#fcebeb', '#a32d2d'] : a.st === 'panic' ? ['#fff3cd', '#8a5a00'] : a.st === 'new' ? ['#e1f5ee', '#085041'] : ['#ffffff', '#2c2c2a'];
@@ -150,27 +153,32 @@ if (btn) btn.addEventListener('click', function () { SHOW = !SHOW; btn.textConte
 /* ---------- the payroll card: made here, from this frame, and never sent anywhere ---------- */
 function usdText(v) { return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function monthText(m) { var p = String(m || '').split('-'); var d = new Date(Date.UTC(+p[0], (+p[1] || 1) - 1, 1)); return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }); }
-function makeCard(anon) {
+function makeCard(anon, noUsd) {
   var S = DATA.summary || {};
-  var was = ANON; ANON = !!anon; frame(); ANON = was;
+  noUsd = !!noUsd || !!DATA.usdHidden;
+  var was = ANON, wasU = NOUSD; ANON = !!anon; NOUSD = noUsd; frame(); ANON = was; NOUSD = wasU;
   var c = document.createElement('canvas'); c.width = 1200; c.height = 630; var k = c.getContext('2d'); k.imageSmoothingEnabled = false;
   k.fillStyle = '#111110'; k.fillRect(0, 0, 1200, 630);
   // The room, cropped to its floor and walls, on the left.
   var sx = 130, sy = 96, sw = 930, sh = 700; k.drawImage(cv, sx, sy, sw, sh, 24, 24, 760, 572);
   var x = 820, y = 70; var font = function (w, px) { return w + ' ' + px + 'px Geist, "Helvetica Neue", Arial, sans-serif'; };
-  k.fillStyle = '#8f8c85'; k.font = font(500, 18); k.fillText('PAYROLL · ' + monthText(S.month).toUpperCase(), x, y);
-  k.fillStyle = '#e8e6e1'; k.font = font(500, 64); k.fillText(S.payroll == null ? 'unpriced' : usdText(S.payroll), x, y + 78);
-  k.fillStyle = '#8f8c85'; k.font = font(400, 18); k.fillText('this month, at list price', x, y + 108);
+  k.fillStyle = '#8f8c85'; k.font = font(500, 18); k.fillText((noUsd ? 'THE OFFICE · ' : 'PAYROLL · ') + monthText(S.month).toUpperCase(), x, y);
+  k.fillStyle = '#e8e6e1'; k.font = font(500, 64); k.fillText(noUsd ? String(S.staff || 0) + ((S.staff | 0) === 1 ? ' agent' : ' agents') : S.payroll == null ? 'unpriced' : usdText(S.payroll), x, y + 78);
+  k.fillStyle = '#8f8c85'; k.font = font(400, 18); k.fillText(noUsd ? 'on staff this month' : 'this month, at list price', x, y + 108);
   var rows = [['Agents on staff', String(S.staff || 0)], ['At their desk', String(S.atDesk || 0)], ['Sent home today', String(S.sentHome || 0)]];
-  if (S.top) rows.unshift(['Highest paid', (anon ? 'agent ' + ((S.top.idx | 0) + 1) : S.top.name) + '  ' + usdText(S.top.sal)]);
+  if (S.top) rows.unshift(['Highest paid', (anon ? 'agent ' + ((S.top.idx | 0) + 1) : S.top.name) + (noUsd || S.top.sal == null ? '' : '  ' + usdText(S.top.sal))]);
   rows.forEach(function (r, i) { var yy = y + 170 + i * 58; k.fillStyle = '#8f8c85'; k.font = font(400, 16); k.fillText(r[0], x, yy); k.fillStyle = r[0] === 'Sent home today' && r[1] !== '0' ? '#f97316' : '#e8e6e1'; k.font = font(500, 24); var t = r[1]; while (k.measureText(t).width > 350 && t.length > 4) t = t.slice(0, -2); k.fillText(t === r[1] ? t : t + '…', x, yy + 28); });
   if (DATA.sample) { k.fillStyle = '#f97316'; k.font = font(600, 16); k.fillText('SAMPLE DATA · every number is invented', x, 560); }
   k.fillStyle = '#8f8c85'; k.font = font(500, 16); k.fillText('made with AgentBill · agentbill.dev', x, 596);
   return c;
 }
-var cardBtn = document.getElementById('office-card'), cardImg = document.getElementById('office-card-img'), cardDl = document.getElementById('office-card-dl'), cardAnon = document.getElementById('office-card-anon');
+var cardBtn = document.getElementById('office-card'), cardImg = document.getElementById('office-card-img'), cardDl = document.getElementById('office-card-dl');
+// The two choices the owner makes once, for the card and the public link alike:
+// unticked means hidden. Read at the moment of the click, never remembered.
+var showNames = document.getElementById('office-show-names'), showUsd = document.getElementById('office-show-usd');
+function cardNow() { return makeCard(!(showNames && showNames.checked), !(showUsd && showUsd.checked)); }
 if (cardBtn && cardImg && cardDl) cardBtn.addEventListener('click', function () {
-  var c = makeCard(cardAnon && cardAnon.checked);
+  var c = cardNow();
   cardImg.src = c.toDataURL('image/png'); cardImg.hidden = false;
   c.toBlob(function (b) { if (!b) return; if (cardDl.href && cardDl.href.indexOf('blob:') === 0) URL.revokeObjectURL(cardDl.href); cardDl.href = URL.createObjectURL(b); cardDl.hidden = false; }, 'image/png');
 });
@@ -182,7 +190,7 @@ var canFiles = !!(navigator.canShare && window.File) && (function () { try { ret
 if (shareBtn && canFiles) {
   shareBtn.hidden = false;
   shareBtn.addEventListener('click', function () {
-    var c = makeCard(cardAnon && cardAnon.checked);
+    var c = cardNow();
     c.toBlob(function (b) {
       if (!b) return;
       var f = new File([b], 'agentbill-payroll-' + ((DATA.summary || {}).month || 'month') + '.png', { type: 'image/png' });
@@ -190,6 +198,14 @@ if (shareBtn && canFiles) {
     }, 'image/png');
   });
 }
+// A public link (src/routes/app.ts POST /app/office/share): the card is drawn
+// here with the same two choices and sent with the form as a PNG data URL, for
+// the preview a feed shows. The page the link opens is built on the server from
+// the account's own rows; without JavaScript the link is made with no card.
+var shareForm = document.getElementById('office-share-form'), shareCard = document.getElementById('office-share-card');
+if (shareForm && shareCard) shareForm.addEventListener('submit', function () {
+  try { shareCard.value = cardNow().toDataURL('image/png'); } catch (e) { shareCard.value = ''; }
+});
 img.onload = function () { if (REDUCE) frame(); else tick(); };
 img.src = cv.getAttribute('data-sprites');
 })();
