@@ -163,7 +163,7 @@ export const PAGES: readonly PageMeta[] = [
   // competing for "AgentBill terms of service"), ad review prefers them
   // reachable, and noindex beside a canonical sends two contradictory signals
   // about one URL.
-  { path: '/terms', section: 'legal', crumbs: [HOME], crumb: 'Terms', og: 'default', index: true, updated: '2026-08-27', priority: 0.2, changefreq: 'yearly' },
+  { path: '/terms', section: 'legal', crumbs: [HOME], crumb: 'Terms', og: 'default', index: true, updated: '2026-09-26', priority: 0.2, changefreq: 'yearly' },
   { path: '/privacy', section: 'legal', crumbs: [HOME], crumb: 'Privacy', og: 'default', index: true, updated: '2026-09-26', priority: 0.2, changefreq: 'yearly' },
   { path: '/security', section: 'legal', crumbs: [HOME], crumb: 'Security', og: 'default', index: true, updated: '2026-09-25', priority: 0.4, changefreq: 'monthly' },
 

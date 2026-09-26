@@ -68,4 +68,4 @@ pytest
 
 ## Questions?
 
-Open an issue or reach out at marketinglior@gmail.com.
+Open an issue or reach out at hello@agentbill.dev.

@@ -27,7 +27,9 @@ const updatedOn = (path: string): string => {
 }
 const TERMS_UPDATED = updatedOn('/terms')
 const PRIVACY_UPDATED = updatedOn('/privacy')
-const CONTACT = 'marketinglior@gmail.com'
+// hello@ receives since 2026-09-26 (src/routes/inbound-mail.ts): the one public
+// contact, on Lior's choice, and a personal address is no longer on any page.
+const CONTACT = 'hello@agentbill.dev'
 
 function legalShell(title: string, path: string, body: string): string {
   return `${head({
