@@ -218,7 +218,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
     return reply.type('text/html').send(page(
       '/docs/task-budgets',
       'Task budgets, a hard cost ceiling per agent job',
-      'Cap what one AI agent job can spend, in units you define, across every call that passes the same task_ref. The ceiling is bound to the job rather than to a project, an organization or a calendar month, and every process that passes that task_ref draws on the same number.',
+      'Cap what one AI agent job can spend, in dollars at list price or in tokens or units you define, across every call that passes the same task_ref. The ceiling is bound to the job rather than to a project, an organization or a calendar month, and every process that passes that task_ref draws on the same number.',
       `
   <h1>Task budgets, one ceiling for the whole job</h1>
   <p>Provider spend caps are real and they fire. What they are bound to is a project, an
@@ -228,14 +228,25 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   <span class="inline">task_ref</span> and it draws down the same ceiling; one you do not
   instrument is invisible to it. Consulted <i>before</i> each call runs.</p>
 
-  <h2>What a unit is</h2>
-  <p>A unit is an integer you define. AgentBill counts units; it never converts the ones you
-  define into money. The common convention is <b>1 unit = 1 cent</b>, so a $5 ceiling for the job is
-  <span class="inline">task_ceiling=500</span> and a call you expect to cost 12 cents is
-  <span class="inline">estimated_units=12</span>. Tokens, requests or tool calls work just as well,
-  as long as every call under the same task uses the same unit. For model calls,
-  <a href="/docs#wrap">wrap()</a> records the tokens your provider reported for you, in a job
-  counted in tokens.</p>
+  <h2>What a job counts</h2>
+  <!-- 2026-09-26, when the site moved to jobs in dollars: this section was
+       "What a unit is" and taught 1 unit = 1 cent as the way to a dollar
+       ceiling. A job can be opened in dollars now (task_budgets.unit 'usd',
+       migration 025; src/lib/usd-estimate.ts, src/routes/events.ts), so the
+       convention is the fallback, not the lesson. -->
+  <p>A job counts <b>dollars</b>, <b>tokens</b> or <b>units</b>, chosen when it opens and fixed from
+  then on. In dollars, AgentBill prices each call itself: a $5 ceiling for the job is
+  <span class="inline">task_ceiling_usd=5</span> on the preflight that opens it (or
+  <span class="inline">ceiling_usd</span> from the console or
+  <span class="inline">PUT /tasks/:task_ref/ceiling</span>), a call you expect to cost 12 cents passes
+  <span class="inline">estimated_usd=0.12</span>, and what it is charged is the public list price of
+  the tokens your provider reported. A call it cannot price is charged its reservation, never $0.
+  Every dollar figure is an estimate at list price, not your invoice.</p>
+  <p>In tokens, which is what <a href="/docs#wrap">wrap()</a> records unless you open the job in
+  dollars, the ceiling is the tokens your provider reported. In units, the default, the number is an
+  integer you define, such as requests, documents or tool calls, and AgentBill never converts it to
+  money; keep one unit for every call under the same task. The walkthrough below counts units, so
+  every number in it is one you can see.</p>
 
   <h2>How it works</h2>
   <p>A task groups many calls under one hard ceiling. Three rules:</p>

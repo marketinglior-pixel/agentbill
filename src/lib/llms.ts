@@ -42,18 +42,26 @@ export const SDK_VERSIONS = {
 
 /** The one-paragraph definition. Shared by both files so an engine that reads
  *  either one gets the same entity, and so a correction lands in both. */
+// 2026-09-26, when the site moved to jobs in dollars and a cost per client: it
+// named units and tokens as what a job counts and never a job in dollars
+// (task_budgets.unit 'usd', migration 025) or the per-customer report
+// (src/lib/report.ts).
 const SUMMARY =
-  'AgentBill is an SDK and HTTP API that puts a spend ceiling on one agent task. ' +
+  'AgentBill is an SDK and HTTP API that shows what each AI agent, client and job costs, in ' +
+  'dollars at public list price, and puts a spend ceiling on one agent task. ' +
   'Before expensive work your code calls preflight, which atomically reserves an estimate ' +
-  'against a ceiling identified by a task_ref you choose: the integer units you pass or, when ' +
-  "the SDK's wrap() is around your OpenAI, Anthropic or Gemini client, the job's running average " +
-  'in tokens. When the reservation would cross that ceiling it refuses, answering approved: false ' +
+  'against a ceiling identified by a task_ref you choose. A job counts dollars (each call priced ' +
+  'from the tokens your provider reported; a call that cannot be priced is charged its ' +
+  "reservation, never $0), tokens, which the SDK's wrap() around your OpenAI, Anthropic or Gemini " +
+  'client reports by default, or integer units you pass. ' +
+  'When the reservation would cross that ceiling it refuses, answering approved: false ' +
   '(the plain SDK client raises a typed error; a wrapped client returns a typed Refusal), after ' +
   'which your own code decides what happens next. Every process, ' +
   'machine, provider and agent that passes the same task_ref draws on the same ceiling. After the ' +
   'call, record settles what it used: your number or, through wrap(), the token counts your ' +
   'provider reported on the response, which the server prices as an estimate at public list ' +
-  'price (list price, your invoice may differ). AgentBill never reads your provider bill and ' +
+  'price (list price, your invoice may differ). A monthly report per customer_id, by agent and ' +
+  'model, carries the same figures. AgentBill never reads your provider bill and ' +
   'never converts units you define into money. Python and Node SDKs, and a remote MCP server at ' +
   'https://agentbill.dev/mcp for Claude, ChatGPT, Cursor, Codex and other MCP clients. Free tier: ' +
   `${num(PLAN_LIMITS.free)} preflight calls a month.`
