@@ -173,6 +173,11 @@ async function privacyBody(): Promise<string> {
       makes, with the ids you choose (agent, customer, job), the numbers (estimates, ceilings, units, tokens) and
       any metadata you attach to a record (at most ${(METADATA_MAX_BYTES / 1024).toLocaleString('en-US')} KB each).
       And the answer each refused call got. This is the service itself: the ceilings, the console and your usage.</li>
+      <li><strong>Public links you make</strong>: when you create a public link to your office, we store what the
+      link shows, frozen at that moment (the staff count, who was at a desk and who was sent home, and agent names
+      and dollar amounts only if you chose to show them), and the card image your browser drew for it. Anyone with
+      the link can see them; search engines are asked not to index the page. Ending a link deletes the image and
+      what the link showed at once, and the link answers 404 from then on.</li>
       <li><strong>Page events</strong>: our marketing pages record a few page-level events in our own database
       (the demo being run, a click to the demo or through to the sign-up page, the sign-up page loading),
       stored with no cookie, no IP address and no identifier that outlives the tab.</li>
@@ -233,7 +238,8 @@ async function privacyBody(): Promise<string> {
     <p>Always, already: an MCP connection's authorization request is deleted ${o.requests} after it expires, and its
     codes and tokens ${o.codes} after they expire.</p>
     <p>Kept while your account exists, and deleted with it: the account, your sign-in identities, your live keys and
-    the networks they have been used from, your customers, jobs and usage records. Kept on purpose, because they
+    the networks they have been used from, your customers, jobs and usage records, and the public links you have
+    not ended. Kept on purpose, because they
     are the record of what was bought and paid: the plan and its history with Polar, the payment events Polar sent
     us, and the record of each quota email.</p>
 

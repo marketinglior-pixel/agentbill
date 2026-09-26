@@ -529,6 +529,13 @@ type HeadOpts = {
   dir?: 'ltr' | 'rtl'
   /** Overrides for the share card. Title and description default to the page's. */
   og?: { type?: string; title?: string; description?: string }
+  /**
+   * An absolute image URL for this page's share card, in place of the site's
+   * one card. Only a page that serves its own 1200x630 image may pass it: a
+   * public office link (/share/:token, src/routes/share.ts), whose card is the
+   * one its owner drew.
+   */
+  ogImage?: string
   /** JSON-LD for this page. The sitewide Organization and WebSite are automatic. */
   jsonLd?: unknown | unknown[]
   /**
@@ -649,7 +656,7 @@ const icons = (theme: ThemeName) => `  <meta name="color-scheme" content="${THEM
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/site.webmanifest" />`
 
-export function head({ title, description, path, canonical, css = '', extraHead = '', og, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'canvas' }: HeadOpts): string {
+export function head({ title, description, path, canonical, css = '', extraHead = '', og, ogImage, jsonLd, mainEntity, breadcrumb, noindex, scriptHashes, scriptOrigins = {}, lang = 'en', dir, theme = 'canvas' }: HeadOpts): string {
   const { tokens, fonts } = THEMES[theme]
   const meta = path ? byPath.get(path) : undefined
   const hidden = noindex ?? (meta ? !meta.index : false)
@@ -661,7 +668,7 @@ export function head({ title, description, path, canonical, css = '', extraHead 
   // registry keeps the per-section `og` field so cards can exist later; until a
   // route serves them, nothing may reference them. Versioned by the PNG's own
   // hash (ui/og.ts), because chat apps cache a card by URL.
-  const card = OG_IMAGE
+  const card = ogImage ?? OG_IMAGE
   const ogTitle = og?.title ?? title
   const ogDesc = og?.description ?? description ?? ''
   const blocks = hidden ? [] : [

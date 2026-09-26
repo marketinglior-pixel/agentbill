@@ -96,7 +96,6 @@ export function demoOffice(now = new Date()): Office {
   }
 }
 
-/** The data block's JSON, safe inside a <script type="application/json">: no "<" survives. */
 /** The post a person starts from when they share the card. Theirs to edit;
  *  it names no agent, so hiding names on the card leaves nothing behind here. */
 export function shareText(o: Office, sample: boolean): string {
@@ -110,8 +109,15 @@ export function officeJson(o: Office, sample: boolean): string {
   // The summary is what the payroll card prints: the same figures as the
   // cards above the room, so the card and the page cannot disagree.
   const topIdx = o.topEarner ? o.agents.findIndex((a) => a.name === o.topEarner!.name) : -1
-  return JSON.stringify({ sample, shareText: shareText(o, sample), agents: o.agents.map((a) => ({ name: a.name, sal: a.sal, state: a.state, working: a.working })),
+  return safeJson({ sample, shareText: shareText(o, sample), agents: o.agents.map((a) => ({ name: a.name, sal: a.sal, state: a.state, working: a.working })),
     summary: { month: o.month, payroll: o.payroll == null ? null : Math.round(o.payroll * 100) / 100, staff: o.staff, atDesk: o.atDesk, sentHome: o.sentHome,
       top: o.topEarner ? { name: o.topEarner.name, sal: Math.round(o.topEarner.sal * 100) / 100, idx: topIdx < 0 ? 0 : topIdx } : null } })
+}
+
+/** JSON that is safe inside a <script type="application/json"> or an HTML
+ *  attribute once quotes are escaped: no "<", ">" or "&" survives, and neither
+ *  line separator a script parser would end a line on. */
+export function safeJson(v: unknown): string {
+  return JSON.stringify(v)
     .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
