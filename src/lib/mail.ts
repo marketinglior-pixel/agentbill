@@ -457,8 +457,14 @@ export function verifyInboundWebhook(payload: string, h: { id: string; timestamp
   }
 }
 
-/** Where a forward comes from. Any local part of the verified sending domain. */
-const FORWARD_FROM = 'AgentBill hello@ <forward@agentbill.dev>'
+/** Where a forward comes from. Any local part of the verified sending domain.
+ *  No "@" in the display name: the first version said "AgentBill hello@", and
+ *  both test forwards of 2026-09-26 were accepted by Gmail ("Delivered" in
+ *  Resend) and then never shown, in the inbox, spam or anywhere. An address in
+ *  a display name is a textbook spoofing signal, and with a Reply-To at another
+ *  domain the message had the shape of a lure. Every other mail this domain
+ *  sends, with neither signal, lands in the inbox. */
+export const FORWARD_FROM = 'AgentBill inbox <forward@agentbill.dev>'
 
 export type ForwardResult =
   | { ok: true }
