@@ -31,9 +31,8 @@ import { TOKENS_CANVAS, ROLES, BASE } from '../../src/ui/theme.js'
 import { KIT_CSS, chip, tag, SAMPLE_TAG } from '../../src/ui/kit.js'
 import { mark, MARK_CSS } from '../../src/ui/mark.js'
 import { HEADLINE, INSTALL_PY, ORIGIN } from '../../src/ui/site.js'
-import { RUN } from '../../src/ui/playground.js'
+import { RUN, usdCents } from '../../src/ui/playground.js'
 
-const num = (n: number) => n.toLocaleString('en-US')
 const host = new URL(ORIGIN).host
 const last = RUN.approved[RUN.approved.length - 1]
 if (!last) throw new Error('RUN has no approved call before its refusal; the card has no row to draw')
@@ -66,7 +65,7 @@ const html = `<!DOCTYPE html>
   .bar-t { display: flex; align-items: center; gap: 12px; font-size: var(--fs-small); color: var(--muted); }
   .tag { padding: 3px 12px; }
   .rows { padding: 8px 12px 12px; }
-  .row { display: grid; grid-template-columns: minmax(0, 1fr) 250px 150px 230px; gap: 16px; align-items: center;
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 330px 210px 230px; gap: 16px; align-items: center;
          padding: 9px 12px; border-radius: var(--r-row); font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
   /* nowrap so a value too long for its column overflows, which the check
      below catches, instead of wrapping to a second line, which it cannot. */
@@ -87,10 +86,10 @@ const html = `<!DOCTYPE html>
   <div class="top"><div class="logo">${mark(30)}AgentBill</div><span class="host">${host}</span></div>
   <h1>${HEADLINE}</h1>
   <div class="frame"><div class="win">
-    <div class="bar"><span class="bar-t">${tag(RUN.taskRef, true)}<span>your agent&rsquo;s log &middot; ceiling ${num(RUN.ceiling)} units</span></span>${SAMPLE_TAG}</div>
+    <div class="bar"><span class="bar-t">${tag(RUN.taskRef, true)}<span>your agent&rsquo;s log &middot; ceiling ${usdCents(RUN.ceiling)}</span></span>${SAMPLE_TAG}</div>
     <div class="rows">
-      <div class="row"><span class="c">${last.name}</span><span class="u">+${num(last.units)}</span><span class="t">${num(last.cum)}</span><span class="a">${chip('ok', 'approved')}</span></div>
-      <div class="row no"><span class="c">${RUN.refused.name}</span><span class="u">asks ${num(RUN.refused.asked)} &middot; ${num(RUN.remaining)} left</span><span class="t">${num(RUN.used + RUN.refused.asked)} &gt; ${num(RUN.ceiling)}</span><span class="a">${chip('no', 'approved: false')}</span></div>
+      <div class="row"><span class="c">${last.name}</span><span class="u">+${usdCents(last.units)}</span><span class="t">${usdCents(last.cum)}</span><span class="a">${chip('ok', 'approved')}</span></div>
+      <div class="row no"><span class="c">${RUN.refused.name}</span><span class="u">asks ${usdCents(RUN.refused.asked)} &middot; ${usdCents(RUN.remaining)} left</span><span class="t">${usdCents(RUN.used + RUN.refused.asked)} &gt; ${usdCents(RUN.ceiling)}</span><span class="a">${chip('no', 'approved: false')}</span></div>
     </div>
   </div></div>
   <div class="foot"><span><b>Your code decides what happens next.</b></span><span class="m">${INSTALL_PY}</span></div>
