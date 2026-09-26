@@ -184,7 +184,7 @@ export class AgentBillClient {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
-          'User-Agent': 'agentbill-openclaw/0.2.1',
+          'User-Agent': 'agentbill-openclaw/0.3.0',
         },
         body: JSON.stringify(body),
         signal: ctrl.signal,

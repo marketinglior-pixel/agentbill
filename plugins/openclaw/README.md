@@ -138,9 +138,16 @@ Each session is a job in the console at https://agentbill.dev/app, named
   session's calls and units by model, from the provider and model names
   OpenClaw reports.
 
-No dollar figure appears for these sessions. The plugin records token totals,
-not the per-type counts a list price needs, so the console shows usage in the
-unit you chose.
+**What each session cost, at list price.** Each model call is recorded with the
+per-type token counts OpenClaw reports (input, cache reads, cache writes,
+output), so AgentBill prices it at public list price, and the console shows what
+each session, agent and customer cost in dollars. It is an estimate, not your
+invoice. OpenAI, Anthropic and Google Gemini calls are priced; a provider the
+price table does not cover (OpenRouter, for example) or a model it does not
+list is shown as unpriced, never as $0. OpenClaw reports one cache-write count
+with no 5-minute or 1-hour split, so cache writes are priced at the 5-minute
+rate, which is under Anthropic's price for a 1-hour cache write. The ceiling
+stays in the unit you chose.
 
 ## Options
 

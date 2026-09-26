@@ -12,7 +12,7 @@ export type { PluginConfig, Units, FailMode, CustomerFrom } from './ceiling.js'
 export default definePluginEntry({
   id: 'agentbill',
   name: 'AgentBill',
-  description: 'A spend budget per session, in tokens or calls, consulted before every model turn and tool call.',
+  description: 'What each session costs at list price, and a spend budget per session, consulted before every model turn and tool call.',
   register(api) {
     registerCeiling(api)
   },

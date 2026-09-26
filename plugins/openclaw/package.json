@@ -1,7 +1,7 @@
 {
   "name": "@agentbill/openclaw",
-  "version": "0.2.1",
-  "description": "A spend budget per OpenClaw session, in tokens or calls. Model turns and tool calls past the limit are refused, nothing refills it on a clock, and a console shows each session's usage.",
+  "version": "0.3.0",
+  "description": "See what each OpenClaw session costs in dollars at list price, and give it a spend budget in tokens or calls: model turns and tool calls past it are refused, and nothing refills it on a clock.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
