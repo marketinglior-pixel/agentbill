@@ -2487,6 +2487,53 @@ ok('[faq] and both SDKs still return, not raise, on free_tier_exceeded and plan_
      && node10.includes('free_tier_exceeded and plan_limit_exceeded deliberately do NOT throw'),
    'an SDK branches on a quota refusal, so the /faq answer may no longer be true')
 
+// Jobs in dollars, 2026-09-26. /faq led with "What is a unit?" and the
+// SoftwareApplication JSON-LD (src/ui/ld.ts, on /, /docs, /faq, /upgrade)
+// named units and tokens as what a job counts and never a job in dollars or
+// the per-customer report. The answers now lead with dollars, and each number
+// in them is read here from the constant it came from, not typed: a gate that
+// typed 20 would pass the day USD_HISTORY_CALLS became 30. The "never $0"
+// claim is about events.ts, so events.ts is read too.
+const { USD_HISTORY_CALLS: HIST11, USD_DEFAULT_ESTIMATE_MICROS: DEF11 } = await import('../../dist/lib/usd-estimate.js')
+const def11 = `$${(DEF11 / 1e6).toFixed(2)}`
+const countHtml11 = (faq10.match(/<h2[^>]*>What does a job count\?<\/h2>\s*<p>([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const countA11 = visible8(countHtml11).replace(/\s+/g, ' ').trim()
+ok('[faq] "What does a job count?" leads with dollars, names tokens and units, and reads its numbers from the estimator\'s constants',
+   countA11.startsWith('Dollars, tokens or units') && countA11.includes('task_ceiling_usd') && countA11.includes('ceiling_usd')
+     && countA11.includes(`median of the job's last ${HIST11} priced calls`) && countA11.includes(`or ${def11} before it has one`)
+     && countA11.includes('charged its reservation, never $0') && countA11.includes('not your invoice')
+     && countA11.includes('never converts it to money') && !/What is a unit\?/.test(faq10),
+   countA11.slice(0, 220) || 'no "What does a job count?" answer on /faq')
+const clientHtml11 = (faq10.match(/<h2[^>]*>Can I see what each client cost me\?<\/h2>\s*<p>([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
+const clientA11 = visible8(clientHtml11).replace(/\s+/g, ' ').trim()
+const report11 = readFileSync9(`${ROOT9}/src/lib/report.ts`, 'utf8')
+ok('[faq] the per-client answer names customer_id, the monthly report as CSV, and unpriced calls, and report.ts still has those columns',
+   clientA11.includes('customer_id') && clientA11.includes('monthly report') && clientA11.includes('CSV')
+     && clientA11.includes('counted as unpriced, never added as $0')
+     && /'customer_id'[\s\S]{0,120}'unpriced_calls'/.test(report11),
+   clientA11.slice(0, 200) || 'no per-client answer on /faq')
+const ldCount11 = faqLd10?.mainEntity?.find((x) => x.name === 'What does a job count?')?.acceptedAnswer?.text ?? ''
+ok('[faq] the FAQPage JSON-LD carries the dollar answer, and no question named for a unit',
+   ldCount11.startsWith('Dollars, tokens or units') && !(faqLd10?.mainEntity ?? []).some((x) => /unit/i.test(x.name)),
+   ldCount11.slice(0, 120) || 'no FAQPage answer for what a job counts')
+const events11 = readFileSync9(`${ROOT9}/src/routes/events.ts`, 'utf8')
+ok('[faq] and events.ts still charges an unpriced call on a dollar job its reservation or the job estimate, never $0',
+   events11.includes("usd = { basis: 'reservation', unpriced: true }") && events11.includes("usd = { basis: 'estimate', unpriced: true }"),
+   'events.ts no longer charges unpriced dollar calls their reservation, so "never $0" may be false')
+const home11 = await fetch(`${API}/`).then((r) => r.text())
+const soft11 = (() => {
+  for (const m of home11.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    try { const j = JSON.parse(m[1]); const nodes = j['@graph'] ?? [j]; const n = nodes.find((x) => x['@type'] === 'SoftwareApplication'); if (n) return n } catch {}
+  }
+  return null
+})()
+const feats11 = (soft11?.featureList ?? []).join(' | ')
+ok('[ld] the SoftwareApplication node leads with dollars per agent, client and job, and lists jobs in dollars and the per-customer report',
+   /^What each AI agent, client and job costs, in dollars at public list price/.test(soft11?.description ?? '')
+     && feats11.includes('A job counts dollars, tokens or units') && feats11.includes('A monthly report per customer_id')
+     && feats11.includes(`or ${def11} before it has one`) && !feats11.includes('reserves the units your code estimates and answers'),
+   (soft11?.description ?? 'no SoftwareApplication node on /').slice(0, 160))
+
 // ---------------------------------------------------------------- meter, stage A: 2026-09-23
 // Four ledger changes every later metering option depends on, each held by
 // gates that name the failure they prevent. The memo that ordered them is

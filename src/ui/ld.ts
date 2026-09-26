@@ -2,6 +2,7 @@ import { ORIGIN } from './site.js'
 import { OG_IMAGE } from './og.js'
 import { SDK_VERSIONS } from '../lib/llms.js'
 import { PLAN_ORDER, PLAN_PRICES, PLAN_LIMITS } from '../integrations/polar.js'
+import { USD_DEFAULT_ESTIMATE_MICROS } from '../lib/usd-estimate.js'
 
 // The product entity, in one place.
 //
@@ -19,13 +20,18 @@ import { PLAN_ORDER, PLAN_PRICES, PLAN_LIMITS } from '../integrations/polar.js'
 // file in src/ or sdk/, and the ones that were checked name what they came from.
 
 /** The one-sentence description, shared by every node that needs one. */
+// 2026-09-26, when the site moved to jobs in dollars and a cost per client: it
+// led with units and never named a job in dollars or the per-customer report.
+// Dollars: task_budgets.unit 'usd' (migration 025), priced in
+// src/routes/events.ts from src/lib/prices.ts; the report is src/lib/report.ts.
 const DESCRIPTION =
-  'A per-task spend ceiling for AI agents. Your code calls preflight before it calls a provider; ' +
-  "preflight reserves an estimate (the integer units you pass, or under the SDK's wrap() the job's " +
-  'running average in tokens) against a ceiling bound to a task_ref you choose, answers ' +
-  'approved:false or raises when the reservation would cross it, and your code decides what happens ' +
-  'next. Units you define are never converted to money; model calls measured by wrap() carry an ' +
-  'estimate at public list price beside their tokens.'
+  'What each AI agent, client and job costs, in dollars at public list price, with a ceiling your ' +
+  'code checks before each call. Your code calls preflight before it calls a provider; preflight ' +
+  'reserves an estimate against a ceiling bound to a task_ref you choose, answers approved:false or ' +
+  'raises when the reservation would cross it, and your code decides what happens next. A job counts ' +
+  "dollars, each call priced from the tokens your provider reported (an estimate, not your invoice), " +
+  'tokens, or integer units you define, which are never converted to money. A monthly report per ' +
+  'customer_id carries the same list-price figures.'
 
 /**
  * SoftwareApplication for / and /pricing. Both emit it under one @id so the two
@@ -77,14 +83,15 @@ export function softwareLd(): unknown {
     // softwareLd() is emitted on /docs and /faq too, rather than referenced
     // from them.
     featureList: [
-      'POST /preflight reserves the units your code estimates and answers before your provider call goes out. An approved answer carries remaining_units and reservation_expires_at.',
+      'POST /preflight reserves an estimate and answers before your provider call goes out. On a job in dollars the estimate is the caller\'s estimated_usd, or the median of the job\'s recent priced calls, or $' + (USD_DEFAULT_ESTIMATE_MICROS / 1e6).toFixed(2) + ' before it has one; otherwise it is the units your code estimates. An approved answer carries remaining_units and reservation_expires_at.',
       'One ceiling per task_ref: every call passing the same task_ref is checked against the same task budget, from any process, any machine and any provider.',
       'A job is opened with its ceiling by the first preflight that names a new task_ref, or from the console before any code runs. A task_ceiling sent on a later preflight is not applied, so a retry cannot raise the number it was meant to respect; the ceiling changes only through the console or PUT /tasks/:task_ref/ceiling, and an approved answer or a task_ceiling_exceeded refusal carries the ceiling in force.',
       'When used plus reserved plus this estimate would cross the task ceiling, preflight answers approved:false with reason task_ceiling_exceeded and the numbers it decided on; the SDK raises TaskCeilingExceededError and the calling code decides what happens next.',
-      'Units are integers the developer defines and passes, or, for model calls measured by the SDK\'s wrap(), the tokens the provider reported. AgentBill compares them to a ceiling, never converts developer-defined units to currency, and never reads a provider invoice; any dollar figure is an estimate at public list price.',
+      'A job counts dollars, tokens or units, declared when it opens. In dollars (task_ceiling_usd on the preflight that opens it or on wrap(), or ceiling_usd from the console or PUT /tasks/:task_ref/ceiling) each call is charged the public list price of the tokens the provider reported, from a dated snapshot of the LiteLLM price table, and a call that cannot be priced is charged its reservation, never $0. Tokens are what the SDK\'s wrap() reports by default. Units are integers the developer defines and are never converted to currency. AgentBill never reads a provider invoice; every dollar figure is an estimate at public list price.',
+      'A monthly report per customer_id, one calendar month (UTC), with each customer\'s lines by agent and model, as CSV or a printable page, from the list price stored with every priced call. Calls with no list price are counted as unpriced, never added as $0.',
       'The check and the reservation are one conditional UPDATE, so two preflights arriving together cannot both be approved against the same remaining units.',
       'idempotency_key replays a stored decision, so a retried preflight holds one reservation instead of two.',
-      'POST /events settles a reservation: success true records the units, success false releases them and records nothing.',
+      'POST /events settles a reservation: success true records the call, success false releases the reservation and records nothing.',
       'Reservations carry an expiry, 60 minutes by default, and a sweeper returns expired ones to the budget every five minutes, so an abandoned run tightens the ceiling rather than loosening it.',
       'Per-customer ceilings through PUT /budget, where limit_units is an integer or null for no limit and may be set below what is already used without rewriting a counter.',
       'Per-call ceiling: when estimated_units exceeds it, preflight answers approved:false with reason ceiling_exceeded, having reserved nothing.',

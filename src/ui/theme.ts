@@ -377,7 +377,7 @@ export const TOKENS_CANVAS = `
        input or a plate inside a card, --r-row a tinted row or a rail link,
        --r-inline code set inside a sentence. */
     --r-card: 24px; --r-card-sm: 20px; --r-inner: 16px; --r-field: 12px; --r-row: 10px; --r-inline: 6px;
-    /* The figure in a frame (492 / 500 units), and code in a frame. */
+    /* The figure in a frame ($4.92 / $5.00), and code in a frame. */
     --fs-stat: clamp(34px, 4vw, 44px);
     --fs-code: 13px;
     /* Geist at 500 for every heading, the register the homepage set. BASE

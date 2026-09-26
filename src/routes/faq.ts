@@ -3,6 +3,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
+import { USD_DEFAULT_ESTIMATE_MICROS, USD_HISTORY_CALLS } from '../lib/usd-estimate.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { softwareLd } from '../ui/ld.js'
 import { CONTENT_CSS } from '../ui/content.js'
@@ -22,12 +23,27 @@ type QA = { q: string; a: string }
 
 const FAQ: readonly QA[] = [
   {
-    // src/routes/preflight.ts: units are an integer the caller passes, and
-    // task_budgets.unit says whether a job counts those or tokens (migration
-    // 014). Nothing converts a developer's units to currency; src/lib/prices.ts
-    // prices tokens that wrap() recorded, as a list-price estimate.
-    q: 'What is a unit?',
-    a: `By default, an integer you define and pass. AgentBill counts units and compares them to a ceiling; it never converts the units you define into money and never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours. A job can instead be counted in tokens, which is what wrap() does: the numbers are the tokens your provider reported, the ceiling is in tokens, and the job's page shows an estimate at public list price beside them. List price, your invoice may differ.`,
+    // task_budgets.unit is 'usd', 'token' or 'unit' (migrations 014, 025,
+    // src/lib/task-ceiling.ts TASK_UNITS), declared when the job opens and
+    // fixed from then on. Dollars: src/lib/usd-estimate.ts is the reservation
+    // order (the caller's estimated_usd, the median of the job's last
+    // USD_HISTORY_CALLS priced calls, then USD_DEFAULT_ESTIMATE_MICROS);
+    // src/routes/events.ts charges the list price of the reported tokens,
+    // rounded up, and an unpriced call its reservation, never $0; src/lib/
+    // prices.ts is the dated LiteLLM snapshot. Tokens is wrap()'s default unit
+    // (sdk/python/agentbill/wrap.py). A developer's own units are never
+    // converted to currency. Rewritten 2026-09-26, when the site moved to jobs
+    // in dollars: this was "What is a unit?", and it led with units.
+    q: 'What does a job count?',
+    a: `Dollars, tokens or units, chosen when the job opens and fixed from then on. Open it in dollars with task_ceiling_usd on wrap() or on the preflight that opens it, or with ceiling_usd from the console or PUT /tasks/:task_ref/ceiling, and AgentBill prices each call itself: the public list price of the tokens your provider reported, from a dated snapshot of the LiteLLM price table. Before a call it reserves your estimated_usd if you pass one, otherwise the median of the job's last ${USD_HISTORY_CALLS} priced calls, or $${(USD_DEFAULT_ESTIMATE_MICROS / 1e6).toFixed(2)} before it has one. A call it cannot price is charged its reservation, never $0. In tokens, which is what wrap() uses unless you open the job in dollars, the ceiling is the tokens your provider reported. In units, the default for a preflight that names no unit, the number is an integer you define and pass, and AgentBill never converts it to money. Every dollar figure is an estimate at list price, not your invoice.`,
+  },
+  {
+    // src/lib/report.ts: one UTC month per customer_id, lines by agent and
+    // model, from events.list_price_usd, which src/routes/events.ts stores on
+    // every priced record whatever the job counts. /app/report.csv and
+    // /app/report in src/routes/app.ts.
+    q: 'Can I see what each client cost me?',
+    a: `Yes. Pass customer_id on wrap() or on each record, and the console's monthly report gives one line per customer for the calendar month (UTC), broken down by agent and model, as a CSV or a printable page. The figure is the list-price estimate stored with each priced call, whatever the job counts, so it is what you bill from, not what your provider will invoice. A call with no list price is counted as unpriced, never added as $0.`,
   },
   {
     // src/routes/preflight.ts for the five reason strings and their shapes;
@@ -37,13 +53,13 @@ const FAQ: readonly QA[] = [
     a: `Five things, and each one names itself. ceiling_exceeded means this one call's estimate is over the per-call ceiling. task_ceiling_exceeded means used plus reserved plus this estimate would cross the ceiling on that task_ref. budget_exhausted means that customer's own limit. free_tier_exceeded and plan_limit_exceeded mean our monthly quota ran out, not yours. All five come back as a 200 with approved false, carrying the numbers the decision was made on, and preflight then raises for the three that are your spend rule so a check you forgot to read cannot be silently ignored, and returns the result with an upgrade_url for the two that are ours. What happens next is your code's decision: retry with a smaller estimate, drop to a cheaper model, return what you have, or stop. We are not in your process and cannot end it.`,
   },
   {
-    // Units move only through preflight.ts, events.ts and step.ts, all of which
+    // A job's numbers move only through preflight.ts, events.ts and step.ts, all of which
     // your code calls, directly or through the SDKs' wrap(), which calls them
     // around the model methods it wraps (sdk/python/agentbill/wrap.py,
     // sdk/node/src/wrap.ts). There is no proxy, no sidecar and no provider
     // credential anywhere in the API surface.
     q: 'Does AgentBill count my tool calls and GPU time automatically?',
-    a: `No. Tool calls and GPU time are counted only when your code says so. Units move when you call preflight, record an event, or record a step, and they count against a job's ceiling only when the call carries the same task_ref. So a tool, a GPU run or a vector search counts if you instrument it with that task_ref, and does not exist to us if you do not. Model calls are the one thing counted for you, and only through a client you wrapped with wrap(): OpenAI, Anthropic and Gemini calls through their create methods, recorded from the usage the provider returned to your process. An unwrapped call is not counted. Nothing sits in your traffic to watch it, which is the trade: one number for a whole job across every provider, because your code, or wrap(), reported what each step used.`,
+    a: `No. Tool calls and GPU time are counted only when your code says so. A job's numbers move when you call preflight, record an event, or record a step, and they count against a job's ceiling only when the call carries the same task_ref. So a tool, a GPU run or a vector search counts if you instrument it with that task_ref, and does not exist to us if you do not. Model calls are the one thing counted for you, and only through a client you wrapped with wrap(): OpenAI, Anthropic and Gemini calls through their create methods, recorded from the usage the provider returned to your process. An unwrapped call is not counted. Nothing sits in your traffic to watch it, which is the trade: one number for a whole job across every provider, because your code, or wrap(), reported what each step used.`,
   },
   {
     // llms.txt and preflight.ts both: no provider credentials, no bill access.
@@ -63,8 +79,8 @@ const FAQ: readonly QA[] = [
   },
   {
     // src/lib/reservations.ts:8 and reservation-sweeper.ts:16, read 2026-09-05.
-    q: 'What happens if a job dies with units still reserved?',
-    a: `Preflight reserves the units it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released early because a process was slow.`,
+    q: 'What happens if a job dies holding a reservation?',
+    a: `Preflight reserves the estimate it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released early because a process was slow.`,
   },
   {
     // src/routes/preflight.ts (the conditional quota UPDATE, and the rejection
@@ -105,7 +121,7 @@ export async function faqRoute(app: FastifyInstance) {
     return reply.type('text/html').send(docsShell({
       path: '/faq',
       title: 'Questions · AgentBill',
-      description: 'What a unit is, what happens when a job dies holding a reservation, how a task budget differs from a monthly cap, and which features are on which plan.',
+      description: 'What a job counts, what each client cost, what happens when a job dies holding a reservation, how a task budget differs from a monthly cap, and which features are on which plan.',
       current: '',
       mainEntity: 'https://agentbill.dev/faq#faq',
       // On canvas (2026-09-23) the questions are a list, not eleven section
