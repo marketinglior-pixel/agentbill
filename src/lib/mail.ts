@@ -464,7 +464,13 @@ export function verifyInboundWebhook(payload: string, h: { id: string; timestamp
  *  a display name is a textbook spoofing signal, and with a Reply-To at another
  *  domain the message had the shape of a lure. Every other mail this domain
  *  sends, with neither signal, lands in the inbox. */
-export const FORWARD_FROM = 'AgentBill inbox <forward@agentbill.dev>'
+//
+// And from hello@, not a new local part: with the name fixed, the test forwards
+// of 2026-09-26 still went to Gmail's spam from forward@agentbill.dev, an
+// address with no history, while every alert this server sends from
+// hello@agentbill.dev lands in the inbox. A forward that bounced back to
+// hello@ is dropped by the route's own-domain loop guard.
+export const FORWARD_FROM = 'AgentBill inbox <hello@agentbill.dev>'
 
 export type ForwardResult =
   | { ok: true }

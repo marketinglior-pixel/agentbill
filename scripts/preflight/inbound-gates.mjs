@@ -107,8 +107,8 @@ async function gates({ API, sql, ok, bootS, stopS, portS }) {
        f1.status === 200 && f1.body?.forwarded === true && sent.length === 1
          && (s1.to === OWNER || (Array.isArray(s1.to) && s1.to.length === 1 && s1.to[0] === OWNER)),
        JSON.stringify({ f1, to: s1.to }))
-    ok('[inbound] the forward is from forward@agentbill.dev, Reply-To is the original sender, and the subject is tagged',
-       String(s1.from) === 'AgentBill inbox <forward@agentbill.dev>' && !/@/.test(String(s1.from).split('<')[0]) && JSON.stringify(s1.reply_to) === JSON.stringify(['"Ev<i>l" <eve@example.com>'])
+    ok('[inbound] the forward is from hello@agentbill.dev, Reply-To is the original sender, and the subject is tagged',
+       String(s1.from) === 'AgentBill inbox <hello@agentbill.dev>' && !/@/.test(String(s1.from).split('<')[0]) && JSON.stringify(s1.reply_to) === JSON.stringify(['"Ev<i>l" <eve@example.com>'])
          && s1.subject === '[hello@] Question about AgentBill em_first',
        JSON.stringify({ from: s1.from, reply_to: s1.reply_to, subject: s1.subject }))
     ok('[inbound] the header block escapes the sender (no raw <i> from a display name) and keeps the original body',
