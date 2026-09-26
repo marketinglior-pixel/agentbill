@@ -1,7 +1,7 @@
 {
   "id": "agentbill",
   "name": "AgentBill",
-  "description": "A spend budget per session, in tokens or calls. Model turns and tool calls past it are refused, and the session says so.",
+  "description": "What each session costs at list price, and a spend budget per session, in tokens or calls. Model turns and tool calls past it are refused, and the session says so.",
   "categories": ["security"],
   "activation": {
     "onStartup": true
@@ -30,7 +30,7 @@
         "type": "string",
         "enum": ["tokens", "calls"],
         "default": "tokens",
-        "description": "What one unit is. tokens: every model call records the usage total OpenClaw reports. calls: every model call and tool call is one unit."
+        "description": "What one unit is. tokens: every model call records the usage total OpenClaw reports, with its per-type counts so AgentBill can price it at list price. calls: every model call and tool call is one unit."
       },
       "estimateUnits": {
         "type": "integer",

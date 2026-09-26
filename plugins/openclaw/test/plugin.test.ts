@@ -282,7 +282,8 @@ test('llm_output settles the turn\'s reservation once, and names the provider an
     const [first, second] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
     assert.equal(first!.reservation_id, RID_RUN)
     assert.equal(first!.units, 1000)
-    assert.deepEqual(first!.metadata, { kind: 'model_call', provider: 'anthropic', model: 'claude-sonnet-4-5' })
+    assert.deepEqual(first!.metadata, { kind: 'model_call', provider: 'anthropic', model: 'claude-sonnet-4-5', tokens: { input: 900, cache_read: 0, cache_write: 0, output: 100 } })
+    assert.equal('tokens' in second!.metadata, false, 'a bare total carries no per-type counts, so none are guessed')
     assert.equal('reservation_id' in second!, false, 'the second model call of the run has no reservation of its own left')
     assert.equal(second!.units, 400)
   })
@@ -372,5 +373,90 @@ test('once the server has returned a reservation_id, a model call with no usage 
     assert.equal(second!.usage_missing, true)
     assert.equal('reservation_id' in second!, false, 'it names no reservation: the server floors it at the task_ref\'s oldest open one')
     assert.equal(second!.task_ref, 'openclaw:k')
+  })
+})
+
+// 0.3.0: each model call carries the per-type counts the server prices, so a
+// session has a cost in dollars at list price whatever its budget counts.
+test('llm_output sends OpenClaw\'s disjoint buckets as tokens, and units are their sum when the host sends no total', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: 'anthropic', model: 'claude-sonnet-4-5', assistantTexts: [],
+      usage: { input: 120, cacheRead: 3000, cacheWrite: 400, output: 80 } }, { sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: 'openai', model: 'gpt-5.4', assistantTexts: [],
+      usage: { input: 10, cacheRead: 5, output: 7, total: 22 } }, { sessionKey: 'k' })
+    const [a, b] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.deepEqual(a!.metadata.tokens, { input: 120, cache_read: 3000, cache_write: 400, output: 80 })
+    assert.equal(a!.units, 3600, 'no total: input + cacheRead + cacheWrite + output, OpenClaw\'s own total')
+    assert.deepEqual(b!.metadata.tokens, { input: 10, cache_read: 5, cache_write: 0, output: 7 })
+    assert.equal(b!.units, 22, 'the host\'s total wins when it sends one')
+  })
+})
+
+test('llm_output names Gemini as the price table does: OpenClaw\'s "google" is sent as "gemini", every other provider as the host named it', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    for (const provider of ['google', 'Gemini', 'OpenRouter', 'claude-cli']) {
+      await fire('llm_output', { runId: 'r', sessionId: 's', provider, model: 'm', assistantTexts: [], usage: { input: 1, output: 1 } }, { sessionKey: 'k' })
+    }
+    const names = srv.calls.filter((c) => c.path === '/events').map((c) => c.body.metadata.provider)
+    assert.deepEqual(names, ['gemini', 'gemini', 'openrouter', 'claude-cli'])
+  })
+})
+
+test('llm_output sends no tokens when the host reported no usage, and still sends them on a session counted in calls', async () => {
+  const srv = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x', units: 'calls' })
+    registerCeiling(api as any)
+    await fire('llm_output', { runId: 'r', sessionId: 's', provider: 'openai', model: 'gpt-5.4', assistantTexts: [], usage: { input: 40, output: 2 } }, { sessionKey: 'k' })
+    const [rec] = srv.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(rec!.units, 1, 'a session counted in calls still records one unit per call')
+    assert.deepEqual(rec!.metadata.tokens, { input: 40, cache_read: 0, cache_write: 0, output: 2 })
+  })
+  const srv2 = fakeServer((b) => ('units' in b ? recorded : approvedWith(RID_RUN)))
+  await withFetch(srv2.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    await fire('before_agent_run', { prompt: 'hi', messages: [] }, { runId: 'r5', sessionKey: 'k' })
+    await fire('llm_output', { runId: 'r5', sessionId: 's', provider: 'openai', model: 'gpt-5.4', assistantTexts: [] }, { sessionKey: 'k' })
+    const [rec] = srv2.calls.filter((c) => c.path === '/events').map((c) => c.body)
+    assert.equal(rec!.usage_missing, true)
+    assert.equal('tokens' in rec!.metadata, false, 'no usage is not a call that cost 0: nothing to price, so nothing is sent')
+  })
+})
+
+// The claim 0.3.0 makes is that a session has a cost in dollars. That is true
+// only if the SERVER prices what the plugin sends, so this runs the server's own
+// priceEvent (src/lib/prices.ts, the function /events calls) on the metadata
+// the plugin actually sent: no second copy of the shape to drift.
+test('the server prices what llm_output sends: OpenAI, Anthropic and Gemini calls get a list price, a provider the table does not price stays unpriced with a reason', async () => {
+  const { priceEvent } = await import('../../../src/lib/prices.js')
+  const srv = fakeServer((b) => ('units' in b ? recorded : approved))
+  await withFetch(srv.fetchImpl, async () => {
+    const { api, fire } = fakeApi({ apiKey: 'agb_x' })
+    registerCeiling(api as any)
+    // Usage as each provider reports it: only Anthropic bills cache writes, so
+    // only its call carries one (the price table has no cache-write rate for
+    // OpenAI or Gemini, and the server rightly refuses to price one there).
+    const calls: [string, string, Record<string, number>][] = [
+      ['openai', 'gpt-5.4', { input: 1000, cacheRead: 500, output: 200 }],
+      ['anthropic', 'claude-sonnet-4-5', { input: 1000, cacheRead: 500, cacheWrite: 100, output: 200 }],
+      ['google', 'gemini-2.5-pro', { input: 1000, cacheRead: 500, output: 200 }],
+      ['openrouter', 'gpt-5.4', { input: 1000, output: 200 }],
+    ]
+    for (const [provider, model, usage] of calls) {
+      await fire('llm_output', { runId: 'r', sessionId: 's', provider, model, assistantTexts: [], usage }, { sessionKey: 'k' })
+    }
+    const prices = srv.calls.filter((c) => c.path === '/events').map((c) => priceEvent(c.body.metadata, false))
+    for (const [i, p] of prices.slice(0, 3).entries()) {
+      assert.ok(p.listPriceUsd != null && Number(p.listPriceUsd) > 0, `${calls[i]![0]}/${calls[i]![1]} is priced: ${JSON.stringify(p)}`)
+    }
+    assert.equal(prices[3]!.listPriceUsd, null, 'openrouter is not in the price table: unpriced, never $0')
+    assert.match(prices[3]!.note ?? '', /no list price/)
   })
 })

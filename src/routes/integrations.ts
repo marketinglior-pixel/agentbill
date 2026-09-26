@@ -294,9 +294,11 @@ ${HUB_ROWS.map(hubRow).join('\n')}
 
   <h2>What one unit is</h2>
   <p><span class="inline">units: "tokens"</span> is the default. After a model turn runs, the plugin
-  records the usage total OpenClaw reports for it in its <span class="inline">llm_output</span>
+  records the usage OpenClaw reports for it in its <span class="inline">llm_output</span>
   hook, which covers every model call in the turn, so what counts against the ceiling is the host's
-  own number, not an estimate you write. Before a call it reserves an estimate:
+  own total, not an estimate you write. Since 0.3.0 the per-type counts go with it (input, cache
+  reads, cache writes, output), and AgentBill prices each call at public list price, so each
+  session has a cost in dollars beside its tokens: an estimate, not your invoice. Before a call it reserves an estimate:
   <span class="inline">estimateUnits</span> for a session's opening call, then the session's running
   average of what those reports came to. Tool calls record nothing in tokens mode; the model calls
   around them are what cost.</p>
@@ -343,7 +345,7 @@ ${HUB_ROWS.map(hubRow).join('\n')}
       <tr><td>subagent_spawned</td><td>observe</td><td>Links the child session to the parent's task_ref.</td></tr>
       <tr><td>before_agent_run</td><td>gate</td><td>Calls preflight. On a refusal, returns the refusal sentence to OpenClaw. Run by the embedded and CLI runners only.</td></tr>
       <tr><td>before_tool_call</td><td>gate</td><td>Calls preflight. On a refusal, returns the refusal sentence to OpenClaw.</td></tr>
-      <tr><td>llm_output</td><td>observe</td><td>Records the usage total OpenClaw reports.</td></tr>
+      <tr><td>llm_output</td><td>observe</td><td>Records the usage OpenClaw reports: its total against the ceiling, its per-type counts for a list price.</td></tr>
       <tr><td>after_tool_call</td><td>observe</td><td>Records <span class="inline">toolCallUnits</span>, when above zero.</td></tr>
       <tr><td>session_end</td><td>observe</td><td>Forgets the session.</td></tr>
     </tbody>
@@ -380,7 +382,8 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <h2>What it does not do</h2>
   <ul class="plain">
     <li>It measures no provider and reads no bill. In tokens mode it records the usage OpenClaw
-    reports; in calls mode it counts calls.</li>
+    reports; in calls mode it counts calls. The dollar figure is an estimate at list price from those
+    counts, never a reading of your invoice.</li>
     <li>It cannot reach into a turn that is already running. It asks before the next one.</li>
   </ul>
 

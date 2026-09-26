@@ -255,7 +255,7 @@ export class Ceiling {
 
   async settleModelCall(
     sessionKey: string,
-    usage: { total?: number; input?: number; output?: number } | undefined,
+    usage: HostUsage | undefined,
     runId: string | undefined,
     customerId: string | undefined,
     // What the host's llm_output event names the call with. OpenClaw's own
@@ -274,8 +274,13 @@ export class Ceiling {
       t.samples += 1
     }
     const metadata: Record<string, unknown> = { kind: 'model_call' }
-    if (typeof call.provider === 'string' && call.provider) metadata.provider = call.provider
+    if (typeof call.provider === 'string' && call.provider) metadata.provider = priceProvider(call.provider)
     if (typeof call.model === 'string' && call.model) metadata.model = call.model
+    // 0.3.0: the per-type counts, so the server can price the call at list
+    // price (src/lib/prices.ts priceEvent reads metadata.tokens). Only when
+    // the host reported them; a bare total cannot be priced and is not guessed.
+    const counts = tokensOf(usage)
+    if (counts && !read.missing) metadata.tokens = counts
     await this.recordQuietly(t, units, `${runId ?? 'run'}:llm:${++this.counter}`, customerId, metadata, {
       reservationId: this.takeHeld(`${runId ?? 'run'}:agent_run`),
       // No usage from the host is not a call that cost 0. The server charges
@@ -329,12 +334,47 @@ export class Ceiling {
  * all. A reported 0 is a real 0; no usage object, or one with no number in
  * it, is "missing" and must not be read as a call that cost nothing.
  */
-function readUsage(usage: { total?: number; input?: number; output?: number } | undefined): { units: number; missing: boolean } {
-  const n = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-  if (!usage || (!n(usage.total) && !n(usage.input) && !n(usage.output))) return { units: 0, missing: true }
-  if (n(usage.total) && usage.total > 0) return { units: Math.round(usage.total), missing: false }
-  const sum = (n(usage.input) ? usage.input : 0) + (n(usage.output) ? usage.output : 0)
-  return { units: sum > 0 ? Math.round(sum) : 0, missing: false }
+/**
+ * The usage OpenClaw reports on llm_output (PluginHookLlmOutputEvent,
+ * 2026.9.4). Its buckets are disjoint: input does NOT include cache reads or
+ * writes. OpenClaw's own cost code bills them separately, its provider
+ * normalisers subtract cached tokens from input, and its total is
+ * input + output + cacheRead + cacheWrite. Read 2026-09-26 in
+ * node_modules/openclaw/dist (usage-cost-*.mjs, usage-*.mjs, compaction-*.mjs).
+ */
+export type HostUsage = { total?: number; input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const count = (v: unknown): number => (isNum(v) && v > 0 ? Math.round(v) : 0)
+
+function readUsage(usage: HostUsage | undefined): { units: number; missing: boolean } {
+  if (!usage || ![usage.total, usage.input, usage.output, usage.cacheRead, usage.cacheWrite].some(isNum)) return { units: 0, missing: true }
+  if (isNum(usage.total) && usage.total > 0) return { units: Math.round(usage.total), missing: false }
+  const sum = count(usage.input) + count(usage.output) + count(usage.cacheRead) + count(usage.cacheWrite)
+  return { units: sum, missing: false }
+}
+
+/**
+ * The per-type counts in the shape the server prices (input, cache_read,
+ * cache_write, output), or null when the host reported no per-type number (a
+ * bare total). OpenClaw reports one cacheWrite with no 5-minute/1-hour split,
+ * so it is sent as cache_write, the 5-minute rate: for a 1-hour Anthropic cache
+ * write the estimate is under the provider's price, and the README says so.
+ */
+export function tokensOf(usage: HostUsage | undefined): { input: number; cache_read: number; cache_write: number; output: number } | null {
+  if (!usage || ![usage.input, usage.output, usage.cacheRead, usage.cacheWrite].some(isNum)) return null
+  return { input: count(usage.input), cache_read: count(usage.cacheRead), cache_write: count(usage.cacheWrite), output: count(usage.output) }
+}
+
+/**
+ * The provider name the server's price table uses. OpenClaw's "google" is the
+ * Gemini API itself (api "google-generative-ai", generativelanguage.googleapis.com),
+ * which the price table calls "gemini". Every other provider is sent as the
+ * host named it, and one the table does not price is recorded unpriced, never $0.
+ */
+export function priceProvider(p: string): string {
+  const v = p.trim().toLowerCase()
+  return v === 'google' ? 'gemini' : v
 }
 
 /**
