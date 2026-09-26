@@ -123,6 +123,16 @@ async function gates({ API, sql, ok, F, O }) {
      png.status === 200 && png.headers.get('content-type') === 'image/png'
        && createHash('sha256').update(buf).digest('hex') === 'b700a75dfd7dd83c460230b588abc44296e8d6e07f3f7e3c8db89e8570f8f4de')
 
+  // The homepage hero runs the same engine over the sample staff (2026-09-26).
+  const home = await fetch(`${API}/`).then((x) => x.text())
+  const attr = home.match(/<canvas id="office"[^>]*data-office="([^"]*)"/)?.[1] ?? ''
+  let homeData = null
+  try { homeData = JSON.parse(attr.replace(/&quot;/g, '"')) } catch { /* reported below */ }
+  const homeCsp = home.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] ?? ''
+  ok('[office] the homepage hero draws the sample office: data on the canvas (no inline data block), sample:true, the engine from this origin, script-src naming \'self\'',
+     homeData?.sample === true && (homeData?.agents ?? []).length >= 5 && !home.includes('id="office-data"')
+       && home.includes('<script src="/app/office.js" defer></script>') && /script-src [^;]*'self'/.test(homeCsp) && !/script-src [^;]*unsafe/.test(homeCsp)
+       && /<figure class="frame of-hero"[\s\S]*?>sample</.test(home), homeCsp.slice(0, 160))
   const demo = await fetch(`${API}/app?demo=1&view=office`).then((x) => x.text())
   const demoData = JSON.parse(demo.match(/id="office-data">([\s\S]*?)<\/script>/)?.[1] ?? '{}')
   ok('[office] the sample office is labelled: its data says sample, and its frame carries the SAMPLE tag',
