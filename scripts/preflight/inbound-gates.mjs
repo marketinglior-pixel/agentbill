@@ -83,6 +83,12 @@ async function gates({ API, sql, ok, bootS, stopS, portS }) {
   const ev = (e) => ({ email_id: e.id, created_at: e.created_at, from: e.from, to: e.to, cc: e.cc ?? [], bcc: [], message_id: e.message_id, subject: e.subject, attachments: [] })
   const rows = async (emailId) => sql`SELECT webhook_id, outcome, sender_hash FROM inbound_mail_deliveries WHERE email_id = ${emailId}`
 
+  // hello@ is the one public contact (2026-09-26): no page names a personal address.
+  const pages = await Promise.all(['/privacy', '/terms', '/security', '/about'].map((p) => fetch(`${API}${p}`).then((r) => r.text())))
+  ok('[inbound] /privacy, /terms, /security and /about name hello@agentbill.dev as the contact, and no gmail.com address at all',
+     pages.every((h) => h.includes('hello@agentbill.dev')) && pages.every((h) => !/[a-z0-9._%+-]+@gmail\.com/i.test(h)),
+     ['/privacy', '/terms', '/security', '/about'].filter((_, i) => !pages[i].includes('hello@agentbill.dev') || /@gmail\.com/i.test(pages[i])).join(' '))
+
   // The main harness server has no RESEND_INBOUND_WEBHOOK_SECRET.
   const unset = await post(API, ev(mail('em_unset')))
   ok('[inbound] with RESEND_INBOUND_WEBHOOK_SECRET unset the route answers 503 and forwards nothing', unset.status === 503 && sent.length === 0, JSON.stringify(unset))
