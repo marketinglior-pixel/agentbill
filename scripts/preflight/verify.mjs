@@ -1511,15 +1511,14 @@ const hero8 = fold8.slice(fold8.indexOf('<header class="hero'), fold8.indexOf('<
 // numbers read from the same RUN the page renders from rather than typed here
 // (a gate that typed 492 would go red on a change that changed nothing), and
 // labelled sample inside its own frame. No video and no image in the fold.
-const { RUN: RUN8, REFUSAL: REFUSAL8 } = await import('../../dist/ui/playground.js')
+const { RUN: RUN8, REFUSAL: REFUSAL8, usdCents: usd8 } = await import('../../dist/ui/playground.js')
 const frAt8 = hero8.indexOf('<figure class="frame"')
 const frame8 = frAt8 < 0 ? '' : hero8.slice(frAt8)
 const frVis8 = visible8(frame8).replace(/\s+/g, ' ')
-const n8 = (x) => Number(x).toLocaleString('en-US')
 ok('[fold] the product frame follows the h1 in the hero and reaches the playground\'s own refusal, in text, labelled sample',
    frAt8 > -1 && hero8.indexOf('<h1') > -1 && frAt8 > hero8.indexOf('<h1')
-     && frVis8.includes(RUN8.taskRef) && frVis8.includes(`${n8(RUN8.used)} / ${n8(RUN8.ceiling)} units`)
-     && frVis8.includes(RUN8.refused.name) && frVis8.includes(`asks ${n8(RUN8.refused.asked)}`)
+     && frVis8.includes(RUN8.taskRef) && frVis8.includes(`${usd8(RUN8.used)} / ${usd8(RUN8.ceiling)} at list price`)
+     && frVis8.includes(RUN8.refused.name) && frVis8.includes(`asks ${usd8(RUN8.refused.asked)}`)
      && frVis8.includes('approved: false') && frVis8.includes(REFUSAL8.name) && /\bsample\b/i.test(frVis8)
      && !hero8.includes('<video') && !/<img\b/.test(frame8),
    frame8 ? frVis8.slice(0, 200) : 'no product frame in the hero')
@@ -1653,8 +1652,8 @@ const stFigVis8 = visible8(stFig8).replace(/\s+/g, ' ')
 ok('[fold] the statement draws both states in one frame: a month meter under the cap, this job refused at its ceiling, labelled sample',
    stFig8.length > 0 && /\bsample\b/i.test(stFigVis8)
      && /Org month cap \d+% used under the cap/.test(stFigVis8)
-     && stFigVis8.includes(`${RUN8.taskRef} ${n8(RUN8.used)} / ${n8(RUN8.ceiling)}`)
-     && stFigVis8.includes(`next call asks ${n8(RUN8.refused.asked)}`) && /\brefused\b/.test(stFigVis8),
+     && stFigVis8.includes(`${RUN8.taskRef} ${usd8(RUN8.used)} / ${usd8(RUN8.ceiling)}`)
+     && stFigVis8.includes(`next call asks ${usd8(RUN8.refused.asked)}`) && /\brefused\b/.test(stFigVis8),
    stFig8 ? stFigVis8.slice(0, 200) : 'no figure in the statement')
 // The claims guard, now standing on its own. It was the second half of the
 // caption gate and had NOTHING to do with the caption: it bans the words that
@@ -1952,9 +1951,9 @@ ok('[register] the harness accounts are gone again',
 const howAt8 = fold8.indexOf('<section class="wrap sec how">')
 const how8 = howAt8 < 0 ? '' : fold8.slice(howAt8, fold8.indexOf('</section>', howAt8))
 const howVis8 = visible8(how8).replace(/\s+/g, ' ')
-ok('[home] How it works teaches the ceiling console-first with ceiling_units, and task_ceiling is not a peer path',
+ok('[home] How it works teaches the ceiling console-first with ceiling_usd, and task_ceiling is not a peer path',
    how8.length > 0 && /in the console/.test(howVis8) && howVis8.includes('PUT /tasks/:task_ref/ceiling')
-     && howVis8.includes('ceiling_units') && howVis8.indexOf('console') < howVis8.indexOf('PUT /tasks')
+     && howVis8.includes('ceiling_usd') && howVis8.indexOf('console') < howVis8.indexOf('PUT /tasks')
      && !/\btask_ceiling\b/.test(visible8(body8)) && !/on\s+its first call/.test(fold8)
      && !/pass <span class="mono-in">task_ceiling/.test(fold8),
    howVis8.slice(0, 200) || 'no How it works section')
@@ -1970,12 +1969,13 @@ ok('[home] the not-list is four lines, none about stopping a run or about who ha
 // dollars" was true until list_price_usd_estimate (GET /tasks/:task_ref,
 // src/lib/prices.ts) started serving a dollar figure for a token job. The line
 // now says what the figure is (an estimate, at public list price, on calls
-// wrap() measured) and keeps the phrase /upgrade counts on, "units refused is
-// not money".
+// wrap() measured) and keeps the phrase /upgrade counts on, "a refused call is
+// not money saved" (2026-09-26, when the page moved to jobs in dollars; it was
+// "units refused is not money").
 const billLine8 = visible8((nots8.match(/<li><b>Read your provider bill\.<\/b>([\s\S]*?)<\/li>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
-ok('[home] the bill line calls the dollar figure an estimate at list price on calls wrap() measured, and never says the API turns no units into dollars',
+ok('[home] the bill line calls the dollar figure an estimate at list price on calls wrap() measured, says a refused call is not money saved, and never says the API turns no units into dollars',
    billLine8.includes('A dollar figure appears only as an estimate at public list price, on calls wrap() measured.')
-     && billLine8.includes('units refused is not money') && !/never turns units into dollars|no dollar estimate/i.test(visible8(fold8)),
+     && billLine8.includes('A refused call is not money saved') && !/never turns units into dollars|no dollar estimate/i.test(visible8(fold8)),
    billLine8.slice(0, 160) || 'no bill line')
 ok('[start] the first screen teaches no preflight or record by hand: nothing on it asks the reader to pick a number of units',
    !/How many units|in units|units=1|ceiling_units/.test(visible8(virgin8)) && !virgin8.includes('name="ceiling_units"'))
@@ -2107,9 +2107,9 @@ for (const [name, html] of [['the statement', st8], ['the estimator', est8], ['t
 // estimate inside its own frame, one way out to /register, and no sentence that
 // says AgentBill measured, tracked or billed a dollar.
 const estVis8 = visible8(est8).replace(/\s+/g, ' ')
-ok('[estimate] the dollars are the visitor\'s arithmetic: three inputs, labelled example and estimate, units not dollars, one link to /register',
+ok('[estimate] the dollars are the visitor\'s arithmetic: three inputs, labelled example and estimate, the rate labelled theirs, one link to /register',
    (est8.match(/<input\b/g) ?? []).length === 3 && /\bid="est-ex">example</.test(est8)
-     && estVis8.includes('An estimate, not a measurement') && estVis8.includes('AgentBill counts units, not dollars')
+     && estVis8.includes('An estimate, not a measurement') && estVis8.includes('Here every call costs your rate. On a real job, AgentBill prices each call at list price')
      && estVis8.includes('Your cost per call') && (est8.match(/<a [^>]*href="\/register"/g) ?? []).length === 1
      && !/<form\b/.test(est8),
    estVis8.slice(0, 200))

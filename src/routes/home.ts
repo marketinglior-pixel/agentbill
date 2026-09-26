@@ -3,7 +3,7 @@ import { HEADLINE, INSTALL_PY, ORIGIN } from '../ui/site.js'
 import { FastifyInstance } from 'fastify'
 import { head, BP } from '../ui/theme.js'
 import { siteNav, siteFooter, CHROME_CSS, KEY_CTA } from '../ui/chrome.js'
-import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL, RUN } from '../ui/playground.js'
+import { PLAYGROUND_CSS, PLAYGROUND_JS, PLAYGROUND_HASH, playgroundSection, REFUSAL, RUN, usdCents } from '../ui/playground.js'
 import { ESTIMATOR_CSS, ESTIMATOR_JS, ESTIMATOR_HASH, estimatorSection } from '../ui/estimator.js'
 import { pixelSnippet } from '../lib/pixel.js'
 import { demoOffice, officeJson } from '../lib/office.js'
@@ -71,18 +71,18 @@ function logFrame(): string {
     `<div class="lg-row${cls}"><span class="lg-c">${name}</span><span class="lg-u">${units}</span><span class="lg-t">${total}</span><span class="lg-a">${answer}</span></div>`
   const ok = '<span class="chip-ok">approved</span>'
   const fill = Math.round((RUN.used / RUN.ceiling) * 1000) / 10
-  return `<figure class="frame" aria-label="Sample: an agent's log for ${RUN.taskRef}, ${num(RUN.used)} of ${num(RUN.ceiling)} units used, the next call answered approved false">
+  return `<figure class="frame" aria-label="Sample: an agent's log for ${RUN.taskRef}, ${usdCents(RUN.used)} of ${usdCents(RUN.ceiling)} used at list price, the next call answered approved false">
       <div class="fr-win">
         <div class="fr-bar">
-          <span class="fr-title"><span class="tag tag-id">${RUN.taskRef}</span><span class="fr-t">your agent&rsquo;s log &middot; ceiling ${num(RUN.ceiling)} units</span></span>
+          <span class="fr-title"><span class="tag tag-id">${RUN.taskRef}</span><span class="fr-t">your agent&rsquo;s log &middot; ceiling ${usdCents(RUN.ceiling)}</span></span>
           <span class="tag">sample</span>
         </div>
         <div class="fr-body">
           <div class="fr-log">
-            <div class="lg-row lg-head"><span class="lg-c">call</span><span class="lg-u">units</span><span class="lg-t">total</span><span class="lg-a">answer</span></div>
-            ${row(`${early.length} earlier calls`, `+${num(early[early.length - 1].cum)}`, num(early[early.length - 1].cum), ok, ' lg-dim')}
-            ${last2.map((s) => row(s.name, `+${num(s.units)}`, num(s.cum), ok)).join('\n            ')}
-            ${row(RUN.refused.name, `asks ${num(RUN.refused.asked)}<span class="ph"> &middot; ${num(RUN.remaining)} left</span>`, `${num(RUN.used + RUN.refused.asked)} &gt; ${num(RUN.ceiling)}`, '<span class="chip-no">approved: false</span>', ' lg-no')}
+            <div class="lg-row lg-head"><span class="lg-c">call</span><span class="lg-u">cost</span><span class="lg-t">total</span><span class="lg-a">answer</span></div>
+            ${row(`${early.length} earlier calls`, `+${usdCents(early[early.length - 1].cum)}`, usdCents(early[early.length - 1].cum), ok, ' lg-dim')}
+            ${last2.map((s) => row(s.name, `+${usdCents(s.units)}`, usdCents(s.cum), ok)).join('\n            ')}
+            ${row(RUN.refused.name, `asks ${usdCents(RUN.refused.asked)}<span class="ph"> &middot; ${usdCents(RUN.remaining)} left</span>`, `${usdCents(RUN.used + RUN.refused.asked)} &gt; ${usdCents(RUN.ceiling)}`, '<span class="chip-no">approved: false</span>', ' lg-no')}
             <div class="fr-decide">
               <span class="fr-k">Your code decides what happens next</span>
               <div class="fr-picks"><span>Return what you have</span><span>Skip this step</span><span>Replan</span></div>
@@ -90,9 +90,9 @@ function logFrame(): string {
           </div>
           <div class="fr-side">
             <span class="fr-k">this job</span>
-            <div class="fr-stat"><b>${num(RUN.used)}</b> <span>/ ${num(RUN.ceiling)} units</span></div>
+            <div class="fr-stat"><b>${usdCents(RUN.used)}</b> <span>/ ${usdCents(RUN.ceiling)} at list price</span></div>
             <div class="fr-meter" aria-hidden="true"><i style="width:${fill}%"></i><u></u></div>
-            <p class="fr-next">next call asks ${num(RUN.refused.asked)}, ${num(RUN.remaining)} left</p>
+            <p class="fr-next">next call asks ${usdCents(RUN.refused.asked)}, ${usdCents(RUN.remaining)} left</p>
             <div class="fr-plate">
               <span class="pl-dim">POST /preflight &nbsp;200</span>
               <span class="pl-no">"approved": false</span>
@@ -137,9 +137,9 @@ function statementFigure(): string {
           <span class="st-s">under the cap</span>
         </div>
         <div class="st-m st-lit">
-          <div class="st-l"><span class="st-n">${RUN.taskRef}</span><span class="st-v">${num(RUN.used)} / ${num(RUN.ceiling)}</span></div>
+          <div class="st-l"><span class="st-n">${RUN.taskRef}</span><span class="st-v">${usdCents(RUN.used)} / ${usdCents(RUN.ceiling)}</span></div>
           <div class="st-bar"><i style="width:${Math.round((RUN.used / RUN.ceiling) * 1000) / 10}%"></i><u></u></div>
-          <span class="st-s"><span class="st-ceil">ceiling ${num(RUN.ceiling)} &middot; </span>next call asks ${num(RUN.refused.asked)} &middot; refused</span>
+          <span class="st-s"><span class="st-ceil">ceiling ${usdCents(RUN.ceiling)} &middot; </span>next call asks ${usdCents(RUN.refused.asked)} &middot; refused</span>
         </div>
       </figure>`
 }
@@ -170,7 +170,7 @@ def critique(draft):
         r = client.preflight(
             agent_id="researcher",
             task_ref="job-142",
-            estimated_units=180)
+            estimated_usd=1.80)
     except TaskCeilingExceededError:
         return draft  <span class="cmt"># your code decides</span>
     <span class="cmt"># our quota ran out, not your ceiling</span>
@@ -186,7 +186,7 @@ async function critique(draft) {
     const r = await preflight({
       agentId: 'researcher',
       taskRef: 'job-142',
-      estimatedUnits: 180 })
+      estimatedUsd: 1.8 })
     <span class="cmt">// our quota ran out, not your ceiling</span>
     if (!r.approved) return draft
   } catch (e) {
@@ -202,20 +202,20 @@ async function critique(draft) {
 
 /** The seven collapsed answers. New copy for this page, checked against the code; faq.ts carries two lines this page must not repeat. */
 const QUESTIONS: ReadonlyArray<readonly [q: string, a: string]> = [
-  ['What is a unit?',
-    'An integer you define and pass. AgentBill counts units and compares them to a ceiling; it never converts them to money and never reads your provider bill. If one unit is one cent for you, a ceiling of 500 is five dollars. If one unit is one document, a ceiling of 500 is five hundred documents. The meaning is yours and the arithmetic is ours.'],
+  ['Where does the dollar figure come from?',
+    'From the model and the tokens your provider reports on each call wrap() measures, priced at public list price from a dated snapshot of the LiteLLM price table. It is an estimate: contract discounts, batch and regional pricing and server-side tool fees are not in it, and a call with no list price is left out of the figure, never counted as $0.'],
   ['Does AgentBill see my provider bill?',
-    'No. It never has access to your OpenAI, Anthropic or cloud account, and it does not read, estimate or reconcile against your invoice. It knows what your code told it a call was worth. That is a deliberate limit and it is why a unit is whatever you say it is.'],
+    'No. It never has access to your OpenAI, Anthropic or cloud account, and it never reads your invoice. The dollars it shows are its own estimate at list price, from the tokens each call reports, so your invoice may differ.'],
   ['How is a job ceiling different from a monthly spend cap?',
     'A monthly cap meters an organization or a project over the month, and some platforms also cap one session inside their own runtime. A job ceiling is a name your code passes: a call is checked against it only if it asks preflight with that name, from any process and for any provider, and the number has no reset.'],
   ['Does AgentBill sit in my request path?',
     'No. It is an endpoint your code calls before it calls a provider, not a gateway your traffic routes through. Nothing to point your base URL at and no third party holding your provider keys. If AgentBill is unreachable, preflight raises in your process after its timeout, and your code decides whether to call the provider anyway.'],
-  ['What happens if a job crashes with units still reserved?',
-    `Preflight reserves the units it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released before its ${RESERVATION_TTL_MINUTES} minutes are up, however slow the process.`],
+  ['What happens if a job crashes with money still reserved?',
+    `Preflight reserves the estimate it approves, so two calls racing cannot both be told there is room for one. A reservation that is never settled expires after ${RESERVATION_TTL_MINUTES} minutes and is swept back to the budget every five minutes. Nothing is held forever because a process crashed, and nothing is released before its ${RESERVATION_TTL_MINUTES} minutes are up, however slow the process.`],
   [`What happens when I reach the free tier's ${num(PLAN_LIMITS.free)} calls?`,
     'Preflight starts answering approved: false with reason free_tier_exceeded (plan_limit_exceeded on a paid plan) and an upgrade_url. The SDK returns that answer instead of raising, so check result.approved. A refused call reserves nothing and is not counted.'],
-  ['Can I show the ceiling in dollars?',
-    'Yes, on a job opened in dollars: set $5 for the job in the console or with ceiling_usd. The figure is an estimate at public list price of the tokens each call reports, from a dated price table, not your invoice, and a call with no list price is charged its reservation, never $0. In units you decide what a unit is worth, the way the estimator above does with your cost per call.'],
+  ['Can a ceiling count something other than dollars?',
+    'Yes. A job can be opened in tokens, or in units you define and pass, where a unit is whatever you decide it is worth. On a job in dollars, a call with no list price is charged its reservation against the ceiling, never $0.'],
 ]
 
 export async function homeRoute(app: FastifyInstance) {
@@ -312,7 +312,7 @@ export async function homeRoute(app: FastifyInstance) {
     .fr-title { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--muted); min-width: 0; }
     .fr-body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
     .fr-log { padding: 12px 20px 20px; min-width: 0; }
-    .lg-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 84px 150px; gap: 12px; align-items: center;
+    .lg-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 116px 150px; gap: 12px; align-items: center;
               padding: 9px 10px; border-radius: 10px; font-family: var(--mono); font-size: var(--fs-small); color: var(--text); }
     .lg-row .lg-u, .lg-row .lg-t { text-align: right; font-variant-numeric: tabular-nums; }
     .lg-row .lg-u { color: var(--muted); }
@@ -562,30 +562,30 @@ ${playgroundSection(codeFrame())}
     <h2>Three steps, no proxy</h2>
     <div class="steps">
       <div class="step">
-        <div class="step-ill"><span class="lbl">Job name</span><span class="fld">${RUN.taskRef}</span><span class="res"><span class="lbl">Ceiling</span> ${num(RUN.ceiling)} units</span></div>
+        <div class="step-ill"><span class="lbl">Job name</span><span class="fld">${RUN.taskRef}</span><span class="res"><span class="lbl">Ceiling</span> ${usdCents(RUN.ceiling)}</span></div>
         <h3><i>1</i> Give the job a ceiling</h3>
-        <p>Name the job and set its ceiling in the console. In code, that name is the
+        <p>Name the job and set its ceiling in dollars in the console. In code, that name is the
         <span class="mono-in">task_ref</span>, and <span class="mono-in">PUT /tasks/:task_ref/ceiling</span> with
-        <span class="mono-in">ceiling_units</span> in the body sets the same number.</p>
+        <span class="mono-in">ceiling_usd</span> in the body sets the same number.</p>
       </div>
       <div class="step">
         <div class="step-ill">client.preflight(
     agent_id="researcher",
     task_ref="${RUN.taskRef}",
-    estimated_units=12)<span class="res">&rarr; <span class="chip-ok">approved</span> 12 reserved</span></div>
+    estimated_usd=0.12)<span class="res">&rarr; <span class="chip-ok">approved</span> $0.12 reserved</span></div>
         <h3><i>2</i> Ask before each call</h3>
         <p>Call preflight with the same <span class="mono-in">task_ref</span> before your provider call. An
-        approved call reserves its units, so two calls racing cannot both take the last room.</p>
+        approved call reserves its estimate, so two calls racing cannot both take the last room.</p>
       </div>
       <div class="step">
-        <div class="step-ill">client.record(
-    agent_id="researcher",
+        <div class="step-ill">wrap(openai_client,
     task_ref="${RUN.taskRef}",
-    units=12)<span class="res">&rarr; settled &middot; 12 used</span></div>
-        <h3><i>3</i> Record what it used</h3>
-        <p>Call record after the provider call to settle the units. No base URL to change, no provider
-        traffic through us, no provider keys held. If we are unreachable, the SDK raises in your process and
-        your code decides.</p>
+    customer_id="acme")<span class="res">&rarr; priced from its tokens, per client</span></div>
+        <h3><i>3</i> See what each client cost</h3>
+        <p><span class="mono-in">wrap()</span> your OpenAI or Anthropic client once: it asks preflight before each
+        call and records the tokens after, at list price, per agent and per <span class="mono-in">customer_id</span>,
+        and the monthly report bills from those. No base URL to change, no provider traffic through us, no provider
+        keys held. If we are unreachable, the SDK raises in your process and your code decides.</p>
       </div>
     </div>
     <p class="how-mcp">Working in Claude, ChatGPT, Cursor or Codex? <a href="/integrations/mcp" id="home-mcp">Connect via MCP &rarr;</a> One URL, and preflight is a tool your agent can call.</p>
@@ -595,6 +595,7 @@ ${playgroundSection(codeFrame())}
   <section class="wrap sec icp">
     <h3>Built for agent loops you own and leave running</h3>
     <ul class="chips">
+      <li>Agent work you bill clients for</li>
       <li>Coding agents you built</li>
       <li>Overnight research jobs</li>
       <li>Scheduled agent runs</li>
@@ -643,10 +644,10 @@ ${playgroundSection(codeFrame())}
           <ul class="nots">
       <li><b>Sit in your request path.</b> No proxy, no base URL to change, no provider keys held. A call
       that never asks preflight, or a retry buried in a library, is never checked against the ceiling
-      before it runs. If it records, its units still count.</li>
+      before it runs. If it records, its cost still counts.</li>
       <li><b>Read your provider bill.</b> No invoice access. A dollar figure appears only as an estimate at
       public list price, on calls wrap() measured. The estimator above is your rate times your count, run
-      in your browser. Units are yours to define, and units refused is not money.</li>
+      in your browser. A refused call is not money saved: what it would have gone on to cost is unknown.</li>
       <li><b>Reach into a running job.</b> Preflight answers <span class="mono-in">approved: false</span>, and
       on a ceiling refusal the SDK raises. Your code decides what happens next.</li>
       <li><b>Undo what already ran.</b> Calls are refused, not reversed, and the ceiling is keyed on

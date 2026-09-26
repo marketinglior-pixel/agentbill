@@ -4,18 +4,14 @@ import { inlineScript } from '../lib/csp.js'
 //
 // What it is: the visitor's own arithmetic, shown back to them. Calls in one
 // run times their own cost per call is what one unattended job could cost; a
-// ceiling in units, at one unit per call, is where preflight would start
-// answering approved: false. Every dollar on this card is the visitor's number
-// multiplied by the visitor's number. AgentBill counts units, not dollars,
-// and the card says so inside its own frame, so a screenshot carries it. The
-// one dollar figure the API serves, list_price_usd_estimate on a job read, is
-// an estimate at public list price on calls wrap() measured (src/lib/prices.ts),
-// never a measurement and never a conversion of units you define.
-//
-// Why "1 unit = 1 call": it is the product's own default, not a mapping this
-// card invents. preflight reserves `estimated_units ?? 1` (src/routes/preflight.ts)
-// and record defaults `units` to 1 in both SDKs, so a caller who passes no
-// estimate is counting calls.
+// job ceiling in dollars, at that cost per call, is where preflight would start
+// answering approved: false: the call that would take the job past its ceiling
+// (2026-09-26, when the homepage moved to jobs in dollars). Every dollar on
+// this card is the visitor's number multiplied by the visitor's number, and the
+// card says so inside its own frame, so a screenshot carries it. On a real job
+// the dollars are AgentBill's estimate at public list price, from the tokens
+// each call wrap() measured reports (src/lib/prices.ts), never a measurement
+// of an invoice.
 //
 // No network. This script never calls fetch, sendBeacon or XMLHttpRequest, and
 // a gate in verify.mjs holds that. The page's one pulse client lives in the
@@ -27,7 +23,7 @@ import { inlineScript } from '../lib/csp.js'
 // one /register anchor is the same with or without the script.
 
 /** The example the card opens on. Labelled "example" until the visitor edits. */
-export const EST_DEFAULTS = { calls: 2000, costPerCall: 0.05, ceiling: 500 } as const
+export const EST_DEFAULTS = { calls: 2000, costPerCall: 0.05, ceiling: 25 } as const
 
 const usd = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 /** A per-call or per-unit rate: a single LLM call often costs under a cent, and rounding it to $0.00 would make the card's own arithmetic fail to add up. */
@@ -37,11 +33,14 @@ const rate = (n: number) => '$' + (n > 0 && n < 0.01
 const int = (n: number) => n.toLocaleString('en-US')
 
 /** The arithmetic, once. The server renders the example with it and the script re-runs the same rule. */
-export function estimate(calls: number, costPerCall: number, ceiling: number) {
+export function estimate(calls: number, costPerCall: number, ceilingUsd: number) {
   const total = calls * costPerCall
-  const fits = calls <= ceiling
-  const approvedCalls = fits ? calls : ceiling
-  return { total, fits, approvedCalls, firstRefused: fits ? null : ceiling + 1, approvedCost: approvedCalls * costPerCall }
+  // The calls that fit under the ceiling at this cost each; the epsilon keeps
+  // 25 / 0.05 at 500, not 499, when the division lands a hair under.
+  const room = costPerCall > 0 ? Math.floor(ceilingUsd / costPerCall + 1e-9) : Infinity
+  const fits = calls <= room
+  const approvedCalls = fits ? calls : room
+  return { total, fits, approvedCalls, firstRefused: fits ? null : room + 1, approvedCost: approvedCalls * costPerCall }
 }
 
 export const ESTIMATOR_CSS = `
@@ -106,9 +105,9 @@ export function estimatorSection(cta: string): string {
         <div class="est-f est-f-cost"><label for="est-cost">Your cost per call (USD)</label>
           <input id="est-cost" type="text" inputmode="decimal" autocomplete="off" value="${rate(d.costPerCall)}" /></div>
         <div class="est-rule"></div>
-        <div class="est-f est-f-ceil"><label for="est-ceil">Try a job ceiling (units)</label>
-          <input id="est-ceil" type="text" inputmode="numeric" autocomplete="off" value="${int(d.ceiling)}" /></div>
-        <p class="est-note" id="est-rate">Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is ${rate(d.costPerCall)} a unit. In this example AgentBill counts units, not dollars.</p>
+        <div class="est-f est-f-ceil"><label for="est-ceil">Try a job ceiling (USD)</label>
+          <input id="est-ceil" type="text" inputmode="decimal" autocomplete="off" value="${usd(d.ceiling)}" /></div>
+        <p class="est-note" id="est-rate">${NOTE}</p>
         <p class="est-js">The inputs need JavaScript. The math is calls in one run &times; your cost per call.</p>
       </div>
       <div class="est-out">
@@ -127,6 +126,9 @@ export function estimatorSection(cta: string): string {
     </div>
   </section>`
 }
+
+/** The card's own label, in its frame: whose dollars these are. */
+const NOTE = 'Here every call costs your rate. On a real job, AgentBill prices each call at list price from the tokens it reports.'
 
 const ESTIMATOR_SRC = `
 (function(){
@@ -151,24 +153,22 @@ const ESTIMATOR_SRC = `
       // the inputs, so every derived line is cleared, not only the total.
       $('total').textContent = 'enter a number';
       $('cap').textContent = 'Calls, cost per call and the ceiling each need a number of 0 or more.';
-      $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. In this example AgentBill counts units, not dollars.';
       $('ceil-line').textContent = '';
       $('after').textContent = '';
       return;
     }
-    calls = Math.floor(calls); ceil = Math.floor(ceil);
-    var total = calls * cost, fits = calls <= ceil, ok = fits ? calls : ceil;
+    calls = Math.floor(calls);
+    var room = cost > 0 ? Math.floor(ceil / cost + 1e-9) : Infinity;
+    var total = calls * cost, fits = calls <= room, ok = fits ? calls : room;
     $('total').textContent = usd(total);
     $('cap').textContent = int(calls) + ' calls \\u00d7 ' + rate(cost)
       + (edited ? '.' : ': example inputs until you change them.') + ' An estimate, not a measurement.';
-    $('rate').textContent = 'Here 1 unit = 1 call, the default when you pass no estimate. At your rate that is '
-      + rate(cost) + ' a unit. In this example AgentBill counts units, not dollars.';
     if (fits) {
-      $('ceil-line').textContent = 'Every call fits under a ceiling of ' + int(ceil) + '.';
+      $('ceil-line').textContent = 'Every call fits under a ceiling of ' + usd(ceil) + '.';
       $('after').textContent = 'The job never reaches its ceiling, so the ceiling approves all ' + int(calls)
         + ' calls. Your plan\\u2019s monthly preflight calls still apply.';
     } else {
-      $('ceil-line').innerHTML = 'Call ' + int(ceil + 1) + ' gets <span class="chip-no">approved: false</span>';
+      $('ceil-line').innerHTML = 'Call ' + int(ok + 1) + ' gets <span class="chip-no">approved: false</span>';
       $('after').textContent = 'The ' + int(ok) + ' approved calls: about ' + usd(ok * cost)
         + ' at your rate. What runs after that is your code\\u2019s decision.';
     }

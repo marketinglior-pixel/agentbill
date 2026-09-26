@@ -1,6 +1,7 @@
 import { inlineScript } from '../lib/csp.js'
 import { PULSE_CLIENT_SRC } from './pulse-client.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
+import { LIST_PRICE_LABEL } from '../lib/prices.js'
 // The homepage playground: a preflight you can run yourself.
 //
 // The refusal band above states the outcome, and it now renders from the run
@@ -46,10 +47,20 @@ import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
    --------------------------------------------------------------------------- */
 
 const TASK_REF = 'job-142'
+/** The job's ceiling, in cents: $5.00. Since 2026-09-26 the demo is a job
+ *  opened in dollars (task_ceiling_usd), the product's own unit on the console,
+ *  not units you define. Cents keep the arithmetic exact; everything a reader
+ *  sees is dollars, and the wire is micro-dollars as the server's is. */
 const DEFAULT_CEILING = 500
 
-/** What the agent intends to spend, in order. Units are yours to define; here
- *  1 unit = 1 cent. */
+/** Cents as the page prints them: $4.92. */
+export const usdCents = (c: number): string => `$${(c / 100).toFixed(2)}`
+/** Cents as the server's JSON carries dollars (usdOf): 4.92, 5, 0.08. */
+const usdJson = (c: number): number => Math.round(c) / 100
+/** Cents as micro-dollars, the unit a dollar job's *_units fields count in. */
+const micros = (c: number): number => Math.round(c) * 10_000
+
+/** What each call costs at list price, in cents, in order. */
 const PLAN: ReadonlyArray<readonly [string, number]> = [
   ['search.web', 12], ['fetch.page', 31], ['llm.summarize', 140], ['fetch.page', 28],
   ['llm.extract', 160], ['llm.rerank', 121], ['llm.critique', 180], ['llm.replan', 210],
@@ -82,9 +93,11 @@ if (!REFUSED) {
  *  in home.ts so the band and the playground cannot disagree. */
 export const REFUSAL = {
   name: 'TaskCeilingExceededError',
+  // The dollar-job template of sdk/python/agentbill/client.py, filled with the
+  // JSON numbers the server sends (4.92, 5, 0.08, 1.8), as Python prints them.
   message:
-    `Refused (task_ceiling_exceeded): task '${TASK_REF}' is at ${REFUSED.used}/${REFUSED.ceiling} units and `
-    + `${REFUSED.remaining} remaining is not enough for this call.`,
+    `Refused (task_ceiling_exceeded): task '${TASK_REF}' is at $${usdJson(REFUSED.used)} of $${usdJson(REFUSED.ceiling)} at list price, `
+    + `and $${usdJson(REFUSED.remaining)} remaining is not enough for the $${usdJson(REFUSED.asked)} this call asked to reserve.`,
   taskRef: TASK_REF,
   used: REFUSED.used,
   ceiling: REFUSED.ceiling,
@@ -128,11 +141,18 @@ export const RUN = (() => {
 const HERO_BODY = {
   approved: false,
   reason: 'task_ceiling_exceeded',
-  estimated_units: PLAN[0][1],
+  estimated_units: micros(PLAN[0][1]),
   task_ref: TASK_REF,
-  task_ceiling: REFUSED.ceiling,
-  task_used_units: REFUSED.used,
-  task_remaining_units: REFUSED.remaining,
+  task_ceiling: micros(REFUSED.ceiling),
+  task_used_units: micros(REFUSED.used),
+  task_remaining_units: micros(REFUSED.remaining),
+  task_unit: 'usd',
+  estimate_source: 'caller',
+  estimated_usd: usdJson(PLAN[0][1]),
+  task_ceiling_usd: usdJson(REFUSED.ceiling),
+  task_used_usd: usdJson(REFUSED.used),
+  task_remaining_usd: usdJson(REFUSED.remaining),
+  list_price_label: LIST_PRICE_LABEL,
 } as const
 export function heroRefusalBody(): Record<string, unknown> {
   return { ...HERO_BODY }
@@ -157,11 +177,11 @@ function plannedRows(): string {
   let cum = 0
   return PLAN.map(([name, units], i) => {
     cum += units
-    return `        <div class="pg-row planned" data-i="${i}" data-u="${units}" data-c="${cum.toLocaleString('en-US')}">` +
+    return `        <div class="pg-row planned" data-i="${i}" data-u="${usdCents(units)}" data-c="${usdCents(cum)}">` +
       `<span class="ar">&middot;</span>` +
       `<span class="nm">${name}</span>` +
-      `<span class="un">${units}</span>` +
-      `<span class="cum">${cum.toLocaleString('en-US')}</span>` +
+      `<span class="un">${usdCents(units)}</span>` +
+      `<span class="cum">${usdCents(cum)}</span>` +
       `<span class="an"></span></div>`
   }).join('\n')
 }
@@ -188,7 +208,7 @@ function restingRequest(): string {
   const fields: ReadonlyArray<readonly [string, string, string]> = [
     ['agent_id', '"researcher"', 's'],
     ['task_ref', `"${TASK_REF}"`, 's'],
-    ['estimated_units', String(PLAN[0][1]), 'n'],
+    ['estimated_usd', String(usdJson(PLAN[0][1])), 'n'],
   ]
   return '{\n' + fields.map(([k, v, cls], i) =>
     `  <span class="k">"${k}"</span>: <span class="${cls}">${v}</span>${i < fields.length - 1 ? ',' : ''}`
@@ -255,7 +275,7 @@ export const PLAYGROUND_CSS = `
              font-family: var(--mono); font-size: var(--fs-chip); letter-spacing: .08em;
              text-transform: uppercase; color: var(--dim); padding: 0 10px 6px; }
   .pg-cols span:nth-child(3), .pg-cols span:nth-child(4) { text-align: right; }
-  .pg-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 64px 72px 128px; gap: 12px; align-items: center;
+  .pg-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 84px 88px 144px; gap: 12px; align-items: center;
             font-family: var(--mono); font-size: var(--fs-small); padding: 7px 10px; border-radius: 10px; }
   .pg-row.ran, .pg-row.refused { animation: pg-slip 0.34s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes pg-slip { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
@@ -315,7 +335,15 @@ export const PLAYGROUND_CSS = `
     .pg-cols { display: none; }
     .pg-row { grid-template-columns: 14px minmax(0, 1fr) 48px 56px; gap: 8px; padding-inline: 6px; }
     .pg-row .an { display: none; }
-    .pg-row.refused .an { display: block; grid-column: 2 / -1; }
+    .pg-row.refused .an { display: block; }
+    /* In dollars the refused row's ask and remainder ("asks $1.80", "$0.08
+       left") outgrow the shared columns and broke onto two lines each. This
+       row sets its own two lines instead: the call and its ask, then the
+       answer and what is left, each figure whole. */
+    .pg-row.refused { grid-template-columns: 14px minmax(0, 1fr) auto; row-gap: 6px; }
+    .pg-row.refused .un, .pg-row.refused .cum { white-space: nowrap; }
+    .pg-row.refused .cum { grid-column: 3; grid-row: 2; }
+    .pg-row.refused .an { grid-column: 2; grid-row: 2; }
     .pg-row.na { display: none; }
     .pg-more.on { display: block; }
   }
@@ -329,6 +357,11 @@ export const PLAYGROUND_CSS = `
     .pg-wire { padding: 14px; }
     .pg-sl { width: auto; flex: 1 1 48px; min-width: 48px; }
     .pg-field { min-width: 0; flex: 1 1 auto; }
+  }
+  /* At 320px the answer chip and "$0.08 left" do not fit one line: the chip
+     takes a third. */
+  @media (max-width: 360px) {
+    .pg-row.refused .an { grid-column: 2 / -1; grid-row: 3; }
   }`
 
 /**
@@ -341,8 +374,8 @@ export function playgroundSection(code = ''): string {
     <div class="sec-head">
       <p class="eyebrow">Demo &middot; runs in your browser</p>
       <h2>Watch one job reach its ceiling</h2>
-      <p class="pg-lede">A ten-call plan shares ${TASK_REF} and a ceiling of ${DEFAULT_CEILING} units. A unit is
-      whatever you decide it is worth.</p>
+      <p class="pg-lede">A ten-call plan shares ${TASK_REF} and a ceiling of ${usdCents(DEFAULT_CEILING)}. Each call
+      asks for what it costs at list price.</p>
     </div>
 
     <div class="pg">
@@ -355,24 +388,24 @@ export function playgroundSection(code = ''): string {
           <div class="pg-field">
             <label class="pg-key" for="pg-ceil">ceiling</label>
             <input id="pg-ceil" class="pg-sl" type="range" min="100" max="1500" step="50" value="${DEFAULT_CEILING}"
-                   aria-label="Task ceiling in units" />
-            <span class="pg-val" id="pg-ceilv">${DEFAULT_CEILING}</span><span class="pg-key">units</span>
+                   aria-label="Task ceiling in dollars" />
+            <span class="pg-val" id="pg-ceilv">${usdCents(DEFAULT_CEILING)}</span>
           </div>
         </div>
         <div class="pg-budget">
           <div class="pg-nums">
-            <span class="pg-used" id="pg-used">0</span>
-            <span class="pg-ceil">used of <b id="pg-ceil2">${DEFAULT_CEILING}</b> units &middot; ${TASK_REF}</span>
+            <span class="pg-used" id="pg-used">$0.00</span>
+            <span class="pg-ceil">used of <b id="pg-ceil2">${usdCents(DEFAULT_CEILING)}</b> &middot; ${TASK_REF}</span>
           </div>
           <div class="pg-track"><div class="pg-ghost" id="pg-ghost"></div><div class="pg-fill" id="pg-fill"></div></div>
         </div>
         <div class="pg-h"><span>Agent calls</span><span id="pg-count">0 calls</span></div>
-        <div class="pg-cols"><span></span><span>the plan</span><span>units</span><span>running</span><span>answer</span></div>
+        <div class="pg-cols"><span></span><span>the plan</span><span>cost</span><span>running</span><span>answer</span></div>
         <div class="pg-log" id="pg-log" aria-live="polite">
 ${plannedRows()}
         </div>
         <div class="pg-more" id="pg-more"></div>
-        <div class="pg-ask" id="pg-ask">this plan asks for <b>${PLAN_TOTAL.toLocaleString('en-US')}</b> units.</div>
+        <div class="pg-ask" id="pg-ask">this plan asks for <b>${usdCents(PLAN_TOTAL)}</b> at list price.</div>
         <div class="pg-decide">
           <span class="pg-key">Your code decides</span>
           <div class="pg-picks"><span>Return what you have</span><span>Skip this step</span><span>Replan with a cheaper model</span></div>
@@ -380,8 +413,9 @@ ${plannedRows()}
         </div>
         <div class="pg-foot">
           <div class="pg-rule">the rule: <b>used + reserved + estimated &lt;= ceiling</b></div>
-          <p class="pg-disc">Runs in your browser, against no account. Same rule and same response body as
-          <a href="/docs#api-reference">POST /preflight</a>.</p>
+          <p class="pg-disc">Runs in your browser, against no account. Same rule as
+          <a href="/docs#api-reference">POST /preflight</a> on a job in dollars, and its dollar fields; the real
+          answer carries a few more.</p>
         </div>
       </div>
 
@@ -410,6 +444,11 @@ const PLAYGROUND_SRC = `
   // says sixty.
   var TTL_MS = ${JSON.stringify(RESERVATION_TTL_MINUTES * 60000)};
   var el = function(id){ return document.getElementById('pg-' + id) };
+  // Cents in, the page's dollars out; and the wire's own shapes: JSON dollars
+  // (usdOf) and micro-dollars for a dollar job's *_units fields.
+  function money(c){ return '$' + (c / 100).toFixed(2) }
+  function usdJ(c){ return Math.round(c) / 100 }
+  function mic(c){ return Math.round(c) * 10000 }
   ${PULSE_CLIENT_SRC}
   // Every link to /register on this page, wherever it sits: the nav, the hero,
   // the pricing row, the close, the footer. Added 2026-09-18, the first day
@@ -475,17 +514,23 @@ const PLAYGROUND_SRC = `
     var reserve = o.estimatedUnits == null ? 1 : o.estimatedUnits;
     if (task.used + task.reserved + reserve <= task.ceiling) {
       task.reserved += reserve;
-      return { approved:true, reason:null, estimated_units:o.estimatedUnits,
+      var left = task.ceiling - task.used - task.reserved;
+      return { approved:true, reason:null, estimated_units:mic(reserve),
         remaining_units:null,
         reservation_expires_at:new Date(Date.now()+TTL_MS).toISOString(),
         task_ref:o.taskRef,
-        task_ceiling: task.ceiling,
-        task_remaining_units: task.ceiling - task.used - task.reserved };
+        task_ceiling: mic(task.ceiling),
+        task_remaining_units: mic(left),
+        task_unit:'usd', estimate_source:'caller', estimated_usd:usdJ(reserve),
+        task_ceiling_usd:usdJ(task.ceiling), task_used_usd:usdJ(task.used), task_remaining_usd:usdJ(left) };
     }
+    var rem = Math.max(0, task.ceiling - task.used - task.reserved);
     return { approved:false, reason:'task_ceiling_exceeded',
-      estimated_units:o.estimatedUnits, task_ref:o.taskRef,
-      task_ceiling:task.ceiling, task_used_units:task.used,
-      task_remaining_units: Math.max(0, task.ceiling - task.used - task.reserved) };
+      estimated_units:mic(reserve), task_ref:o.taskRef,
+      task_ceiling:mic(task.ceiling), task_used_units:mic(task.used),
+      task_remaining_units: mic(rem),
+      task_unit:'usd', estimate_source:'caller', estimated_usd:usdJ(reserve),
+      task_ceiling_usd:usdJ(task.ceiling), task_used_usd:usdJ(task.used), task_remaining_usd:usdJ(rem) };
   }
   function record(units){ task.reserved -= units; task.used += units; }
 
@@ -507,7 +552,7 @@ const PLAYGROUND_SRC = `
 
   function bars(refusedBy){
     var pct = Math.min(100, task.used / task.ceiling * 100);
-    el('used').textContent = task.used.toLocaleString('en-US');
+    el('used').textContent = money(task.used);
     el('fill').style.width = pct + '%';
     if (refusedBy != null) {
       el('ghost').style.left = pct + '%';
@@ -542,7 +587,7 @@ const PLAYGROUND_SRC = `
     el('status').className = 'pg-status idle'; el('status').textContent = 'request';
     el('fill').style.width = '0'; el('fill').classList.remove('refused');
     el('ghost').classList.remove('on'); el('ghost').style.width = '0';
-    el('used').textContent = '0'; el('used').classList.remove('over');
+    el('used').textContent = '$0.00'; el('used').classList.remove('over');
     el('ceil').disabled = false; el('run').disabled = false; el('run').textContent = 'Run the job';
   }
 
@@ -582,8 +627,8 @@ const PLAYGROUND_SRC = `
     // runs is decided by the branch the developer wrote, which the caption in
     // the same card says.
     if (row) {
-      row.querySelector('.un').textContent = 'asks ' + units;
-      row.querySelector('.cum').textContent = res.task_remaining_units + ' left';
+      row.querySelector('.un').textContent = 'asks ' + money(units);
+      row.querySelector('.cum').textContent = money(Math.max(0, task.ceiling - task.used - task.reserved)) + ' left';
       row.querySelector('.an').innerHTML = '<span class="chip-no">approved: false</span>';
     }
     // The calls the run never reached: named, not asked, no running total.
@@ -621,8 +666,8 @@ const PLAYGROUND_SRC = `
   }
 
   el('ceil').addEventListener('input', function(){
-    el('ceilv').textContent = this.value;
-    el('ceil2').textContent = this.value;
+    el('ceilv').textContent = money(parseInt(this.value, 10));
+    el('ceil2').textContent = money(parseInt(this.value, 10));
     if (!running) reset();
   });
   el('run').addEventListener('click', function(){
