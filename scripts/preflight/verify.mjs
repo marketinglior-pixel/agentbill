@@ -1528,7 +1528,8 @@ ok('[fold] the product frame follows the h1 in the hero and reaches the playgrou
 // line became HEADLINE for the whole site (HOME_H1 folded in and deleted).
 // Typed here on purpose, unlike the numbers: the point is that the words do
 // not move, and HEADLINE is the thing that would move them.
-const LOCKED_H1_8 = 'Give the job you leave running overnight its own ceiling'
+// Relocked 2026-09-26 on Lior's choice of the client-cost line, after M2.
+const LOCKED_H1_8 = "See what every client's agents cost you, before the invoice does"
 const h1Text8 = ((hero8.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) ?? [])[1] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 ok('[fold] the h1 is the locked line, byte for byte', h1Text8 === LOCKED_H1_8, `h1 reads: ${h1Text8}`)
 // ---------------------------------------------------------------- the share card
@@ -1595,7 +1596,8 @@ ok(`[og] every card URL a head emits is ${OG_IMAGE.replace(/^https:\/\/[^/]+/, '
 // the concept, the sub is the first place preflight appears, and the pill
 // above the h1 must not say it.
 const heroVis8 = visible8(hero8).replace(/\s+/g, ' ')
-const iConcept8 = heroVis8.indexOf('its own ceiling')
+// The concept since 2026-09-26 is the h1's: what your clients' agents cost you.
+const iConcept8 = heroVis8.indexOf("agents cost you")
 const iPreName8 = heroVis8.search(/\bpreflight\b/i)
 ok('[fold] the concept is read before the name preflight, in the hero and not in <head>',
    hero8.length > 0 && iConcept8 > -1 && iPreName8 > -1 && iConcept8 < iPreName8, `concept at ${iConcept8}, preflight at ${iPreName8}`)
@@ -1608,7 +1610,7 @@ ok('[fold] the concept is read before the name preflight, in the hero and not in
 // carried is a period here: voice-dna bans the character on every surface and
 // hygiene greps for the literal, so the entity form is asserted on the hero
 // too, since &mdash; renders the same dash and no grep in this repo sees it.
-const LOCKED_SUB8 = 'AgentBill is a per-task spending ceiling for autonomous AI agents. Before the next model call, preflight returns approved: false when this task_ref is out of units. Your code decides whether to stop, skip, or replan.'
+const LOCKED_SUB8 = 'Per agent, per client, per job, in dollars at list price, with a monthly report you can bill from. Give any job a ceiling, and the call that would cross it gets approved: false before it runs. Your code decides whether to stop, skip, or replan.'
 const subHtml8 = (hero8.match(/<p class="sub">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
 const subText8 = subHtml8.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 // 2026-09-23: the month/job contrast left the h1 with the redesign and lives in
@@ -1622,7 +1624,7 @@ const stVis8 = visible8(st8).replace(/\s+/g, ' ')
 ok('[fold] the page still says what the ceiling is and is not: the statement draws month against job, the body says no proxy, the sub is locked',
    st8.length > 0 && stVis8.includes('Month caps, org caps, and session or window budgets are real')
      && stVis8.includes('A job ceiling meters one job') && stVis8.includes('only if it asks preflight')
-     && visible8(body8).includes('No proxy') && subText8.startsWith('AgentBill is a per-task spending ceiling'),
+     && visible8(body8).includes('No proxy') && subText8.startsWith('Per agent, per client, per job'),
    `statement ${st8.length} bytes; sub reads: ${subText8.slice(0, 80)}`)
 ok('[fold] the sub under the h1 is the locked sentence, byte for byte, and the hero carries no em dash',
    subText8 === LOCKED_SUB8 && !hero8.includes('&mdash;') && !hero8.includes('\u2014'),

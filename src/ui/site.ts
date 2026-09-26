@@ -52,7 +52,9 @@ export const ORIGIN = 'https://agentbill.dev'
  *
  *  Known cost: with the "AgentBill · " prefix the homepage <title> is 68
  *  characters, so a search result that cuts near 60 loses the last word. */
-export const HEADLINE = 'Give the job you leave running overnight its own ceiling'
+// 2026-09-26, Lior's choice after M2: the line for the reader who runs agents for
+// clients (Shahar's "what does each client cost me"), over the office in the hero.
+export const HEADLINE = "See what every client's agents cost you, before the invoice does"
 
 /** The install line beside the primary action, and on the share card. */
 export const INSTALL_PY = 'pip install agentbill-sdk'

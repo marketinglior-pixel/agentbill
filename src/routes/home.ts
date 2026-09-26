@@ -222,14 +222,14 @@ export async function homeRoute(app: FastifyInstance) {
   app.get('/', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(`${head({
       title: `AgentBill · ${HEADLINE}`,
-      description: `${HEADLINE}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next. Free tier, no card.`,
+      description: `${HEADLINE}. Every model call in dollars at list price, per agent, per client and per job, and a ceiling any job can carry. Free tier, no card.`,
       path: '/',
       // Canvas is head()'s default for every page since 2026-09-23 (Lior's
       // instruction to carry this page's design to every screen, the console
       // included). Named here anyway: this page is the system's reference.
       theme: 'canvas',
       og: {
-        description: `${HEADLINE}. One call before the work asks whether this job has units left, and preflight is that call. Your code decides what happens next.`,
+        description: `${HEADLINE}. Every model call in dollars at list price, per agent, per client and per job, and a ceiling any job can carry.`,
       },
       // The product entity lives in ui/ld.ts and is emitted identically here
       // and on /pricing under one @id.
@@ -524,12 +524,11 @@ ${siteNav('/')}
 <main>
 
   <header class="hero wrap">
-    <p class="pill"><span class="pill-tag">For builders</span>who run agents unattended</p>
+    <p class="pill"><span class="pill-tag">For agencies and builders</span>who run agents for clients</p>
     <h1>${HEADLINE}</h1>
-    <p class="sub">AgentBill is a per-task spending ceiling for autonomous
-    <span class="nb">AI agents.</span> Before the next
-    model call, preflight returns <span class="mono-in">approved: false</span> when this
-    <span class="mono-in">task_ref</span> is out of units. <span class="nb">Your code</span>
+    <p class="sub">Per agent, per client, per job, in dollars at list price, with a monthly
+    report you can bill from. Give any job a ceiling, and the call that would cross it gets
+    <span class="mono-in">approved: false</span> before it runs. <span class="nb">Your code</span>
     decides whether to stop, skip, or replan.</p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
