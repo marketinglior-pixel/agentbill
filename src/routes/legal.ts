@@ -183,6 +183,10 @@ async function privacyBody(): Promise<string> {
       <li><strong>Page events</strong>: our marketing pages record a few page-level events in our own database
       (the demo being run, a click to the demo or through to the sign-up page, the sign-up page loading),
       stored with no cookie, no IP address and no identifier that outlives the tab.</li>
+      <li><strong>Which of our links you came from</strong>: some of our links carry a short label we wrote
+      ourselves (<code>?src=</code>, for example the one in an ad). If you create an account after arriving on
+      one, the account keeps that label, set once, so we can tell which of our links brought people. It is only
+      our own label: never the page you came from, and nothing you typed.</li>
       <li><strong>The request log</strong>: like any web server, ours logs each request with the IP address it
       came from, the path (never the query string, and never a sign-in or recovery token) and the time. The log
       is kept by our host, Fly.io, under its own retention; this service sets none.</li>

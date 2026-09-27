@@ -23,12 +23,16 @@ export interface SigninOpts {
   next?: string
   /** The email button's words. */
   submit?: string
+  /** A campaign label already through cleanSource() (src/lib/source.ts), or ''.
+   *  Carried to /auth/:provider and /auth/email so the account it creates keeps it. */
+  src?: string
 }
 
 const escAttr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
-export function signinPanel({ providers, from, next = '', submit = 'Email me a sign-in link' }: SigninOpts): string {
-  const q = next ? `?next=${encodeURIComponent(next)}` : ''
+export function signinPanel({ providers, from, next = '', submit = 'Email me a sign-in link', src = '' }: SigninOpts): string {
+  const params = [next ? `next=${encodeURIComponent(next)}` : '', src ? `src=${encodeURIComponent(src)}` : ''].filter(Boolean)
+  const q = params.length ? `?${params.join('&')}` : ''
   const buttons = [
     providers.includes('google')
       ? `<a class="pbtn is-google" href="/auth/google${escAttr(q)}">${GOOGLE_G}<span>Continue with Google</span></a>` : '',
@@ -43,6 +47,7 @@ export function signinPanel({ providers, from, next = '', submit = 'Email me a s
       <form class="signin-email" id="email-form" method="post" action="/auth/email">
         <input type="hidden" name="from" value="${from}" />
         ${next ? `<input type="hidden" name="next" value="${escAttr(next)}" />` : ''}
+        ${src ? `<input type="hidden" name="src" value="${escAttr(src)}" />` : ''}
         <label class="cv-flabel" for="email">Work email</label>
         <input class="cv-field" type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" maxlength="254" />
         <button type="submit" class="btn btn-lg btn-email">${submit}</button>

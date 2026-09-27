@@ -4922,6 +4922,8 @@ const { shareGates } = await import('./share-gates.mjs')
 await shareGates({ API, sql, ok })
 const { rejectionGates } = await import('./rejection-gates.mjs')
 await rejectionGates({ API, sql, ok, adminCookie })
+const { sourceGates } = await import('./source-gates.mjs')
+await sourceGates({ API, sql, ok, adminCookie, fakeBase: process.env.OAUTH_TEST_BASE, outbox: process.env.MAIL_TEST_OUTBOX })
 const { spikeGates } = await import('./spike-gates.mjs')
 await spikeGates({ API, sql, ok, bootS, stopS, portS: PORT_S })
 // ------------------------------------------------ [capi] Meta Conversions API (2026-09-26), in its own file
