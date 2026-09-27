@@ -172,7 +172,9 @@ async function privacyBody(): Promise<string> {
       <li><strong>What your code sends</strong>: the preflight calls, usage records and steps your integration
       makes, with the ids you choose (agent, customer, job), the numbers (estimates, ceilings, units, tokens) and
       any metadata you attach to a record (at most ${(METADATA_MAX_BYTES / 1024).toLocaleString('en-US')} KB each).
-      And the answer each refused call got. This is the service itself: the ceilings, the console and your usage.</li>
+      And the answer each refused call got, and a daily count of preflights the service could not decide
+      (a 422, such as a new job sent with no ceiling), per account and reason, with nothing of the request
+      in it. This is the service itself: the ceilings, the console and your usage.</li>
       <li><strong>Public links you make</strong>: when you create a public link to your office, we store what the
       link shows, frozen at that moment (the staff count, who was at a desk and who was sent home, and agent names
       and dollar amounts only if you chose to show them), and the card image your browser drew for it. Anyone with

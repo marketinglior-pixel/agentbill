@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
+import { noteRejection, rejectionReason } from '../lib/preflight-rejections.js'
 import { z } from 'zod'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
@@ -71,6 +72,15 @@ export type ServiceResult = { status: number; body: unknown }
  * request's logger. The route below is now three lines.
  */
 export async function runPreflight(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<ServiceResult> {
+  const r = await decidePreflight(accountId, input, log)
+  // A 422 is a call the server could not decide, and until 2026-09-27 nothing
+  // recorded it. Counted per account, per reason, per day (migration 036), for
+  // "why does a key not become a first call?". Never changes the answer.
+  if (r.status === 422) await noteRejection(accountId, rejectionReason(r.body), log)
+  return r
+}
+
+async function decidePreflight(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<ServiceResult> {
     const parse = PreflightBody.safeParse(input)
     if (!parse.success) {
       return { status: 422, body: { error: 'validation_error', details: parse.error.issues } }

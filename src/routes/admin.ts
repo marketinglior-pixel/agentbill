@@ -4,6 +4,7 @@ import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from 
 import type { AccountSignals } from '../lib/conversion.js'
 import { getSitePulse } from '../lib/pulse.js'
 import type { SitePulse } from '../lib/pulse.js'
+import { loadRejections, type RejectionRow } from '../lib/preflight-rejections.js'
 import { publicRoute } from '../middleware/auth.js'
 import { head, BP } from '../ui/theme.js'
 import { mark, MARK_CSS } from '../ui/mark.js'
@@ -47,8 +48,9 @@ export async function adminRoute(app: FastifyInstance) {
     }
     const accounts = await getAccountsWithSignals()
     const pulse = await getSitePulse()
+    const rejections = await loadRejections(30)
     reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
-    return reply.send(adminPage(accounts, pulse))
+    return reply.send(adminPage(accounts, pulse, rejections))
   })
 
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
@@ -279,7 +281,7 @@ ${topBar('admin')}
 </html>`
 }
 
-function adminPage(accounts: AccountSignals[], pulse: SitePulse) {
+function adminPage(accounts: AccountSignals[], pulse: SitePulse, rejections: RejectionRow[] = []) {
   const total = accounts.length
   const paid = accounts.filter(a => a.plan !== 'free').length
   const hot = accounts.filter(isHot).length
@@ -445,6 +447,41 @@ ${topBar('signed in', true)}
     with no source, which is the honest answer rather than a gap to be filled by sniffing a referrer.
     A source with clicks and zero /register loads is the link, not the page: check that the surface
     points at <code>/</code> or <code>/register</code> and not somewhere the parameter is dropped.
+  </p>`}
+
+  <h2 id="rejections">Preflights answered 422, last 30 days</h2>
+  ${rejections.length === 0
+    ? `<p class="sub">None counted. Counting started 2026-09-27 (migration 036), so an empty table before
+       then says nothing; after it, it means no preflight in the window was malformed or opened a job
+       without a ceiling.</p>`
+    : `<div class="cv-panel"><div class="cv-card cv-scroll"><table class="cv-table is-ruled">
+    <thead>
+      <tr>
+        <th>Reason</th>
+        <th>Accounts</th>
+        <th>Times</th>
+        <th>Accounts that never recorded a call</th>
+        <th>Accounts that recorded one after</th>
+        <th>Last</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rejections.map((row) => `<tr>
+        <td><code>${esc(row.reason)}</code></td>
+        <td>${row.accounts}</td>
+        <td>${row.times}</td>
+        <td class="${row.neverCalled > 0 ? 'held' : ''}">${row.neverCalled}</td>
+        <td>${row.calledAfter}</td>
+        <td>${row.last.slice(0, 16).replace('T', ' ')}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div></div>
+  <p class="sub">
+    A 422 is a preflight the server could not decide: <code>task_ceiling_required</code> is a new job
+    with no ceiling, <code>task_unit_mismatch</code> a unit that is not the job's, <code>validation_error</code>
+    a body that does not parse. Nothing is reserved and no quota is used, so before this table nothing
+    recorded one. "Never recorded a call" is the stuck count: an account whose only contact with the API
+    so far ends in this answer.
   </p>`}
 
   <h2>Accounts</h2>
