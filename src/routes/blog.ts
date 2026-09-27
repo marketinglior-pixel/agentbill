@@ -93,8 +93,8 @@ const POSTS: readonly Post[] = [
   {
     path: '/blog/how-preflight-avoids-double-billing',
     title: 'How preflight avoids double-billing under concurrent load',
-    description: 'The naive read-check-approve pattern has a race condition. Here\'s how AgentBill uses an atomic reserve to guarantee consistency between the preflight check and the final settlement.',
-    minutes: 6,
+    description: 'Five parallel tool calls read the same $4.90 on a $5.00 job and all five go out. How preflight reserves in one conditional UPDATE instead, settles to list price, reclaims what never reports back, and the CI test that fires 40 at once.',
+    minutes: 7,
   },
 ]
 
@@ -137,114 +137,90 @@ export async function blogRoute(app: FastifyInstance) {
   <h1>How preflight avoids double-billing under concurrent load</h1>
   <div class="meta">${dateline('/blog/how-preflight-avoids-double-billing')}</div>
 
-  <p>A developer on Reddit asked a sharp question about AgentBill's checkpoint pattern: <em>"Most checkpoint patterns I've seen either re-meter or skip metering and lose accuracy. How does the read-only check stay consistent with the final settlement?"</em></p>
+  <p>An agent that makes one call at a time is easy to budget. Read what the job has spent, compare it with the ceiling, make the call. Most agents don't work that way anymore. A planner hands five tool calls to five workers, the five start within a few milliseconds of each other, and each one asks the same question at the same moment: does this job have room for me?</p>
 
-  <p>It's the right question. The naive implementation of a preflight check has a race condition that causes exactly this problem. Here's how AgentBill solves it.</p>
+  <p>If the answer comes from a read, all five get the same answer. This post is about how AgentBill answers with a write instead, what happens to money held for a call that never reports back, and the test in our CI that fires 40 of these at once.</p>
 
 
-  <h2>The problem: read-check-approve is broken under concurrency</h2>
+  <h2>The check that reads</h2>
 
-  <p>The obvious implementation of a preflight check looks like this:</p>
+  <p>The obvious preflight check reads the job, adds the estimate, and compares:</p>
 
   <div class="code"><pre>
-<span class="comment"># Naive implementation, DO NOT use in production</span>
-def preflight(customer_id, estimated_units):
-    customer = db.query("SELECT used_units, limit_units FROM customers WHERE id = ?", customer_id)
-    remaining = customer.limit_units - customer.used_units
-
-    if estimated_units > remaining:
+<span class="comment"># Read, then decide. Do not use this under concurrency.</span>
+def preflight(task_ref, estimated_usd):
+    job = db.one("SELECT ceiling_usd, spent_usd FROM jobs WHERE task_ref = %s",
+                 task_ref)
+    if job.spent_usd + estimated_usd > job.ceiling_usd:
         return {"approved": False}
-
     return {"approved": True}</pre></div>
 
-  <p>This reads the current balance, checks if the run fits, and returns a decision. Under a single serial workload it works fine.</p>
-
-  <p>Under concurrent load it breaks. Consider two agent runs starting at the same millisecond for the same customer who has 10 units remaining, each estimating 8 units:</p>
+  <p>With one worker it works. Now give it five. The job has a $5.00 ceiling and has spent $4.90, and each call estimates $0.10:</p>
 
   <div class="code"><pre>
-Thread A: reads remaining = 10. 8 &lt;= 10. Approved.
-Thread B: reads remaining = 10. 8 &lt;= 10. Approved.
+worker 1: reads spent = $4.90. 4.90 + 0.10 &lt;= 5.00. approved.
+worker 2: reads spent = $4.90. approved.
+worker 3: reads spent = $4.90. approved.
+worker 4: reads spent = $4.90. approved.
+worker 5: reads spent = $4.90. approved.
 
-Thread A runs. Uses 8 units. Used = 8.
-Thread B runs. Uses 8 units. Used = 16. Limit exceeded.</pre></div>
+five calls go out. spent = $5.40 on a $5.00 ceiling.</pre></div>
 
-  <p>Both reads happen before either write. Both see the same balance. Both get approved. The customer burns 16 units against a 10-unit budget. The check was useless.</p>
-
-  <p>This is a classic TOCTOU race: Time Of Check, Time Of Use. The check and the use happen at different times, and the state can change between them.</p>
+  <p>Every read happened before any write, so every worker saw $4.90. This is a time-of-check to time-of-use race: the state changed between the check and the spend, and nothing in the check could see it coming. A lock in your own process doesn't help once the workers are separate processes, or separate machines.</p>
 
 
-  <h2>The fix: atomic reservation</h2>
+  <h2>The check that writes</h2>
 
-  <p>AgentBill doesn't just read the balance, it reserves units atomically inside a transaction. The preflight <span class="inline">UPDATE</span> only succeeds when there's enough budget remaining:</p>
+  <p>AgentBill's preflight doesn't read the balance and then decide. It tries to reserve the estimate, and the condition is part of the write:</p>
 
   <div class="code"><pre>
-<span class="comment">-- This is what happens inside AgentBill's preflight</span>
-UPDATE customers
-SET reserved_units = reserved_units + :estimated_units
+<span class="comment">-- inside POST /preflight, in one transaction (simplified)</span>
+UPDATE task_budgets
+SET reserved_units = reserved_units + :estimate
 WHERE account_id = :account_id
-  AND customer_ref = :customer_ref
-  AND (
-    limit_units IS NULL
-    OR used_units + reserved_units + :estimated_units &lt;= limit_units
-  )
-RETURNING limit_units, used_units, reserved_units</pre></div>
+  AND task_ref   = :task_ref
+  AND used_units + reserved_units + :estimate &lt;= ceiling_units
+RETURNING ceiling_units, used_units, reserved_units</pre></div>
 
-  <p>If budget is available, the UPDATE succeeds and returns the updated row. The reservation is now reflected in <span class="inline">reserved_units</span>, visible to every subsequent transaction.</p>
+  <p>If the estimate fits, a row comes back, and the reservation is already in <span class="inline">reserved_units</span> where the next worker's UPDATE will see it. If zero rows come back, it didn't fit. The answer is <span class="inline">approved: false</span> with the reason <span class="inline">task_ceiling_exceeded</span>, nothing was reserved, and your code decides what happens next: wait, fall back to a cheaper model, hand the job to a person, or let it end there.</p>
 
-  <p>If budget is exhausted, the WHERE clause matches 0 rows. The UPDATE returns nothing. The run is blocked. No budget was consumed.</p>
-
-  <p>Replaying the concurrent scenario:</p>
+  <p>Postgres takes a row lock for the UPDATE, so the five workers queue on the job's row for the length of one statement each. There's no read-then-write gap left to fall into. On a job in dollars the numbers are micro-dollars, so $5.00 is 5,000,000 and a $0.10 estimate is 100,000. Same five workers:</p>
 
   <div class="code"><pre>
-Thread A: UPDATE adds 8 to reserved_units. reserved = 8. Succeeds.
-Thread B: UPDATE tries to add 8. used + reserved + 8 = 16 > 10. WHERE fails. Blocked.
+worker 1: 4,900,000 + 0         + 100,000 &lt;= 5,000,000. reserved. approved.
+worker 2: 4,900,000 + 100,000   + 100,000 >  5,000,000. zero rows. approved: false.
+worker 3: zero rows. approved: false.
+worker 4: zero rows. approved: false.
+worker 5: zero rows. approved: false.
 
-Thread A runs. Completes. record() converts reserved → used.</pre></div>
+one call goes out. the other four hear approved: false before sending anything.</pre></div>
 
-  <p>The database handles the serialization. No application-level locking required.</p>
-
-
-  <h2>Settlement: converting reserved to used</h2>
-
-  <p>After the agent run completes, <span class="inline">record()</span> settles the reservation:</p>
-
-  <div class="code"><pre>
-UPDATE customers
-SET used_units     = used_units + :actual_units,
-    reserved_units = reserved_units - :estimated_units
-WHERE account_id = :account_id
-  AND customer_ref = :customer_ref</pre></div>
-
-  <p>The reserved units come out. The actual units go in. The net balance reflects reality.</p>
-
-  <p>If <span class="inline">actual_units</span> differs from <span class="inline">estimated_units</span>, say you estimated 10 but the run used 7, the difference is released back into available budget. No manual adjustment needed.</p>
+  <p>What the job can still go over by is the gap between one call's estimate and what that call really cost. That's the next section.</p>
 
 
-  <h2>What happens when a run fails</h2>
+  <h2>Settling to what the call cost</h2>
 
-  <p>A reservation is released in exactly one place: <span class="inline">record()</span>. Call it with <span class="inline">success=false</span> and the reserved units go back without billing anything.</p>
+  <p>When the provider answers, <span class="inline">record</span> reports the tokens it used. On a job in dollars the server prices those tokens at the provider's public list price and settles by that amount: the cost goes into <span class="inline">used_units</span>, the whole reservation comes out of <span class="inline">reserved_units</span>, and whatever the call didn't need is free for the next worker right away. A $0.10 reservation for a gpt-4o call of 10,000 input and 2,000 output tokens settles at $0.045.</p>
+
+  <p>So the estimate matters, and you don't have to guess it. Leave <span class="inline">estimated_usd</span> out and the server reserves the job's recent median call, or $0.10 before the job has a priced call. The answer names whose estimate it was in <span class="inline">estimate_source</span>: <span class="inline">caller</span>, <span class="inline">job_median</span> or <span class="inline">default</span>. A call that costs more than its reservation is still charged in full, because the spend happened, and spend that lands past the ceiling is recorded and flagged <span class="inline">task_exceeded</span> rather than dropped. The ceiling holds to within one call's miss, not to the cent. Every dollar figure here is an estimate at list price, not your provider's invoice.</p>
+
+
+  <h2>A call that never reports back</h2>
+
+  <p>When the provider call throws, <span class="inline">wrap()</span> releases the reservation with a zero-unit record that names it, so the money is back before the exception reaches your code. The harder case is a worker that goes away without a word: the process exits, the machine restarts, the network drops. Nothing will ever settle that reservation.</p>
+
+  <p>So every reservation expires. Each approved preflight returns <span class="inline">reservation_expires_at</span>, 60 minutes out on the hosted service, and a sweeper reclaims the ones that pass it. That needed one change to the shape of the data. <span class="inline">reserved_units</span> is a counter, and a counter can't be swept, because it doesn't know how much of itself is stale. So a reservation is also a row, and the counter is the sum of the open rows:</p>
 
   <div class="code"><pre>
-<span class="comment"># The run failed. Release the reservation, bill nothing.</span>
-<span class="comment"># units must match what preflight reserved.</span>
-client.record(agent_id="researcher", units=200, success=False)</pre></div>
+<span class="comment">-- The invariant every path keeps</span>
+task_budgets.reserved_units = SUM(units) of the job's open reservation rows</pre></div>
 
-  <p>The SDK decorator does this for you: it wraps the call in try/except and releases on the way out of a failed run.</p>
-
-  <p><strong>If <span class="inline">record()</span> never arrives at all, the units stay reserved until they expire.</strong> Each reservation carries a TTL, returned to the caller as <span class="inline">reservation_expires_at</span> on every approved preflight, and a sweeper reclaims the ones that pass it.</p>
-
-  <p>Getting that sweeper right needed one change to the shape of the data. <span class="inline">reserved_units</span> is a counter, and a counter cannot be swept, because it does not know how much of itself is stale. So a reservation is a row, and the counter is the sum of the open rows:</p>
+  <p>Which makes the sweep boring, and boring is the goal here:</p>
 
   <div class="code"><pre>
-<span class="comment">-- The invariant every path maintains</span>
-customers.reserved_units    = SUM(units) of open rows for that customer
-task_budgets.reserved_units = SUM(units) of open rows for that task</pre></div>
-
-  <p>Which turns the sweep into something boring, and boring is the goal on this path:</p>
-
-  <div class="code"><pre>
-<span class="comment">-- Claim expired rows and release their units, in ONE transaction.</span>
-<span class="comment">-- SKIP LOCKED because production runs more than one machine.</span>
+<span class="comment">-- The sweeper's claim, trimmed. Expired rows and their</span>
+<span class="comment">-- units go back in ONE transaction. SKIP LOCKED because</span>
+<span class="comment">-- production runs two machines, and both sweep.</span>
 UPDATE reservations SET released_at = now()
 WHERE id IN (
   SELECT id FROM reservations
@@ -252,63 +228,113 @@ WHERE id IN (
   ORDER BY expires_at LIMIT 500
   FOR UPDATE SKIP LOCKED
 )
-RETURNING customer_id, task_ref, units</pre></div>
+RETURNING id, account_id, task_ref, units</pre></div>
 
-  <h2>The bug this design exists to prevent</h2>
 
-  <p>Now that two different things can release the same reservation, the sweeper and a late <span class="inline">record()</span>, the obvious implementation is wrong in the dangerous direction.</p>
+  <h2>The late settle</h2>
 
-  <p>Consider a run that dies, gets swept an hour later, and then, somehow, settles: a queued retry, a delayed worker, a caller that kept the id. If <span class="inline">record()</span> decrements <span class="inline">reserved_units</span> by its <span class="inline">units</span> argument, those units come off twice, once from the sweeper and once from the settle. The counter now sits <em>below</em> the units genuinely in flight, and the gate starts approving runs against budget that another run is already holding. A double release is a double spend.</p>
+  <p>Now two different things can close the same reservation: the sweeper, and a record that arrives late. A queued retry, a slow worker, a caller that held on to the id for an hour. If the record takes its reservation off the counter no matter what, those units come off twice, once by the sweeper and once by the settle. The counter then sits <em>below</em> what's really in flight, and preflight starts approving calls against money another call is still holding. A double release is a double spend.</p>
 
-  <p>So the settle path does not decrement by what the caller sent. It closes reservation rows FIFO, counts what those rows were actually holding, and decrements by <em>that</em>:</p>
+  <p>So a record doesn't take off what it thinks was reserved. It closes the reservation it names, and takes off what that row was still holding, which is nothing if the sweeper got there already:</p>
 
   <div class="code"><pre>
-<span class="comment"># units always moves: the spend really happened.</span>
-<span class="comment"># reserved moves by what the closed rows held, which is 0</span>
-<span class="comment"># if the sweeper already reclaimed them.</span>
-consumed = consume_reservations(customer_id, task_ref, units)
+<span class="comment">-- record() names the reservation its preflight returned</span>
+UPDATE reservations SET released_at = now()
+WHERE id = :reservation_id AND released_at IS NULL
+RETURNING units                  <span class="comment">-- :returned, or no row (0) if the sweeper took it</span>
 
-UPDATE customers
-SET used_units     = used_units + :units,
-    reserved_units = GREATEST(0, reserved_units - :consumed)</pre></div>
+<span class="comment">-- then, in the same transaction</span>
+UPDATE task_budgets
+SET used_units     = used_units + :cost,
+    reserved_units = GREATEST(0, reserved_units - :returned)</pre></div>
 
-  <p>A settle for a reservation that no longer exists finds nothing to close, gets <span class="inline">consumed = 0</span>, and leaves the counter alone. Same code path covers <span class="inline">record()</span> calls that never had a preflight at all.</p>
+  <p>The cost always goes in, because the call really ran. The reservation comes out once, whichever of the two got there before the other.</p>
+
 
   <h2>The retry that reserved twice</h2>
 
-  <p>One more hole worth naming, because it was in the mechanism meant to prevent waste. <span class="inline">/events</span> has enforced <span class="inline">(account_id, idempotency_key)</span> UNIQUE since the beginning. <span class="inline">/preflight</span> had nothing, so a client that retried a timed-out preflight reserved a second time, and an aggressive retry policy could exhaust a budget without a single model call behind it.</p>
+  <p>One more hole, and it was in the mechanism that exists to prevent waste. <span class="inline">/events</span> has enforced <span class="inline">(account_id, idempotency_key)</span> as unique from the start. <span class="inline">/preflight</span> had nothing, so a client that retried a timed-out preflight reserved a second time, and an eager retry policy could use up a job's ceiling without a single model call behind it.</p>
 
-  <p>preflight now takes the same <span class="inline">idempotency_key</span>. The key is claimed inside the reserving transaction, so a duplicate blocks on the unique index rather than racing: same key, same decision, one reservation. A retry that lands while the original is still being decided gets <span class="inline">409 preflight_in_progress</span>, which is not a block and reserves nothing.</p>
+  <p>preflight takes the same <span class="inline">idempotency_key</span> now. The key is claimed inside the reserving transaction, so a duplicate waits on the unique index instead of racing: same key, same decision, one reservation. A retry that lands while the original is still being decided gets <span class="inline">409 preflight_in_progress</span>, which isn't a refusal and reserves nothing.</p>
 
-  <p>Note which way all of this fails. An abandoned reservation makes the ceiling <em>tighter</em>, never looser: the run that gets blocked is a later one, not an expensive one that should have been stopped. Every correctness choice above preserves that direction. The gate does not open by accident.</p>
-
-
-  <h2>Why this matters for metering accuracy</h2>
-
-  <p>The developer's question was specifically about consistency between the check and the settlement. The reservation pattern guarantees this in three ways:</p>
-
-  <p><strong>1. No double-approval.</strong> The atomic UPDATE ensures only one concurrent run can claim a given unit of budget. The database is the lock.</p>
-
-  <p><strong>2. No phantom budget.</strong> Every approved run immediately reduces the available budget visible to subsequent runs. There's no window where the same units appear available twice.</p>
-
-  <p><strong>3. Accurate settlement.</strong> The <span class="inline">record()</span> call replaces estimated with actual. The reservation was a claim, not a charge. The charge happens at settlement with the real number.</p>
+  <p>Notice which way all of this fails. A reservation that never settles makes the ceiling tighter for an hour, never looser: the call that gets <span class="inline">approved: false</span> is a later one, until the sweeper gives the money back. Every choice above keeps that direction.</p>
 
 
-  <h2>The full flow</h2>
+  <h2>The test that runs on every change</h2>
+
+  <p>We don't take the UPDATE's word for it. On every change, CI opens a job with a $1.00 ceiling and fires 40 preflights at it at once, each at the $0.10 default. It passes when exactly 10 are approved, 30 come back <span class="inline">approved: false</span> with <span class="inline">task_ceiling_exceeded</span>, the job's <span class="inline">reserved_units</span> is the ceiling to the micro-dollar, and the open reservation rows add up to the same number. A second job does it again at the caller's own $0.03 estimate and expects 33 approvals, $0.99, never 34.</p>
 
   <div class="code"><pre>
-preflight(estimated_units=10)
-  → atomic UPDATE reserves 10 units
-  → returns approved=true, remaining_units=N
+40 preflights at once on a $1.00 job, $0.10 each
 
-agent runs (actual cost: 7 units)
+approved                                   10
+approved: false (task_ceiling_exceeded)    30
+task_budgets.reserved_units         1,000,000   = the ceiling
+sum of open reservation rows        1,000,000</pre></div>
 
-record(units=7)
-  → used_units += 7
-  → reserved_units -= 10
-  → net: 7 charged, 3 released</pre></div>
+  <p>If someone changes that UPDATE into a read and a write, this is the test that goes red.</p>
 
-  <p>If two runs start simultaneously, only one can atomically claim the budget. The other is blocked at the database level before any compute runs.</p>
+
+  <h2>Using it</h2>
+
+  <p>You don't write any of the SQL above. <span class="inline">wrap()</span> puts a preflight in front of each provider call and a record after it, so five parallel workers on one <span class="inline">task_ref</span> draw from one ceiling, in one process or in five.</p>
+
+  <p><strong>Python</strong></p>
+  <div class="code"><pre>pip install -U agentbill-sdk openai</pre></div>
+
+  <div class="code"><pre>
+from concurrent.futures import ThreadPoolExecutor
+from openai import OpenAI
+from agentbill import wrap, Refusal
+
+<span class="comment"># Reads AGENTBILL_API_KEY; OpenAI() reads OPENAI_API_KEY.</span>
+<span class="comment"># job-142 opens in dollars with a $5.00 ceiling.</span>
+llm = wrap(OpenAI(), task_ref="job-142", agent_id="researcher",
+           task_ceiling_usd=5)
+
+def look_up(topic):
+    reply = llm.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
+        messages=[{"role": "user", "content": f"One line on {topic}."}],
+    )
+    if isinstance(reply, Refusal):
+        <span class="comment"># approved: false. This call was not sent. Your code decides.</span>
+        return None
+    return reply.choices[0].message.content
+
+topics = ["row locks", "idempotency keys", "reservations",
+          "sweepers", "list prices"]
+with ThreadPoolExecutor(max_workers=5) as pool:
+    print(list(pool.map(look_up, topics)))</pre></div>
+
+  <p><strong>Node.js</strong></p>
+  <div class="code"><pre>npm install agentbill openai</pre></div>
+
+  <div class="code"><pre>
+import OpenAI from 'openai'
+import { wrap, isRefusal } from 'agentbill'
+
+<span class="comment">// Reads AGENTBILL_API_KEY; new OpenAI() reads OPENAI_API_KEY.</span>
+<span class="comment">// job-142 opens in dollars with a $5.00 ceiling.</span>
+const llm = wrap(new OpenAI(), {
+  taskRef: 'job-142', agentId: 'researcher', taskCeilingUsd: 5,
+})
+
+const topics = ['row locks', 'idempotency keys', 'reservations',
+                'sweepers', 'list prices']
+const ask = (topic) => llm.chat.completions.create({
+  model: 'gpt-4o-mini', max_tokens: 300,
+  messages: [{ role: 'user', content: 'One line on ' + topic + '.' }],
+})
+const replies = await Promise.all(topics.map(ask))
+for (const reply of replies) {
+  <span class="comment">// approved: false. This call was not sent. Your code decides.</span>
+  if (isRefusal(reply)) console.log(String(reply))
+  else console.log(reply.choices[0].message.content)
+}</pre></div>
+
+  <p>AgentBill is an SDK inside your process, not a proxy. The call goes from your code to your provider, and AgentBill sees the provider's name, the model, the token counts and the job, never the prompt or the answer.</p>
 
 
   <section class="ct-cta">

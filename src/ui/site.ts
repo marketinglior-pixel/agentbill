@@ -158,7 +158,7 @@ export const PAGES: readonly PageMeta[] = [
   { path: '/integrations/mcp', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'MCP', og: 'docs', index: true, updated: '2026-09-25', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
 
   { path: '/blog', section: 'blog', crumbs: [HOME], crumb: 'Blog', og: 'blog', index: true, updated: '2026-09-05', priority: 0.6, changefreq: 'monthly' },
-  { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-05', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
+  { path: '/blog/how-preflight-avoids-double-billing', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Preflight and double-billing', og: 'blog', index: true, updated: '2026-09-27', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
   { path: '/blog/monthly-caps-wont-save-you', section: 'blog', crumbs: [HOME, BLOG], crumb: 'Monthly caps', og: 'blog', index: true, updated: '2026-09-23', published: '2026-05-06', priority: 0.6, changefreq: 'yearly' },
 
   // Indexable on purpose. noindex on a policy page buys nothing (nobody is

@@ -2100,6 +2100,41 @@ const misnamed8 = blogLinks8.filter((l) => l.text !== l.href.replace(/^https:\/\
 ok('[blog] every external link says, in its own text, exactly where it goes',
    blogLinks8.length > 0 && misnamed8.length === 0,
    misnamed8.map((l) => `"${l.text}" -> ${l.href}`).join('; ') || 'no external links')
+// The post on concurrency, rewritten 2026-09-27 for jobs in dollars and parallel
+// tool calls. From May until then no gate read it: it taught customer_id and
+// record(units=200), said "blocked" five times and quoted a Reddit comment with
+// no link. The Reddit and LinkedIn posts of that week point here. Three gates:
+// its words, its samples, and the CI numbers it quotes, read against the
+// usd-gates assertions that produce them, so the post cannot keep a number the
+// test no longer asserts.
+const dbl8 = await fetch(`${API}/blog/how-preflight-avoids-double-billing`).then((r) => r.text())
+const dblStart8 = dbl8.indexOf('<h1>')
+const dblEnd8 = dblStart8 < 0 ? -1 : dbl8.indexOf('class="also"', dblStart8)
+const dblPost8 = dblStart8 < 0 || dblEnd8 < 0 ? '' : dbl8.slice(dblStart8, dblEnd8)
+{
+  const prose = readable8(dblPost8.replace(/<blockquote[\s\S]*?<\/blockquote>/g, ' ').replace(/<pre[\s\S]*?<\/pre>/g, ' '))
+  const hits = prose.match(/\b[a-z]*(stop|kill|block|dies)[a-z]*\b|\b(first|nobody|only|honestly)\b|per-request ceiling|\bcustomer|—/gi) ?? []
+  ok('[blog] the concurrency post, outside its samples, never says stop, kill, block, dies, first, nobody, only, honestly, customer or an em dash',
+     dblPost8.length > 2000 && hits.length === 0, hits.join(', ') || `${dblPost8.length} chars`)
+}
+{
+  const pre = [...dblPost8.matchAll(/<pre[\s\S]*?<\/pre>/g)].map((m) => m[0]).join('\n')
+  const retired = /customer_id|customerId|BudgetExhaustedError|blocked|Blocked|estimated_units=|units=200/g
+  ok('[blog] the concurrency post teaches a job in dollars (task_ref job-142, task_ceiling_usd, wrap) in both languages and none of the retired samples',
+     pre.includes('task_ref="job-142"') && pre.includes('task_ceiling_usd=5') && pre.includes("taskRef: 'job-142'")
+       && pre.includes('taskCeilingUsd: 5') && pre.includes('isinstance(reply, Refusal)') && pre.includes('isRefusal(reply)')
+       && !retired.test(pre), (pre.match(retired) ?? ['a dollar-job sample is missing']).join(', '))
+}
+{
+  const { readFileSync } = await import('node:fs')
+  const usd = readFileSync(`${ROOT_ST}scripts/preflight/usd-gates.mjs`, 'utf8')
+  const prose = visible8(dblPost8)
+  ok('[blog] the 40-at-once numbers the concurrency post quotes (10 of 40 at $0.10, 33 at $0.03, $1.00) are the ones usd-gates.mjs asserts',
+     /exactly 10 are approved, 30 come back/.test(prose) && /expects 33 approvals, \$0\.99, never 34/.test(prose)
+       && /\{ length: 40 \}/.test(usd) && /ceiling_usd: 1 \}/.test(usd) && /yes === 10 && no === 30/.test(usd)
+       && /estimated_usd: 0\.03/.test(usd) && /yes3 === 33/.test(usd),
+     prose.match(/fires 40[^.]*\.[^.]*\./)?.[0] ?? 'no 40-at-once paragraph')
+}
 // The band under Fig. 1, 2026-09-18: the one place on / where a third party is
 // quoted or characterised, and until now in no gate's slice. The sentence "with
 // no way to detect or stop it from the CLI" sat here for twelve days under a
