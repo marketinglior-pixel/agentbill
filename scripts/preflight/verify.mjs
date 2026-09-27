@@ -1786,12 +1786,10 @@ ok('[fold] the hero carries the one link to #estimate, the retired demo link is 
 // 2026-09-27: the headline and lede carry the homepage's promise (what each
 // client's agents cost, in dollars) instead of the retired units story, which
 // the visitor met on no page before this one.
-ok('[register] the lede carries the homepage\'s promise in dollars and per client, not the retired units story, and nothing under the form pitches',
-   register8.includes("<h1>See what every client&#39;s agents cost you.</h1>") || register8.includes("See what every client's agents cost you.</h1>"))
-ok('[register] the lede: one wrap(), model and tokens per client at list price, a ceiling in dollars, approved: false, your code decides',
-   register8.includes('Wrap your OpenAI, Anthropic or Google client once.') && register8.includes('per client, as an estimate at public list price')
-     && register8.includes('Give a job a ceiling in dollars') && register8.includes('<code>approved: false</code>') && register8.includes('Your code decides.')
-     && !register8.includes('Key once.') && !register8.includes('Ceiling on one') && !register8.includes('One decorator')
+ok('[register] the h1 carries the homepage\'s promise, what every client\'s agents cost, not the retired units story',
+   register8.includes("<h1>What every client&#39;s agents cost.</h1>") || register8.includes("What every client's agents cost.</h1>"))
+ok('[register] the lede: each call\'s cost at list price and a ceiling in dollars, short enough to hold the form on the fold, and nothing under the form pitches',
+   register8.includes("cost at list price, and a ceiling in dollars on any job.") && !register8.includes('Key once.') && !register8.includes('Ceiling on one') && !register8.includes('One decorator')
      && !register8.includes('class="facts"') && !register8.includes('the entire integration surface'))
 // 2026-09-25: /register shows no key. It is the sign-in block, and the key is
 // made in the console by a person whose address is verified ([auth] gates).
