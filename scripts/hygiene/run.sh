@@ -113,15 +113,18 @@ gate "home.ts: one python, one node sample, no phantom block" "1:1:2" "$n"
 # the task_ref-only record(units=1) sample, and on 2026-09-11 a comment that
 # spelled the tag name with angle brackets swallowed it into a "dynamic" block:
 # python went 38 -> 37 and nothing failed. Same trap as home.ts above, same guard.
+# Since 2026-09-27 it also carries the curl that records a test call with no
+# provider key, a shell literal the [start] gates run as pasted.
 n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   let s=''; process.stdin.on('data', d => s += d).on('end', () => {
     const b = JSON.parse(s).filter(x => x.source.endsWith('routes/app.ts'));
     const py = b.filter(x => x.kind === 'python').length;
     const nd = b.filter(x => x.kind === 'node').length;
+    const sh = b.filter(x => x.kind === 'shell').length;
     const dy = b.filter(x => x.kind === 'dynamic').length;
-    process.stdout.write(py + ':' + nd + ':' + dy + ':' + b.length);
+    process.stdout.write(py + ':' + nd + ':' + sh + ':' + dy + ':' + b.length);
   });")
-gate "app.ts: one python, one node literal, one dynamic pre, no phantom" "1:1:1:3" "$n"
+gate "app.ts: one python, one node, one shell literal, one dynamic pre, no phantom" "1:1:1:1:4" "$n"
 
 # The start screen's prose says what one run does: job first-call, a ceiling of
 # 20,000 tokens, wrap(). The two samples are literals (the harvester executes

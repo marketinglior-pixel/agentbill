@@ -15,7 +15,7 @@ import { setTaskCeiling, CONSOLE_AGENT, unitWord, TASK_UNITS, asTaskUnit, amount
 import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type AgentHistory, type HistoryJob } from '../lib/ceiling-suggest.js'
 import {
   VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
-  INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
+  INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, NEEDS_LINE, CURL_LEAD, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
 } from '../ui/steps.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
@@ -35,7 +35,7 @@ import { endSessions, linkedProviders } from '../lib/users.js'
 import { configuredProviders, providerConfig, isProvider, newFlow, flowCookie, authorizeUrl, type Provider } from '../lib/oauth.js'
 import { signinPanel, signinFonts, SIGNIN_CSS } from '../ui/signin.js'
 import { GOOGLE_G, GITHUB_MARK } from '../ui/provider-marks.js'
-import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate } from '../ui/copy.js'
+import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate, copyBlock } from '../ui/copy.js'
 import { hashKey, insertKey, maskKey, keyPrefixOf, keyLast4Of } from '../lib/api-keys.js'
 import { revokeAllKeys } from './keys.js'
 import { connectedApps, SCOPE_TEXT, type ConnectedApp } from '../lib/mcp-oauth.js'
@@ -212,9 +212,10 @@ export async function appRoute(app: FastifyInstance) {
     // on the first visit, after reading, so that visit still shows its step.
     const setup = demo ? null : await loadSetup(viewer.accountId)
     if (setup && view === 'office' && !setup.done.office) await markOfficeSeen(viewer.accountId)
-    // The MCP path's prompt has a Copy control, the one script this page can
-    // run, under its own hash and only where the control is drawn.
-    if (via === 'mcp' && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
+    // Each path has a Copy control (the MCP prompt; since 2026-09-27 the Python,
+    // Node and curl samples too), the one script this page can run, under its
+    // own hash and only where the control is drawn.
+    if (via && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
     return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office, shares, shareMsg, setup,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
@@ -2467,7 +2468,7 @@ ${siteFooter()}
 function firstKeyPage(apiKey: string): string {
   return `${HEAD('Your API key', LOGIN_CSS)}
 <body>
-${siteNav('/app', { sticky: false })}
+${siteNav('/app', { sticky: false, signedIn: true })}
   <main class="login-wrap">
     <div class="login cv-panel"><div class="cv-card">
     <h1>Your API key is ready.</h1>
@@ -3499,6 +3500,21 @@ const reply = await llm.chat.completions.create({
 console.log(isRefusal(reply) ? String(reply) : reply.choices[0].message.content)</pre>`
 }
 
+/**
+ * The first call with no provider key (2026-09-27): a test call recorded by
+ * hand, the words in CURL_LEAD (src/ui/steps.ts). A literal like the two
+ * above, and the [start] gates run it as pasted against a live server and
+ * read back that it was priced and ends the path.
+ */
+function curlSample(): string {
+  return `<pre class="snip">curl -sS https://agentbill.dev/events \\
+  -H "Authorization: Bearer $AGENTBILL_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"customer_id":"default","event_type":"curl-test","idempotency_key":"curl-test-1",
+       "metadata":{"provider":"openai","model":"gpt-4o-mini","step":"test",
+                   "tokens":{"input":1200,"output":300}}}'</pre>`
+}
+
 /** The last step of every path: the account's first model call, or where it will appear. */
 function firstCallBlock(p: Page): string {
   const f = p.d.first
@@ -3538,6 +3554,9 @@ function startScreen(p: Page): string {
     `<a class="via" href="${href(p, 'start', { via: v })}"${v === via ? ' aria-current="true"' : ''}><b>${VIA_TITLE[v]}</b><span>${VIA_SUB[v]}</span></a>`).join('\n        ')
   const step = (n: number, body: string) => `<div class="ns3"><span class="ns3-n">${n}</span><div>${body}</div></div>`
   const last = (n: number) => step(n, `<p><b>Your first call</b></p>${firstCallBlock(p)}`)
+  // The SDK paths' way through with no provider key: the test call, by curl.
+  const noKey = `<div class="nokey" id="no-provider-key"><p>${CURL_LEAD}</p>
+        ${copyBlock('sample-curl', curlSample(), 'the curl command')}</div>`
   let path = ''
   if (via === 'mcp') {
     path = [
@@ -3553,22 +3572,24 @@ function startScreen(p: Page): string {
     path = [
       step(1, `<p>Install the SDK and the OpenAI client, once, where your code runs.</p>
         <div class="snip">${INSTALL_PY_WRAP}</div>`),
-      step(2, `<p>Run this. It makes one real call to OpenAI through <code>wrap()</code>.</p>
-        ${pythonSample()}
+      step(2, `<p>${NEEDS_LINE}</p>
         <p class="fine">${KEYS_LINE}</p>
+        ${copyBlock('sample-python', pythonSample(), 'the Python code')}
         <p class="fine">${WHAT_RUNS}</p>
-        <p class="fine">${ANTHROPIC_LINE}</p>`),
+        <p class="fine">${ANTHROPIC_LINE}</p>
+        ${noKey}`),
       last(3),
     ].join('\n      ')
   } else if (via === 'node') {
     path = [
       step(1, `<p>Install the SDK and the OpenAI client, once, where your code runs.</p>
         <div class="snip">${INSTALL_NODE_WRAP}</div>`),
-      step(2, `<p>Save this as <code>first-call.mjs</code> and run <code>node first-call.mjs</code>. It makes one real call to OpenAI through <code>wrap()</code>.</p>
-        ${nodeSample()}
-        <p class="fine">${KEYS_LINE}</p>
+      step(2, `<p>${NEEDS_LINE}</p>
+        <p class="fine">Save it as <code>first-call.mjs</code> and run <code>node first-call.mjs</code>. ${KEYS_LINE}</p>
+        ${copyBlock('sample-node', nodeSample(), 'the Node code')}
         <p class="fine">${WHAT_RUNS}</p>
-        <p class="fine">${ANTHROPIC_LINE}</p>`),
+        <p class="fine">${ANTHROPIC_LINE}</p>
+        ${noKey}`),
       last(3),
     ].join('\n      ')
   } else {

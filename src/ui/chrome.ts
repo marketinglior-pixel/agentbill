@@ -205,7 +205,7 @@ ${MARK_CSS}
  */
 export function siteNav(
   current = '',
-  { cta = true, sticky = true }: { cta?: boolean; sticky?: boolean } = {},
+  { cta = true, sticky = true, signedIn = false }: { cta?: boolean; sticky?: boolean; signedIn?: boolean } = {},
 ): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
   const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
@@ -214,7 +214,11 @@ export function siteNav(
   // KEY_CTA because that is what sign-up ends in. /login sends a browser that
   // is already signed in straight to the console, so it is also the way back
   // to it; the footer keeps a plain Console link.
-  const menu = [...LINKS, ['/login', 'Log in'] as const, ['/register', 'Sign up'] as const]
+  // signedIn, 2026-09-27: a page only a signed-in person reaches (the first
+  // key) offered that person "Log in" and "Get API key". It names the console
+  // instead, and draws no sign-up button.
+  const auth = signedIn ? [['/app', 'Console'] as const] : [['/login', 'Log in'] as const, ['/register', 'Sign up'] as const]
+  const menu = [...LINKS, ...auth]
     .map(([href, label]) => `<li><a href="${href}"${at(href)}>${label}</a></li>`).join('\n            ')
   return `  <nav class="site-nav" aria-label="Primary">
     <div class="nav-inner">
@@ -223,17 +227,17 @@ export function siteNav(
         ${center}
       </div>
       <div class="nav-right">
-        <a class="console" href="/login"${at('/login')}>Log in</a>
+        ${signedIn ? `<a class="console" href="/app">Console</a>` : `<a class="console" href="/login"${at('/login')}>Log in</a>`}
         <details class="nav-menu">
           <summary>Menu</summary>
           <ul>
             ${menu}
           </ul>
-        </details>${cta ? `
+        </details>${cta && !signedIn ? `
         <a class="btn" href="/register"><span class="long">${KEY_CTA}</span><span class="short">${KEY_CTA_SHORT}</span></a>` : ''}
       </div>
     </div>
-  </nav>${cta && sticky ? `
+  </nav>${cta && sticky && !signedIn ? `
   <div class="sticky-cta"><a class="btn" href="/register">${KEY_CTA}</a></div>` : ''}`
 }
 

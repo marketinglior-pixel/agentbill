@@ -184,6 +184,11 @@ async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, 
   ok('[auth] the start screen makes the first key once: a 200 page that shows it (no-store), and a second press makes none',
      fk1.status === 200 && !!fkKey && fk1.headers.get('cache-control') === 'no-store' && fk1Html.includes(`export AGENTBILL_API_KEY=${fkKey}`)
        && fk2.status === 303 && fk2.headers.get('location') === '/app?view=keys' && await liveKeys(g1Acct.id) === 1, `${fk1.status} ${fk2.status}`)
+  // 2026-09-27: a signed-in person on this page was offered "Log in" and "Get API key".
+  const fkNav = (fk1Html.match(/<nav class="site-nav"[\s\S]*?<\/nav>/) ?? [''])[0]
+  ok('[auth] the key page\'s nav names the console to the signed-in person: no Log in, no sign-up button, no sticky sign-up bar',
+     fkNav.includes('<a class="console" href="/app">Console</a>') && !fkNav.includes('>Log in<') && !fkNav.includes('href="/register"')
+       && !fk1Html.includes('class="sticky-cta"'), fkNav.slice(0, 200) || 'no nav')
   const fkAlive = await fetch(`${API}/keys`, { headers: { Authorization: `Bearer ${fkKey}` } }).then((r) => r.status)
   ok('[auth] and that key works on the API', fkAlive === 200, `${fkAlive}`)
   const fkAnon = await fetch(`${API}/app/keys/first`, { method: 'POST', redirect: 'manual', headers: SAME })

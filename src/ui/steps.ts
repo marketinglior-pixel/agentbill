@@ -88,7 +88,27 @@ export const INSTALL_NODE_WRAP = 'npm install agentbill openai'
  * (2026-09-09), and the console has no key to fill a line with.
  */
 export const KEYS_LINE =
-  'Set two keys in the terminal you run it from: <code>AGENTBILL_API_KEY</code> (the <code>export</code> line you were given with the key; <a href="/recover">/recover</a> shows it again) and <code>OPENAI_API_KEY</code>, your own. This console never shows your key.'
+  'Set two keys in the terminal you run it from: <code>AGENTBILL_API_KEY</code> (the <code>export</code> line you were given with the key; lost it? <a href="/recover">/recover</a> gives you a new one) and <code>OPENAI_API_KEY</code>, your own. This console never shows your key.'
+
+/**
+ * What the Python and Node paths need, said BEFORE the code (2026-09-27). A
+ * new-user run on a local server found the only mention of an OpenAI key in a
+ * paragraph under the sample. Without one, OpenAI() raises in the reader's
+ * process before wrap() sends anything: no request, no trace here, which is
+ * exactly the trace the real accounts left (a key, and no request, ever).
+ */
+export const NEEDS_LINE =
+  'Run this. It makes one real call to OpenAI through <code>wrap()</code>, so <b>it needs an OpenAI API key of your own</b>. No OpenAI key? The curl below records a test call with your AgentBill key alone.'
+
+/**
+ * The path with no provider key (2026-09-27): one curl that records a TEST
+ * call, named as one, the MCP prompt's precedent above. The token counts are
+ * written in it, not measured, and it says so; it names the provider because
+ * the server prices a record only when the metadata says whose list price
+ * applies. Its idempotency key is fixed, so running it twice records once.
+ */
+export const CURL_LEAD =
+  '<b>No OpenAI key?</b> Record one test call instead. It needs only <code>AGENTBILL_API_KEY</code>, calls no model, and records the token counts written in it under step <code>test</code>, so you can see a priced record land here. It is not a measurement of anything, and running it again records nothing new.'
 
 /** What one run does, in the order it happens. Every clause is wrap()'s documented behaviour. */
 export const WHAT_RUNS =
