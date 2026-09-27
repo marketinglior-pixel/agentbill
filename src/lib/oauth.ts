@@ -124,6 +124,8 @@ export interface Flow {
   a?: string
   /** where to land afterwards, already validated to a same-host path */
   x: string
+  /** the campaign label the sign-in started under (src/lib/source.ts), for a new account */
+  c?: string
   /** expiry, unix seconds */
   e: number
 }
@@ -131,8 +133,8 @@ export interface Flow {
 const b64u = (n: number) => randomBytes(n).toString('base64url')
 export const pkceChallenge = (verifier: string) => createHash('sha256').update(verifier).digest('base64url')
 
-export function newFlow(p: Provider, m: Flow['m'], x: string, a?: string): Flow {
-  return { p, s: b64u(24), v: b64u(32), n: b64u(24), m, ...(a ? { a } : {}), x, e: Math.floor(Date.now() / 1000) + FLOW_MAX_AGE }
+export function newFlow(p: Provider, m: Flow['m'], x: string, a?: string, c?: string | null): Flow {
+  return { p, s: b64u(24), v: b64u(32), n: b64u(24), m, ...(a ? { a } : {}), x, ...(c ? { c } : {}), e: Math.floor(Date.now() / 1000) + FLOW_MAX_AGE }
 }
 
 export function flowCookie(flow: Flow): string | null {
@@ -152,6 +154,7 @@ const FlowShape = z.object({
   m: z.enum(['signin', 'link']),
   a: z.string().uuid().optional(),
   x: z.string().max(200),
+  c: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,23}$/).optional(),
   e: z.number().int(),
 })
 

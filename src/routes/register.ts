@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { cleanSource } from '../lib/source.js'
 import { z } from 'zod'
 import { pixelSnippet, pixelHashes, pixelExtra } from '../lib/pixel.js'
 import { plain } from '../lib/ids.js'
@@ -72,6 +73,9 @@ export async function registerRoute(app: FastifyInstance) {
       sent: q.sent === '1',
       err: typeof q.err === 'string' ? q.err : '',
       next: '',
+      // The label the homepage put on its link here (?src=), carried to the
+      // account this page creates (migration 037).
+      src: cleanSource(q.src) ?? '',
       extraHead: pixelSnippet(),
       scriptHashes: [REGISTER_HASH, ...pixelHashes()],
       scriptOrigins: pixelExtra(),
@@ -104,7 +108,7 @@ export async function registerRoute(app: FastifyInstance) {
       return reply.code(429).send({ error: 'rate_limited', message: 'Too many attempts from this address. Try again in an hour.' })
     }
 
-    queueSignInLink(request.log, parsed.data.email, '')
+    queueSignInLink(request.log, parsed.data.email, '', cleanSource((request.body as Record<string, unknown> | undefined)?.src))
     if (!json) return reply.redirect('/register?sent=1', 303)
     return reply.code(202).send(CHECK_EMAIL)
   })

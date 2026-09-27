@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { getAccountsWithSignals, conversionScore, isHot, FREE_TIER_LIMIT } from '../lib/conversion.js'
 import type { AccountSignals } from '../lib/conversion.js'
-import { getSitePulse } from '../lib/pulse.js'
-import type { SitePulse } from '../lib/pulse.js'
+import { getSitePulse, getSignupSources } from '../lib/pulse.js'
+import type { SitePulse, SignupSource } from '../lib/pulse.js'
 import { loadRejections, type RejectionRow } from '../lib/preflight-rejections.js'
 import { publicRoute } from '../middleware/auth.js'
 import { head, BP } from '../ui/theme.js'
@@ -49,8 +49,9 @@ export async function adminRoute(app: FastifyInstance) {
     const accounts = await getAccountsWithSignals()
     const pulse = await getSitePulse()
     const rejections = await loadRejections(30)
+    const signups = await getSignupSources(30)
     reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
-    return reply.send(adminPage(accounts, pulse, rejections))
+    return reply.send(adminPage(accounts, pulse, rejections, signups))
   })
 
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
@@ -281,7 +282,7 @@ ${topBar('admin')}
 </html>`
 }
 
-function adminPage(accounts: AccountSignals[], pulse: SitePulse, rejections: RejectionRow[] = []) {
+function adminPage(accounts: AccountSignals[], pulse: SitePulse, rejections: RejectionRow[] = [], signups: SignupSource[] = []) {
   const total = accounts.length
   const paid = accounts.filter(a => a.plan !== 'free').length
   const hot = accounts.filter(isHot).length
@@ -448,6 +449,26 @@ ${topBar('signed in', true)}
     A source with clicks and zero /register loads is the link, not the page: check that the surface
     points at <code>/</code> or <code>/register</code> and not somewhere the parameter is dropped.
   </p>`}
+
+  <h2 id="signups">Accounts by the link they came from, last 30 days</h2>
+  ${signups.length === 0
+    ? `<p class="sub">No account created under a <code>?src=</code> label yet. Since 2026-09-27 (migration 037) the label a
+       visitor arrived with on <code>/register</code> is kept on the account it creates, through the email link and
+       through Google and GitHub alike. Accounts from before then, and every untagged one, read as no source.</p>`
+    : `<div class="cv-panel"><div class="cv-card cv-scroll"><table class="cv-table is-ruled">
+    <thead><tr><th>Source</th><th>Accounts (30d / 7d)</th><th>Recorded a call</th><th>First</th><th>Last</th></tr></thead>
+    <tbody>
+      ${signups.map((row) => `<tr>
+        <td><code>${esc(row.source)}</code></td>
+        <td class="${row.accounts > 0 ? 'held' : ''}">${row.accounts} <span class="muted">/ ${row.accounts7}</span></td>
+        <td class="${row.called > 0 ? 'held' : ''}">${row.called}</td>
+        <td>${row.first.slice(0, 16).replace('T', ' ')}</td>
+        <td>${row.last.slice(0, 16).replace('T', ' ')}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div></div>
+  <p class="sub">An account keeps the label it was created under and no later one. Read it beside the table above:
+    /register loads for a label, then accounts, then accounts that recorded a call.</p>`}
 
   <h2 id="rejections">Preflights answered 422, last 30 days</h2>
   ${rejections.length === 0

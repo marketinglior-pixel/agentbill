@@ -34,7 +34,7 @@ export type LinkRefusal =
   | 'provider_taken'       // this account's owner already has a different identity at this provider
   | 'email_in_use'         // the provider's verified address already belongs to another person here
 
-export async function signIn(id: VerifiedIdentity): Promise<{ ok: true; s: SignedIn } | { ok: false; reason: LinkRefusal }> {
+export async function signIn(id: VerifiedIdentity, source: string | null = null): Promise<{ ok: true; s: SignedIn } | { ok: false; reason: LinkRefusal }> {
   return sql.begin(async (tx) => {
     let user: { id: string; sessionEpoch: number; email: string } | undefined
     const [known] = await tx`
@@ -80,15 +80,18 @@ export async function signIn(id: VerifiedIdentity): Promise<{ ok: true; s: Signe
     // default_budget_units NULL for the reason register.ts gives: it is copied
     // onto every customer and never resets, so a number here is a silent
     // lifetime cap.
+    //
+    // signup_source (migration 037): the campaign label this sign-in started
+    // under, set here once and never by a later sign-in, which finds `owned`.
     let [acct] = await tx`
-      INSERT INTO accounts (email, name, plan, default_budget_units, owner_user_id)
-      VALUES (${u.email}, NULL, 'free', NULL, ${u.id})
+      INSERT INTO accounts (email, name, plan, default_budget_units, owner_user_id, signup_source)
+      VALUES (${u.email}, NULL, 'free', NULL, ${u.id}, ${source})
       ON CONFLICT DO NOTHING RETURNING id
     `
     if (!acct) {
       ;[acct] = await tx`
-        INSERT INTO accounts (email, name, plan, default_budget_units, owner_user_id)
-        VALUES (NULL, NULL, 'free', NULL, ${u.id}) RETURNING id
+        INSERT INTO accounts (email, name, plan, default_budget_units, owner_user_id, signup_source)
+        VALUES (NULL, NULL, 'free', NULL, ${u.id}, ${source}) RETURNING id
       `
     }
     return { ok: true as const, s: { userId: u.id, epoch: Number(u.sessionEpoch), accountId: acct.id as string, email: u.email, created: true } }

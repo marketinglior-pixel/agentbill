@@ -173,3 +173,41 @@ export async function getSitePulse(): Promise<SitePulse> {
              week: { pageViews: 0, ctaClicks: 0, tryClicks: 0, estimateClicks: 0, estimateUses: 0, registerViews: 0, runs: 0 } }
   }
 }
+
+export type SignupSource = {
+  source: string
+  /** Accounts created under this label in the window, and in the last 7 days. */
+  accounts: number
+  accounts7: number
+  /** Of those accounts, how many have recorded any call. */
+  called: number
+  first: string
+  last: string
+}
+
+/**
+ * Accounts by the campaign label they were created under, last `days` days
+ * (accounts.signup_source, migration 037). Where the table above counts page
+ * loads per label, this counts what those loads became: an account, and an
+ * account that made a call. Untagged accounts are left out, as the table
+ * above leaves out untagged loads. Never throws: an admin page without the
+ * column (a database before 037) reads as no rows.
+ */
+export async function getSignupSources(days = 30): Promise<SignupSource[]> {
+  try {
+    const rows = await sql`
+      SELECT a.signup_source AS source,
+             count(*)::int AS accounts,
+             count(*) FILTER (WHERE a.created_at > now() - interval '7 days')::int AS accounts_7,
+             count(*) FILTER (WHERE EXISTS (SELECT 1 FROM events e WHERE e.account_id = a.id))::int AS called,
+             min(a.created_at) AS first, max(a.created_at) AS last
+      FROM accounts a
+      WHERE a.signup_source IS NOT NULL AND a.created_at > now() - (${days}::int * interval '1 day')
+      GROUP BY a.signup_source
+      ORDER BY count(*) DESC, a.signup_source ASC`
+    return rows.map((r) => ({ source: String(r.source), accounts: r.accounts, accounts7: r.accounts7, called: r.called,
+      first: new Date(r.first).toISOString(), last: new Date(r.last).toISOString() }))
+  } catch {
+    return []
+  }
+}

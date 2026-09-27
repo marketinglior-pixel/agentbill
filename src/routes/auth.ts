@@ -15,6 +15,7 @@ import { mailUser } from '../lib/mail.js'
 import { alertNewSignup } from '../lib/signup-alert.js'
 import { userSessionCookie } from '../lib/user-session.js'
 import { signIn, linkIdentity, type SignedIn } from '../lib/users.js'
+import { cleanSource } from '../lib/source.js'
 import { reportRegistration } from '../lib/capi.js'
 import {
   providerConfig, configuredProviders, isProvider, newFlow, flowCookie, readFlow, stateMatches,
@@ -75,7 +76,7 @@ export function allowLinkRequest(request: FastifyRequest): boolean {
  * would make a known address measurably slower than an unknown one, and the
  * answer must not depend on which it is. Never throws.
  */
-export function queueSignInLink(log: FastifyBaseLogger, email: string, next: string): void {
+export function queueSignInLink(log: FastifyBaseLogger, email: string, next: string, source: string | null = null): void {
   // The in-memory per-address limit: past it, nothing is minted and nothing is
   // said. Refusing out loud would tell a stranger that somebody asked recently.
   if (!linkAddressLimiter.hit(email).allowed) {
@@ -97,8 +98,8 @@ export function queueSignInLink(log: FastifyBaseLogger, email: string, next: str
         // One live link per address: asking again retires the last one.
         await tx`UPDATE email_sign_in_tokens SET consumed_at = now() WHERE email = ${email} AND consumed_at IS NULL`
         const [row] = await tx`
-          INSERT INTO email_sign_in_tokens (email, token_hash, next_path, expires_at)
-          VALUES (${email}, ${hashToken(token)}, ${next || null}, now() + (${LINK_TTL_MINUTES} * INTERVAL '1 minute'))
+          INSERT INTO email_sign_in_tokens (email, token_hash, next_path, source, expires_at)
+          VALUES (${email}, ${hashToken(token)}, ${next || null}, ${source}, now() + (${LINK_TTL_MINUTES} * INTERVAL '1 minute'))
           RETURNING id
         `
         return String(row.id)
@@ -148,13 +149,13 @@ async function liveLink(token: string): Promise<{ email: string } | null> {
 }
 
 /** Spend a link: the check and the write are one statement, by the database clock. */
-async function spendLink(token: string): Promise<{ email: string; next: string } | null> {
+async function spendLink(token: string): Promise<{ email: string; next: string; source: string | null } | null> {
   const [row] = await sql`
     UPDATE email_sign_in_tokens SET consumed_at = now()
     WHERE token_hash = ${hashToken(token)} AND consumed_at IS NULL AND expires_at > now()
-    RETURNING email, next_path
+    RETURNING email, next_path, source
   `
-  return row ? { email: row.email as string, next: safeNext(row.nextPath) } : null
+  return row ? { email: row.email as string, next: safeNext(row.nextPath), source: cleanSource(row.source) } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +283,8 @@ export interface SigninPageOpts {
   sent: boolean
   err: string
   next: string
+  /** The campaign label this visit arrived with, already cleaned, or ''. */
+  src?: string
   /** Page-specific head additions: a script's hash, a pixel. */
   extraHead?: string
   scriptHashes?: string[]
@@ -306,7 +309,7 @@ export function signinPage(o: SigninPageOpts): string {
         <p>${o.sub}</p>
       </div>
       ${Object.hasOwn(LOGIN_ERRS, o.err) ? `<p class="cv-err" role="alert">${LOGIN_ERRS[o.err]}</p>` : ''}
-      ${signinPanel({ providers, from, next: o.next })}
+      ${signinPanel({ providers, from, next: o.next, src: o.src ?? '' })}
       <p class="form-note">By continuing you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. No marketing email.</p>
       <p class="form-note">Made your account with only an API key, before sign-in existed? <a href="/app">Open the console with the key</a>, then connect Google or GitHub there. Lost the key? <a href="/recover">Get back in</a>.</p>`
   return `${head({
@@ -382,6 +385,7 @@ export async function authRoute(app: FastifyInstance) {
       sent: q.sent === '1',
       err: typeof q.err === 'string' ? q.err : '',
       next: safeNext(q.next),
+      src: cleanSource(q.src) ?? '',
     }))
   })
 
@@ -392,8 +396,12 @@ export async function authRoute(app: FastifyInstance) {
     const p = (request.params as { provider: string }).provider
     const cfg = isProvider(p) ? providerConfig(p) : null
     if (!cfg) return sendNotFoundPage(request, reply, 404)
-    const next = safeNext((request.query as Record<string, unknown> | undefined)?.next)
-    const flow = newFlow(cfg.provider, 'signin', next)
+    const query = (request.query ?? {}) as Record<string, unknown>
+    const next = safeNext(query.next)
+    // The campaign label, if the sign-in started on a tagged page (migration
+    // 037). It rides in the signed flow cookie, so the callback cannot be told
+    // a different one.
+    const flow = newFlow(cfg.provider, 'signin', next, undefined, cleanSource(query.src))
     const cookie = flowCookie(flow)
     reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer')
     if (!cookie) return reply.redirect('/login?err=unavailable', 303)
@@ -433,7 +441,7 @@ export async function authRoute(app: FastifyInstance) {
         request.log.info({ provider: cfg.provider, accountId: r.s.accountId }, 'sign-in connected to an account')
         return land(request, reply, r.s, cfg.provider, '/app?view=keys&link=ok', clear)
       }
-      const r = await signIn(v.id)
+      const r = await signIn(v.id, flow.c ?? null)
       if (!r.ok) return fail(LINK_CODE[r.reason] ?? 'failed')
       return land(request, reply, r.s, cfg.provider, safeNext(flow.x), clear)
     } catch (err) {
@@ -463,7 +471,7 @@ export async function authRoute(app: FastifyInstance) {
         ? reply.code(422).send({ error: 'validation_error', message: 'email: Invalid email' })
         : reply.redirect(from, 303)
     }
-    queueSignInLink(request.log, parsed.data.email, safeNext(parsed.data.next))
+    queueSignInLink(request.log, parsed.data.email, safeNext(parsed.data.next), cleanSource(body.src))
     return json
       ? reply.code(202).send(CHECK_EMAIL)
       : reply.redirect(`${from}?sent=1`, 303)
@@ -489,7 +497,7 @@ export async function authRoute(app: FastifyInstance) {
     const spent = TOKEN_RE.test(token) ? await spendLink(token) : null
     if (!spent) return noStore(reply).code(410).send(DEAD_LINK)
     try {
-      const r = await signIn({ provider: 'email', providerUserId: spent.email, email: spent.email })
+      const r = await signIn({ provider: 'email', providerUserId: spent.email, email: spent.email }, spent.source)
       if (!r.ok) return reply.redirect('/login?err=taken', 303)
       return land(request, reply, r.s, 'email', spent.next)
     } catch (err) {
