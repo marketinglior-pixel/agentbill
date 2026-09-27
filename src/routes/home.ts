@@ -528,7 +528,7 @@ ${siteNav('/')}
     <h1>${HEADLINE}</h1>
     <p class="sub">Per agent, per client, per job, in dollars at list price, with a monthly
     report you can bill from. Give any job a ceiling, and the call that would cross it gets
-    <span class="mono-in nb">approved: false</span> before it runs. <span class="nb">Your code</span>
+    <span class="mono-in">approved: false</span> before it runs. <span class="nb">Your code</span>
     decides whether to <span class="nb">stop, skip, or replan.</span></p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
