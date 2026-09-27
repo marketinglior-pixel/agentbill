@@ -17,6 +17,7 @@
 // every copy control on the page.
 
 import { inlineScript } from '../lib/csp.js'
+import { BP } from './theme.js'
 
 export const COPY_CSS = `
   /* The pill is a control, so it clears the 44px floor like every other one.
@@ -42,6 +43,17 @@ export const COPY_CSS = `
   /* The label changes; it does not animate. design.md forbids motion for mood,
      and a state change that says what happened is not mood. */
   .cp-btn[data-done="1"] { color: var(--green); }
+  /* A code block with the same control, held at its top right. The block keeps
+     room for it on the right, so a long first line wraps before the button
+     rather than under it; on a phone that room is the code's, so the button
+     drops below the block instead. */
+  .snipcopy { position: relative; }
+  .snipcopy .snip { padding-right: 88px; }
+  .snipcopy .cp-btn { position: absolute; top: 10px; right: 10px; }
+  @media (max-width: ${BP.sm}px) {
+    .snipcopy .snip { padding-right: 18px; }
+    .snipcopy .cp-btn { position: static; margin-top: var(--s2); }
+  }
   .cp-note { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); margin-top: var(--s3); }
   .cp-note a { color: var(--dim); text-decoration: underline; }
   .cp-note a:hover { color: var(--text); }
@@ -80,4 +92,15 @@ export function copyPill(id: string, text: string): string {
  */
 export function copyPlate(id: string, text: string): string {
   return `<div class="cv-plate"><code id="${id}">${text}</code>` + copyButton(id, text) + `</div>`
+}
+
+/**
+ * A code block with the control (2026-09-27): the start screen's Python, Node
+ * and curl samples, which a reader otherwise selected by hand, 16 lines at a
+ * time. The id sits on a wrapper around the block, never on the block, so the
+ * tag the snippet harvester and the gates read stays exactly as it was; the
+ * button is outside the wrapper, so its own label is never copied.
+ */
+export function copyBlock(id: string, pre: string, what: string): string {
+  return `<div class="snipcopy"><div id="${id}">${pre}</div>` + copyButton(id, what) + `</div>`
 }

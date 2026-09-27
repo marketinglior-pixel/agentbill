@@ -57,10 +57,12 @@ export async function registerRoute(app: FastifyInstance) {
     return reply.send(signinPage({
       path: '/register',
       title: 'Create your account · AgentBill',
-      description: 'A free AgentBill account: sign up with Google, GitHub or an email link, and make your API key in the console. 1,000 preflight calls a month, hard per-task budget ceilings for AI agents. No credit card.',
+      description: 'A free AgentBill account: sign up with Google, GitHub or an email link, and make your API key in the console. 1,000 preflight calls a month, the cost of every client\'s agents at list price, and hard per-job ceilings in dollars. No credit card.',
       og: { description: `${HEADLINE}. Free tier, no credit card.` },
-      h1: 'Give one job a ceiling.',
-      lede: 'Key once. Ceiling on one <code>task_ref</code>. Preflight returns <code>approved: false</code> when that job is out. Your code decides.',
+      // The homepage's promise, carried onto the page a visitor reaches from it
+      // (2026-09-27): the page in between told the retired units story.
+      h1: "See what every client's agents cost you.",
+      lede: 'Wrap your OpenAI, Anthropic or Google client once. Every call is recorded with its model and tokens, per client, as an estimate at public list price. Give a job a ceiling in dollars, and preflight answers <code>approved: false</code> before it goes past it. Your code decides.',
       trust: '<b>free</b> · no card · your key is made in the console, shown once',
       h2: 'Create your account',
       sub: 'Sign up, and the console makes your API key. No card.',

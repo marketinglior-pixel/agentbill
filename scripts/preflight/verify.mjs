@@ -1366,9 +1366,30 @@ ok('[start] MCP: the connect page, a copyable first prompt, and what it does and
    'the MCP path is missing a part')
 const cspST = (r) => r.headers.get('content-security-policy') ?? ''
 const copyHashST = (mcpST.match(/<script[^>]*>[\s\S]*?<\/script>/) ?? [''])[0]
-ok('[start] the copy control is the one script, under a hash, on the MCP path only: the other paths and views carry no script-src',
-   /script-src 'sha256-[A-Za-z0-9+/=]+'/.test(cspST(mcpResST)) && copyHashST.includes('data-copy') && !/script-src/.test(cspST(pyPageST))
-     && !/<script/.test(pyST) && !/<script/.test(nodeST), `${cspST(mcpResST).slice(0, 120)} | ${cspST(pyPageST).slice(0, 80)}`)
+// Since 2026-09-27 every path has a Copy control (the MCP prompt, and the
+// Python, Node and curl samples, which a reader selected by hand before), so
+// every path carries the one copy script under the same hash. A view with no
+// control still carries none.
+const nodeResST = await pageST('/app?view=start&via=node')
+const hashOfST = (r) => (cspST(r).match(/script-src ('sha256-[A-Za-z0-9+/=]+')/) ?? [])[1]
+const tasksResST = await pageST('/app?view=tasks')
+const tasksBodyST = await tasksResST.text()
+ok('[start] the copy control is the one script, under one hash, on each of the three paths; a view with no control carries no script-src',
+   !!hashOfST(mcpResST) && hashOfST(pyPageST) === hashOfST(mcpResST) && hashOfST(nodeResST) === hashOfST(mcpResST)
+     && copyHashST.includes('data-copy') && (pyST.match(/<script/g) ?? []).length === 1 && (nodeST.match(/<script/g) ?? []).length === 1
+     && !/script-src/.test(cspST(tasksResST)) && !/<script/.test(tasksBodyST),
+   `${hashOfST(mcpResST)} | ${hashOfST(pyPageST)} | ${hashOfST(nodeResST)} | tasks: ${cspST(tasksResST).slice(0, 80)}`)
+// The fixes from the 2026-09-27 new-user run (O-output/2026-09-27-new-user-journey).
+const beforeST = (h, a, b) => { const i = h.indexOf(a), j = h.indexOf(b); return i >= 0 && j >= 0 && i < j }
+ok('[start] python and node: the OpenAI key the call needs is said before the code, and the no-key way through is named there too',
+   [pyST, nodeST].every((h) => beforeST(h, 'it needs an OpenAI API key of your own', '<pre class="snip">')
+     && beforeST(h, 'OPENAI_API_KEY', '<pre class="snip">') && beforeST(h, 'No OpenAI key? The curl below', '<pre class="snip">')))
+ok('[start] python and node: each sample and the curl has a Copy control on a wrapper around it, so the tag the harvester reads is unchanged',
+   pyST.includes('<div id="sample-python"><pre class="snip">') && pyST.includes('data-copy="sample-python"')
+     && nodeST.includes('<div id="sample-node"><pre class="snip">') && nodeST.includes('data-copy="sample-node"')
+     && [pyST, nodeST].every((h) => h.includes('<div id="sample-curl"><pre class="snip">') && h.includes('data-copy="sample-curl"')))
+ok('[start] the key line says /recover gives a new key, never that it shows the old one again',
+   pyST.includes('lost it? <a href="/recover">/recover</a> gives you a new one') && ![pyST, nodeST, virgin8].some((h) => h.includes('shows it again')))
 const evilST = await pageST('/app?view=start&via=%3Cscript%3E').then(r => r.text())
 ok('[start] a via that is not one of the three chooses nothing and is never echoed',
    evilST.includes('How will you connect?') && !current(evilST) && !evilST.includes('%3Cscript') && !/via=<|via=&lt;/.test(evilST))
@@ -1470,6 +1491,43 @@ ok('[start] and the activity chart is the cost chart, its split by event_type in
    actST.includes('id="cost-chart"') && actST.includes('Share of cost') && actST.includes('An estimate at public list price') && !actST.includes('Units recorded'),
    'activity is not the cost view')
 await sql`DELETE FROM accounts WHERE id = ${ACCT_ST}`
+
+// The first call with no provider key, 2026-09-27: the curl on the Python
+// path, taken off a virgin account's page and run as pasted with sh, the
+// AgentBill key in the environment and nothing else. Only the address is this
+// server's. It must be priced, end the path on the screen, tick the setup
+// guide's first priced call, and record once however often it is run.
+const ACCT_CU = '00000000-0000-0000-0000-0000000000c2'
+const KEY_CU = shapedKey(`start-curl-${Date.now()}`)
+await sql`DELETE FROM accounts WHERE id = ${ACCT_CU}`
+await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_CU}, 'free', 0, date_trunc('month', CURRENT_DATE)::date)`
+await insertKeyRow(sql, ACCT_CU, KEY_CU, 'harness-curl')
+const loginCU = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY_CU}` })
+const cookieCU = (loginCU.headers.get('set-cookie') ?? '').split(';')[0]
+const pageCU = (path) => nav8(path, { headers: { cookie: cookieCU } }).then(r => r.text())
+const pyCU = await pageCU('/app?view=start&via=python')
+const curlCU = unesc((pyCU.match(/<div id="sample-curl"><pre class="snip">([\s\S]*?)<\/pre>/) ?? [])[1] ?? '')
+ok('[start] curl: the page carries the command, with the key read from AGENTBILL_API_KEY and no blank to fill',
+   curlCU.startsWith('curl -sS https://agentbill.dev/events') && curlCU.includes('Bearer $AGENTBILL_API_KEY') && !/agb_|YOUR_|<|>/.test(curlCU), curlCU.slice(0, 120))
+writeST(`${dirST}/first-call.sh`, curlCU.replace('https://agentbill.dev/events', `${API}/events`))
+const runCU = () => spawnST('sh', [`${dirST}/first-call.sh`], { encoding: 'utf8', timeout: 30_000,
+  env: { PATH: process.env.PATH, AGENTBILL_API_KEY: KEY_CU } })
+const cu1 = runCU()
+const rowsCU = () => sql`SELECT list_price_usd::text AS usd, event_type, metadata->>'step' AS step, metadata->>'model' AS model FROM events WHERE account_id = ${ACCT_CU}`
+const [evCU] = await rowsCU()
+ok('[start] curl: run as pasted, it records one call, priced from the 1,500 tokens written in it, under step test',
+   cu1.status === 0 && !!evCU && evCU.usd === '0.000360000000' && evCU.step === 'test' && evCU.model === 'gpt-4o-mini' && evCU.eventType === 'curl-test',
+   `${cu1.status} ${cu1.stdout.slice(0, 200)} ${cu1.stderr.slice(0, 200)} | ${JSON.stringify(evCU)}`)
+const cu2 = runCU()
+ok('[start] curl: run again, it records nothing new', cu2.status === 0 && (await rowsCU()).length === 1, `${cu2.status} ${(await rowsCU()).length} rows`)
+const afterCU = await pageCU('/app?view=start&via=python')
+const lineCU = visibleST((afterCU.match(/<p class="first-ok" id="first-call">([\s\S]*?)<\/p>/) ?? [])[1] ?? '').replace(/\s+/g, ' ').trim()
+const { loadSetup: loadSetupCU } = await import('../../dist/lib/setup.js')
+const setupCU = await loadSetupCU(ACCT_CU)
+ok('[start] curl: the path ends on it as the first call, named as a test step, and the setup guide ticks its first priced call',
+   lineCU.replace(/ ([,.])/g, '$1') === 'Your first call was recorded: $0.00036 (estimate at list price), 1,500 tokens, model gpt-4o-mini, step test.'
+     && setupCU.done.first_call === true, `${lineCU} | ${JSON.stringify(setupCU.done)}`)
+await sql`DELETE FROM accounts WHERE id = ${ACCT_CU}`
 // The microcopy bans, measured on the VISIBLE text and not the markup: every
 // one of these words appears inside the CSS of every page on the site
 // (display:block, flex-wrap), so a grep over HTML can only ever be noise.
@@ -1725,8 +1783,15 @@ ok('[fold] the hero carries the one link to #estimate, the retired demo link is 
 // /register, 2026-09-12: setup language above one form, nothing under it
 // that pitches, and a key screen whose one action signs the key into the
 // start screen rather than sending the reader to a login card.
-ok('[register] the lede is setup language and nothing under the form pitches',
-   register8.includes('Key once.') && register8.includes('Your code decides.') && !register8.includes('One decorator')
+// 2026-09-27: the headline and lede carry the homepage's promise (what each
+// client's agents cost, in dollars) instead of the retired units story, which
+// the visitor met on no page before this one.
+ok('[register] the lede carries the homepage\'s promise in dollars and per client, not the retired units story, and nothing under the form pitches',
+   register8.includes("<h1>See what every client&#39;s agents cost you.</h1>") || register8.includes("See what every client's agents cost you.</h1>"))
+ok('[register] the lede: one wrap(), model and tokens per client at list price, a ceiling in dollars, approved: false, your code decides',
+   register8.includes('Wrap your OpenAI, Anthropic or Google client once.') && register8.includes('per client, as an estimate at public list price')
+     && register8.includes('Give a job a ceiling in dollars') && register8.includes('<code>approved: false</code>') && register8.includes('Your code decides.')
+     && !register8.includes('Key once.') && !register8.includes('Ceiling on one') && !register8.includes('One decorator')
      && !register8.includes('class="facts"') && !register8.includes('the entire integration surface'))
 // 2026-09-25: /register shows no key. It is the sign-in block, and the key is
 // made in the console by a person whose address is verified ([auth] gates).
