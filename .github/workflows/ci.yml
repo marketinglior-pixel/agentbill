@@ -103,6 +103,53 @@ jobs:
           HYGIENE_BASE: http://localhost:3998
         run: npm run check:hygiene
 
+  # scripts/shots.mjs, 2026-09-27. It was run by hand only, so on 09-27 a
+  # /register copy change shipped with the email button 151px under the fold
+  # at 1440x735, with every job here green, and six older failures had sat on
+  # production unseen. It renders every public surface in a real browser and
+  # fails on: a sign-up action under the fold, the hero's phrases broken or
+  # orphaned, a clipped control, sideways scroll, a console error, a non-200.
+  # No database, like the sitemap job: the pages it reads are static or the
+  # sample console. Dummy OAuth ids draw the Google and GitHub buttons, which
+  # production has; without them the form is ~110px shorter and the fold check
+  # measures a page nobody sees. Chrome is the runner's own; the fonts are
+  # Google Fonts, the same files production serves.
+  shots:
+    name: Pages render within the fold and without clipping
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Boot the server and render every surface
+        env:
+          DATABASE_URL: postgres://unused@127.0.0.1:1/unused
+          PORT: "3997"
+          META_PIXEL_ID: "1234567890"
+          GOOGLE_CLIENT_ID: ci-dummy
+          GOOGLE_CLIENT_SECRET: ci-dummy
+          GITHUB_CLIENT_ID: ci-dummy
+          GITHUB_CLIENT_SECRET: ci-dummy
+          BASE_URL: http://localhost:3997
+          SHOTS_OUT: scripts/shots-out
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROMIUM_PATH" || { echo "no Chrome on the runner"; exit 1; }
+          node dist/server.js &
+          for i in $(seq 1 40); do curl -sf http://localhost:3997/health >/dev/null && break; sleep 0.5; done
+          node scripts/shots.mjs
+      - name: Keep the captures when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: scripts/shots-out/
+          retention-days: 7
+
   python-sdk:
     name: Python SDK install and unit tests
     runs-on: ubuntu-latest
