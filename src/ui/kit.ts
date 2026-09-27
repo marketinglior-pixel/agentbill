@@ -223,6 +223,13 @@ export const KIT_CSS = `
   .cv-seg > a:hover, .cv-seg > button:hover { color: var(--text); text-decoration: none; }
   .cv-seg > [aria-current], .cv-seg > [aria-pressed="true"], .cv-seg > [aria-selected="true"] {
             background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+  /* At 320 the activity view's four periods ("24 hours" .. "90 days") came to
+     324px in a 288px column and ran off the screen (scripts/shots.mjs, narrow).
+     Tighter items there; the height, and so the tap target, is unchanged. */
+  @media (max-width: ${BP.xs}px) {
+    .cv-seg { max-width: 100%; }
+    .cv-seg > a, .cv-seg > button { padding: 0 8px; }
+  }
 
   /* ---- A rail link: the console's views, any vertical list of places.
      The current one is a white pill on the rail's grey ground. .n is its count. */
