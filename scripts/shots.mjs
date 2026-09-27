@@ -443,7 +443,14 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         // fluid and a break moves with the viewport.
         if (!m.sub) failures.push(`${vp} ${name}: no .hero .sub, so the line-break check measured nothing`)
         else {
-          if (m.sub.nb.length !== 2) failures.push(`${vp} ${name}: ${m.sub.nb.length} .nb phrase(s) in the sub, expected 2`)
+          // By name since 2026-09-27, when the sentence was rewritten for the
+          // client-cost line (d6cdb04) and a count of 2 had silently become 1:
+          // the code token, which was splitting "approved:" from "false", the
+          // "Your code" that opens the last sentence, and the ending, glued so
+          // keeping the token whole does not leave "or replan." alone.
+          const want = ['approved: false', 'Your code', 'stop, skip, or replan.']
+          const got = m.sub.nb.map((p) => p.text)
+          if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`${vp} ${name}: the sub's .nb phrases are ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`)
           for (const p of m.sub.nb) {
             if (p.lines > 1) failures.push(`${vp} ${name}: the phrase "${p.text}" is broken across ${p.lines} lines`)
           }

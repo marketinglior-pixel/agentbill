@@ -1698,7 +1698,9 @@ ok('[fold] the hero never says we stop the run: no stops, stopped, runaway, or "
 // The served markup wraps the sentence across source lines, so the cut has to
 // tolerate a line break inside it: the first version matched single spaces,
 // cut nothing, and the loop went red on the locked sentence itself.
-const heroBan8 = hero8.replace(/whether to stop,\s+skip,\s+or replan/g, ' ')
+// The ending is glued in a .nb span since 2026-09-27 (scripts/shots.mjs), so
+// the exemption allows that one span and nothing else between its words.
+const heroBan8 = hero8.replace(/whether to\s+(?:<span class="nb">)?stop,\s+skip,\s+or replan/g, ' ')
 // The dual state, DRAWN, 2026-09-23: Fig. 1 left with the redesign and the
 // statement's figure carries its argument: the same account in the same minute,
 // a month meter with room beside this job at its ceiling, the next call
