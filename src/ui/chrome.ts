@@ -202,10 +202,13 @@ ${MARK_CSS}
  * \`current\` marks the active link, e.g. "/docs" or "/pricing".
  * \`cta: false\` drops the "Get API key" button; /register uses it, because a
  * button that links to the page you are already on is noise beside the form.
+ * \`stickyLabel\` is the phone bar's words, 2026-09-28: the homepage's phone
+ * visitor arrives from an Instagram feed, where "Get API key" asks for a desk.
  */
 export function siteNav(
   current = '',
-  { cta = true, sticky = true, signedIn = false }: { cta?: boolean; sticky?: boolean; signedIn?: boolean } = {},
+  { cta = true, sticky = true, signedIn = false, stickyLabel = KEY_CTA }:
+    { cta?: boolean; sticky?: boolean; signedIn?: boolean; stickyLabel?: string } = {},
 ): string {
   const at = (href: string) => (href === current ? ' aria-current="page"' : '')
   const center = LINKS.map(([href, label]) => `<a href="${href}"${at(href)}>${label}</a>`).join('\n        ')
@@ -238,7 +241,7 @@ export function siteNav(
       </div>
     </div>
   </nav>${cta && sticky && !signedIn ? `
-  <div class="sticky-cta"><a class="btn" href="/register">${KEY_CTA}</a></div>` : ''}`
+  <div class="sticky-cta"><a class="btn" href="/register">${stickyLabel}</a></div>` : ''}`
 }
 
 // Only destinations that exist. Every external one was fetched before it was
