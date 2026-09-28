@@ -37,7 +37,8 @@ import { endSessions, linkedProviders } from '../lib/users.js'
 import { configuredProviders, providerConfig, isProvider, newFlow, flowCookie, authorizeUrl, type Provider } from '../lib/oauth.js'
 import { signinPanel, signinFonts, SIGNIN_CSS } from '../ui/signin.js'
 import { GOOGLE_G, GITHUB_MARK } from '../ui/provider-marks.js'
-import { COPY_CSS, COPY_JS, COPY_HASH, copyPlate, copyBlock } from '../ui/copy.js'
+import { COPY_CSS, CONSOLE_COPY_JS, CONSOLE_COPY_HASH, copyPlate, copyBlock } from '../ui/copy.js'
+import { recordStep, isStartStep } from '../lib/start-steps.js'
 import { hashKey, insertKey, maskKey, keyPrefixOf, keyLast4Of } from '../lib/api-keys.js'
 import { revokeAllKeys } from './keys.js'
 import { connectedApps, SCOPE_TEXT, type ConnectedApp } from '../lib/mcp-oauth.js'
@@ -204,6 +205,17 @@ export async function appRoute(app: FastifyInstance) {
     // The Claude Code path's client name, off ?client=, only in the shape the
     // /otel endpoint keeps as a label; anything else falls back to the default.
     const ccClient = via === 'claude-code' ? otelLabel(q?.client) : null
+    // Where setup stops (2026-09-28, migration 038): the start screen shown,
+    // the card chosen, a client named. The predicate is onboardingDue's, read
+    // off the same rows, because the overview IS the start screen until the
+    // account has recorded something.
+    if (!demo) {
+      const startShown = view === 'start'
+        || (view === 'overview' && !data.recorded && data.lastBlock === null && data.overruns === 0 && !filter.task && !filter.agent)
+      if (startShown) await recordStep(viewer.accountId, 'start')
+      if (view === 'start' && via) await recordStep(viewer.accountId, `via:${via}`)
+      if (ccClient && typeof q?.client === 'string') await recordStep(viewer.accountId, 'cc_client')
+    }
     // The overview's cards. Only the overview draws them, so only it pays.
     const dash = view !== 'overview' ? null : demo ? demoDashboard(range as DashRange) : await loadDashboard(viewer.accountId, range as DashRange)
     const agents = view !== 'agents' ? null : demo ? demoAgentRows(range as DashRange) : await agentRows(viewer.accountId, range as DashRange)
@@ -220,7 +232,7 @@ export async function appRoute(app: FastifyInstance) {
     // Each path has a Copy control (the MCP prompt; since 2026-09-27 the Python,
     // Node and curl samples too), the one script this page can run, under its
     // own hash and only where the control is drawn.
-    if (via && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
+    if (via && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${CONSOLE_COPY_HASH}; connect-src 'self'`))
     return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, ccClient, dash, agents, report, office, shares, shareMsg, setup,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
@@ -482,8 +494,23 @@ export async function appRoute(app: FastifyInstance) {
     reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
       .header('X-Robots-Tag', 'noindex')
       .header('X-Content-Type-Options', 'nosniff')
-      .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
+      .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${CONSOLE_COPY_HASH}; connect-src 'self'`))
     return reply.send(firstKeyPage(apiKey))
+  })
+
+  // A Copy press on the start screen or the key screen, reported by the
+  // console's copy script (src/ui/copy.ts) with a beacon: the control's id,
+  // from a closed set, never what was copied. Same-origin and a session, like
+  // every console POST; anything else is refused and nothing is counted.
+  app.post('/app/step', { ...publicRoute(), bodyLimit: 256 }, async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.code(401).send({ error: 'unauthorized' })
+    const raw: unknown = request.body
+    const step = typeof raw === 'string' && raw.length <= 64 ? String(raw).trim() : ''
+    if (!isStartStep(step) || !step.startsWith('copy:')) return reply.code(400).send({ error: 'unknown_step' })
+    await recordStep(viewer.accountId, step)
+    return reply.code(204).send()
   })
 
   // "Revoke all keys", the console's half of POST /keys/revoke-all (the rule
@@ -2493,7 +2520,7 @@ ${siteNav('/app', { sticky: false, signedIn: true })}
     </div></div>
   </main>
 ${siteFooter()}
-${COPY_JS}
+${CONSOLE_COPY_JS}
 </body>
 </html>`
 }
@@ -4191,7 +4218,7 @@ function consolePage(p: Page): string {
       </div>
     </main>
   </div>
-${body.includes('data-copy=') ? COPY_JS : ''}
+${body.includes('data-copy=') ? CONSOLE_COPY_JS : ''}
 </body>
 </html>`
 }

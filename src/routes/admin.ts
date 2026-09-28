@@ -11,6 +11,7 @@ import { mark, MARK_CSS } from '../ui/mark.js'
 import { KIT_CSS, tag } from '../ui/kit.js'
 import { sameOrigin } from './app.js'
 import { limiterKey } from '../lib/client-ip.js'
+import { loadStartFunnel, type FunnelRow } from '../lib/start-steps.js'
 import { createLimiter } from '../lib/rate-limiter.js'
 
 const WARN_AT = 800
@@ -50,8 +51,9 @@ export async function adminRoute(app: FastifyInstance) {
     const pulse = await getSitePulse()
     const rejections = await loadRejections(30)
     const signups = await getSignupSources(30)
+    const funnel = await loadStartFunnel(30)
     reply.type('text/html').header('Cache-Control', 'no-store').header('X-Robots-Tag', 'noindex, nofollow')
-    return reply.send(adminPage(accounts, pulse, rejections, signups))
+    return reply.send(adminPage(accounts, pulse, rejections, signups, funnel))
   })
 
   // POST /admin/login, form submits secret, sets HttpOnly session cookie.
@@ -282,7 +284,7 @@ ${topBar('admin')}
 </html>`
 }
 
-function adminPage(accounts: AccountSignals[], pulse: SitePulse, rejections: RejectionRow[] = [], signups: SignupSource[] = []) {
+function adminPage(accounts: AccountSignals[], pulse: SitePulse, rejections: RejectionRow[] = [], signups: SignupSource[] = [], funnel: FunnelRow[] = []) {
   const total = accounts.length
   const paid = accounts.filter(a => a.plan !== 'free').length
   const hot = accounts.filter(isHot).length
@@ -469,6 +471,35 @@ ${topBar('signed in', true)}
   </table></div></div>
   <p class="sub">An account keeps the label it was created under and no later one. Read it beside the table above:
     /register loads for a label, then accounts, then accounts that recorded a call.</p>`}
+
+  <h2 id="funnel">Where setup stops, accounts created in the last 30 days</h2>
+  ${funnel.length === 0
+    ? `<p class="sub">No account created in the window.</p>`
+    : `<div class="cv-panel"><div class="cv-card cv-scroll"><table class="cv-table is-ruled">
+    <thead><tr><th>Account</th><th>Created</th><th>Key</th><th>Start screen</th><th>Card</th><th>Copied</th><th>Key used</th><th>First call</th></tr></thead>
+    <tbody>
+      ${funnel.map((r) => {
+        const has = (s: string) => r.steps.find((x) => x.step === s)
+        const vias = r.steps.filter((x) => x.step.startsWith('via:')).map((x) => x.step.slice(4) + (x.n > 1 ? ` ×${x.n}` : ''))
+        const copies = r.steps.filter((x) => x.step.startsWith('copy:')).map((x) => x.step.slice(5) + (x.n > 1 ? ` ×${x.n}` : ''))
+        const start = has('start')
+        const yes = (b: boolean) => b ? '<td class="held">yes</td>' : '<td class="muted">no</td>'
+        return `<tr>
+        <td>${esc(r.email || r.account.slice(0, 8))}</td>
+        <td>${r.created.slice(0, 16).replace('T', ' ')}</td>
+        <td>${r.keyMade ? r.keyMade.slice(0, 16).replace('T', ' ') : '<span class="muted">none</span>'}</td>
+        <td>${start ? `${start.n}× <span class="muted">from ${start.first.slice(5, 16).replace('T', ' ')}</span>` : '<span class="muted">not counted</span>'}</td>
+        <td>${vias.length ? esc(vias.join(', ')) + (has('cc_client') ? ' <span class="muted">+ client named</span>' : '') : '<span class="muted">none</span>'}</td>
+        <td>${copies.length ? esc(copies.join(', ')) : '<span class="muted">none</span>'}</td>
+        ${yes(r.keyUsed)}
+        ${yes(r.called)}
+      </tr>`
+      }).join('')}
+    </tbody>
+  </table></div></div>
+  <p class="sub">Counted since 2026-09-28 (migration 038): the start screen shown, the card chosen, a client named on the
+    Claude Code path, and each Copy press on the start and key screens. An account that reached the start screen before
+    then reads "not counted", not "never". Key used is any request the key ever authenticated; first call is any record.</p>`}
 
   <h2 id="rejections">Preflights answered 422, last 30 days</h2>
   ${rejections.length === 0
