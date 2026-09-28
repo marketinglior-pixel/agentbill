@@ -220,7 +220,7 @@ if (process.env.SHOTS_COOKIE) {
 // activity view in dollars, 2026-09-25. Each path is its own capture; the
 // dollar view needs an account with a priced call, so it is captured with
 // SHOTS_COOKIE only (a local server's session), never against production.
-const START_VIAS = ['mcp', 'python', 'node']
+const START_VIAS = ['claude-code', 'python', 'node', 'mcp']
 const SIGNED_IN = [
   ...(process.env.SHOTS_COOKIE ? [['console-start', '/app?view=start', process.env.SHOTS_COOKIE], ['console-keys', '/app?view=keys', process.env.SHOTS_COOKIE],
     ...START_VIAS.map((v) => [`console-start-${v}`, `/app?view=start&via=${v}`, process.env.SHOTS_COOKIE]),

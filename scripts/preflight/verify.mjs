@@ -1337,11 +1337,13 @@ await insertKeyRow(sql, ACCT_ST, KEY_ST, 'harness-start')
 const loginST = await nav8('/app/session', { method: 'POST', headers: FORM8, body: `api_key=${KEY_ST}` })
 const cookieST = (loginST.headers.get('set-cookie') ?? '').split(';')[0]
 const pageST = (path) => nav8(path, { headers: { cookie: cookieST } })
+// The question since 2026-09-28, from the one place the screen reads it.
+const { CONNECT_Q: CONNECT_Q_ST } = await import('../../dist/ui/steps.js')
 const virgin8 = await pageST('/app').then(r => r.text())
 const viaLinksST = [...virgin8.matchAll(/<a class="via" href="([^"]+)"([^>]*)>/g)].map((m) => [m[1], m[2]])
-ok('[start] a virgin account\'s overview asks how you will connect, with three links and nothing chosen, and no ceiling form',
-   virgin8.includes('How will you connect?') && viaLinksST.length === 3
-     && JSON.stringify(viaLinksST.map((l) => l[0])) === JSON.stringify(['/app?view=start&amp;via=mcp', '/app?view=start&amp;via=python', '/app?view=start&amp;via=node'])
+ok('[start] a virgin account\'s overview asks what you build your agents with, with four links (Claude Code first, MCP last) and nothing chosen, and no ceiling form',
+   virgin8.includes(CONNECT_Q_ST) && CONNECT_Q_ST === 'What do you build your agents with?' && viaLinksST.length === 4
+     && JSON.stringify(viaLinksST.map((l) => l[0])) === JSON.stringify(['/app?view=start&amp;via=claude-code', '/app?view=start&amp;via=python', '/app?view=start&amp;via=node', '/app?view=start&amp;via=mcp'])
      && viaLinksST.every((l) => !l[1].includes('aria-current')) && !virgin8.includes('class="setf3"') && !virgin8.includes('Three steps'),
    JSON.stringify(viaLinksST))
 ok('[start] before anything is recorded the screen says where the first call will appear',
@@ -1353,7 +1355,7 @@ const pyST = await pyPageST.text()
 const nodeST = await pageST('/app?view=start&via=node').then(r => r.text())
 const mcpResST = await pageST('/app?view=start&via=mcp')
 const mcpST = await mcpResST.text()
-const current = (h) => (h.match(/<a class="via" href="[^"]*via=(\w+)" aria-current="true">/) ?? [])[1]
+const current = (h) => (h.match(/<a class="via" href="[^"]*via=([\w-]+)" aria-current="true">/) ?? [])[1]
 ok('[start] Python: the chosen card is marked, the install upgrades, and the one sample wraps an OpenAI client on job first-call',
    current(pyST) === 'python' && pyST.includes('pip install -U agentbill-sdk openai') && snipOf(pyST).includes('agentbill.wrap(OpenAI(), task_ref="first-call"')
      && !/client\.record\(|units=1/.test(snipOf(pyST)), snipOf(pyST).slice(0, 160))
@@ -1390,9 +1392,30 @@ ok('[start] python and node: each sample and the curl has a Copy control on a wr
      && [pyST, nodeST].every((h) => h.includes('<div id="sample-curl"><pre class="snip">') && h.includes('data-copy="sample-curl"')))
 ok('[start] the key line says /recover gives a new key, never that it shows the old one again',
    pyST.includes('lost it? <a href="/recover">/recover</a> gives you a new one') && ![pyST, nodeST, virgin8].some((h) => h.includes('shows it again')))
+// The Claude Code path, 2026-09-28: two files, the committed one built with the
+// reader's client name in the shape /otel reads (src/routes/otel.ts), the key
+// file a placeholder, because the console never shows a key.
+{
+  const { OTEL_BASE } = await import('../../dist/routes/otel.js')
+  const jsonOf = (h, id) => { const m = h.match(new RegExp(`<div id="${id}"><pre class="snip">([\\s\\S]*?)</pre>`)); try { return m ? JSON.parse(unesc(m[1])) : null } catch { return 'unparseable' } }
+  const ccDef = await pageST('/app?view=start&via=claude-code').then(r => r.text())
+  const ccAcme = await pageST('/app?view=start&via=claude-code&client=acme-dental').then(r => r.text())
+  const ccBad = await pageST(`/app?view=start&via=claude-code&client=${encodeURIComponent('Acme"><script>x')}`).then(r => r.text())
+  const want = (client) => JSON.stringify({ env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1', OTEL_LOGS_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
+    OTEL_EXPORTER_OTLP_ENDPOINT: `https://agentbill.dev${OTEL_BASE}`, OTEL_RESOURCE_ATTRIBUTES: `client=${client}` } })
+  const local = jsonOf(ccDef, 'cc-local')
+  ok('[start] Claude Code: the card is marked and the settings file is valid JSON in the shape /otel reads, with the default client, then the typed one',
+     current(ccDef) === 'claude-code' && JSON.stringify(jsonOf(ccDef, 'cc-settings')) === want('my-first-client') && JSON.stringify(jsonOf(ccAcme, 'cc-settings')) === want('acme-dental')
+       && ccAcme.includes('value="acme-dental"') && ccDef.includes('method="GET" action="/app"'),
+     JSON.stringify([jsonOf(ccDef, 'cc-settings'), jsonOf(ccAcme, 'cc-settings')]).slice(0, 400))
+  ok('[start] Claude Code: a client name that is not a label falls back to the default and is never echoed; the key file is a placeholder, never a key',
+     JSON.stringify(jsonOf(ccBad, 'cc-settings')) === want('my-first-client') && !ccBad.includes('<script>x') && !ccBad.includes('Acme&quot;')
+       && JSON.stringify(local) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer agb_your_key' } }) && !/agb_[0-9a-f]{48}/.test(ccDef),
+     JSON.stringify(local))
+}
 const evilST = await pageST('/app?view=start&via=%3Cscript%3E').then(r => r.text())
 ok('[start] a via that is not one of the three chooses nothing and is never echoed',
-   evilST.includes('How will you connect?') && !current(evilST) && !evilST.includes('%3Cscript') && !/via=<|via=&lt;/.test(evilST))
+   evilST.includes(CONNECT_Q_ST) && !current(evilST) && !evilST.includes('%3Cscript') && !/via=<|via=&lt;/.test(evilST))
 
 // A record that names no model: the screen says why there is no dollar yet,
 // and the overview stops being the start screen, because something arrived.
@@ -1403,7 +1426,7 @@ const overST = await pageST('/app').then(r => r.text())
 ok('[start] a record that names no model: the screen says none can be priced, and shows no dollar figure for it',
    handST.includes('none of them names a model, so none can be priced') && !handST.includes('Your first call was recorded'), 'no unpriced line')
 ok('[start] and once anything is recorded the overview is the dashboard, with the start screen still reachable',
-   overST.includes('class="dash"') && overST.includes('class="leak') && !overST.includes('How will you connect?') && handST.includes('How will you connect?'))
+   overST.includes('class="dash"') && overST.includes('class="leak') && !overST.includes(CONNECT_Q_ST) && handST.includes(CONNECT_Q_ST))
 
 // The production path, Python: the literal on the page, run as pasted.
 const { mkdtempSync: mkdtST, writeFileSync: writeST, mkdirSync: mkdirST, symlinkSync: linkST } = await import('node:fs')
@@ -1901,7 +1924,7 @@ ok('[register] the person\'s session and the key session share name-independent 
    attrs8(up8.cookie) === attrs8(login8.headers.getSetCookie()[0] ?? ''), `${attrs8(up8.cookie)} vs ${attrs8(login8.headers.getSetCookie()[0] ?? '')}`)
 const asNew8 = await nav8('/app?view=start', { headers: { cookie: up8.cookie.split(';')[0] } }).then(r => r.text())
 ok('[register] and that cookie opens the start screen as the account just created, not another',
-   asNew8.includes('How will you connect?') && asNew8.includes(email8) && !asNew8.includes('>no email<'),
+   asNew8.includes(CONNECT_Q_ST) && asNew8.includes(email8) && !asNew8.includes('>no email<'),
    'the new session did not render the new account')
 // The owner's signup alert, 2026-09-12. There is no Resend key in the harness,
 // so what is checked here is the DECISION, not a delivery: the daily cap is a
