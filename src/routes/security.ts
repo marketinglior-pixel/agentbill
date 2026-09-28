@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { CONTENT_CSS } from '../ui/content.js'
+import { plaintextKeysStored } from '../lib/privacy-facts.js'
 
 // /security, the plain-language twin of SECURITY.md.
 //
@@ -9,14 +10,20 @@ import { CONTENT_CSS } from '../ui/content.js'
 // triggered it ("I can't connect your API to my stuff when I don't know how
 // secure it is") had no page to answer it. The rule for the "what we do" list
 // is the rule for every claim on this site: only what is implemented and held
-// by a gate in scripts/preflight/verify.mjs today. Keys are stored in plain
-// text until the next batch, so this page says so and claims no hashing.
+// by a gate in scripts/preflight/verify.mjs today.
+//
+// The key sentence is read from the database, 2026-09-28, the day migration
+// 027 emptied the plaintext column on production: the page said "stored in
+// plain text" for as long as that was true, and a static sentence would have
+// gone on saying it. It asks what /privacy asks (plaintextKeysStored, the
+// scrub trigger's presence), so the two pages cannot disagree.
 
 const CONTACT = 'hello@agentbill.dev'
 const REPO = 'https://github.com/marketinglior-pixel/agentbill'
 
 export async function securityRoute(app: FastifyInstance) {
   app.get('/security', publicRoute(), async (_, reply) => {
+    const plaintext = await plaintextKeysStored()
     return reply.type('text/html').send(docsShell({
       path: '/security',
       title: 'Security · AgentBill',
@@ -79,8 +86,12 @@ curl -X POST https://agentbill.dev/keys/revoke \\
         its certificate is verified.</li>
     <li>Every query that reads or writes your data is scoped to your account, and one account cannot
         read another's jobs, customers, keys or refusals.</li>
-    <li>A key is shown once, when it is made, and is never emailed. Keys are stored in plain text in
-        our database today; storing only a hash of each key is the next change we are making.</li>
+    <li>A key is shown once, when it is made, and is never emailed. ${plaintext
+      ? `Keys are stored in plain text in our database today; storing only a hash of each key is the
+        next change we are making.`
+      : `Keys are stored only as a hash: the key itself is not in our database, so nobody can read it
+        there, us included. Database backups made before 28 September 2026 still hold the keys that
+        existed then, until those backups expire.`}</li>
     <li>When a key is used from a network it has never been used from before, the account's owner is
         emailed. The key's very earliest network is the one exception, since nothing has changed yet.</li>
     <li>Requests are limited per key and per account, and repeated attempts with keys that do not
