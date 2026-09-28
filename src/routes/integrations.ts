@@ -188,6 +188,10 @@ ${HUB_ROWS.map(hubRow).join('\n')}
   <p><b>Your agent is code you own.</b> Put preflight and record where your code, or your
   framework, calls the model. The guides show where that is in LangChain, the OpenAI Agents SDK and
   CrewAI, with samples that were run against the framework versions in the table.</p>
+  <p><b>You build in Claude Code.</b> Point its built-in telemetry at AgentBill with two small
+  files in each client's project, and every request it makes is recorded under that client, with
+  its tokens and its price at list. No code; the <a href="/integrations/claude-code">Claude Code
+  page</a> has the two files.</p>
   <p><b>Your agent host speaks MCP.</b> Connect it to <span class="inline">${MCP_URL}</span>: Claude and
   ChatGPT with a sign-in, Cursor and VS Code in one click, the rest with one command or a few lines
   of config, on the <a href="/integrations/mcp">MCP page</a>. The model gets a preflight tool it can
@@ -833,6 +837,82 @@ except HookAborted as e:
   // client, each snippet checked against that client's current docs (the
   // sources are beside each one in src/ui/mcp-connect.ts). The local stdio
   // package keeps its README blocks under Other, byte for byte.
+  // Claude Code, 2026-09-28: its own OpenTelemetry export, received at /otel
+  // (src/routes/otel.ts). Every claim below is either that route or a real
+  // export read off a local listener (Claude Code 2.1.274). The settings split
+  // (label in settings.json, key in settings.local.json) was run end to end:
+  // Claude Code merged the two files and sent the key from the local one.
+  app.get('/integrations/claude-code', publicRoute(), async (_, reply) => {
+    return reply.type('text/html').send(page(
+      '/integrations/claude-code',
+      'Claude Code cost per client: every request, priced at list, from its own telemetry',
+      'Two small files in a client\'s project point Claude Code\'s built-in OpenTelemetry at AgentBill. Every API request it makes is recorded with its model, tokens and cost at list price, under that client. No code and no proxy.',
+      `
+  <h1>Claude Code: what each client's work costs</h1>
+  <span class="badge">Claude Code</span><span class="badge">OpenTelemetry</span>
+  <p class="lede">Claude Code reports every API request it makes over OpenTelemetry. Point that
+  report at AgentBill with two small files in a client's project, and each request is recorded
+  with its model, its tokens and what it cost at list price, under that client. There is no code
+  to add and nothing in between: Claude Code talks to Anthropic exactly as before, and AgentBill
+  receives the report after each request.</p>
+
+  <h2>Set up a client's project</h2>
+  <p>Once per project. In the project's folder, <span class="inline">.claude/settings.json</span>,
+  which you can commit with the project:</p>
+  <div class="code"><pre>{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://agentbill.dev/otel",
+    "OTEL_RESOURCE_ATTRIBUTES": "client=acme-dental"
+  }
+}</pre></div>
+  <p>And your key, in <span class="inline">.claude/settings.local.json</span> beside it. This file
+  is the one that stays out of git: if the project's <span class="inline">.gitignore</span> does
+  not list <span class="inline">.claude/settings.local.json</span> yet, add it.</p>
+  <div class="code"><pre>{
+  "env": {
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key"
+  }
+}</pre></div>
+  <p><span class="inline">client</span> is the name the calls are filed under: letters, digits, dots,
+  dashes and underscores, no spaces, up to 64 characters. To name the agent too, add it after a
+  comma: <span class="inline">client=acme-dental,agent=support-bot</span>. Without an agent name
+  the calls are filed under <span class="inline">claude-code</span>; without a client, under
+  <span class="inline">default</span>.</p>
+
+  <h2>Check it</h2>
+  <p>Open Claude Code in that project and ask it anything. A few seconds after it answers, the
+  request is in the <a href="/app">console</a>, under Customers, with its model, its tokens and its
+  price. Work in the same project goes on being recorded there; another client's project gets its
+  own two files with its own name.</p>
+
+  <h2>What is recorded, and what is not</h2>
+  <p><b>Recorded, for each API request:</b> the model, the input, output and cache tokens, how long
+  it took, the session id, the price at list, and Claude Code's own cost figure beside ours.</p>
+  <p><b>Never stored:</b> the email, account, organization and user ids Claude Code attaches to its
+  report, and every event other than the API request itself. Claude Code does not send the text of
+  your prompts unless you turn that on with <span class="inline">OTEL_LOG_USER_PROMPTS</span>, and
+  even then AgentBill does not keep it.</p>
+
+  <h2>What the dollar figure means</h2>
+  <p>Every figure is an estimate at list price, from the tokens the request reported. On the API it
+  is what those tokens cost at Anthropic's published rates. On a Pro or Max subscription you are not
+  billed per token: the figure is what the same work would cost at list price, which is what makes
+  one client's work comparable with another's, and it is not your bill.</p>
+
+  <h2>What it does not do</h2>
+  <p>This records requests after they are made. Claude Code does not ask AgentBill before a request,
+  so a job ceiling does not refuse one here; use it to see what each client costs and when a
+  client's work grows. Each request is one record, and records count toward your plan's monthly
+  records.</p>
+
+  ${cta('integrations')}
+`,
+    ))
+  })
+
   app.get('/integrations/mcp', publicRoute(), async (_, reply) => {
     return reply.type('text/html').send(page(
       '/integrations/mcp',

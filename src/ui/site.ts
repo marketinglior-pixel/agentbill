@@ -149,11 +149,12 @@ export const PAGES: readonly PageMeta[] = [
   // What we publish and the frameworks the plain SDK slots into. The hub sits
   // under Docs in the trail because /docs is where a reader arrives from; the
   // path is top-level so each page's URL names its integration and nothing else.
-  { path: '/integrations', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Integrations', og: 'docs', index: true, updated: '2026-09-25', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
+  { path: '/integrations', section: 'docs', crumbs: [HOME, DOCS], crumb: 'Integrations', og: 'docs', index: true, updated: '2026-09-28', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
   { path: '/integrations/openclaw', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenClaw', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
   { path: '/integrations/langchain', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'LangChain', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
   { path: '/integrations/openai-agents-sdk', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'OpenAI Agents SDK', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
   { path: '/integrations/crewai', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'CrewAI', og: 'docs', index: true, updated: '2026-09-23', published: '2026-09-23', priority: 0.7, changefreq: 'monthly' },
+  { path: '/integrations/claude-code', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'Claude Code', og: 'docs', index: true, updated: '2026-09-28', published: '2026-09-28', priority: 0.8, changefreq: 'monthly' },
   // The MCP connect page since 2026-09-25: the remote endpoint, one tab per client.
   { path: '/integrations/mcp', section: 'docs', crumbs: [HOME, DOCS, INTEGRATIONS], crumb: 'MCP', og: 'docs', index: true, updated: '2026-09-25', published: '2026-09-23', priority: 0.8, changefreq: 'monthly' },
 
