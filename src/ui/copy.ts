@@ -76,6 +76,22 @@ const c = inlineScript(src)
 export const COPY_JS = c.html
 export const COPY_HASH = c.hash
 
+/**
+ * The console's copy script (2026-09-28): the same control, and after a copy
+ * it tells the server which one, with a beacon to /app/step (src/lib/
+ * start-steps.ts, migration 038). Only the control's id is sent, never what
+ * was copied. Its own hash, so the site's pages keep theirs; a page that runs
+ * it needs connect-src 'self' for the beacon.
+ */
+const consoleSrc = src.replace(
+  "      btn.setAttribute('data-done', '1')",
+  "      btn.setAttribute('data-done', '1')\n      if (navigator.sendBeacon) navigator.sendBeacon('/app/step', 'copy:' + btn.getAttribute('data-copy'))",
+)
+if (consoleSrc === src) throw new Error('console copy script: the beacon line did not attach')
+const cc = inlineScript(consoleSrc)
+export const CONSOLE_COPY_JS = cc.html
+export const CONSOLE_COPY_HASH = cc.hash
+
 const copyButton = (id: string, text: string): string =>
   `<button type="button" class="cp-btn" data-copy="${id}" aria-label="Copy ${text}">Copy</button>`
 

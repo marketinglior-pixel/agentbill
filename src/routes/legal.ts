@@ -187,6 +187,10 @@ async function privacyBody(): Promise<string> {
       ourselves (<code>?src=</code>, for example the one in an ad). If you create an account after arriving on
       one, the account keeps that label, set once, so we can tell which of our links brought people. It is only
       our own label: never the page you came from, and nothing you typed.</li>
+      <li><strong>How far setup got</strong>: in your console, whether the start screen was shown, which way in you
+      picked, whether you named a client, and which of its samples or your key's lines you pressed Copy on, with how
+      often and when. Never what you typed or copied: only that the step happened, so we can see where setup gets
+      stuck.</li>
       <li><strong>The request log</strong>: like any web server, ours logs each request with the IP address it
       came from, the path (never the query string, and never a sign-in or recovery token) and the time. The log
       is kept by our host, Fly.io, under its own retention; this service sets none.</li>

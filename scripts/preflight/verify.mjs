@@ -1413,6 +1413,42 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
        && JSON.stringify(local) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer agb_your_key' } }) && !/agb_[0-9a-f]{48}/.test(ccDef),
      JSON.stringify(local))
 }
+// Where setup stops, 2026-09-28 (migration 038, src/lib/start-steps.ts). The
+// pages above were this account's: the start screen, the four cards, and the
+// Claude Code path with a good client name once and a bad one once.
+{
+  const stepsOf = async () => Object.fromEntries((await sql`SELECT step, n FROM start_steps WHERE account_id = ${ACCT_ST}`).map((r) => [r.step, r.n]))
+  const s0 = await stepsOf()
+  ok('[steps] the server counts the start screen, each card chosen, and a client named, and not a name that was not one',
+     s0.start >= 1 && s0['via:python'] >= 1 && s0['via:node'] >= 1 && s0['via:mcp'] >= 1 && s0['via:claude-code'] >= 3 && s0.cc_client === 1,
+     JSON.stringify(s0))
+  const beacon = (body, h = {}) => nav8('/app/step', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'Sec-Fetch-Site': 'same-origin', cookie: cookieST, ...h }, body })
+  const b1 = await beacon('copy:cc-settings')
+  const b2 = await beacon('copy:cc-settings')
+  const bad = await beacon('copy:not-a-control')
+  const notCopy = await beacon('via:python')
+  const cross = await beacon('copy:sample-python', { 'Sec-Fetch-Site': 'cross-site' })
+  const anon = await nav8('/app/step', { method: 'POST', headers: { 'Content-Type': 'text/plain', 'Sec-Fetch-Site': 'same-origin' }, body: 'copy:sample-python' })
+  const s1 = await stepsOf()
+  ok('[steps] a Copy beacon counts its control, twice is n=2; an unknown control, a non-copy step, a cross-site post or no session counts nothing',
+     b1.status === 204 && b2.status === 204 && s1['copy:cc-settings'] === 2 && bad.status === 400 && notCopy.status === 400 && cross.status === 403 && anon.status === 401
+       && s1['copy:not-a-control'] === undefined && s1['copy:sample-python'] === undefined && s1['via:python'] === s0['via:python'],
+     JSON.stringify({ status: [b1.status, b2.status, bad.status, notCopy.status, cross.status, anon.status], s1 }))
+  const { CONSOLE_COPY_HASH } = await import('../../dist/ui/copy.js')
+  const withCopy = await pageST('/app?view=start&via=python')
+  const csp = withCopy.headers.get('content-security-policy') ?? ''
+  const html = await withCopy.text()
+  ok('[steps] a page with Copy controls runs the console copy script by its hash, which sends the beacon, and its CSP allows it (connect-src self)',
+     csp.includes(`script-src ${CONSOLE_COPY_HASH}`) && csp.includes("connect-src 'self'") && html.includes("sendBeacon('/app/step', 'copy:' + btn.getAttribute('data-copy'))"),
+     csp.slice(0, 200))
+  const admin = await fetch(`${API}/admin`, { headers: { cookie: await adminCookie(), 'fly-client-ip': '203.0.113.252' } }).then((r) => r.text())
+  const funnel = admin.match(/<h2 id="funnel">[\s\S]*?<h2 id="rejections">/)?.[0] ?? ''
+  ok('[steps] /admin shows where setup stopped, per account: the cards chosen and the controls copied',
+     funnel.includes('cc-settings ×2') && funnel.includes('claude-code') && funnel.includes('client named'), funnel.slice(0, 300) || 'no funnel section')
+  const priv = await fetch(`${API}/privacy`).then((r) => r.text())
+  ok('[steps] /privacy says how far setup got is counted, and that nothing typed or copied is',
+     priv.includes('How far setup got') && priv.includes('Never what you typed or copied'), 'privacy bullet missing')
+}
 const evilST = await pageST('/app?view=start&via=%3Cscript%3E').then(r => r.text())
 ok('[start] a via that is not one of the three chooses nothing and is never echoed',
    evilST.includes(CONNECT_Q_ST) && !current(evilST) && !evilST.includes('%3Cscript') && !/via=<|via=&lt;/.test(evilST))
