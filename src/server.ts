@@ -3,6 +3,7 @@ import { STATUS_CODES } from 'node:http'
 import { ID_MAX } from './lib/ids.js'
 import Fastify, { type FastifyReply } from 'fastify'
 import { eventsRoute } from './routes/events.js'
+import { otelRoute } from './routes/otel.js'
 import { budgetRoute } from './routes/budget.js'
 import { dashboardRoute } from './routes/dashboard.js'
 import { registerRoute } from './routes/register.js'
@@ -271,6 +272,7 @@ app.register(decisionsRoute)
 app.register(usageRoute)
 app.register(appRoute)
 app.register(preflightRoute)
+app.register(otelRoute)
 app.register(pulseRoute)
 app.register(webhooksRoute)
 app.register(inboundMailRoute)

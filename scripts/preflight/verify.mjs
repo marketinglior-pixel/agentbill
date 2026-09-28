@@ -3707,11 +3707,27 @@ const hits11 = (re, pick) => pages11.flatMap((p) => (pick(p).match(re) ?? []).ma
   const h = [...hits11(NAMED11, (p) => p.prose), ...hits11(NAMED11, (p) => p.main), ...hits11(NAMED11, (p) => p.code)]
   ok('[integrations] n8n is named nowhere on these pages: nothing we ship installs into it',
      pages11.length > 0 && h.length === 0, [...new Set(h)].join('; '))
-  const cc = pages11.filter((p) => p.path !== '/integrations/mcp')
+  // 2026-09-28: Claude Code got an integration of its own (its OpenTelemetry
+  // export, received at /otel, src/routes/otel.ts), so the rule moved with the
+  // fact it guarded. It is named on the MCP page beside its documented command,
+  // on /integrations/claude-code beside the settings the endpoint actually
+  // reads, and on the hub only in a paragraph that links there. Anywhere else
+  // it is still a claim with nothing shipped behind it.
+  const CC_PAGES = ['/integrations/mcp', '/integrations/claude-code', '/integrations']
+  const cc = pages11.filter((p) => !CC_PAGES.includes(p.path))
     .flatMap((p) => [p.prose, p.main, p.code].flatMap((t) => (t.match(CLAUDE_CODE11) ?? []).map((w) => `${p.path}: ${w}`)))
   const mcpMain = pages11.find((p) => p.path === '/integrations/mcp')?.main ?? ''
-  ok('[integrations] Claude Code is named on /integrations/mcp alone, and there beside the command its docs give',
-     cc.length === 0 && mcpMain.includes('claude mcp add --transport http agentbill https://agentbill.dev/mcp'), [...new Set(cc)].join('; '))
+  const hubHtml = pages11.find((p) => p.path === '/integrations')?.html ?? ''
+  const ccOnce = new RegExp(CLAUDE_CODE11.source, 'i')  // not /g: .test on a global regex keeps lastIndex between calls
+  const hubCC = [...hubHtml.matchAll(/<p>[\s\S]*?<\/p>/g)].map((m) => m[0]).filter((para) => ccOnce.test(para.replace(/<[^>]+>/g, ' ')))
+  const ccMain = pages11.find((p) => p.path === '/integrations/claude-code')?.main ?? ''
+  const { OTEL_BASE } = await import('../../dist/routes/otel.js')
+  ok('[integrations] Claude Code is named only on the MCP page (beside its command), on its own page (beside the settings /otel reads), and on the hub in the paragraph that links there',
+     cc.length === 0 && mcpMain.includes('claude mcp add --transport http agentbill https://agentbill.dev/mcp')
+       && hubCC.length === 1 && hubCC[0].includes('href="/integrations/claude-code"')
+       && ccMain.includes(`"OTEL_EXPORTER_OTLP_ENDPOINT": "https://agentbill.dev${OTEL_BASE}"`) && ccMain.includes('"OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"')
+       && ccMain.includes('"OTEL_LOGS_EXPORTER": "otlp"') && ccMain.includes('"CLAUDE_CODE_ENABLE_TELEMETRY": "1"') && ccMain.includes('"OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key"'),
+     [...new Set(cc)].join('; ') || `hub paragraphs naming it: ${hubCC.length}; settings on its page: ${ccMain.includes('"OTEL_EXPORTER_OTLP_ENDPOINT"')}`)
 }
 
 // The install line and the config a reader copies from /integrations/openclaw
@@ -4923,6 +4939,9 @@ await authGates({
 // ------------------------------------------------ [usd] a job whose ceiling is in dollars (T3, 2026-09-25), in its own file
 const { usdGates } = await import('./usd-gates.mjs')
 await usdGates({ API, sql, ok, legacyKey: KEY })
+// ------------------------------------------------ [otel] Claude Code telemetry (2026-09-28), in its own file
+const { otelGates } = await import('./otel-gates.mjs')
+await otelGates({ API, sql, ok })
 
 // ------------------------------------------------ [mcp] the remote MCP endpoint (2026-09-25), in its own file
 // ------------------------------------------------ [openclaw] and [connect-marks] (2026-09-25), in their own file
