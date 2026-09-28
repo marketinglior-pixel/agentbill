@@ -144,4 +144,4 @@ export const CC_STEP2 =
 
 /** Step 3: what to do, and what the figure is. */
 export const CC_STEP3 =
-  'Open Claude Code in that project and ask it anything. A few seconds after it answers, the request appears below with its model, its tokens and its price at list. On a Pro or Max plan that figure is what the work would cost at list price, not your bill.'
+  'Open Claude Code in that project, after both files are in place (a session that was already open does not read them: quit it and start it again), and ask it anything. A few seconds after it answers, the request appears below with its model, its tokens and its price at list. On a Pro or Max plan that figure is what the work would cost at list price, not your bill.'

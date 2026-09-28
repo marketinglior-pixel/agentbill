@@ -203,6 +203,44 @@ async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, 
   ok('[auth] no session makes no key, and a key session is not a person: it is sent to the keys view with nothing made',
      fkAnon.status === 303 && fkAnon.headers.get('location') === '/app' && fkKeySess.status === 303 && fkKeySess.headers.get('location') === '/app?view=keys')
 
+  // ------------------------------------------------------------ a key for Claude Code's key file (2026-09-28)
+  // A person who did not keep their key stopped at step 2 of the Claude Code
+  // path. The step now makes one, shown once, already in the file.
+  const ccKeyPost = (cookie, h = SAME) => fetch(`${API}/app/keys/claude-code`, { method: 'POST', redirect: 'manual', headers: { ...h, ...(cookie ? { cookie } : {}) } })
+  const ccPath = await console_(g1.user, '?view=start&via=claude-code')
+  const ccPathKeySess = await console_(legacySession, '?view=start&via=claude-code')
+  ok('[auth] the Claude Code path offers a signed-in person "make a key for this file", and a key session (which holds its key) no such button',
+     ccPath.includes('action="/app/keys/claude-code"') && ccPath.includes('id="cc-newkey"') && ccPathKeySess.includes('id="cc-local"') && !ccPathKeySess.includes('/app/keys/claude-code'))
+  const cc1 = await ccKeyPost(g1.user)
+  const cc1Html = await cc1.text()
+  const ccFile = (cc1Html.match(/<code id="key-claude-code">([^<]*)<\/code>/) ?? [])[1] ?? ''
+  let ccNew = null
+  try { ccNew = JSON.parse(ccFile.replace(/&quot;/g, '"').replace(/&amp;/g, '&')).env.OTEL_EXPORTER_OTLP_HEADERS.replace('Authorization=Bearer ', '') } catch {}
+  const oldStill = await fetch(`${API}/keys`, { headers: { Authorization: `Bearer ${fkKey}` } }).then((r) => r.status)
+  const newWorks = ccNew ? await fetch(`${API}/keys`, { headers: { Authorization: `Bearer ${ccNew}` } }).then((r) => r.status) : 0
+  const [ccRow] = await sql`SELECT label FROM developer_api_keys WHERE account_id = ${g1Acct.id} AND key_hash = ${keyHash(ccNew ?? '')}`
+  const [ccStep] = await sql`SELECT n FROM start_steps WHERE account_id = ${g1Acct.id} AND step = 'cc_newkey'`
+  ok('[auth] pressing it: a 200 no-store page with the whole key file carrying a new key, labelled claude-code, that works; the old key still works; the step is counted',
+     cc1.status === 200 && cc1.headers.get('cache-control') === 'no-store' && /^agb_[0-9a-f]{48}$/.test(ccNew ?? '') && ccNew !== fkKey
+       && newWorks === 200 && oldStill === 200 && ccRow?.label === 'claude-code' && await liveKeys(g1Acct.id) === 2 && ccStep?.n === 1
+       && cc1Html.includes('href="/app?view=start&amp;via=claude-code"'),
+     JSON.stringify({ status: cc1.status, newWorks, oldStill, label: ccRow?.label, step: ccStep?.n }))
+  const ccAnon = await ccKeyPost('')
+  const ccKeySess = await ccKeyPost(legacySession)
+  const ccCross = await ccKeyPost(g1.user, { 'Sec-Fetch-Site': 'cross-site' })
+  ok('[auth] no session, a key session and a cross-site post make no Claude Code key',
+     ccAnon.status === 303 && ccAnon.headers.get('location') === '/app' && ccKeySess.status === 303 && ccKeySess.headers.get('location') === '/app?view=keys'
+       && ccCross.status === 403 && await liveKeys(g1Acct.id) === 2,
+     `${ccAnon.status} ${ccKeySess.status} ${ccCross.status}`)
+  for (let i = 0; i < 8; i++) await insertKeyRow(sql, g1Acct.id, 'agb_' + createHash('sha256').update(`cc-cap-${i}-${rnd()}`).digest('hex').slice(0, 48), 'harness-cap')
+  const ccCap = await ccKeyPost(g1.user)
+  const capPage = await console_(g1.user, '?view=keys&keys=cap')
+  ok('[auth] at 10 working keys the button makes none: it lands on the keys view, which says why',
+     ccCap.status === 303 && ccCap.headers.get('location') === '/app?view=keys&keys=cap' && await liveKeys(g1Acct.id) === 10
+       && capPage.includes('already has 10 working keys'),
+     `${ccCap.status} ${ccCap.headers.get('location')}`)
+  await sql`DELETE FROM developer_api_keys WHERE account_id = ${g1Acct.id} AND label IN ('harness-cap', 'claude-code')`
+
   // ------------------------------------------------------------ refusals on the callback
   const exchanged = async (code) => (await fakeLog()).filter((e) => e.code === code)
   // State mismatch.

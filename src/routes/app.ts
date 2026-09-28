@@ -142,6 +142,9 @@ export type Viewer = {
  *  or the account's when a person is signed in with no key yet. */
 const bucket = (v: Viewer): string => v.keyId || `account:${v.accountId}`
 
+/** Live keys an account may hold before the Claude Code key button refuses. */
+const CC_KEY_CAP = 10
+
 export async function appRoute(app: FastifyInstance) {
   app.get('/app', publicRoute(), async (request, reply) => {
     // same-origin, not no-referrer: under no-referrer, browsers send `Origin: null`
@@ -200,7 +203,7 @@ export async function appRoute(app: FastifyInstance) {
     // with the outcome of a Disconnect: a code from a closed set, never echoed.
     const apps = view === 'keys' && !demo ? await connectedApps(viewer.accountId) : []
     const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
-    const keysMsg = q?.keys === 'revoked_all' || q?.keys === 'revoke_refused' || q?.keys === 'confirm' ? q.keys : null
+    const keysMsg = q?.keys === 'revoked_all' || q?.keys === 'revoke_refused' || q?.keys === 'confirm' || q?.keys === 'cap' ? q.keys : null
     const via = asVia(q?.via)
     // The Claude Code path's client name, off ?client=, only in the shape the
     // /otel endpoint keeps as a label; anything else falls back to the default.
@@ -496,6 +499,41 @@ export async function appRoute(app: FastifyInstance) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${CONSOLE_COPY_HASH}; connect-src 'self'`))
     return reply.send(firstKeyPage(apiKey))
+  })
+
+  // A new key for Claude Code's key file, from the start screen (2026-09-28).
+  // A person who made a key days ago and did not keep it reached step 2 of the
+  // Claude Code path and stopped there: the console never shows a key again,
+  // and the file needs one. This makes another key, shown once on a 200 page
+  // already inside the file, like /keys/first. The keys they have keep
+  // working; revoking is the keys view's job. Only for a person: a key
+  // session is holding its key already. At most CC_KEY_CAP live keys, so a
+  // loop of presses cannot fill the table.
+  app.post('/app/keys/claude-code', publicRoute(), async (request, reply) => {
+    if (!sameOrigin(request)) return reply.code(403).send({ error: 'forbidden' })
+    const viewer = await loadSession(request)
+    if (!viewer) return reply.redirect('/app', 303)
+    if (viewer.via !== 'user') return reply.redirect('/app?view=keys', 303)
+    if (!checkRateLimit(bucket(viewer)).allowed) return reply.redirect('/app?view=start&via=claude-code&err=rate', 303)
+    const apiKey = await sql.begin(async (tx) => {
+      await tx`SELECT id FROM accounts WHERE id = ${viewer.accountId} FOR UPDATE`
+      const [c] = await tx`
+        SELECT count(*)::int AS n FROM developer_api_keys
+        WHERE account_id = ${viewer.accountId}
+          AND (revoked_at IS NULL OR revoked_at > NOW())
+          AND (expires_at IS NULL OR expires_at > NOW())
+      `
+      if ((c?.n ?? 0) >= CC_KEY_CAP) return null
+      return (await insertKey(tx, { accountId: viewer.accountId, label: 'claude-code' })).key
+    })
+    if (!apiKey) return reply.redirect('/app?view=keys&keys=cap', 303)
+    await recordStep(viewer.accountId, 'cc_newkey')
+    request.log.info({ accountId: viewer.accountId }, 'claude code key created from the console')
+    reply.type('text/html').header('Cache-Control', 'no-store').header('Referrer-Policy', 'same-origin')
+      .header('X-Robots-Tag', 'noindex')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${CONSOLE_COPY_HASH}; connect-src 'self'`))
+    return reply.send(ccKeyPage(apiKey))
   })
 
   // A Copy press on the start screen or the key screen, reported by the
@@ -2525,6 +2563,26 @@ ${CONSOLE_COPY_JS}
 </html>`
 }
 
+/** The Claude Code key file, with a key made for it, shown once. */
+function ccKeyPage(apiKey: string): string {
+  return `${HEAD('Your Claude Code key', LOGIN_CSS)}
+<body>
+${siteNav('/app', { sticky: false, signedIn: true })}
+  <main class="login-wrap">
+    <div class="login cv-panel"><div class="cv-card">
+    <h1>Your key, in the file.</h1>
+    <p>This is the whole of <code>.claude/settings.local.json</code>, with a new key in it. Copy it into the client's project, beside <code>.claude/settings.json</code>. This page is not shown again.</p>
+    ${copyPlate('key-claude-code', esc(ccLocalSettings(apiKey)))}
+    <p class="fine">Your other keys keep working. You can revoke any of them in the console, under API keys.</p>
+    <a class="btn btn-lg go" href="/app?view=start&amp;via=claude-code">Back to the Claude Code steps &rarr;</a>
+    </div></div>
+  </main>
+${siteFooter()}
+${CONSOLE_COPY_JS}
+</body>
+</html>`
+}
+
 // ---------------------------------------------------------------------------
 // Page state and links
 // ---------------------------------------------------------------------------
@@ -2539,7 +2597,7 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   /** A Disconnect's outcome, 'disconnected' or 'gone'. */
   appMsg?: 'disconnected' | 'gone' | null
   /** A Revoke all's outcome, a code from a closed set. */
-  keysMsg?: 'revoked_all' | 'revoke_refused' | 'confirm' | null
+  keysMsg?: 'revoked_all' | 'revoke_refused' | 'confirm' | 'cap' | null
   /** The start screen's answer to "what do you build with?", off ?via=. */
   via?: Via | null
   /** The Claude Code path's client name, off ?client=, already a valid label. */
@@ -3652,7 +3710,11 @@ function startScreen(p: Page): string {
         <p class="fine">Letters, digits, dots, dashes and underscores, no spaces. Then, in that project's folder, <code>.claude/settings.json</code>, which you can commit with the project:</p>
         ${copyBlock('cc-settings', `<pre class="snip">${esc(ccSettings(client))}</pre>`, 'the settings file')}`),
       step(2, `<p>${CC_STEP2}</p>
-        ${copyBlock('cc-local', ccLocalSample(), 'the key file')}`),
+        ${copyBlock('cc-local', ccLocalSample(), 'the key file')}
+        ${!p.anon && !p.demo && p.v.via === 'user'
+          ? `<form class="cc-newkey" method="POST" action="/app/keys/claude-code"><button class="btn-alt" type="submit" id="cc-newkey">Make a key for this file</button></form>
+        <p class="fine">Didn't keep your key? This makes a new one, shown once, already inside the file. Your other keys keep working.</p>`
+          : ''}`),
       step(3, `<p>${CC_STEP3} <a href="/integrations/claude-code">What is recorded, and what is not</a>.</p>`),
       last(4),
     ].join('\n      ')
@@ -3861,6 +3923,7 @@ function connectedAppsBlock(p: Page): string {
 /** The outcome of Revoke all, on the keys view. Codes only, never echoed. */
 function keysMsg(p: Page): string {
   if (p.keysMsg === 'revoked_all') return `<p class="ok" id="keys-flash">Every key on this account is revoked and no longer authenticates. ${p.v.via === 'user' ? '<a href="/app?view=start">Create a new key</a> on the start screen; it is shown once.' : ''}</p>`
+  if (p.keysMsg === 'cap') return `<p class="err cv-err" id="keys-flash">No new key was made: this account already has ${CC_KEY_CAP} working keys. Revoke one you no longer use, then make a new one from the start screen.</p>`
   if (p.keysMsg === 'confirm') return '<p class="err cv-err" id="keys-flash">Nothing was revoked: tick the box to confirm first.</p>'
   if (p.keysMsg === 'revoke_refused') return '<p class="err cv-err" id="keys-flash">Nothing was revoked: this account has no email address and no sign-in, so with every key gone nobody could get back in. Connect Google or GitHub above first.</p>'
   return ''
