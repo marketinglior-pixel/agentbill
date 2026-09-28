@@ -616,7 +616,8 @@ curl -X PUT https://agentbill.dev/tasks/job-142/ceiling \\
   number is micro-dollars (1,000,000 is $1.00) and each answer carries the same figures in dollars beside
   them. What it counts is an estimate at public list price, not your invoice: before a call, preflight
   reserves your own estimate when you send one (<span class="inline">estimated_usd</span>), otherwise
-  the median of the job's last 20 priced calls, or $0.10 before its first, and the answer's
+  the median of the job's last 20 priced calls (their largest once the job is at 80% of its ceiling,
+  counting calls still in flight), or $0.10 before its first, and the answer's
   <span class="inline">estimate_source</span> says which. After it, the record is charged the list price of
   the tokens it reports (<span class="inline">provider</span>, <span class="inline">model</span> and
   <span class="inline">tokens</span> in its metadata, the shape <span class="inline">wrap()</span> writes),

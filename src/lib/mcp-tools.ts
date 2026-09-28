@@ -214,7 +214,7 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
         idempotency_key: id('Makes a retried preflight safe: same key, same decision, one reservation.').optional(),
         unit: z.enum(TASK_UNITS).optional().describe('What the job counts, "unit", "token" or "usd" (micro-dollars at list price). Read when this call opens the job.'),
         task_ceiling_usd: z.number().positive().max(1_000_000).optional().describe('Opens a new job with a ceiling in dollars at public list price, unit "usd". Not applied once the job exists.'),
-        estimated_usd: z.number().positive().max(1_000_000).optional().describe('On a job in dollars, this call\'s own estimate in dollars. Left out, the job\'s recent median call is reserved, or $0.10 before its first.'),
+        estimated_usd: z.number().positive().max(1_000_000).optional().describe('On a job in dollars, this call\'s own estimate in dollars. Left out, the job\'s recent median call is reserved (its largest recent call once the job is at 80% of its ceiling), or $0.10 before its first.'),
       },
       annotations: { title: 'Ask preflight before a call', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     }, async (a) => {

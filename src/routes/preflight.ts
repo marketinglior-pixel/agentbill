@@ -348,7 +348,8 @@ async function decidePreflight(accountId: string, input: unknown, log: FastifyBa
           if (jobUnit === 'usd') {
             // The caller's own dollar estimate when it gives one (estimated_usd,
             // or estimated_units with unit "usd" declared, in micro-dollars);
-            // otherwise the job's median or the default. A bare estimated_units
+            // otherwise the job's median (its largest recent call once it is at
+            // 80% of its ceiling) or the default. A bare estimated_units
             // without unit "usd" is in some other unit and is not read as
             // money; the answer's estimate_source says which one was used.
             if (usdAsked !== null) { reserveUnits = usdAsked; estimateSource = 'caller' }
@@ -357,7 +358,17 @@ async function decidePreflight(accountId: string, input: unknown, log: FastifyBa
             // bare estimated_units is not read as micro-dollars either.
             else if (parse.data.unit === 'usd' && estimated_units != null) { reserveUnits = estimated_units; estimateSource = 'caller' }
             else {
-              const e = await usdEstimate(tx, accountId, task_ref)
+              // Where the job stands, so the estimate can turn strict near the
+              // ceiling (src/lib/usd-estimate.ts). Read in this transaction but
+              // not locked: it only picks the size of the hold, and the
+              // conditional UPDATE below is still what decides.
+              const [standing] = await tx`
+                SELECT ceiling_units, used_units, reserved_units FROM task_budgets
+                WHERE account_id = ${accountId} AND task_ref = ${task_ref}
+              `
+              const e = await usdEstimate(tx, accountId, task_ref, standing ? {
+                ceiling: unitsOf(standing.ceilingUnits), used: unitsOf(standing.usedUnits), reserved: unitsOf(standing.reservedUnits),
+              } : null)
               reserveUnits = e.micros; estimateSource = e.source
             }
           }
@@ -627,8 +638,8 @@ async function decidePreflight(accountId: string, input: unknown, log: FastifyBa
 /**
  * The dollar figures beside a dollar job's micro-dollars, additively: the same
  * numbers divided by a million, never a second computation. estimate_source
- * says whose estimate was reserved: the caller's, the job's median, or the
- * default (src/lib/usd-estimate.ts).
+ * says whose estimate was reserved: the caller's, the job's median, its
+ * largest recent call near the ceiling, or the default (src/lib/usd-estimate.ts).
  */
 function usdFields(reserved: number, source: EstimateSource | null, d: Record<string, number>) {
   return {

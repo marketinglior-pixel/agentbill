@@ -3,7 +3,7 @@ import { publicRoute } from '../middleware/auth.js'
 import { docsShell } from '../ui/docs.js'
 import { PLAN_LIMITS } from '../integrations/polar.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
-import { USD_DEFAULT_ESTIMATE_MICROS, USD_HISTORY_CALLS } from '../lib/usd-estimate.js'
+import { USD_DEFAULT_ESTIMATE_MICROS, USD_HISTORY_CALLS, USD_STRICT_FROM } from '../lib/usd-estimate.js'
 import { KEY_CTA } from '../ui/chrome.js'
 import { softwareLd } from '../ui/ld.js'
 import { CONTENT_CSS } from '../ui/content.js'
@@ -27,7 +27,8 @@ const FAQ: readonly QA[] = [
     // src/lib/task-ceiling.ts TASK_UNITS), declared when the job opens and
     // fixed from then on. Dollars: src/lib/usd-estimate.ts is the reservation
     // order (the caller's estimated_usd, the median of the job's last
-    // USD_HISTORY_CALLS priced calls, then USD_DEFAULT_ESTIMATE_MICROS);
+    // USD_HISTORY_CALLS priced calls or their largest from USD_STRICT_FROM of
+    // the ceiling, then USD_DEFAULT_ESTIMATE_MICROS);
     // src/routes/events.ts charges the list price of the reported tokens,
     // rounded up, and an unpriced call its reservation, never $0; src/lib/
     // prices.ts is the dated LiteLLM snapshot. Tokens is wrap()'s default unit
@@ -35,7 +36,7 @@ const FAQ: readonly QA[] = [
     // converted to currency. Rewritten 2026-09-26, when the site moved to jobs
     // in dollars: this was "What is a unit?", and it led with units.
     q: 'What does a job count?',
-    a: `Dollars, tokens or units, chosen when the job opens and fixed from then on. Open it in dollars with task_ceiling_usd on wrap() or on the preflight that opens it, or with ceiling_usd from the console or PUT /tasks/:task_ref/ceiling, and AgentBill prices each call itself: the public list price of the tokens your provider reported, from a dated snapshot of the LiteLLM price table. Before a call it reserves your estimated_usd if you pass one, otherwise the median of the job's last ${USD_HISTORY_CALLS} priced calls, or $${(USD_DEFAULT_ESTIMATE_MICROS / 1e6).toFixed(2)} before it has one. A call it cannot price is charged its reservation, never $0. In tokens, which is what wrap() uses unless you open the job in dollars, the ceiling is the tokens your provider reported. In units, the default for a preflight that names no unit, the number is an integer you define and pass, and AgentBill never converts it to money. Every dollar figure is an estimate at list price, not your invoice.`,
+    a: `Dollars, tokens or units, chosen when the job opens and fixed from then on. Open it in dollars with task_ceiling_usd on wrap() or on the preflight that opens it, or with ceiling_usd from the console or PUT /tasks/:task_ref/ceiling, and AgentBill prices each call itself: the public list price of the tokens your provider reported, from a dated snapshot of the LiteLLM price table. Before a call it reserves your estimated_usd if you pass one, otherwise the median of the job's last ${USD_HISTORY_CALLS} priced calls (their largest once the job is at ${USD_STRICT_FROM * 100}% of its ceiling, counting calls still in flight), or $${(USD_DEFAULT_ESTIMATE_MICROS / 1e6).toFixed(2)} before it has one. A call it cannot price is charged its reservation, never $0. In tokens, which is what wrap() uses unless you open the job in dollars, the ceiling is the tokens your provider reported. In units, the default for a preflight that names no unit, the number is an integer you define and pass, and AgentBill never converts it to money. Every dollar figure is an estimate at list price, not your invoice.`,
   },
   {
     // src/lib/report.ts: one UTC month per customer_id, lines by agent and

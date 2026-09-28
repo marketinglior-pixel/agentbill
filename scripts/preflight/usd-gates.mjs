@@ -152,6 +152,32 @@ async function gates({ API, sql, ok, legacyKey }) {
      JSON.stringify([p2b.body?.estimate_source, p2b.body?.estimated_units, p2c.body?.estimate_source, p2c.body?.estimated_units]))
   for (const p of [p2b, p2c]) await rec({ task_ref: 'usd-settle', reservation_id: p.body.reservation_id, success: false, units: 0 })
 
+  // ---- strict near the ceiling (2026-09-28): the median below 80% of the
+  // ceiling, used plus held, and the job's largest recent call from there on.
+  // Three real calls, $0.045, $0.009 and $0.09: median $0.045, largest $0.09.
+  // The 80% counts holds still in flight, so it is reached with caller holds.
+  await call('PUT', '/tasks/usd-strict/ceiling', { ceiling_usd: 1 })
+  for (const [i, o] of [[10_000, 2_000], [2_000, 400], [20_000, 4_000]]) await rec({ task_ref: 'usd-strict', units: 1, metadata: gpt4o(i, o) })
+  const js0 = await job('usd-strict')
+  const hold79 = await pre({ task_ref: 'usd-strict', estimated_usd: 0.646 })
+  const at79 = await pre({ task_ref: 'usd-strict' })
+  if (at79.body?.reservation_id) await rec({ task_ref: 'usd-strict', reservation_id: at79.body.reservation_id, success: false, units: 0 })
+  const hold80 = await pre({ task_ref: 'usd-strict', estimated_usd: 0.01 })
+  const at80 = await pre({ task_ref: 'usd-strict' })
+  ok('[usd] below 80% of the ceiling (used plus held) the hold is the job\'s median call; at 80% it is the job\'s largest recent call, named job_max',
+     js0.usedUnits === 144_000 && hold79.body?.approved === true && hold80.body?.approved === true
+       && at79.body?.approved === true && at79.body.estimate_source === 'job_median' && at79.body.estimated_units === 45_000
+       && at80.body?.approved === true && at80.body.estimate_source === 'job_max' && at80.body.estimated_units === 90_000 && at80.body.estimated_usd === 0.09,
+     JSON.stringify({ used: js0.usedUnits, at79: [at79.body?.estimate_source, at79.body?.estimated_units], at80: [at80.body?.estimate_source, at80.body?.estimated_units] }))
+  const late = await pre({ task_ref: 'usd-strict' })
+  const refused = await pre({ task_ref: 'usd-strict' })
+  ok('[usd] near the ceiling the strict hold still reserves atomically: one more $0.09 fits, the next is refused, and the refusal names job_max',
+     late.body?.approved === true && late.body.estimate_source === 'job_max'
+       && refused.body?.approved === false && refused.body.reason === 'task_ceiling_exceeded' && refused.body.estimate_source === 'job_max' && refused.body.estimated_usd === 0.09
+       && (await job('usd-strict')).reservedUnits <= 1_000_000 - 144_000,
+     JSON.stringify([late.body?.estimate_source, refused.body?.reason, refused.body?.estimate_source]))
+  for (const p of [hold79, hold80, at80, late]) if (p.body?.reservation_id) await rec({ task_ref: 'usd-strict', reservation_id: p.body.reservation_id, success: false, units: 0 })
+
   // ---- the unpriced call: never $0
   const r2 = await rec({ task_ref: 'usd-settle', reservation_id: p2.body.reservation_id, units: 1 })
   const p3 = await pre({ task_ref: 'usd-settle' })
