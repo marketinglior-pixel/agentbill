@@ -21,6 +21,7 @@ export const START_STEPS: readonly string[] = [
   'start',
   ...VIAS.map((v) => `via:${v}`),
   'cc_client',
+  'cc_newkey',
   ...COPY_IDS.map((id) => `copy:${id}`),
 ]
 

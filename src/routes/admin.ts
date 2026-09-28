@@ -489,7 +489,7 @@ ${topBar('signed in', true)}
         <td>${r.created.slice(0, 16).replace('T', ' ')}</td>
         <td>${r.keyMade ? r.keyMade.slice(0, 16).replace('T', ' ') : '<span class="muted">none</span>'}</td>
         <td>${start ? `${start.n}× <span class="muted">from ${start.first.slice(5, 16).replace('T', ' ')}</span>` : '<span class="muted">not counted</span>'}</td>
-        <td>${vias.length ? esc(vias.join(', ')) + (has('cc_client') ? ' <span class="muted">+ client named</span>' : '') : '<span class="muted">none</span>'}</td>
+        <td>${vias.length ? esc(vias.join(', ')) + (has('cc_client') ? ' <span class="muted">+ client named</span>' : '') + (has('cc_newkey') ? ' <span class="muted">+ key made for the file</span>' : '') : '<span class="muted">none</span>'}</td>
         <td>${copies.length ? esc(copies.join(', ')) : '<span class="muted">none</span>'}</td>
         ${yes(r.keyUsed)}
         ${yes(r.called)}
