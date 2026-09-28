@@ -222,6 +222,39 @@ export const redirectOrigin = (uri: string): string => { try { return new URL(ur
 export const isLoopbackRedirect = (uri: string): boolean => { try { return isLoopbackUrl(new URL(uri)) } catch { return false } }
 
 // ---------------------------------------------------------------------------
+// A name that belongs to someone else
+// ---------------------------------------------------------------------------
+
+// A DCR client chooses its own name, so an app can register as "Claude" and
+// send the code to a host of its own (a report of 2026-09-28 did exactly
+// that). The consent page already shows the host; this is for the person who
+// reads only the name. It warns when the name is a known product's and the
+// redirect is a web host that product does not use. A loopback redirect is
+// left to the loopback warning: Claude Code, Cursor and Codex all use one, and
+// nothing about a local port says whose app is listening on it.
+const KNOWN_APPS: readonly { product: string; name: RegExp; hosts: readonly string[] }[] = [
+  { product: 'Claude', name: /\bclaude\b|\banthropic\b/i, hosts: ['claude.ai', 'claude.com', 'anthropic.com'] },
+  { product: 'ChatGPT', name: /\bchat\s*gpt\b|\bopenai\b|\bcodex\b/i, hosts: ['chatgpt.com', 'openai.com'] },
+  { product: 'Cursor', name: /\bcursor\b/i, hosts: ['cursor.com', 'cursor.sh'] },
+  { product: 'VS Code', name: /\bvs\s*code\b|\bvisual studio code\b|\bcopilot\b/i, hosts: ['vscode.dev', 'github.com', 'visualstudio.com'] },
+]
+
+const hostIsOrUnder = (host: string, base: string) => host === base || host.endsWith(`.${base}`)
+
+/**
+ * The product whose name this app uses without being on its hosts, or null.
+ * Loopback redirects and names that match no product are always null.
+ */
+export function borrowedName(clientName: string | null, redirectUri: string): { product: string; hosts: readonly string[] } | null {
+  if (!clientName || isLoopbackRedirect(redirectUri)) return null
+  let host: string
+  try { host = new URL(redirectUri).hostname.toLowerCase() } catch { return null }
+  const app = KNOWN_APPS.find((a) => a.name.test(clientName))
+  if (!app || app.hosts.some((h) => hostIsOrUnder(host, h))) return null
+  return { product: app.product, hosts: app.hosts }
+}
+
+// ---------------------------------------------------------------------------
 // Scope and resource
 // ---------------------------------------------------------------------------
 

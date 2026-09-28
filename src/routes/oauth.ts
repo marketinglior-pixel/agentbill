@@ -10,7 +10,7 @@ import {
   protectedResourceMetadata, authorizationServerMetadata, registerClient, registerLimiter, tokenLimiter, authorizeLimiter,
   lookupClient, authenticateClient, matchRedirect, parseScope, resourceOk, mcpResource, issuer, createRequest, loadRequest,
   consumeRequest, issueCode, exchangeCode, refreshGrant, revokeToken, redirectHost, redirectOrigin, isLoopbackRedirect,
-  disconnectApp, CHALLENGE_SHAPE, SCOPE_TEXT, scopeList, isCimdId, type PendingRequest, type Client,
+  disconnectApp, CHALLENGE_SHAPE, SCOPE_TEXT, scopeList, isCimdId, borrowedName, type PendingRequest, type Client,
 } from '../lib/mcp-oauth.js'
 
 // The OAuth 2.1 surface for the remote MCP endpoint, 2026-09-25. The rules are
@@ -66,6 +66,8 @@ const CONSENT_CSS = `${SIGNIN_PAGE_CSS}
     .consent .acts-row { display: flex; flex-wrap: wrap; gap: var(--s3); }
     .consent .fine { font-size: var(--fs-micro); color: var(--dim); line-height: 1.6; }
     .consent .fine a { color: var(--text); text-underline-offset: 3px; }
+    .consent .name-warn { display: grid; gap: 6px; }
+    .consent .name-warn b { color: var(--white); font-weight: 600; }
 `
 
 function shell(title: string, h1: string, lede: string, inner: string): string {
@@ -114,8 +116,18 @@ function consentPage(v: Viewer, req: PendingRequest, client: Client): string {
   const published = client.kind === 'cimd' ? redirectHost(client.clientId) : ''
   const token = consentToken(req.id, v)
   const hidden = `<input type="hidden" name="request_id" value="${req.id}" /><input type="hidden" name="csrf" value="${token}" />`
+  // A known product's name on a host that product does not use: said first,
+  // and Deny becomes the primary button.
+  const borrowed = borrowedName(client.clientName, req.redirectUri)
+  const warn = borrowed
+    ? `<div class="cv-err name-warn" role="alert" id="name-warning">
+        <p><b>This may not be ${esc(borrowed.product)}.</b> The app calls itself ${esc(borrowed.product)}, but ${esc(borrowed.product)} connections come back to ${esc(borrowed.hosts[0])}. This one sends you to <b>${esc(host)}</b>.</p>
+        <p>Unless you set up this app yourself, choose Deny.</p>
+      </div>`
+    : ''
   return shell('Connect an app', 'Connect an app to AgentBill?', 'An app is asking to use AgentBill\'s MCP tools on your account.', `
     <div class="consent">
+      ${warn}
       <div class="who">
         <p class="cv-label">The app says it is</p>
         <h2 id="client-name">${esc(name)}</h2>
@@ -146,9 +158,9 @@ ${scopes.map((s) => `          <li><b>${SCOPE_TEXT[s].title}</b>${SCOPE_TEXT[s].
       <p class="fine">Signed in as <b>${esc(v.userEmail ?? '')}</b>. You can disconnect it any time in the console, under API keys.</p>
       <div class="acts-row">
         <form method="POST" action="/app/oauth/authorize">${hidden}<input type="hidden" name="decision" value="approve" />
-          <button class="btn btn-lg" type="submit" id="approve">Allow</button></form>
+          <button class="${borrowed ? 'btn-alt' : 'btn btn-lg'}" type="submit" id="approve">Allow</button></form>
         <form method="POST" action="/app/oauth/authorize">${hidden}<input type="hidden" name="decision" value="deny" />
-          <button class="btn-alt" type="submit" id="deny">Deny</button></form>
+          <button class="${borrowed ? 'btn btn-lg' : 'btn-alt'}" type="submit" id="deny">Deny</button></form>
       </div>
     </div>`)
 }

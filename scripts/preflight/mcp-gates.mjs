@@ -270,6 +270,29 @@ async function gates({ API, sql, ok, bootS, stopS, portS, serverLog, legacyKey, 
        && /id="redirect-host">127\.0\.0\.1:43111</.test(evilHtml) && evilHtml.includes('id="loopback-warning"')
        && csp.includes("form-action 'self' http://127.0.0.1:43111;") && csp.includes("frame-ancestors 'none'") && !/<script(?![^>]*ld\+json)/.test(evilHtml),
      csp)
+  // A known product's name on a host it does not use (the 2026-09-28 report
+  // registered exactly such a client). Warn, and make Deny the primary button;
+  // never warn on the product's own host, on loopback, or on another name.
+  const pageFor = async (name, uri) => {
+    const c = await register({ client_name: name, redirect_uris: [uri], token_endpoint_auth_method: 'none' })
+    return (await get(authorizeUrl(c.body.client_id, pkce(), { redirect_uri: uri }), personA.cookie)).text()
+  }
+  const warned = (h) => h.includes('id="name-warning"')
+  const denyFirst = (h) => /class="btn btn-lg" type="submit" id="deny"/.test(h) && /class="btn-alt" type="submit" id="approve"/.test(h)
+  const fakeClaude = await pageFor('Claude', 'https://evil.example/oauth/cb')
+  const fakeGpt = await pageFor('ChatGPT connector', 'https://chatgpt.evil.example/cb')
+  const realClaude = await pageFor('Claude', 'https://claude.ai/api/mcp/auth_callback')
+  const localCode = await pageFor('Claude Code', 'http://127.0.0.1:43112/callback')
+  const reportName = await pageFor('Test MCP Client', 'https://attacker.example.com/callback')
+  const lookalike = await pageFor('Claudette CRM', 'https://evil.example/cb')
+  ok('[mcp] a client named like Claude or ChatGPT on a host they do not use gets a warning naming both hosts, and Deny becomes the primary button',
+     warned(fakeClaude) && fakeClaude.includes('come back to claude.ai') && fakeClaude.includes('<b>evil.example</b>') && denyFirst(fakeClaude)
+       && warned(fakeGpt) && fakeGpt.includes('<b>chatgpt.evil.example</b>'),
+     JSON.stringify([warned(fakeClaude), denyFirst(fakeClaude), warned(fakeGpt)]))
+  ok('[mcp] no name warning on the product\'s own host, on a loopback redirect, on another name or on a name that only starts like one; Allow stays primary there',
+     !warned(realClaude) && /class="btn btn-lg" type="submit" id="approve"/.test(realClaude)
+       && !warned(localCode) && localCode.includes('id="loopback-warning"') && !warned(reportName) && !warned(lookalike),
+     JSON.stringify([warned(realClaude), warned(localCode), warned(reportName), warned(lookalike)]))
   ok('[mcp] it names what the app can and cannot do, and the page is never cached',
      afterHtml.includes('Ask preflight and record usage') && afterHtml.includes('Read your jobs and refusals') && afterHtml.includes('See, create or revoke your API keys')
        && afterLogin.headers.get('cache-control') === 'no-store')
