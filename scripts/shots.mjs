@@ -329,6 +329,22 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
           if (!b || b.offsetParent === null) return null
           return { vh: window.innerHeight, bottom: Math.round(b.getBoundingClientRect().bottom + window.scrollY) }
         })(),
+        // The phone hero, 2026-09-28. The Meta visitor arrives from the office
+        // video on a phone, so there the hero opens on the office, the pill is
+        // one sentence on at most two lines, and the primary action (the bar
+        // and the hero button) asks for an account, not an API key. The
+        // desktop keeps the headline first and "Get API key".
+        phoneHero: (() => {
+          const of = document.querySelector('.hero .of-hero'), h1 = document.querySelector('.hero h1')
+          const pill = document.querySelector('.hero .pill')
+          if (!of || !h1 || !pill) return null
+          const r = document.createRange(); r.selectNodeContents(pill)
+          const pillLines = new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size
+          const shown = (sel) => [...document.querySelectorAll(sel)].filter((e) => e.offsetParent !== null || getComputedStyle(e).position === 'fixed')
+          const words = (sel) => shown(sel).map((e) => e.innerText.trim()).join(' | ')
+          return { officeFirst: of.getBoundingClientRect().top < h1.getBoundingClientRect().top, pillLines,
+                   hero: words('.hero-cta a.btn-lg'), bar: shown('.sticky-cta').length ? words('.sticky-cta a') : null }
+        })(),
         // The nav, 2026-09-25, when MCP joined it: every destination on one
         // line, the bar at its 60px, and the MCP link reachable at every width
         // (in the bar on a desktop, in the menu on a phone).
@@ -463,6 +479,15 @@ for (const [vp, width, height, isMobile] of VIEWPORTS) {
         if (!m.hero) failures.push(`${vp} ${name}: no .hero-cta a.btn-lg on the homepage, so the hero fold check measured nothing`)
         else if (HERO_ACTION_VISIBLE.has(vp) && m.hero.bottom > m.hero.vh) {
           failures.push(`${vp} ${name}: the hero button's bottom edge is ${m.hero.bottom - m.hero.vh}px BELOW the fold`)
+        }
+        const ph = m.phoneHero, phone = isMobile
+        if (!ph) failures.push(`${vp} ${name}: no .of-hero, h1 or .pill in the hero, so the phone-hero check measured nothing`)
+        else {
+          if (ph.officeFirst !== phone) failures.push(`${vp} ${name}: the office is ${ph.officeFirst ? 'above' : 'below'} the headline; it belongs ${phone ? 'above it on a phone' : 'below it on a desktop'}`)
+          if (phone && ph.pillLines > 2) failures.push(`${vp} ${name}: the hero pill runs to ${ph.pillLines} lines`)
+          const want = phone ? 'Start free' : 'Get API key'
+          if (!ph.hero.startsWith(want)) failures.push(`${vp} ${name}: the hero button says "${ph.hero}", not "${want} →"`)
+          if (phone && !(ph.bar ?? '').startsWith('Start free')) failures.push(`${vp} ${name}: the phone bar says "${ph.bar}", not "Start free →"`)
         }
       }
       if (m.nav) {

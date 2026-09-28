@@ -105,6 +105,13 @@ function logFrame(): string {
     </figure>`
 }
 
+// The phone's primary action, 2026-09-28. "Get API key" asks someone in an
+// Instagram feed for a desk; this asks for an account, which Google, GitHub
+// or an email link make on the phone, and the code is connected later from a
+// laptop. It still goes to /register. Not "send me the setup link": the
+// email link lasts 15 minutes, so it cannot wait for the laptop.
+const PHONE_CTA = 'Start free &rarr;'
+
 /**
  * The hero's office (2026-09-26, Lior: "the office view, big, in the hero").
  * The console's own office engine (/app/office.js, src/ui/office-engine.ts)
@@ -437,6 +444,7 @@ export async function homeRoute(app: FastifyInstance) {
     #estimate .sec-head .lead { max-width: 48rem; }
     .pg-lede { max-width: 51rem; }
     .ph { display: none; }
+    .lb-phone { display: none; }
 
     /* Your code, under the demo's wire. */
     .code-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-inner); min-width: 0; }
@@ -464,8 +472,18 @@ export async function homeRoute(app: FastifyInstance) {
       .sec-head .lead, .pg-lede { margin-inline: 0; }
       .chips { justify-content: flex-start; gap: 8px; }
       .chips li { padding: 9px 15px; font-size: var(--fs-small); }
-      .pill { padding: 7px 13px; gap: .28em; }
+      /* One sentence on a phone, 2026-09-28. As inline-flex the tag and the
+         text were two flex items, and at 390 each wrapped in its own column. */
+      .pill { display: block; align-self: center; max-width: 100%; padding: 7px 16px; text-align: center; text-wrap: balance; }
       .pill-tag { font: inherit; letter-spacing: normal; text-transform: none; background: none; border: 0; padding: 0; }
+      /* The phone visitor comes from the office video in an Instagram feed, so
+         the phone hero opens on that office (2026-09-28: 113 visits from the
+         campaign, none touched the page). Desktop keeps its order. */
+      .hero { display: flex; flex-direction: column; }
+      .hero .of-hero { order: -1; margin-top: 0; margin-bottom: 20px; }
+      .lb-wide { display: none; }
+      .lb-phone { display: inline; }
+      .hero .trust { text-wrap: balance; }
       /* The hero frame as the phone frame draws it (5:22): the meter first, the
          last two approved calls and the refused one, and the line under them. */
       .fr-body { display: flex; flex-direction: column; }
@@ -520,21 +538,21 @@ export async function homeRoute(app: FastifyInstance) {
 `,
     })}
 <body>
-${siteNav('/')}
+${siteNav('/', { stickyLabel: PHONE_CTA })}
 <main>
 
   <header class="hero wrap">
-    <p class="pill"><span class="pill-tag">For agencies and builders</span>who run agents for clients</p>
+    <p class="pill"><span class="pill-tag">For agencies and builders</span> who run agents for clients</p>
     <h1>${HEADLINE}</h1>
     <p class="sub">Per agent, per client, per job, in dollars at list price, with a monthly
     report you can bill from. Give any job a ceiling, and the call that would cross it gets
     <span class="mono-in nb">approved: false</span> before it runs. <span class="nb">Your code</span>
     decides whether to <span class="nb">stop, skip, or replan.</span></p>
     <div class="hero-cta">
-      <a class="btn btn-lg" href="/register">${KEY_CTA}</a>
+      <a class="btn btn-lg" href="/register"><span class="lb-wide">${KEY_CTA}</span><span class="lb-phone">${PHONE_CTA}</span></a>
       <a class="btn-alt" href="#estimate">Estimate a run</a>
     </div>
-    <p class="trust">Start free &middot; ${num(PLAN_LIMITS.free)} preflight calls/mo, no card</p>
+    <p class="trust"><span class="lb-wide">Start free &middot; ${num(PLAN_LIMITS.free)} preflight calls/mo, no card</span><span class="lb-phone">Free, no card. Sign up here, connect your code later from your laptop.</span></p>
     ${officeFrame()}
     ${logFrame()}
   </header>
