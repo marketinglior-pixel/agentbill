@@ -26,23 +26,31 @@
  * the reader's, so neither needs a builder.
  */
 
-/** The three ways in, in the order the screen offers them. */
-export const VIAS = ['mcp', 'python', 'node'] as const
+/**
+ * The ways in, in the order the screen offers them. Claude Code first since
+ * 2026-09-28: an agency that builds in Claude Code has no code of its own for
+ * wrap(), and its own telemetry, received at /otel, needs none. MCP last: it
+ * lets an assistant read and record, and meters nothing on its own.
+ */
+export const VIAS = ['claude-code', 'python', 'node', 'mcp'] as const
 export type Via = (typeof VIAS)[number]
 export const asVia = (v: unknown): Via | null => (VIAS as readonly unknown[]).includes(v) ? v as Via : null
 
-/** The question, and the promise every answer keeps. */
-export const CONNECT_Q = 'How will you connect?'
+/** The question, and the promise every answer keeps. It asks what the reader
+ *  builds with, not how to connect: the answer picks the path (2026-09-28). */
+export const CONNECT_Q = 'What do you build your agents with?'
 export const CONNECT_LEDE =
   'Pick one. Each path is a few lines and ends on your first recorded call, with its tokens, its model and what it cost at list price.'
 
 /** The three choices, as the cards read. */
 export const VIA_TITLE: Record<Via, string> = {
+  'claude-code': 'Claude Code',
   mcp: 'Claude, Cursor, Codex or another MCP client',
   python: 'Python',
   node: 'Node',
 }
 export const VIA_SUB: Record<Via, string> = {
+  'claude-code': 'Two small files in a client\'s project. Every request it makes is priced, under that client. No code.',
   mcp: 'Ask about your jobs and spend from the assistant you already use.',
   python: 'Wrap your OpenAI or Anthropic client once. Every call is metered.',
   node: 'The same, with the agentbill package from npm.',
@@ -120,3 +128,20 @@ export const ANTHROPIC_LINE =
 
 /** Where the path ends when nothing has arrived yet. */
 export const WAITING_LINE = 'Nothing recorded yet. Run it, then reload this page: your first call appears here.'
+
+// ---------------------------------------------------------------- Claude Code
+
+/** The client name the Claude Code path shows until the reader types one. */
+export const CC_CLIENT_DEFAULT = 'my-first-client'
+
+/** Step 1, before the name and the settings file. */
+export const CC_STEP1 =
+  'Which client is this project for? Every request Claude Code makes in it is filed under that name.'
+
+/** Step 2: where the key goes, and why there. */
+export const CC_STEP2 =
+  'Your key goes beside it, in <code>.claude/settings.local.json</code>, the file that stays out of git: if the project\'s <code>.gitignore</code> does not list it yet, add it. The screen you made the key on showed this file with your key already in it; lost the key? <a href="/recover">/recover</a> gives you a new one.'
+
+/** Step 3: what to do, and what the figure is. */
+export const CC_STEP3 =
+  'Open Claude Code in that project and ask it anything. A few seconds after it answers, the request appears below with its model, its tokens and its price at list. On a Pro or Max plan that figure is what the work would cost at list price, not your bill.'

@@ -124,7 +124,10 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
     const dy = b.filter(x => x.kind === 'dynamic').length;
     process.stdout.write(py + ':' + nd + ':' + sh + ':' + dy + ':' + b.length);
   });")
-gate "app.ts: one python, one node, one shell literal, one dynamic pre, no phantom" "1:1:1:1:4" "$n"
+# Since 2026-09-28 the Claude Code path adds two: its settings file, built with
+# the reader's client name (so "dynamic"; the [start] gates parse it as JSON),
+# and the key file, a JSON literal with a placeholder.
+gate "app.ts: one python, one node, one shell literal, two dynamic pres, no phantom" "1:1:1:2:6" "$n"
 
 # The start screen's prose says what one run does: job first-call, a ceiling of
 # 20,000 tokens, wrap(). The two samples are literals (the harvester executes

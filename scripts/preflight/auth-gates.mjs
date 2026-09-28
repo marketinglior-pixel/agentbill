@@ -184,6 +184,12 @@ async function gates({ API, sql, ok, fakeBase, outbox, serverLog, bootS, stopS, 
   ok('[auth] the start screen makes the first key once: a 200 page that shows it (no-store), and a second press makes none',
      fk1.status === 200 && !!fkKey && fk1.headers.get('cache-control') === 'no-store' && fk1Html.includes(`export AGENTBILL_API_KEY=${fkKey}`)
        && fk2.status === 303 && fk2.headers.get('location') === '/app?view=keys' && await liveKeys(g1Acct.id) === 1, `${fk1.status} ${fk2.status}`)
+  // 2026-09-28: the same page gives a Claude Code builder the key file, with the key in it.
+  const ccLocal = (fk1Html.match(/<code id="key-claude-code">([^<]*)<\/code>/) ?? [])[1] ?? ''
+  let ccParsed = null
+  try { ccParsed = JSON.parse(ccLocal.replace(/&quot;/g, '"').replace(/&amp;/g, '&')) } catch {}
+  ok('[auth] the key page also gives .claude/settings.local.json for Claude Code, as valid JSON carrying exactly that key',
+     !!fkKey && JSON.stringify(ccParsed) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${fkKey}` } }), ccLocal.slice(0, 120) || 'no key file')
   // 2026-09-27: a signed-in person on this page was offered "Log in" and "Get API key".
   const fkNav = (fk1Html.match(/<nav class="site-nav"[\s\S]*?<\/nav>/) ?? [''])[0]
   ok('[auth] the key page\'s nav names the console to the signed-in person: no Log in, no sign-up button, no sticky sign-up bar',

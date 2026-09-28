@@ -16,7 +16,9 @@ import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type 
 import {
   VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
   INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, NEEDS_LINE, CURL_LEAD, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
+  CC_CLIENT_DEFAULT, CC_STEP1, CC_STEP2, CC_STEP3,
 } from '../ui/steps.js'
+import { OTEL_BASE, otelLabel } from './otel.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
 import { loadDashboard, demoDashboard, DASH_RANGES, type Dash, type DashRange } from '../lib/dashboard.js'
 import { dashboardGrid, dashRangeControl, DASH_CSS } from '../ui/dashboard.js'
@@ -199,6 +201,9 @@ export async function appRoute(app: FastifyInstance) {
     const appMsg = q?.app === 'disconnected' || q?.app === 'gone' ? q.app : null
     const keysMsg = q?.keys === 'revoked_all' || q?.keys === 'revoke_refused' || q?.keys === 'confirm' ? q.keys : null
     const via = asVia(q?.via)
+    // The Claude Code path's client name, off ?client=, only in the shape the
+    // /otel endpoint keeps as a label; anything else falls back to the default.
+    const ccClient = via === 'claude-code' ? otelLabel(q?.client) : null
     // The overview's cards. Only the overview draws them, so only it pays.
     const dash = view !== 'overview' ? null : demo ? demoDashboard(range as DashRange) : await loadDashboard(viewer.accountId, range as DashRange)
     const agents = view !== 'agents' ? null : demo ? demoAgentRows(range as DashRange) : await agentRows(viewer.accountId, range as DashRange)
@@ -216,7 +221,7 @@ export async function appRoute(app: FastifyInstance) {
     // Node and curl samples too), the one script this page can run, under its
     // own hash and only where the control is drawn.
     if (via && !demo) reply.header('Content-Security-Policy', APP_CSP.replace("default-src 'none'", `default-src 'none'; script-src ${COPY_HASH}`))
-    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, dash, agents, report, office, shares, shareMsg, setup,
+    return reply.send(consolePage({ v: viewer, d: data, demo, anon: false, range, view, filter, sort, apps, appMsg, keysMsg, via, ccClient, dash, agents, report, office, shares, shareMsg, setup,
                                     flash: demo ? null : await verifyFlash(viewer.accountId, flash), suggest, link, providers }))
   })
 
@@ -2081,7 +2086,12 @@ ${SIGNIN_CSS}
   .start > .ask { margin: var(--s2) var(--s2) 0; display: grid; gap: var(--s2); }
   .start > .ask .intro { color: var(--text); font-size: var(--fs-h3); font-weight: 500; line-height: 1.3; margin: 0; }
   .start > .ask p { color: var(--muted); max-width: 64ch; }
-  .vias { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+  .vias { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
+  /* The Claude Code path's client name: a plain GET form, so the page stays script-free. */
+  .ccname { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin: var(--s3) 0; }
+  .ccname label { font-weight: 500; }
+  .ccname input[name="client"] { height: var(--h-md); min-width: 0; flex: 1 1 220px; max-width: 320px; padding: 0 var(--s3);
+                                 border: 1px solid var(--field-line); border-radius: var(--r-field); background: var(--field-bg); font: inherit; }
   .via { display: grid; gap: var(--s1); align-content: start; background: var(--card-bg); border: 1px solid var(--card-line);
          border-radius: var(--r-inner); padding: var(--s4); color: var(--text); text-decoration: none; min-height: var(--h-lg); }
   .via b { font-weight: 500; }
@@ -2476,6 +2486,8 @@ ${siteNav('/app', { sticky: false, signedIn: true })}
     ${copyPlate('key-display', esc(apiKey))}
     <p>Nothing in the console needs it pasted in: your code sends it, with every call. In Python or Node that means <code>AGENTBILL_API_KEY</code>, and this line sets it in the terminal your code runs in.</p>
     ${copyPlate('key-export', `export AGENTBILL_API_KEY=${esc(apiKey)}`)}
+    <p>Building in Claude Code? This is the whole of <code>.claude/settings.local.json</code> in a client's project, with the key in it. The start screen has the other file.</p>
+    ${copyPlate('key-claude-code', esc(ccLocalSettings(apiKey)))}
     <p class="fine">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p>
     <a class="btn btn-lg go" href="/app?view=start">Continue to the start screen &rarr;</a>
     </div></div>
@@ -2501,8 +2513,10 @@ type Page = { v: Viewer; d: Console; demo: boolean; anon: boolean; range: string
   appMsg?: 'disconnected' | 'gone' | null
   /** A Revoke all's outcome, a code from a closed set. */
   keysMsg?: 'revoked_all' | 'revoke_refused' | 'confirm' | null
-  /** The start screen's answer to "how will you connect?", off ?via=. */
+  /** The start screen's answer to "what do you build with?", off ?via=. */
   via?: Via | null
+  /** The Claude Code path's client name, off ?client=, already a valid label. */
+  ccClient?: string | null
   /** The overview's dashboard (src/lib/dashboard.ts), for its window. */
   dash?: Dash | null
   /** The agents view's rows (src/lib/report.ts), for its window. */
@@ -3536,6 +3550,36 @@ function firstCallBlock(p: Page): string {
   return `<p id="first-call">${WAITING_LINE}</p>`
 }
 
+/**
+ * The Claude Code path's two files (2026-09-28), in the shape the /otel
+ * endpoint (src/routes/otel.ts) reads and a real Claude Code run merged: the
+ * committed file turns the telemetry on and names the client, the local one
+ * carries the key. settings.json is built with the reader's client name; the
+ * local file on this screen is a literal with a placeholder, because the
+ * console never shows a key (the key screen shows it filled in, once).
+ */
+function ccSettings(client: string): string {
+  return JSON.stringify({ env: {
+    CLAUDE_CODE_ENABLE_TELEMETRY: '1',
+    OTEL_LOGS_EXPORTER: 'otlp',
+    OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
+    OTEL_EXPORTER_OTLP_ENDPOINT: `${ORIGIN}${OTEL_BASE}`,
+    OTEL_RESOURCE_ATTRIBUTES: `client=${client}`,
+  } }, null, 2)
+}
+
+function ccLocalSettings(apiKey: string): string {
+  return JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${apiKey}` } })
+}
+
+function ccLocalSample(): string {
+  return `<pre class="snip">{
+  "env": {
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key"
+  }
+}</pre>`
+}
+
 function startScreen(p: Page): string {
   const f = p.flash
   const said = !f ? ''
@@ -3567,6 +3611,23 @@ function startScreen(p: Page): string {
         <div class="does"><div>${label('What it does')}<p>${MCP_DOES}</p></div><div>${label('What it does not')}<p>${MCP_DOES_NOT}</p></div></div>
         <p class="fine">The prompt records a test call, with the token counts you gave it, so you can see one priced record land here. It is not a measurement of anything, and it is recorded under step <code>test</code>.</p>`),
       last(3),
+    ].join('\n      ')
+  } else if (via === 'claude-code') {
+    const client = p.ccClient ?? CC_CLIENT_DEFAULT
+    path = [
+      step(1, `<p>${CC_STEP1}</p>
+        <form class="ccname" method="GET" action="/app">
+          <input type="hidden" name="view" value="start"><input type="hidden" name="via" value="claude-code">
+          <label for="cc-client">Client name</label>
+          <input id="cc-client" name="client" value="${esc(client)}" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\\-]{0,63}" required>
+          <button class="btn-alt" type="submit">Use this name</button>
+        </form>
+        <p class="fine">Letters, digits, dots, dashes and underscores, no spaces. Then, in that project's folder, <code>.claude/settings.json</code>, which you can commit with the project:</p>
+        ${copyBlock('cc-settings', `<pre class="snip">${esc(ccSettings(client))}</pre>`, 'the settings file')}`),
+      step(2, `<p>${CC_STEP2}</p>
+        ${copyBlock('cc-local', ccLocalSample(), 'the key file')}`),
+      step(3, `<p>${CC_STEP3} <a href="/integrations/claude-code">What is recorded, and what is not</a>.</p>`),
+      last(4),
     ].join('\n      ')
   } else if (via === 'python') {
     path = [
@@ -3806,7 +3867,7 @@ function monthLabel(m: string): string {
 /** Where each step is done, and the one thing to do there. Inline code only:
  *  a <pre> here would be picked up by the snippet harness as a sample to run. */
 const SETUP_HELP: Record<SetupKey, string> = {
-  connect: 'Pick how you connect below: an MCP client, Python or Node. Connecting with Claude, Cursor or Codex needs no key; the SDKs need one, made on this screen.',
+  connect: 'Pick what you build your agents with, below: Claude Code, Python, Node or an MCP client. Claude Code and the SDKs need a key, made on this screen; connecting Claude, Cursor or Codex over MCP needs none.',
   first_call: 'Make one model call through AgentBill. It is done when a call lands with a model, its tokens and a list-price estimate.',
   customers: 'Pass a <code>customer_id</code> on each call and every customer gets its own line here and its own monthly report. Python: <code>wrap(client, customer_id="acme")</code>. Node: <code>wrap(client, { customerId: \'acme\' })</code>. MCP: ask your assistant to record the call with <code>customer_id</code> set. Done when a call with a customer other than <code>default</code> is recorded.',
   ceiling: 'Give one job a ceiling in dollars with the form below: a <code>task_ref</code> such as <code>first-ceiling</code>, In dollars, 1. Or from code: <code>wrap(client, task_ref="first-ceiling", task_ceiling_usd=1)</code>. Done when a job has a ceiling.',

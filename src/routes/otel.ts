@@ -67,8 +67,9 @@ const attrs = (list: unknown): Map<string, string | number | boolean> => {
 const count = (v: unknown): number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0
 
-/** A label from OTEL_RESOURCE_ATTRIBUTES, or null when it is not one we keep. */
-const label = (v: unknown): string | null => {
+/** A label from OTEL_RESOURCE_ATTRIBUTES, or null when it is not one we keep.
+ *  Exported for the start screen, which builds the settings file with one. */
+export const otelLabel = (v: unknown): string | null => {
   if (typeof v !== 'string') return null
   const s = v.trim()
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(s) && isId(s) ? s : null
@@ -147,9 +148,9 @@ export async function otelRoute(app: FastifyInstance) {
           const cost = typeof a.get('cost_usd') === 'number' ? Number(a.get('cost_usd')) : null
           const tokens = claudeCodeTokens(model, t, cost)
           const total = t.input + t.output + t.cacheRead + t.cacheCreation
-          const client = label(resource.get('client') ?? a.get('client'))
-          const agent = label(resource.get('agent') ?? a.get('agent'))
-          const step = label(a.get('query_source'))
+          const client = otelLabel(resource.get('client') ?? a.get('client'))
+          const agent = otelLabel(resource.get('agent') ?? a.get('agent'))
+          const step = otelLabel(a.get('query_source'))
           const duration = count(a.get('duration_ms'))
 
           const r = await runRecord(request.accountId, {
