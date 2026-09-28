@@ -4895,9 +4895,18 @@ const docsSX = await fetch(`${API}/docs`).then((r) => r.text())
 ok('[secfix S23] /security is a public page, in the sitemap, linked from the footer and from /docs',
    secPage.status === 200 && sitemapSX.includes('<loc>https://agentbill.dev/security</loc>') && /<footer[\s\S]*href="\/security"[\s\S]*<\/footer>/.test(homeS)
      && /<main[\s\S]*href="\/security"[\s\S]*<\/main>/.test(docsSX), `${secPage.status}`)
-ok('[secfix S23] /security says how to report and how to revoke, and claims no key hashing',
-   secText.includes('hello@agentbill.dev') && secText.includes('/keys/revoke') && !/\bhash(ed|es)? (API )?keys\b|keys are (stored )?hashed/i.test(secText) && /plain text/i.test(secText),
-   secText.slice(0, 160))
+// 2026-09-28, the day 027 ran on production: the key sentence follows the
+// database, as /privacy's does. Before 027 the page says plain text and claims
+// no hashing; after it, "stored only as a hash" and the backups caveat, and no
+// "plain text". Which one is read from the scrub trigger, so each pass of
+// run.sh checks the sentence its own schema makes true.
+const [secPT] = await sql`SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'developer_api_keys_scrub_plaintext' AND NOT tgisinternal) AS scrubbed`
+ok(`[secfix S23] /security says how to report and how to revoke, and its key sentence matches the database (027 ${secPT.scrubbed ? 'applied: hash only' : 'not applied: plain text'})`,
+   secText.includes('hello@agentbill.dev') && secText.includes('/keys/revoke')
+     && (secPT.scrubbed
+       ? /Keys are stored only as a hash/.test(secText) && /backups made before 28 September 2026/.test(secText) && !/plain text/i.test(secText)
+       : /plain text/i.test(secText) && !/\bhash(ed|es)? (API )?keys\b|keys are (stored )?hashed|Keys are stored only as a hash/i.test(secText)),
+   (secText.match(/A key is shown once[^.]*\.[^.]*\./) ?? [secText.slice(0, 160)])[0])
 ok('[secfix S23] and none of its copy says stop, block or kill, or carries an em dash',
    !/\b(stops|blocks|kills)\b/i.test(secText) && !secHtml.includes('\u2014'))
 ok('[secfix S24] the runtime image runs as the node user', /^USER node$/m.test(readS(`${ROOT_S}Dockerfile`, 'utf8')))

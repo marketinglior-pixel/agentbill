@@ -1,5 +1,10 @@
 -- 027: the plaintext API key leaves the database (security batch B, S3).
 --
+-- APPLIED ON PRODUCTION 2026-09-28 (Lior's go for this file): 54 rows, 0 left
+-- in plain text, scrub trigger 1, fill trigger 0, then VACUUM (FULL, ANALYZE)
+-- (55 dead tuples to 0). It stays in migrations-later so run.sh keeps its two
+-- passes: the default one is still the schema a rollback to 026 would meet.
+--
 -- ============================================================================
 -- NOT PART OF THE CHAIN. DO NOT APPLY WITH 026. NEEDS LIOR'S SEPARATE GO.
 -- ============================================================================
