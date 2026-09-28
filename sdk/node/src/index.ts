@@ -340,7 +340,7 @@ export interface PreflightResult {
   upgradeUrl?: string
   /** On a job in dollars: 'usd', and estimatedUnits / taskRemainingUnits are
    *  micro-dollars; these are the same figures in dollars, and whose estimate
-   *  was reserved ('caller', 'job_median' or 'default'). */
+   *  was reserved ('caller', 'job_median', 'job_max' near the ceiling, or 'default'). */
   taskUnit?: string
   estimatedUsd?: number
   taskRemainingUsd?: number

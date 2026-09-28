@@ -56,8 +56,9 @@ class PreflightResult:
     # A job whose ceiling is in dollars (server 2026-09-25): task_unit is "usd",
     # estimated_units and task_remaining_units are micro-dollars (1,000,000 is
     # $1), and these are the same figures in dollars, as list-price estimates.
-    # estimate_source says whose estimate was reserved: "caller", "job_median"
-    # or "default". None on a job in units or tokens.
+    # estimate_source says whose estimate was reserved: "caller", "job_median",
+    # "job_max" (the job's largest recent call, once it is at 80% of its
+    # ceiling) or "default". None on a job in units or tokens.
     task_unit: Optional[str] = None
     estimated_usd: Optional[float] = None
     task_remaining_usd: Optional[float] = None
