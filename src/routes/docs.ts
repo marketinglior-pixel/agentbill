@@ -10,6 +10,10 @@ import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { CONSOLE_AGENT } from '../lib/task-ceiling.js'
 import { N8N_MAPPING } from '../ui/steps.js'
 
+/** What the docs cover, in the order / names it: the page's description, share card and JSON-LD. */
+const DOCS_LEAD =
+  'Every model call in dollars at list price, per agent, per client and per job, and a ceiling any job can carry. Python and Node SDKs, Claude Code, n8n or any HTTP tool, and MCP.'
+
 // /docs carried no page-level structured data at all, while every guide under
 // it emitted a TechArticle. It is the second-highest priority page in the
 // registry and the one an answer engine reads to learn the integration, so the
@@ -27,7 +31,7 @@ const docsArticleLd = {
   '@id': `${ORIGIN}/docs#techarticle`,
   headline: 'AgentBill documentation',
   description:
-    'Add a per-task spend ceiling to an AI agent: preflight before the call, record after, on units you define. Python and Node SDKs.',
+    DOCS_LEAD,
   url: `${ORIGIN}/docs`,
   dateModified: docsMeta?.updated,
   inLanguage: 'en-US',
@@ -90,12 +94,14 @@ const quickStartLd = {
 export async function docsRoute(app: FastifyInstance) {
   app.get('/docs', publicRoute(), async (request, reply) => {
     return reply.type('text/html').send(docsShell({
-      title: 'AgentBill Docs · Preflight Billing for AI Agents',
-      description: 'AgentBill documentation. Add a per-task spend ceiling to your AI agent: preflight before the call, record after, on units you define. Python and Node SDKs.',
+      title: 'AgentBill Docs · Every model call priced, per client and per job',
+      // The share preview carried the retired preflight-billing line until 2026-09-30, when a
+      // tester was sent a docs link; it now leads with what / leads with.
+      description: `AgentBill documentation. ${DOCS_LEAD}`,
       path: '/docs',
       // This page used to carry og and twitter tags and no og:image at all, so
       // every share of the docs was a card with no art.
-      og: { description: 'Add a per-task spend ceiling to your AI agent. Preflight before the call, record after. Python and Node SDKs.' },
+      og: { description: DOCS_LEAD },
       jsonLd: [docsArticleLd, quickStartLd, softwareLd(), ...sourceLd()],
       mainEntity: `${ORIGIN}/docs#techarticle`,
       // The body's canvas pieces (the plate for the run's printed output and
