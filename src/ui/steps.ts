@@ -130,6 +130,20 @@ export const WHAT_RUNS =
 export const ANTHROPIC_LINE =
   'Anthropic works the same way: wrap an Anthropic client and call <code>messages.create</code>. So does a Google Gen AI client.'
 
+/** The n8n values that replace the sample ones in the events body. Every expression was run in n8n
+ *  2.41.3 against a stub OpenAI that answered 111 and 22 tokens (O-output 6-n8n-real-usage-test.md):
+ *  the OpenAI node with Simplify Output off passed 111 and 22 on; Basic LLM Chain passed only its text,
+ *  and a node after it could not read the chat model under it. */
+export const N8N_MAPPING = [
+  '<b>Header:</b> in the HTTP Request node, Authentication: Generic Credential Type, then Header Auth, with Name <code>Authorization</code> and Value <code>Bearer</code>, a space and your key.',
+  '<b>One event per model call.</b> A run that calls the model three times sends three, each with its own idempotency_key. <code>{{ $execution.id }}-writer-{{ $runIndex }}</code> is unique to each run and each pass of a loop; use a different word in place of writer for each call.',
+  '<b>reservation_id</b> from the preflight answer: <code>{{ $(\'Preflight\').item.json.reservation_id }}</code> when that node is named Preflight.',
+  '<b>Model and tokens from the OpenAI node</b> (Message a model): turn its Simplify Output off, then use <code>{{ $json.model }}</code>, <code>{{ $json.usage.input_tokens }}</code> and <code>{{ $json.usage.output_tokens }}</code> in the node right after it, or <code>$(\'Message a model\').item.json</code> in place of <code>$json</code> further on. With Simplify Output on, the usage is not in its output.',
+  '<b>An HTTP Request straight to OpenAI</b> returns <code>usage.prompt_tokens</code> and <code>usage.completion_tokens</code>; one to Anthropic returns <code>usage.input_tokens</code> and <code>usage.output_tokens</code>.',
+  '<b>The Basic LLM Chain node</b> passes on only its text, and a node after it cannot read the chat model under it, so there are no tokens to map. For a chain with no memory and no tools, the OpenAI node does the same job and passes them on.',
+  '<b>When the model call fails:</b> set that node\'s On Error to Continue (using error output) and send the same body from the error branch with <code>"success": false</code> and the reservation_id. That releases the hold and bills nothing.',
+] as const
+
 /** Where the path ends when nothing has arrived yet. */
 export const WAITING_LINE = 'Nothing recorded yet. Run it, then reload this page: your first call appears here.'
 

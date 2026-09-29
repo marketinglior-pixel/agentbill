@@ -8,6 +8,7 @@ import { CONTENT_CSS } from '../ui/content.js'
 import { HISTORY_JOBS, HISTORY_AGENTS } from '../lib/ceiling-suggest.js'
 import { RESERVATION_TTL_MINUTES } from '../lib/reservations.js'
 import { CONSOLE_AGENT } from '../lib/task-ceiling.js'
+import { N8N_MAPPING } from '../ui/steps.js'
 
 // /docs carried no page-level structured data at all, while every guide under
 // it emitted a TechArticle. It is the second-highest priority page in the
@@ -614,6 +615,12 @@ curl -X POST https://agentbill.dev/events \\
        "metadata": {"provider": "openai", "model": "gpt-4o-mini",
                     "tokens": {"input": 1200, "output": 300}}}'</pre>
   <p>A body that misses one of them is a 422 that names every missing field.</p>
+
+  <h4 id="n8n-values">In n8n: the real model and tokens</h4>
+  <p>The values in the body above are samples. These replace them:</p>
+  <ul>
+    ${N8N_MAPPING.map((l) => `<li>${l.replace(/<code>/g, '<span class="inline">').replace(/<\/code>/g, '</span>')}</li>`).join('\n    ')}
+  </ul>
 
   <h3 id="put-task-ceiling">PUT /tasks/:task_ref/ceiling</h3>
   <p>Opens a job with a ceiling, or changes the ceiling of one that exists. The same write the
