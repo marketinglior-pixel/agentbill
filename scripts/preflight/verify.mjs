@@ -1768,7 +1768,11 @@ ok('[fold] the concept is read before the name preflight, in the hero and not in
 // carried is a period here: voice-dna bans the character on every surface and
 // hygiene greps for the literal, so the entity form is asserted on the hero
 // too, since &mdash; renders the same dash and no grep in this repo sees it.
-const LOCKED_SUB8 = 'Per agent, per client, per job, in dollars at list price, with a monthly report you can bill from. Give any job a ceiling, and the call that would cross it gets approved: false before it runs. Your code decides whether to stop, skip, or replan.'
+// 2026-09-29, the claims audit (O-output/2026-09-29-paid-pilot/1-claims-audit.md):
+// the dollars are an estimate at list price, not the provider's invoice, and a
+// ceiling is checked against the estimate each call sends, so the sentence now
+// says both.
+const LOCKED_SUB8 = 'Per agent, per client, per job, estimated in dollars at list price, with a monthly report to price and bill from. Give any job a ceiling, and a call whose estimate would cross it gets approved: false before it runs. Your code decides whether to stop, skip, or replan.'
 const subHtml8 = (hero8.match(/<p class="sub">([\s\S]*?)<\/p>/) ?? [])[1] ?? ''
 const subText8 = subHtml8.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 // 2026-09-23: the month/job contrast left the h1 with the redesign and lives in
