@@ -32,7 +32,9 @@
  * wrap(), and its own telemetry, received at /otel, needs none. MCP last: it
  * lets an assistant read and record, and meters nothing on its own.
  */
-export const VIAS = ['claude-code', 'python', 'node', 'mcp'] as const
+// 2026-09-29: 'http' second. The first paid tester builds in n8n, found no
+// path for it, built both requests by hand and never got a call recorded.
+export const VIAS = ['claude-code', 'http', 'python', 'node', 'mcp'] as const
 export type Via = (typeof VIAS)[number]
 export const asVia = (v: unknown): Via | null => (VIAS as readonly unknown[]).includes(v) ? v as Via : null
 
@@ -45,12 +47,14 @@ export const CONNECT_LEDE =
 /** The three choices, as the cards read. */
 export const VIA_TITLE: Record<Via, string> = {
   'claude-code': 'Claude Code',
+  http: 'n8n, Make or any HTTP tool',
   mcp: 'Claude, Cursor, Codex or another MCP client',
   python: 'Python',
   node: 'Node',
 }
 export const VIA_SUB: Record<Via, string> = {
   'claude-code': 'Two small files in a client\'s project. Every request it makes is priced, under that client. No code.',
+  http: 'Two HTTP requests around your model call, copied from here. Every call is priced, under your client. No code.',
   mcp: 'Ask about your jobs and spend from the assistant you already use.',
   python: 'Wrap your OpenAI or Anthropic client once. Every call is metered.',
   node: 'The same, with the agentbill package from npm.',

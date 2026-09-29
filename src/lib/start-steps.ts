@@ -14,7 +14,7 @@ import { VIAS } from '../ui/steps.js'
 /** The ids of the copy controls on the start screen and the key screen. */
 export const COPY_IDS = [
   'sample-python', 'sample-node', 'sample-curl', 'mcp-prompt', 'cc-settings', 'cc-local',
-  'key-display', 'key-export', 'key-claude-code',
+  'key-display', 'key-export', 'key-claude-code', 'http-preflight', 'http-events',
 ] as const
 
 export const START_STEPS: readonly string[] = [

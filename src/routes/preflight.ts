@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { noteRejection, rejectionReason } from '../lib/preflight-rejections.js'
 import { z } from 'zod'
+import { describeIssues } from '../lib/validation-message.js'
 import { sql } from '../db/index.js'
 import { zId, zIdOrBlank, INT4_MAX } from '../lib/ids.js'
 import { reportUsage, PLAN_LIMITS, UPGRADE_URL } from '../integrations/polar.js'
@@ -83,7 +84,8 @@ export async function runPreflight(accountId: string, input: unknown, log: Fasti
 async function decidePreflight(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<ServiceResult> {
     const parse = PreflightBody.safeParse(input)
     if (!parse.success) {
-      return { status: 422, body: { error: 'validation_error', details: parse.error.issues } }
+      const { message, fields } = describeIssues(parse.error.issues)
+      return { status: 422, body: { error: 'validation_error', message, fields, details: parse.error.issues } }
     }
 
     const {

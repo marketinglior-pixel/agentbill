@@ -513,6 +513,12 @@ if (isRefusal(stream)) {
 
   <h2>API Reference</h2>
 
+  <p><strong>Base URL:</strong> <span class="inline">https://agentbill.dev</span>. Every request carries
+  the header <span class="inline">Authorization: Bearer &lt;your key&gt;</span>. The tables below are the
+  SDKs' parameters; <span class="inline">preflight()</span> is <span class="inline">POST /preflight</span>
+  with the same body, and <span class="inline">record()</span> is <span class="inline">POST /events</span>,
+  whose raw body has three names of its own: see <a href="#post-events">POST /events</a>.</p>
+
   <h3>preflight()</h3>
   <table>
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
@@ -588,6 +594,26 @@ if (isRefusal(stream)) {
     <tr><td>metadata</td><td>object <span class="tag">optional</span></td><td>Stored on the event, never counted. At most 8 KB as JSON and 32 keys; more is a 422. provider, model and tokens in the shape <a href="#wrap">wrap()</a> writes are priced at list price for the job's <a href="#wrap-breakdown">breakdown</a>.</td></tr>
     <tr><td>usage_missing</td><td>bool <span class="tag">optional</span></td><td>The provider reported no usage. Not read as 0: the call is charged at least the reservation it settles, and counted in usage_missing_calls.</td></tr>
   </table>
+
+  <h3 id="post-events">POST /events, the raw request</h3>
+  <p>For n8n, Make, curl or anything else that is not the SDK. <span class="inline">record()</span> fills
+  three fields in for you that a raw request sends itself:</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td>customer_id</td><td>string <span class="tag">required</span></td><td>The client this call is for. "default" if you have no customers.</td></tr>
+    <tr><td>event_type</td><td>string <span class="tag">required</span></td><td>The agent's label: the value preflight calls agent_id.</td></tr>
+    <tr><td>idempotency_key</td><td>string <span class="tag">required</span></td><td>Any string unique to this call. Same key, one event.</td></tr>
+    <tr><td>reservation_id, units, task_ref, success, metadata, usage_missing</td><td><span class="tag">optional</span></td><td>As in the record() table above.</td></tr>
+  </table>
+  <pre class="cv-code">
+curl -X POST https://agentbill.dev/events \\
+  -H "Authorization: Bearer $AGENTBILL_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"customer_id": "test-client", "event_type": "campaign-writer",
+       "idempotency_key": "test-call-1",
+       "metadata": {"provider": "openai", "model": "gpt-4o-mini",
+                    "tokens": {"input": 1200, "output": 300}}}'</pre>
+  <p>A body that misses one of them is a 422 that names every missing field.</p>
 
   <h3 id="put-task-ceiling">PUT /tasks/:task_ref/ceiling</h3>
   <p>Opens a job with a ceiling, or changes the ceiling of one that exists. The same write the
