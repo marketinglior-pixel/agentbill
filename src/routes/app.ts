@@ -16,7 +16,7 @@ import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type 
 import {
   VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
   INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, NEEDS_LINE, CURL_LEAD, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
-  CC_CLIENT_DEFAULT, CC_STEP1, CC_STEP2, CC_STEP3,
+  CC_CLIENT_DEFAULT, CC_STEP1, CC_STEP2, CC_STEP3, CC_CAP_DEFAULT, CC_CAP_LINE,
 } from '../ui/steps.js'
 import { OTEL_BASE, otelLabel } from './otel.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
@@ -3656,23 +3656,39 @@ function firstCallBlock(p: Page): string {
  * console never shows a key (the key screen shows it filled in, once).
  */
 function ccSettings(client: string): string {
-  return JSON.stringify({ env: {
-    CLAUDE_CODE_ENABLE_TELEMETRY: '1',
-    OTEL_LOGS_EXPORTER: 'otlp',
-    OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
-    OTEL_EXPORTER_OTLP_ENDPOINT: `${ORIGIN}${OTEL_BASE}`,
-    OTEL_RESOURCE_ATTRIBUTES: `client=${client}`,
-  } }, null, 2)
+  return JSON.stringify({
+    env: {
+      CLAUDE_CODE_ENABLE_TELEMETRY: '1',
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
+      OTEL_EXPORTER_OTLP_ENDPOINT: `${ORIGIN}${OTEL_BASE}`,
+      OTEL_LOGS_EXPORT_INTERVAL: '1000',
+      OTEL_RESOURCE_ATTRIBUTES: `client=${client}`,
+      AGENTBILL_SESSION_CAP_USD: CC_CAP_DEFAULT,
+    },
+    // The session cap (2026-09-29): Claude Code's own HTTP hook asks
+    // /otel/hook after every tool call and stops the session at the cap. An
+    // HTTP hook because Claude Code does not pass OTEL_* variables to hooks,
+    // and it needs no Node or shell, so it runs the same on Windows.
+    hooks: { PostToolUse: [{ hooks: [{
+      type: 'http', url: `${ORIGIN}${OTEL_BASE}/hook`, timeout: 5,
+      headers: { Authorization: 'Bearer $AGENTBILL_API_KEY', 'X-AgentBill-Cap': '$AGENTBILL_SESSION_CAP_USD' },
+      allowedEnvVars: ['AGENTBILL_API_KEY', 'AGENTBILL_SESSION_CAP_USD'],
+    }] }] },
+  }, null, 2)
 }
 
+/** The key file: the telemetry header and, for the cap hook, the key again
+ *  under a name Claude Code will pass to a hook. */
 function ccLocalSettings(apiKey: string): string {
-  return JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${apiKey}` } })
+  return JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${apiKey}`, AGENTBILL_API_KEY: apiKey } })
 }
 
 function ccLocalSample(): string {
   return `<pre class="snip">{
   "env": {
-    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key"
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key",
+    "AGENTBILL_API_KEY": "agb_your_key"
   }
 }</pre>`
 }
@@ -3727,7 +3743,8 @@ function startScreen(p: Page): string {
           ? `<form class="cc-newkey" method="POST" action="/app/keys/claude-code"><button class="btn-alt" type="submit" id="cc-newkey">Make a key for this file</button></form>
         <p class="fine">Didn't keep your key? This makes a new one, shown once, already inside the file. Your other keys keep working.</p>`
           : ''}`),
-      step(3, `<p>${CC_STEP3} <a href="/integrations/claude-code">What is recorded, and what is not</a>.</p>`),
+      step(3, `<p>${CC_STEP3} <a href="/integrations/claude-code">What is recorded, and what is not</a>.</p>
+        <p class="fine" id="cc-cap">${CC_CAP_LINE}</p>`),
       last(4),
     ].join('\n      ')
   } else if (via === 'http') {

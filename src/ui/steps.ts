@@ -146,6 +146,14 @@ export const CC_STEP1 =
 export const CC_STEP2 =
   'Your key goes beside it, in <code>.claude/settings.local.json</code>, the file that stays out of git: if the project\'s <code>.gitignore</code> does not list it yet, add it. The screen you made the key on showed this file with your key already in it; lost the key? <a href="/recover">/recover</a> gives you a new one.'
 
+/** The session cap the settings file starts with, in dollars (2026-09-29). */
+export const CC_CAP_DEFAULT = '20'
+
+/** Under step 3: what the cap does, and what it cannot. Measured 2026-09-29:
+ *  a $0.05 cap stopped at $0.138, a $0.40 cap at $0.43. */
+export const CC_CAP_LINE =
+  'The file also caps each session at $' + CC_CAP_DEFAULT + ', counted from what Claude Code reports each request cost. When a session reaches it, Claude Code ends the turn and shows why; raise <code>AGENTBILL_SESSION_CAP_USD</code> and say continue to go on. It is checked after each tool call, so a session can pass its cap by about the request that crossed it. Delete the <code>hooks</code> section for no cap.'
+
 /** Step 3: what to do, and what the figure is. */
 export const CC_STEP3 =
   'Open Claude Code in that project, after both files are in place (a session that was already open does not read them: quit it and start it again), and ask it anything. A few seconds after it answers, the request appears below with its model, its tokens and its price at list. On a Pro or Max plan that figure is what the work would cost at list price, not your bill.'

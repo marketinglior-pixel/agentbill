@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { runRecord } from './events.js'
 import { priceCall, type Tokens } from '../lib/prices.js'
 import { isId, INT4_MAX } from '../lib/ids.js'
+import { sql } from '../db/index.js'
 
 // Claude Code's own telemetry, received once and recorded per call
 // (2026-09-28).
@@ -188,6 +189,62 @@ export async function otelRoute(app: FastifyInstance) {
     return reply.code(200).send(out.rejected
       ? { partialSuccess: { rejectedLogRecords: out.rejected, errorMessage: out.error ?? '' } }
       : {})
+  })
+
+  // What one Claude Code session has spent so far (2026-09-29), for the cap.
+  // Every record above carries the session id, so a session's spend is the
+  // sum over its records: Claude Code's own cost_usd where the record has it,
+  // else our list-price estimate. Bounded to the account asking and to the
+  // last 30 days of its records.
+  const sessionSpend = async (accountId: string, id: string) => {
+    const [row] = await sql`
+      SELECT count(*)::int AS calls,
+             coalesce(sum(coalesce((metadata->>'claude_code_cost_usd')::numeric, list_price_usd)), 0)::float8 AS spent,
+             max(created_at) AS last_at
+      FROM events
+      WHERE account_id = ${accountId}
+        AND metadata->>'session_id' = ${id}
+        AND created_at > now() - interval '30 days'`
+    return { spent: Math.round(Number(row?.spent ?? 0) * 1e6) / 1e6, calls: Number(row?.calls ?? 0), lastAt: row?.lastAt ?? null }
+  }
+  const capOf = (raw: unknown): number | null => {
+    const n = typeof raw === 'string' ? Number(raw.trim()) : NaN
+    return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? n : null
+  }
+  const sessionOk = (id: unknown): id is string => typeof id === 'string' && isId(id) && id.length <= 128
+
+  // GET: the figure, for anything that wants to read it. ?cap=<usd> adds over.
+  app.get(`${OTEL_BASE}/session/:id`, async (request, reply) => {
+    const id = (request.params as { id?: string }).id
+    if (!sessionOk(id)) return reply.code(400).send({ error: 'validation_error', message: 'The session id is 1 to 128 characters with no control characters.' })
+    const cap = capOf((request.query as Record<string, unknown> | undefined)?.cap)
+    const s = await sessionSpend(request.accountId, id)
+    return reply.header('Cache-Control', 'no-store').send({
+      session_id: id, spent_usd: s.spent, calls: s.calls, last_recorded_at: s.lastAt, cap_usd: cap, over: cap !== null && s.spent >= cap,
+    })
+  })
+
+  // POST: Claude Code's own HTTP hook (PostToolUse) posts its hook input here,
+  // with the key and the cap in headers it fills from the project's settings.
+  // The answer is Claude Code's hook decision: {} to go on, or continue:false
+  // with the reason shown to the user once the session has reached its cap.
+  // An HTTP hook, because Claude Code does not pass OTEL_* variables to a
+  // command hook (found 2026-09-29 by a probe hook), and because it needs no
+  // Node or shell on the machine, so it works the same on Windows.
+  // No cap, no session id: {} and nothing else. It never stops a session on
+  // our error: a 5xx is a non-blocking error to Claude Code.
+  app.post(`${OTEL_BASE}/hook`, { bodyLimit: 1024 * 1024 }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    const cap = capOf(request.headers['x-agentbill-cap'])
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const id = body.session_id
+    if (cap === null || !sessionOk(id)) return reply.send({})
+    const s = await sessionSpend(request.accountId, id)
+    if (s.spent < cap) return reply.send({})
+    return reply.send({
+      continue: false,
+      stopReason: `AgentBill: this session has spent $${s.spent.toFixed(2)} of its $${cap.toFixed(2)} cap. To keep going, raise AGENTBILL_SESSION_CAP_USD in .claude/settings.json, then say continue.`,
+    })
   })
 
   // Metrics are not read: every figure is in the api_request events. Accepted

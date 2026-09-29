@@ -130,5 +130,43 @@ async function gates({ API, sql, ok }) {
   const metrics = await post('/otel/v1/metrics', { resourceMetrics: [] })
   ok('[otel] a metrics export is accepted and stores nothing', metrics.status === 200 && (await events()).length === before, `${metrics.status}`)
 
+  // The session cap (2026-09-29). Claude Code's HTTP PostToolUse hook posts
+  // its hook input to /otel/hook with the key and the cap in headers; the
+  // answer is its decision. A real run, measured locally that day: a $0.05
+  // cap stopped a 30-file task after 3 turns at $0.138 (the first request
+  // alone was $0.068), and after the cap was raised to $0.40 and the session
+  // resumed, it stopped again at $0.43.
+  const S3 = randomUUID()
+  const CAPREQ = { input: 10, output: 60, cr: 20828, cw: 10407, cost: 0.0232068 }
+  await post('/otel/v1/logs', exportOf([apiRecord(S3, `req_cap1_${randomBytes(4).toString('hex')}`, CAPREQ), apiRecord(S3, `req_cap2_${randomBytes(4).toString('hex')}`, CAPREQ)]))
+  const hook = (body, h = {}) => fetch(`${API}/otel/hook`, { method: 'POST', headers: { Authorization: `Bearer ${KA}`, 'Content-Type': 'application/json', ...h }, body: JSON.stringify(body) })
+    .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))
+  const input = { session_id: S3, hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: {}, tool_response: {} }
+  const under = await hook(input, { 'X-AgentBill-Cap': '0.05' })
+  const over = await hook(input, { 'X-AgentBill-Cap': '0.04' })
+  const spend = await fetch(`${API}/otel/session/${S3}?cap=0.04`, { headers: { Authorization: `Bearer ${KA}` } }).then((r) => r.json())
+  ok('[otel] the session\'s spend is the sum of Claude Code\'s own cost over its records, and the hook stops it once that reaches the cap',
+     spend.calls === 2 && Math.abs(spend.spent_usd - 0.0464136) < 1e-6 && spend.over === true
+       && under.status === 200 && JSON.stringify(under.body) === '{}'
+       && over.status === 200 && over.body?.continue === false && /spent \$0\.05 of its \$0\.04 cap/.test(over.body?.stopReason ?? '') && over.body.stopReason.includes('AGENTBILL_SESSION_CAP_USD'),
+     JSON.stringify({ spend, under, over }).slice(0, 500))
+  const noCap = await hook(input)
+  const badCap = await hook(input, { 'X-AgentBill-Cap': '$AGENTBILL_SESSION_CAP_USD' })
+  const noSession = await hook({ hook_event_name: 'PostToolUse' }, { 'X-AgentBill-Cap': '0.01' })
+  const otherSession = await hook({ ...input, session_id: randomUUID() }, { 'X-AgentBill-Cap': '0.01' })
+  ok('[otel] no cap, an unexpanded cap, no session id or a session with nothing recorded: the hook lets the session go on ({})',
+     [noCap, badCap, noSession, otherSession].every((r) => r.status === 200 && JSON.stringify(r.body) === '{}'),
+     JSON.stringify([noCap, badCap, noSession, otherSession].map((r) => r.body)))
+  const B = '00000000-0000-0000-0000-0000000000e2'
+  const KB = 'agb_' + createHash('sha256').update(`otel-b-${randomBytes(6).toString('hex')}`).digest('hex').slice(0, 48)
+  await sql`DELETE FROM accounts WHERE id = ${B}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${B}, 'scale', 0, date_trunc('month', CURRENT_DATE)::date)`
+  await insertKeyRow(sql, B, KB, 'harness-otel-b')
+  const foreign = await fetch(`${API}/otel/hook`, { method: 'POST', headers: { Authorization: `Bearer ${KB}`, 'Content-Type': 'application/json', 'X-AgentBill-Cap': '0.01' }, body: JSON.stringify(input) }).then((r) => r.json())
+  const anon = await fetch(`${API}/otel/hook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-AgentBill-Cap': '0.01' }, body: JSON.stringify(input) })
+  ok('[otel] another account\'s key sees none of this session\'s spend, and no key is 401',
+     JSON.stringify(foreign) === '{}' && anon.status === 401, JSON.stringify({ foreign, anon: anon.status }))
+  await sql`DELETE FROM accounts WHERE id = ${B}`
+
   await sql`DELETE FROM accounts WHERE id = ${A}`
 }
