@@ -865,7 +865,21 @@ except HookAborted as e:
     "OTEL_LOGS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "https://agentbill.dev/otel",
-    "OTEL_RESOURCE_ATTRIBUTES": "client=acme-dental"
+    "OTEL_LOGS_EXPORT_INTERVAL": "1000",
+    "OTEL_RESOURCE_ATTRIBUTES": "client=acme-dental",
+    "AGENTBILL_SESSION_CAP_USD": "20"
+  },
+  "hooks": {
+    "PostToolUse": [{ "hooks": [{
+      "type": "http",
+      "url": "https://agentbill.dev/otel/hook",
+      "timeout": 5,
+      "headers": {
+        "Authorization": "Bearer $AGENTBILL_API_KEY",
+        "X-AgentBill-Cap": "$AGENTBILL_SESSION_CAP_USD"
+      },
+      "allowedEnvVars": ["AGENTBILL_API_KEY", "AGENTBILL_SESSION_CAP_USD"]
+    }] }]
   }
 }</pre></div>
   <p>And your key, in <span class="inline">.claude/settings.local.json</span> beside it. This file
@@ -873,14 +887,31 @@ except HookAborted as e:
   not list <span class="inline">.claude/settings.local.json</span> yet, add it.</p>
   <div class="code"><pre>{
   "env": {
-    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key"
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer agb_your_key",
+    "AGENTBILL_API_KEY": "agb_your_key"
   }
 }</pre></div>
+  <p>The key is there twice on purpose: Claude Code does not pass <span class="inline">OTEL_</span>
+  variables to hooks, so the cap below reads it under its own name.</p>
   <p><span class="inline">client</span> is the name the calls are filed under: letters, digits, dots,
   dashes and underscores, no spaces, up to 64 characters. To name the agent too, add it after a
   comma: <span class="inline">client=acme-dental,agent=support-bot</span>. Without an agent name
   the calls are filed under <span class="inline">claude-code</span>; without a client, under
   <span class="inline">default</span>.</p>
+
+  <h2 id="cap">The session cap</h2>
+  <p>The <span class="inline">hooks</span> section caps each Claude Code session in dollars. After every
+  tool call, Claude Code asks <span class="inline">agentbill.dev/otel/hook</span> what the session has
+  spent so far, counted from the cost Claude Code itself reports for each request. Once that reaches
+  <span class="inline">AGENTBILL_SESSION_CAP_USD</span>, Claude Code ends the turn and shows why. To go
+  on, raise the number in <span class="inline">.claude/settings.json</span> and say continue.</p>
+  <p>What it cannot do: end a request already in flight, or see one Claude Code has not exported
+  yet. A session can pass its cap by about the request that crossed it. Measured on a real session:
+  a $0.05 cap ended the turn at $0.14 (the opening request alone was $0.07), and after raising it to
+  $0.40, at $0.43. If agentbill.dev does not answer, the session goes on: the hook never ends work
+  because of us. It is a Claude Code HTTP hook, so there is nothing to install, and it works the same
+  in the terminal, in the VS Code extension and on Windows. Delete the <span class="inline">hooks</span>
+  section for no cap.</p>
 
   <h2>Check it</h2>
   <p>Open Claude Code in that project and ask it anything. A few seconds after it answers, the

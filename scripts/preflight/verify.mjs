@@ -1401,8 +1401,15 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
   const ccDef = await pageST('/app?view=start&via=claude-code').then(r => r.text())
   const ccAcme = await pageST('/app?view=start&via=claude-code&client=acme-dental').then(r => r.text())
   const ccBad = await pageST(`/app?view=start&via=claude-code&client=${encodeURIComponent('Acme"><script>x')}`).then(r => r.text())
-  const want = (client) => JSON.stringify({ env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1', OTEL_LOGS_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
-    OTEL_EXPORTER_OTLP_ENDPOINT: `https://agentbill.dev${OTEL_BASE}`, OTEL_RESOURCE_ATTRIBUTES: `client=${client}` } })
+  // Since 2026-09-29 the file also carries the session cap and Claude Code's
+  // HTTP hook that enforces it (/otel/hook), with the key passed by name.
+  const want = (client) => JSON.stringify({
+    env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1', OTEL_LOGS_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
+      OTEL_EXPORTER_OTLP_ENDPOINT: `https://agentbill.dev${OTEL_BASE}`, OTEL_LOGS_EXPORT_INTERVAL: '1000', OTEL_RESOURCE_ATTRIBUTES: `client=${client}`,
+      AGENTBILL_SESSION_CAP_USD: '20' },
+    hooks: { PostToolUse: [{ hooks: [{ type: 'http', url: `https://agentbill.dev${OTEL_BASE}/hook`, timeout: 5,
+      headers: { Authorization: 'Bearer $AGENTBILL_API_KEY', 'X-AgentBill-Cap': '$AGENTBILL_SESSION_CAP_USD' },
+      allowedEnvVars: ['AGENTBILL_API_KEY', 'AGENTBILL_SESSION_CAP_USD'] }] }] } })
   const local = jsonOf(ccDef, 'cc-local')
   ok('[start] Claude Code: the card is marked and the settings file is valid JSON in the shape /otel reads, with the default client, then the typed one',
      current(ccDef) === 'claude-code' && JSON.stringify(jsonOf(ccDef, 'cc-settings')) === want('my-first-client') && JSON.stringify(jsonOf(ccAcme, 'cc-settings')) === want('acme-dental')
@@ -1410,7 +1417,7 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
      JSON.stringify([jsonOf(ccDef, 'cc-settings'), jsonOf(ccAcme, 'cc-settings')]).slice(0, 400))
   ok('[start] Claude Code: a client name that is not a label falls back to the default and is never echoed; the key file is a placeholder, never a key',
      JSON.stringify(jsonOf(ccBad, 'cc-settings')) === want('my-first-client') && !ccBad.includes('<script>x') && !ccBad.includes('Acme&quot;')
-       && JSON.stringify(local) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer agb_your_key' } }) && !/agb_[0-9a-f]{48}/.test(ccDef),
+       && JSON.stringify(local) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer agb_your_key', AGENTBILL_API_KEY: 'agb_your_key' } }) && !/agb_[0-9a-f]{48}/.test(ccDef),
      JSON.stringify(local))
 }
 // The n8n / Make / HTTP path, 2026-09-29. The first paid tester builds in n8n,
