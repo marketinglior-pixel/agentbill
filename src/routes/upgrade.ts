@@ -151,7 +151,7 @@ ${siteNav('/pricing', { sticky: false })}
       <h2>Every plan includes</h2>
       <ul class="incl row-close">
         <li><b>Preflight budget checks.</b> The ceiling is consulted before the call goes out, not after the bill.</li>
-        <li><b>Per-task hard ceilings.</b> One budget across every call that passes the same task_ref, reserved atomically.</li>
+        <li><b>Per-task ceilings.</b> One budget across every call that passes the same task_ref, reserved atomically against each call's estimate. A call that uses more than it estimated can land past by the difference, and the next one is refused.</li>
         <li><b>Per-agent attribution.</b> Every task and every refusal carries the agent that asked.</li>
         <li><b>Key security.</b> Revoke, rotate, expiry and rate limiting on every API key.</li>
         <li><b>New-address alert.</b> An email when a key is used from an address it has not been seen from.</li>

@@ -249,7 +249,7 @@ client = AgentBillClient(api_key=SECRET_FROM_YOUR_VAULT)</pre></div>
   every number in it is one you can see.</p>
 
   <h2>How it works</h2>
-  <p>A task groups many calls under one hard ceiling. Three rules:</p>
+  <p>A task groups many calls under one ceiling. Three rules:</p>
   <p>1, A job is opened with its ceiling: by the preflight that names a new
   <span class="inline">task_ref</span> with a <span class="inline">task_ceiling</span>, or in the
   console (or <span class="inline">PUT /tasks/:task_ref/ceiling</span>) before any code runs. After

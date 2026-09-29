@@ -544,9 +544,9 @@ ${siteNav('/', { stickyLabel: PHONE_CTA })}
   <header class="hero wrap">
     <p class="pill"><span class="pill-tag">For agencies and builders</span> who run agents for clients</p>
     <h1>${HEADLINE}</h1>
-    <p class="sub">Per agent, per client, per job, in dollars at list price, with a monthly
-    report you can bill from. Give any job a ceiling, and the call that would cross it gets
-    <span class="mono-in nb">approved: false</span> before it runs. <span class="nb">Your code</span>
+    <p class="sub">Per agent, per client, per job, estimated in dollars at list price, with a
+    monthly report to price and bill from. Give any job a ceiling, and a call whose estimate
+    would cross it gets <span class="mono-in nb">approved: false</span> before it runs. <span class="nb">Your code</span>
     decides whether to <span class="nb">stop, skip, or replan.</span></p>
     <div class="hero-cta">
       <a class="btn btn-lg" href="/register"><span class="lb-wide">${KEY_CTA}</span><span class="lb-phone">${PHONE_CTA}</span></a>
@@ -563,8 +563,9 @@ ${siteNav('/', { stickyLabel: PHONE_CTA })}
         <h2>Unattended agents need a job ceiling</h2>
         <p>Month caps, org caps, and session or window budgets are real. They meter an account, a clock, or
         one session. A job ceiling meters one job, across processes and providers, with no reset: a call
-        is checked against it only if it asks preflight with the job&rsquo;s name, and the call that would
-        cross it gets <span class="mono-in">approved: false</span>.</p>
+        is checked against it only if it asks preflight with the job&rsquo;s name, and a call whose estimate
+        would cross it gets <span class="mono-in">approved: false</span>. A call that uses more than it
+        estimated can land past by the difference; the next one is refused.</p>
         <p class="st-line">An org cap is monthly: either tonight&rsquo;s loop fits under it, or every agent in
         the org is refused until the cap resets or someone raises it.</p>
       </div>
