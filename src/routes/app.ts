@@ -2553,7 +2553,7 @@ ${siteNav('/app', { sticky: false, signedIn: true })}
     ${copyPlate('key-export', `export AGENTBILL_API_KEY=${esc(apiKey)}`)}
     <p>Building in Claude Code? This is the whole of <code>.claude/settings.local.json</code> in a client's project, with the key in it. The start screen has the other file.</p>
     ${copyPlate('key-claude-code', esc(ccLocalSettings(apiKey)))}
-    <p class="fine">No terminal? Send the key yourself as an <code>Authorization: Bearer</code> header from whatever makes the call.</p>
+    <p class="fine">Building in n8n, Make or another HTTP tool? The key goes in an <code>Authorization</code> header, as <code>Bearer</code> and the key, and the start screen's "n8n, Make or any HTTP tool" card has both requests to copy.</p>
     <a class="btn btn-lg go" href="/app?view=start">Continue to the start screen &rarr;</a>
     </div></div>
   </main>
@@ -3605,6 +3605,18 @@ console.log(isRefusal(reply) ? String(reply) : reply.choices[0].message.content)
  * above, and the [start] gates run it as pasted against a live server and
  * read back that it was priced and ends the path.
  */
+/**
+ * The HTTP path's two bodies (2026-09-29), for n8n, Make and anything else
+ * that sends a request. The events body is a working record as it stands, in
+ * the metadata shape the pricer reads (the curl sample's), so a first send
+ * lands a priced call; the reader then maps reservation_id, model and tokens.
+ */
+const HTTP_PREFLIGHT_BODY = JSON.stringify({ agent_id: 'campaign-writer', customer_id: 'test-client' }, null, 2)
+const HTTP_EVENTS_BODY = JSON.stringify({
+  customer_id: 'test-client', event_type: 'campaign-writer', idempotency_key: 'test-call-1',
+  metadata: { provider: 'openai', model: 'gpt-4o-mini', tokens: { input: 1200, output: 300 } },
+}, null, 2)
+
 function curlSample(): string {
   return `<pre class="snip">curl -sS https://agentbill.dev/events \\
   -H "Authorization: Bearer $AGENTBILL_API_KEY" \\
@@ -3717,6 +3729,17 @@ function startScreen(p: Page): string {
           : ''}`),
       step(3, `<p>${CC_STEP3} <a href="/integrations/claude-code">What is recorded, and what is not</a>.</p>`),
       last(4),
+    ].join('\n      ')
+  } else if (via === 'http') {
+    path = [
+      step(1, `<p>Before the model call, add an HTTP request: <b>POST</b> <code>${ORIGIN}/preflight</code>, with a header <code>Authorization</code> whose value is <code>Bearer</code>, a space, and your key. Send this JSON body:</p>
+        ${copyBlock('http-preflight', `<pre class="snip">${esc(HTTP_PREFLIGHT_BODY)}</pre>`, 'the preflight body')}
+        <p class="fine"><b>agent_id</b> is required: a label for the agent, yours to name. <b>customer_id</b> is the client this run is for; leave it out and it is "default". The answer carries <code>approved</code>, true or false, and a <code>reservation_id</code> for the second request. When approved is false, <code>reason</code> says why, and your workflow decides what happens next.</p>`),
+      step(2, `<p>After the model call, a second HTTP request: <b>POST</b> <code>${ORIGIN}/events</code>, with the same header. This body works as it is: send it once and your first call appears below.</p>
+        ${copyBlock('http-events', `<pre class="snip">${esc(HTTP_EVENTS_BODY)}</pre>`, 'the events body')}
+        <p class="fine"><b>Required:</b> customer_id, event_type (the same label as agent_id above) and idempotency_key, unique to each call: the same key twice records one event, so change it for your next test.</p>
+        <p class="fine"><b>Then map your own values.</b> reservation_id from the first request's answer (in n8n, for example, <code>{{ $('Preflight').item.json.reservation_id }}</code> when that node is named Preflight), and the model and tokens from your model's response: OpenAI's <code>usage.prompt_tokens</code> and <code>usage.completion_tokens</code>, Anthropic's <code>usage.input_tokens</code> and <code>usage.output_tokens</code>. A call that names no model is recorded, with no dollar figure.</p>`),
+      last(3),
     ].join('\n      ')
   } else if (via === 'python') {
     path = [

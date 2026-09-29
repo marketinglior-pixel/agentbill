@@ -126,8 +126,11 @@ n=$(node scripts/snippets/extract.mjs 2>/dev/null | node -e "
   });")
 # Since 2026-09-28 the Claude Code path adds two: its settings file, built with
 # the reader's client name (so "dynamic"; the [start] gates parse it as JSON),
-# and the key file, a JSON literal with a placeholder.
-gate "app.ts: one python, one node, one shell literal, two dynamic pres, no phantom" "1:1:1:2:6" "$n"
+# and the key file, a JSON literal with a placeholder. Since 2026-09-29 the
+# n8n / Make / HTTP path adds two more dynamic ones, its /preflight and /events
+# bodies, built with JSON.stringify; the [start] gates parse both and send them
+# to the server exactly as shown, so they are exercised there, not here.
+gate "app.ts: one python, one node, one shell literal, four dynamic pres, no phantom" "1:1:1:4:8" "$n"
 
 # The start screen's prose says what one run does: job first-call, a ceiling of
 # 20,000 tokens, wrap(). The two samples are literals (the harvester executes

@@ -1341,9 +1341,9 @@ const pageST = (path) => nav8(path, { headers: { cookie: cookieST } })
 const { CONNECT_Q: CONNECT_Q_ST } = await import('../../dist/ui/steps.js')
 const virgin8 = await pageST('/app').then(r => r.text())
 const viaLinksST = [...virgin8.matchAll(/<a class="via" href="([^"]+)"([^>]*)>/g)].map((m) => [m[1], m[2]])
-ok('[start] a virgin account\'s overview asks what you build your agents with, with four links (Claude Code first, MCP last) and nothing chosen, and no ceiling form',
-   virgin8.includes(CONNECT_Q_ST) && CONNECT_Q_ST === 'What do you build your agents with?' && viaLinksST.length === 4
-     && JSON.stringify(viaLinksST.map((l) => l[0])) === JSON.stringify(['/app?view=start&amp;via=claude-code', '/app?view=start&amp;via=python', '/app?view=start&amp;via=node', '/app?view=start&amp;via=mcp'])
+ok('[start] a virgin account\'s overview asks what you build your agents with, with five links (Claude Code first, then n8n/Make/HTTP, MCP last) and nothing chosen, and no ceiling form',
+   virgin8.includes(CONNECT_Q_ST) && CONNECT_Q_ST === 'What do you build your agents with?' && viaLinksST.length === 5
+     && JSON.stringify(viaLinksST.map((l) => l[0])) === JSON.stringify(['/app?view=start&amp;via=claude-code', '/app?view=start&amp;via=http', '/app?view=start&amp;via=python', '/app?view=start&amp;via=node', '/app?view=start&amp;via=mcp'])
      && viaLinksST.every((l) => !l[1].includes('aria-current')) && !virgin8.includes('class="setf3"') && !virgin8.includes('Three steps'),
    JSON.stringify(viaLinksST))
 ok('[start] before anything is recorded the screen says where the first call will appear',
@@ -1412,6 +1412,48 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
      JSON.stringify(jsonOf(ccBad, 'cc-settings')) === want('my-first-client') && !ccBad.includes('<script>x') && !ccBad.includes('Acme&quot;')
        && JSON.stringify(local) === JSON.stringify({ env: { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer agb_your_key' } }) && !/agb_[0-9a-f]{48}/.test(ccDef),
      JSON.stringify(local))
+}
+// The n8n / Make / HTTP path, 2026-09-29. The first paid tester builds in n8n,
+// found no path for it, wrote both requests from the docs (which describe the
+// SDK's record(), not the raw body) and got a 422 that said only "Required".
+// The screen's two bodies must work exactly as shown, on an account of their
+// own (this one's first record is the unpriced one the gates below expect),
+// and a 422 must name every field it wants.
+{
+  const httpST = await pageST('/app?view=start&via=http').then(r => r.text())
+  const bodyOf = (h, id) => { const m = h.match(new RegExp(`<div id="${id}"><pre class="snip">([\\s\\S]*?)</pre>`)); try { return m ? JSON.parse(unesc(m[1])) : null } catch { return 'unparseable' } }
+  const pre = bodyOf(httpST, 'http-preflight'), ev = bodyOf(httpST, 'http-events')
+  ok('[start] n8n/Make/HTTP: the card is marked, both URLs are on agentbill.dev, and both bodies are valid JSON: agent_id, then customer_id, event_type (= agent_id), idempotency_key and a model',
+     current(httpST) === 'http' && httpST.includes('https://agentbill.dev/preflight') && httpST.includes('https://agentbill.dev/events')
+       && typeof pre?.agent_id === 'string' && typeof ev?.customer_id === 'string' && ev?.event_type === pre.agent_id && typeof ev?.idempotency_key === 'string' && !!ev?.metadata?.model,
+     JSON.stringify([pre, ev]).slice(0, 300))
+  const ACCT_HT = '00000000-0000-0000-0000-0000000000c9'
+  const KEY_HT = shapedKey(`http-path-${Date.now()}`)
+  await sql`DELETE FROM accounts WHERE id = ${ACCT_HT}`
+  await sql`INSERT INTO accounts (id, plan, monthly_calls, billing_period_start) VALUES (${ACCT_HT}, 'free', 0, date_trunc('month', CURRENT_DATE)::date)`
+  await insertKeyRow(sql, ACCT_HT, KEY_HT, 'harness-http')
+  const H = { Authorization: `Bearer ${KEY_HT}`, 'Content-Type': 'application/json' }
+  const send = (path, body) => fetch(`${API}${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }))
+  const pf = await send('/preflight', pre)
+  const evr = await send('/events', ev)
+  const [rec] = await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${ACCT_HT}`
+  ok('[start] sent exactly as the screen shows them: preflight approves with a reservation_id, and the events body records one call',
+     pf.s === 200 && pf.b?.approved === true && !!pf.b?.reservation_id && evr.s < 300 && rec.n === 1, JSON.stringify({ pf, evr }).slice(0, 400))
+  const bad = await send('/events', { agent_id: 'campaign-writer', reservation_id: pf.b?.reservation_id })
+  ok('[events] a raw body missing its three required fields is a 422 that names all three, lists them in fields, and says agent_id is event_type here',
+     bad.s === 422 && bad.b?.error === 'validation_error' && /^Missing required fields: /.test(bad.b?.message ?? '')
+       && ['customer_id', 'event_type', 'idempotency_key'].every((f) => bad.b.message.includes(f) && bad.b.fields.some((x) => x.field === f && x.problem === 'required'))
+       && bad.b.message.includes('This body has agent_id') && bad.b.fields.length === 3,
+     JSON.stringify(bad.b).slice(0, 400))
+  const badUnits = await send('/events', { ...ev, idempotency_key: `bad-units-${Date.now()}`, units: 'ten' })
+  ok('[events] a wrong type is named by its field, with no raw-body hint when the required fields are there',
+     badUnits.s === 422 && /^units: /.test(badUnits.b?.message ?? '') && !badUnits.b.message.includes('POST /events takes'), JSON.stringify(badUnits.b).slice(0, 300))
+  const pfBad = await send('/preflight', {})
+  ok('[preflight] an empty body is a 422 that names agent_id, and still carries details for existing clients',
+     pfBad.s === 422 && pfBad.b?.message === 'Missing required field: agent_id.' && Array.isArray(pfBad.b?.details) && pfBad.b?.fields?.[0]?.field === 'agent_id',
+     JSON.stringify(pfBad.b).slice(0, 300))
+  const [recAfter] = await sql`SELECT count(*)::int AS n FROM events WHERE account_id = ${ACCT_HT}`
+  ok('[events] and the refused bodies recorded nothing', recAfter.n === 1, `${recAfter.n}`)
 }
 // Where setup stops, 2026-09-28 (migration 038, src/lib/start-steps.ts). The
 // pages above were this account's: the start screen, the four cards, and the

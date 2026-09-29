@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyBaseLogger } from 'fastify'
 import { z } from 'zod'
+import { describeIssues } from '../lib/validation-message.js'
 import { sql } from '../db/index.js'
 import { unitsOf, unitsOrNull } from '../db/int8.js'
 import { zId, INT4_MAX } from '../lib/ids.js'
@@ -130,10 +131,15 @@ export type RecordResult = { status: number; body: unknown }
 export async function runRecord(accountId: string, input: unknown, log: FastifyBaseLogger): Promise<RecordResult> {
     const parsed = EventBody.safeParse(input)
     if (!parsed.success) {
-      return { status: 422, body: {
-        error: 'validation_error',
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
-      } }
+      // A raw request (n8n, Make, curl) sends what the SDK's record() fills
+      // in, so the answer says so, and names preflight's agent_id if that is
+      // what arrived in event_type's place.
+      const sent = input !== null && typeof input === 'object' ? input as Record<string, unknown> : {}
+      const rawHint = parsed.error.issues.some((i) => ['customer_id', 'event_type', 'idempotency_key'].includes(String(i.path[0])))
+        ? `POST /events takes customer_id ("default" if you have no customers), event_type (the label preflight calls agent_id) and idempotency_key (any string unique to this call); the SDKs' record() fills these in, a raw request sends them.${'agent_id' in sent && !('event_type' in sent) ? ' This body has agent_id: on /events that label is event_type.' : ''}`
+        : ''
+      const { message, fields } = describeIssues(parsed.error.issues, rawHint)
+      return { status: 422, body: { error: 'validation_error', message, fields } }
     }
 
     const {
