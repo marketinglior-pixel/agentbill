@@ -16,7 +16,7 @@ import { HISTORY_JOBS, HISTORY_AGENTS, PICKS, summarizeHistory, type Pick, type 
 import {
   VIAS, asVia, type Via, CONNECT_Q, CONNECT_LEDE, VIA_TITLE, VIA_SUB, MCP_PROMPT, MCP_DOES, MCP_DOES_NOT,
   INSTALL_PY_WRAP, INSTALL_NODE_WRAP, KEYS_LINE, NEEDS_LINE, CURL_LEAD, WHAT_RUNS, ANTHROPIC_LINE, WAITING_LINE,
-  CC_CLIENT_DEFAULT, CC_STEP1, CC_STEP2, CC_STEP3, CC_CAP_DEFAULT, CC_CAP_LINE,
+  CC_CLIENT_DEFAULT, CC_STEP1, CC_STEP2, CC_STEP3, CC_CAP_DEFAULT, CC_CAP_LINE, N8N_MAPPING,
 } from '../ui/steps.js'
 import { OTEL_BASE, otelLabel } from './otel.js'
 import { LIST_PRICE_LABEL } from '../lib/prices.js'
@@ -2068,6 +2068,10 @@ ${SIGNIN_CSS}
   .setf { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr) minmax(0, 1fr) auto; gap: var(--s3); align-items: end; }
   .setf code { font-size: .9em; color: var(--dim); font-weight: 400; margin-left: 2px; }
   .setc .fine { max-width: 86ch; }
+  .fine.map { max-width: 86ch; margin: var(--s2) 0; padding-left: 1.25em; }
+  .fine.map li { margin: 6px 0; }
+  /* n8n expressions are long and have no spaces to break at; at 375 they pushed the card past the edge. */
+  .fine.map code { overflow-wrap: anywhere; }
   /* The inline save on a row: a field and a button at the in-control height. */
   .bset { display: flex; align-items: center; gap: var(--s2); justify-content: flex-end; }
   /* The column head says CEILING; the label stays for a screen reader and
@@ -3755,7 +3759,9 @@ function startScreen(p: Page): string {
       step(2, `<p>After the model call, a second HTTP request: <b>POST</b> <code>${ORIGIN}/events</code>, with the same header. This body works as it is: send it once and your first call appears below.</p>
         ${copyBlock('http-events', `<pre class="snip">${esc(HTTP_EVENTS_BODY)}</pre>`, 'the events body')}
         <p class="fine"><b>Required:</b> customer_id, event_type (the same label as agent_id above) and idempotency_key, unique to each call: the same key twice records one event, so change it for your next test.</p>
-        <p class="fine"><b>Then map your own values.</b> reservation_id from the first request's answer (in n8n, for example, <code>{{ $('Preflight').item.json.reservation_id }}</code> when that node is named Preflight), and the model and tokens from your model's response: OpenAI's <code>usage.prompt_tokens</code> and <code>usage.completion_tokens</code>, Anthropic's <code>usage.input_tokens</code> and <code>usage.output_tokens</code>. A call that names no model is recorded, with no dollar figure.</p>`),
+        <p class="fine"><b>Then map your own values.</b> The ones in the body above are samples. In n8n:</p>
+        <ul class="fine map">${N8N_MAPPING.map((l) => `<li>${l}</li>`).join('')}</ul>
+        <p class="fine">A call that names no model is recorded, with no dollar figure.</p>`),
       last(3),
     ].join('\n      ')
   } else if (via === 'python') {

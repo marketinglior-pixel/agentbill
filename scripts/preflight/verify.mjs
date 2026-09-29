@@ -1434,6 +1434,17 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
      current(httpST) === 'http' && httpST.includes('https://agentbill.dev/preflight') && httpST.includes('https://agentbill.dev/events')
        && typeof pre?.agent_id === 'string' && typeof ev?.customer_id === 'string' && ev?.event_type === pre.agent_id && typeof ev?.idempotency_key === 'string' && !!ev?.metadata?.model,
      JSON.stringify([pre, ev]).slice(0, 300))
+  // Muhammad's second run (30.09): the card's sample values worked, the real ones had no map.
+  // The n8n lines come from N8N_MAPPING, each run in n8n 2.41.3 against a stub OpenAI; the old
+  // line pointed n8n's OpenAI node at Chat Completions field names it does not return.
+  const docsST = await fetch(`${API}/docs`).then(r => r.text())
+  const N8N_LINES = ['Simplify Output off', '{{ $json.usage.input_tokens }}', '{{ $json.usage.output_tokens }}', '{{ $json.model }}',
+    '{{ $execution.id }}-writer-{{ $runIndex }}', 'One event per model call', 'Header Auth', '"success": false', 'Continue (using error output)',
+    'Basic LLM Chain', "{{ $('Preflight').item.json.reservation_id }}"]
+  ok('[start] n8n: the card and /docs#n8n-values both carry every mapping line (Simplify Output, input/output_tokens, one event per call, the key expression, Header Auth, the failure branch, the chain caveat)',
+     N8N_LINES.every((l) => httpST.includes(l)) && docsST.includes('id="n8n-values"') && N8N_LINES.every((l) => docsST.includes(l))
+       && !httpST.includes("from your model's response: OpenAI's"),
+     JSON.stringify({ card: N8N_LINES.filter((l) => !httpST.includes(l)), docs: N8N_LINES.filter((l) => !docsST.includes(l)) }))
   const ACCT_HT = '00000000-0000-0000-0000-0000000000c9'
   const KEY_HT = shapedKey(`http-path-${Date.now()}`)
   await sql`DELETE FROM accounts WHERE id = ${ACCT_HT}`
