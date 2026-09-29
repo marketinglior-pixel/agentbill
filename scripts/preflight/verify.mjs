@@ -1445,6 +1445,11 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
      N8N_LINES.every((l) => httpST.includes(l)) && docsST.includes('id="n8n-values"') && N8N_LINES.every((l) => docsST.includes(l))
        && !httpST.includes("from your model's response: OpenAI's"),
      JSON.stringify({ card: N8N_LINES.filter((l) => !httpST.includes(l)), docs: N8N_LINES.filter((l) => !docsST.includes(l)) }))
+  const docsMetaOf = (re) => (docsST.match(re) || [])[1] ?? ''
+  const docsTitle = docsMetaOf(/<title>([^<]*)<\/title>/), docsDesc = docsMetaOf(/<meta name="description" content="([^"]*)"/), docsOg = docsMetaOf(/<meta property="og:description" content="([^"]*)"/)
+  ok('[docs] the title, description and share card lead with cost per client and job, not the retired preflight-billing line',
+     /per client/.test(docsTitle) && [docsDesc, docsOg].every((d) => d.includes('per agent, per client and per job')) && !/Preflight Billing|per-task spend ceiling/.test(docsTitle + docsDesc + docsOg),
+     JSON.stringify({ docsTitle, docsDesc, docsOg }).slice(0, 400))
   const ACCT_HT = '00000000-0000-0000-0000-0000000000c9'
   const KEY_HT = shapedKey(`http-path-${Date.now()}`)
   await sql`DELETE FROM accounts WHERE id = ${ACCT_HT}`
