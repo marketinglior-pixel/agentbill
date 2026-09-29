@@ -618,7 +618,7 @@ curl -X POST https://agentbill.dev/events \\
 
   <h4 id="n8n-values">In n8n: the real model and tokens</h4>
   <p>The values in the body above are samples. These replace them:</p>
-  <ul>
+  <ul class="n8n-map">
     ${N8N_MAPPING.map((l) => `<li>${l.replace(/<code>/g, '<span class="inline">').replace(/<\/code>/g, '</span>')}</li>`).join('\n    ')}
   </ul>
 

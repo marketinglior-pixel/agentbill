@@ -156,6 +156,8 @@ export const DOCS_CSS = `${CHROME_CSS}
      it spent the one accent the system reserves for the refusal. */
   .inline { font-family: var(--mono); background: var(--surface3); padding: 2px 6px; border-radius: var(--r-inline);
             font-size: .875em; color: var(--text); }
+  /* n8n expressions have no spaces to break at; at 320 one was cut by 24px. */
+  .n8n-map .inline { overflow-wrap: anywhere; }
 
   /* Tables, in the kit's voice: mono uppercase column labels, a hairline under
      every row because docs rows carry sentences, the name column in the mono. */
