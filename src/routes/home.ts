@@ -695,7 +695,7 @@ ${QUESTIONS.map(([q, a]) => `        <details>
   </section>
 
 </main>
-${siteFooter()}
+${siteFooter({ listedOn: true })}
 ${PLAYGROUND_JS}${ESTIMATOR_JS}${COPY_JS}${TABS_JS}
 <script src="/app/office.js" defer></script>
 </body>
