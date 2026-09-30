@@ -47,8 +47,11 @@ async function gates({ API, sql, ok, R, O }) {
   // Last month, under its own agent, so a 30-day window that reaches into last
   // month on the 1st cannot move the agents rows below.
   await ev(R, acme, 'archived', { model: 'claude-x' }, 9.0, prevMonthDay)
-  // An agent first seen 60 days ago is not new in a 30-day window; triage is.
-  await ev(R, acme, 'veteran', { model: 'old' }, 0.02, new Date(now.getTime() - 60 * 86_400_000))
+  // An agent first seen long ago is not new in a 30-day window; triage is.
+  // Two months back, the 15th: at least 45 days old, and never inside the
+  // previous month. "60 days ago" was, on the 30th and 31st of a month after a
+  // 31-day one (it failed on 2026-09-30, when 60 days back was 1 August).
+  await ev(R, acme, 'veteran', { model: 'old' }, 0.02, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 15, 12)))
   await ev(R, acme, 'veteran', { model: 'old' }, 0.03, recent)
   await ev(O, theirs, 'their-agent', { model: 'theirs' }, 50, recent)
   await sql`INSERT INTO preflight_decisions (account_id, agent_id, reason, source, blocked, snapshot) VALUES (${R}, 'triage', 'task_ceiling_exceeded', 'preflight', true, '{}'::json)`
@@ -63,7 +66,7 @@ async function gates({ API, sql, ok, R, O }) {
   const agT = visible(ag.match(/<table class="cv-table cards">([\s\S]*?)<\/table>/)?.[1] ?? '')
   ok('[report] the agents view: each agent with its est. cost, calls, tokens, mean latency and refusals, dearest first',
      /triage new \$0\.60 2 180 1\.00 s 1 /.test(agT) && agT.indexOf('triage') < agT.indexOf('writer'), agT)
-  ok('[report] "new" is all-time: an agent first seen 60 days ago is not new; its refusals link to the refusals view for it',
+  ok('[report] "new" is all-time: an agent first seen two months back is not new; its refusals link to the refusals view for it',
      /veteran \$0\.03 1 /.test(agT) && !/veteran new/.test(agT) && ag.includes('href="/app?view=refusals&amp;agent=triage"'), agT)
   ok('[report] an agent named in markup is text, and no other account\'s agent is listed',
      ag.includes('&lt;script&gt;x&lt;/script&gt;') && !ag.includes('<script>x') && !ag.includes('their-agent'))

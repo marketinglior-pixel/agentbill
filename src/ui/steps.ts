@@ -133,9 +133,12 @@ export const ANTHROPIC_LINE =
 /** The n8n values that replace the sample ones in the events body. Every expression was run in n8n
  *  2.41.3 against a stub OpenAI that answered 111 and 22 tokens (O-output 6-n8n-real-usage-test.md):
  *  the OpenAI node with Simplify Output off passed 111 and 22 on; Basic LLM Chain passed only its text,
- *  and a node after it could not read the chat model under it. */
+ *  and a node after it could not read the chat model under it. The IF line, 30.09: with a 1-unit job, run 1
+ *  was approved and made 1 stub call; run 2 was refused, took the false branch to Stop and Error and made 0;
+ *  the same workflow with no IF node made the stub call on approved: false. */
 export const N8N_MAPPING = [
   '<b>Header:</b> in the HTTP Request node, Authentication: Generic Credential Type, then Header Auth, with Name <code>Authorization</code> and Value <code>Bearer</code>, a space and your key.',
+  '<b>When preflight says no:</b> <code>"approved": false</code> comes back as HTTP 200, so the HTTP Request node succeeds and the next node runs anyway. Put an IF node after Preflight on <code>{{ $json.approved }}</code> is true: the true branch goes on to the model call, the false branch to a Stop and Error node, or to a message to you, with <code>{{ $(\'Preflight\').item.json.reason }}</code>. Without it, a refused call still reaches OpenAI.',
   '<b>One event per model call.</b> A run that calls the model three times sends three, each with its own idempotency_key. <code>{{ $execution.id }}-writer-{{ $runIndex }}</code> is unique to each run and each pass of a loop; use a different word in place of writer for each call.',
   '<b>reservation_id</b> from the preflight answer: <code>{{ $(\'Preflight\').item.json.reservation_id }}</code> when that node is named Preflight.',
   '<b>Model and tokens from the OpenAI node</b> (Message a model): turn its Simplify Output off, then use <code>{{ $json.model }}</code>, <code>{{ $json.usage.input_tokens }}</code> and <code>{{ $json.usage.output_tokens }}</code> in the node right after it, or <code>$(\'Message a model\').item.json</code> in place of <code>$json</code> further on. With Simplify Output on, the usage is not in its output.',
