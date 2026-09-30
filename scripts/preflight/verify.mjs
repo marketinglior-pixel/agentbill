@@ -1451,6 +1451,14 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
   ok('[docs] the title, description and share card lead with cost per client and job, not the retired preflight-billing line',
      /per client/.test(docsTitle) && [docsDesc, docsOg].every((d) => d.includes('per agent, per client and per job')) && !/Preflight Billing|per-task spend ceiling/.test(docsTitle + docsDesc + docsOg),
      JSON.stringify({ docsTitle, docsDesc, docsOg }).slice(0, 400))
+  // PeerPush marks the listing "Not Verified" until / links back; a text link, never their badge
+  // image (it says AWARDED and would load from peerpush.com on every visit), and on / only.
+  const homeST = await fetch(`${API}/`).then(r => r.text())
+  const pricingST = await fetch(`${API}/pricing`).then(r => r.text())
+  ok('[home] the footer of / links to the PeerPush listing as plain text; no peerpush image anywhere on /, and /pricing does not carry the link',
+     /<a class="foot-listed" href="https:\/\/peerpush\.com\/p\/agentbill" rel="noopener">Listed on PeerPush<\/a>/.test(homeST)
+       && !/<img[^>]+peerpush\.com/.test(homeST) && !/AWARDED|Just Launched/i.test(homeST) && !pricingST.includes('peerpush.com/p/agentbill'),
+     (homeST.match(/foot-copy[^<]*<[^\n]{0,160}/) || [''])[0])
   const ACCT_HT = '00000000-0000-0000-0000-0000000000c9'
   const KEY_HT = shapedKey(`http-path-${Date.now()}`)
   await sql`DELETE FROM accounts WHERE id = ${ACCT_HT}`

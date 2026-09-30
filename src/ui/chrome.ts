@@ -151,6 +151,8 @@ ${MARK_CSS}
                 font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
   .foot-brand .mark { width: 14px; height: 14px; }
   .foot-copy { font-family: var(--mono); font-size: var(--fs-micro); color: var(--dim); }
+  .foot-listed { color: var(--dim); text-decoration: none; }
+  .foot-listed:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
   @media (max-width: ${BP.md}px) {
     .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5) var(--s5); }
   }
@@ -280,7 +282,13 @@ const FOOT: ReadonlyArray<readonly [heading: string, links: ReadonlyArray<readon
   ]],
 ]
 
-export function siteFooter(): string {
+/** The one directory we list back to (2026-09-30): PeerPush marks a listing "Not Verified" until the
+ *  product's homepage links to it, and accepts a plain text link in place of its badge. A text link,
+ *  not the badge: the badge says "AWARDED" for a launch anyone can buy, and is an image served from
+ *  peerpush.com, which would send every visitor's IP there. Only / carries it, where their check looks. */
+export const LISTED_ON = { href: 'https://peerpush.com/p/agentbill', label: 'Listed on PeerPush' } as const
+
+export function siteFooter(opts: { listedOn?: boolean } = {}): string {
   return `  <footer class="site-foot">
     <div class="foot-inner">
       <div class="foot-cols">
@@ -291,7 +299,7 @@ ${links.map(([href, label, ext]) => `          <a href="${href}"${ext ? ' class=
       </div>
       <div class="foot-base">
         <div class="foot-brand">${mark(14)}agentbill.dev · what counts, who pays, what's refused.</div>
-        <div class="foot-copy">&copy; 2026 AgentBill</div>
+        <div class="foot-copy">&copy; 2026 AgentBill${opts.listedOn ? ` · <a class="foot-listed" href="${LISTED_ON.href}" rel="noopener">${LISTED_ON.label}</a>` : ''}</div>
       </div>
     </div>
   </footer>`
