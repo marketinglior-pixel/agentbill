@@ -1440,7 +1440,8 @@ ok('[start] the key line says /recover gives a new key, never that it shows the 
   const docsST = await fetch(`${API}/docs`).then(r => r.text())
   const N8N_LINES = ['Simplify Output off', '{{ $json.usage.input_tokens }}', '{{ $json.usage.output_tokens }}', '{{ $json.model }}',
     '{{ $execution.id }}-writer-{{ $runIndex }}', 'One event per model call', 'Header Auth', '"success": false', 'Continue (using error output)',
-    'Basic LLM Chain', "{{ $('Preflight').item.json.reservation_id }}"]
+    'Basic LLM Chain', "{{ $('Preflight').item.json.reservation_id }}",
+    'Put an IF node after Preflight', '{{ $json.approved }}', "{{ $('Preflight').item.json.reason }}", 'a refused call still reaches OpenAI']
   ok('[start] n8n: the card and /docs#n8n-values both carry every mapping line (Simplify Output, input/output_tokens, one event per call, the key expression, Header Auth, the failure branch, the chain caveat)',
      N8N_LINES.every((l) => httpST.includes(l)) && docsST.includes('id="n8n-values"') && N8N_LINES.every((l) => docsST.includes(l))
        && !httpST.includes("from your model's response: OpenAI's"),
